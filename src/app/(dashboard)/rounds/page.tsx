@@ -463,15 +463,12 @@ export default function RoundsPage() {
 
   const reconciliationCycles = useMemo(() => {
     if (!activePopupGroupName || !allCycles) return [];
-    
-    // REUSE EXACT SAME Normalization logic from Group Cards
     const filtered = allCycles.filter((c) => {
       const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
       const targetClean = String(activePopupGroupName).replace(/group/gi, '').trim().toLowerCase();
       return cNameClean === targetClean;
     });
 
-    // Deduplicate by start date (exact same logic as Cycles Page)
     const uniqueMap = new Map<string, any>()
     filtered.forEach((c) => {
       const start = String(c?.startDate || "-")
@@ -484,14 +481,11 @@ export default function RoundsPage() {
     const sortedUnique = Array.from(uniqueMap.values()).sort((a, b) => 
       String(a.startDate).localeCompare(String(b.startDate))
     );
-
-    console.log(`Auditing Group: ${activePopupGroupName}, Found ${sortedUnique.length} unique cycles.`);
-    console.log("Cycles fetched:", sortedUnique);
     
     return sortedUnique.map((c, i) => ({
       ...c,
       displayLabel: `Cycle ${i + 1}`
-    })).reverse(); // Newest first for selection ease
+    })).reverse();
   }, [activePopupGroupName, allCycles]);
 
   const reconciliationTotal = useMemo(() => {
@@ -499,7 +493,6 @@ export default function RoundsPage() {
     const cycle = allCycles.find(c => c.id === selectedReconciliationCycleId);
     if (!cycle) return 0;
 
-    // REUSE EXACT SAME Dates from selected cycle
     const startDate = cycle.startDate;
     const endDate = cycle.endDate;
     const cycleIdInternal = cycle.id;
@@ -510,13 +503,11 @@ export default function RoundsPage() {
       return mGroup === gNameClean;
     }).map(m => m.id));
 
-    // REUSE LOGIC FROM Cycle Dashboard Audit Page
     const cyclePayments = (allPayments || []).filter(p => {
       if (!groupMemberIds.has(p.memberId)) return false;
       if (p.status && !['success', 'paid', 'verified'].includes(p.status.toLowerCase())) return false;
       if (p.cycleId === cycleIdInternal) return true;
       const pDate = getRecordDate(p);
-      // STRICT INCLUSIVE FILTER
       return pDate && pDate >= startDate && pDate <= endDate;
     });
 
@@ -861,7 +852,12 @@ export default function RoundsPage() {
                   </TableBody>
                 </Table>
               </div>
-              <DialogFooter><Button onClick={() => setIsHistoryDialogOpen(false)} className="w-full font-bold h-10 rounded-xl text-xs uppercase tracking-widest">Close</Button></DialogFooter>
+              <DialogFooter className="flex-col sm:flex-row gap-2">
+                <Button variant="outline" onClick={() => window.print()} className="w-full sm:flex-1 font-bold h-10 rounded-xl text-xs uppercase tracking-widest gap-2">
+                  <Printer className="size-3.5" /> Print Ledger
+                </Button>
+                <Button onClick={() => setIsHistoryDialogOpen(false)} className="w-full sm:flex-1 font-bold h-10 rounded-xl text-xs uppercase tracking-widest">Close</Button>
+              </DialogFooter>
             </div>
           )}
         </DialogContent>
@@ -915,6 +911,45 @@ export default function RoundsPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Bluetooth Thermal Printer Hidden Receipt Layout */}
+      {historyMember && (
+        <div id="thermal-receipt" className="hidden">
+          <div style={{ textAlign: 'center', marginBottom: '10px', borderBottom: '1px dashed black', paddingBottom: '10px' }}>
+            <h2 style={{ fontSize: '16px', fontWeight: 'bold', margin: '0' }}>PAYMENT HISTORY</h2>
+            <p style={{ fontSize: '10px', margin: '2px 0' }}>ChitFund Pro Management 2026</p>
+          </div>
+          <div style={{ marginBottom: '10px', fontSize: '12px' }}>
+            <p style={{ margin: '2px 0' }}><strong>Member:</strong> {historyMember.name}</p>
+            <p style={{ margin: '2px 0' }}><strong>Group:</strong> {historyMember.chitGroup}</p>
+            <p style={{ margin: '2px 0' }}><strong>Generated:</strong> {format(new Date(), 'dd-MM-yyyy HH:mm')}</p>
+          </div>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '11px' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid black' }}>
+                <th style={{ textAlign: 'left', padding: '4px 0' }}>DATE</th>
+                <th style={{ textAlign: 'right', padding: '4px 0' }}>AMOUNT</th>
+              </tr>
+            </thead>
+            <tbody>
+              {allPayments
+                .filter(p => p.memberId === historyMember.id && (p.status === 'success' || p.status === 'paid'))
+                .map((p, i) => (
+                  <tr key={i} style={{ borderBottom: '1px dashed #eee' }}>
+                    <td style={{ padding: '4px 0' }}>{getRecordDate(p)}</td>
+                    <td style={{ textAlign: 'right', padding: '4px 0' }}>₹{getPaymentAmount(p).toLocaleString()}</td>
+                  </tr>
+                ))}
+            </tbody>
+          </table>
+          <div style={{ marginTop: '10px', borderTop: '1px solid black', paddingTop: '10px', textAlign: 'right' }}>
+            <p style={{ fontSize: '14px', fontWeight: 'bold' }}>TOTAL: ₹{(totalPaidByMember.get(historyMember.id) || 0).toLocaleString()}</p>
+          </div>
+          <div style={{ marginTop: '20px', textAlign: 'center', fontSize: '10px' }}>
+            <p>*** Thank You ***</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
