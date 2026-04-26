@@ -729,8 +729,7 @@ export default function RoundsPage() {
                   <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Max Members</Label><Input type="number" value={chitToEdit.totalMembers || ""} onChange={e => setChitToEdit({...chitToEdit, totalMembers: Number(e.target.value)})} required className="h-10 rounded-xl text-sm font-bold" /></div>
                   <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Collection Type</Label><Select value={chitToEdit.collectionType} onValueChange={(v) => setChitToEdit({...chitToEdit, collectionType: v})}><SelectTrigger className="h-10 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Daily">Daily</SelectItem><SelectItem value="Monthly">Monthly</SelectItem></SelectContent></Select></div>
                 </div>
-                <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] shadow-md">{isActionPending ? <Loader2 className="mr-2 size-3 animate-spin" /> : null}Save Changes</Button></DialogFooter>
-              </form>
+                <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] shadow-md">{isActionPending ? <Loader2 className="mr-2 size-3 animate-spin" /> : null}Save Changes</Button></form>
             )}
           </DialogContent>
         </Dialog>
@@ -770,8 +769,7 @@ export default function RoundsPage() {
         <Card className="shadow-sm border-l-4 border-l-amber-500 bg-card rounded-xl"><CardHeader className="p-2.5 pb-1"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Pending</CardTitle></CardHeader><CardContent className="p-2.5 pt-0"><div className="text-lg font-bold tabular-nums text-amber-600 tracking-tight">{assignedMembers.filter(m => m.memberStatus === 'pending').length}</div></CardContent></Card>
         <Card className="shadow-sm border-l-4 border-l-emerald-500 bg-card rounded-xl">
           <CardHeader className="p-2.5 pb-1 flex flex-row items-center justify-between"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Today Collection</CardTitle><Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-emerald-50 text-emerald-600/70 hover:text-emerald-600" onClick={() => setIsDailyAuditOpen(true)}><Wallet className="size-3" /></Button></CardHeader>
-          <CardContent className="p-2.5 pt-0"><div className="text-lg font-bold tabular-nums text-emerald-600 tracking-tight">₹{getGroupTodayCollection(currentRound?.name).toLocaleString()}</div></CardContent>
-        </Card>
+          <CardContent className="p-2.5 pt-0"><div className="text-lg font-bold tabular-nums text-emerald-600 tracking-tight">₹{getGroupTodayCollection(currentRound?.name).toLocaleString()}</div></CardContent></Card>
       </div>
 
       <div className="rounded-2xl border bg-card shadow-sm overflow-hidden border-border/60">
@@ -839,7 +837,7 @@ export default function RoundsPage() {
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {historyMember && (
             <div className="space-y-4">
-              <DialogHeader><DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><History className="size-4" /> Ledger</DialogTitle><DialogDescription className="text-[9px] font-bold uppercase tracking-widest truncate">{historyMember.name}</DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><History className="size-4" /> Payment History</DialogTitle><DialogDescription className="text-[9px] font-bold uppercase tracking-widest truncate">{historyMember.name}</DialogDescription></DialogHeader>
               <div className="max-h-[250px] overflow-y-auto pr-1.5 custom-scrollbar">
                 <Table>
                   <TableHeader className="bg-muted/30 sticky top-0"><TableRow><TableHead className="text-[8px] font-black uppercase tracking-widest h-7">Date</TableHead><TableHead className="text-[8px] font-black uppercase tracking-widest h-7">Paid</TableHead><TableHead className="text-[8px] font-black uppercase tracking-widest h-7 text-right">Mode</TableHead></TableRow></TableHeader>
