@@ -150,7 +150,6 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
       
       // Chain Synchronization: Ensure zero gaps and zero overlaps (Rule: prev.endDate = next.startDate - 1)
-      // This is allowed even for history because it's a system-enforced continuity rule, not a manual record change.
       for (let i = 0; i < cycles.length - 1; i++) {
         const current = cycles[i];
         const next = cycles[i+1];
@@ -260,7 +259,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
             <Button
               variant="ghost"
               size="icon"
-              className="h-8 w-8 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-emerald-100 text-emerald-700"
+              className="h-8 w-8 rounded-lg hover:bg-emerald-100 text-emerald-700 transition-colors"
               onClick={(e) => handleEditClick(e, cycle)}
             >
               <Pencil className="size-3.5" />
