@@ -141,16 +141,16 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       if (targetCycleId) {
         cycles = cycles.map(c => c.id === targetCycleId ? { ...c, startDate: finalStart, endDate: finalEnd } : c);
       } else {
-        cycles.push({ id: 'NEW_TEMP', startDate: finalStart, endDate: finalEnd, name: group.name, status: 'active' });
+        cycles.push({ id: 'NEW_TEMP', startDate: finalStart, endDate: finalEnd, name: group.name, status: 'active' } as any);
       }
 
       // Chronological sort to apply self-healing timeline logic
-      cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
+      cycles.sort((a: any, b: any) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
       
-      // Strict Continuity Enforcer: previous.endDate = current.startDate - 1 day
+      // Strict Continuity Enforcer: previous.endDate = next.startDate - 1 day
       for (let i = 0; i < cycles.length - 1; i++) {
-        const current = cycles[i];
-        const next = cycles[i+1];
+        const current = cycles[i] as any;
+        const next = cycles[i+1] as any;
         
         const nextStart = parseISO(next.startDate);
         const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
@@ -181,8 +181,8 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           status: 'active',
           createdAt: new Date().toISOString()
         });
-        const newIdx = cycles.findIndex(c => c.id === 'NEW_TEMP');
-        if (newIdx !== -1) cycles[newIdx].id = newRef.id;
+        const newIdx = cycles.findIndex((c: any) => c.id === 'NEW_TEMP');
+        if (newIdx !== -1) (cycles[newIdx] as any).id = newRef.id;
       }
 
       // Sync Payments with updated cycle boundaries
@@ -194,7 +194,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         const targetDate = pData.targetDate || (pData.paymentDate ? (pData.paymentDate.toDate ? format(pData.paymentDate.toDate(), 'yyyy-MM-dd') : pData.paymentDate.split('T')[0]) : null);
         if (!targetDate) return;
         
-        const matchingCycle = cycles.find(c => targetDate >= c.startDate && targetDate <= c.endDate);
+        const matchingCycle = cycles.find((c: any) => targetDate >= c.startDate && targetDate <= c.endDate) as any;
         if (matchingCycle && pData.cycleId !== matchingCycle.id) {
           batch.update(pDoc.ref, { cycleId: matchingCycle.id });
         }
@@ -642,7 +642,18 @@ export default function RoundsPage() {
             return (
               <Card key={group.id} className="group hover:shadow-xl transition-all border-border/60 overflow-hidden flex flex-col relative bg-card shadow-sm rounded-2xl">
                 <div className="absolute top-3 right-3 flex items-center gap-1">
-                  <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"><MoreVertical className="size-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => { setChitToEdit(group); setIsEditChitDialogOpen(true); }}><Pencil className="size-4 mr-2" /> Edit Scheme</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" onSelect={() => { setChitToDelete(group); setIsDeleteChitDialogOpen(true); }}><Trash2 className="size-4 mr-2" /> Delete Scheme</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full transition-colors">
+                        <MoreVertical className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onSelect={() => { setChitToEdit(group); setIsEditChitDialogOpen(true); }}><Pencil className="size-4 mr-2" /> Edit Scheme</DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive" onSelect={() => { setChitToDelete(group); setIsDeleteChitDialogOpen(true); }}><Trash2 className="size-4 mr-2" /> Delete Scheme</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary/70 hover:text-primary transition-colors" onClick={() => { setActivePopupGroupName(group.name); setSelectedReconciliationCycleId(activeCycle?.id || null); setIsCollectionPopupOpen(true); }}><Wallet className="size-4" /></Button>
                   <GroupCycleControl group={group} latestCycle={activeCycle || groupCycles[0]} />
                 </div>
