@@ -44,7 +44,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
 
   const [isEditDialogOpen, setIsEditDialogOpen] = React.useState(false)
   const [isActionPending, setIsActionPending] = React.useState(false)
-  const [editingCycle, setEditingCycle] = React.useState<{id: string, startDate: string, endDate: string} | null>(null)
+  const [editingCycle, setEditingCycle] = React.useState<{id: string, startDate: string, endDate: string, status?: string} | null>(null)
 
   const cyclesQuery = useMemoFirebase(() => query(collection(db, 'cycles'), orderBy('startDate', 'desc')), [db])
   const { data: allCycles, isLoading } = useCollection(cyclesQuery)
@@ -113,6 +113,15 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
 
   const handleEditClick = (e: React.MouseEvent, cycle: any) => {
     e.stopPropagation()
+    // STRICT RULE: Prevent manual modification of historical records
+    if (cycle.status !== 'active') {
+      toast({ 
+        variant: "destructive", 
+        title: "Access Restricted", 
+        description: "Historical audit periods are locked for integrity." 
+      })
+      return
+    }
     setEditingCycle({ ...cycle })
     setIsEditDialogOpen(true)
   }
@@ -129,13 +138,19 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       const querySnapshot = await getDocs(q);
       let cycles = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       
-      // Update local state with the edited cycle
+      const targetCycle = cycles.find(c => c.id === editingCycle.id);
+      if (!targetCycle || targetCycle.status !== 'active') {
+        throw new Error("Modification of historical records is restricted to preserve audit integrity.");
+      }
+
+      // Update local set with the edited cycle for continuity calculation
       cycles = cycles.map(c => c.id === editingCycle.id ? { ...c, startDate: editingCycle.startDate, endDate: editingCycle.endDate } : c);
       
       // Chronological sort to apply self-healing timeline logic
       cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
       
       // Chain Synchronization: Ensure zero gaps and zero overlaps (Rule: prev.endDate = next.startDate - 1)
+      // This is allowed even for history because it's a system-enforced continuity rule, not a manual record change.
       for (let i = 0; i < cycles.length - 1; i++) {
         const current = cycles[i];
         const next = cycles[i+1];
@@ -238,18 +253,20 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
 
       <div className="flex items-center gap-3">
         {isActive && (
-          <Badge variant="outline" className="text-[8px] font-black uppercase tracking-tighter border-emerald-200 text-emerald-700 bg-emerald-50 h-5 px-1.5 hidden sm:flex">
-            Active
-          </Badge>
+          <>
+            <Badge variant="outline" className="text-[8px] font-black uppercase tracking-tighter border-emerald-200 text-emerald-700 bg-emerald-50 h-5 px-1.5 hidden sm:flex">
+              Active
+            </Badge>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-emerald-100 text-emerald-700"
+              onClick={(e) => handleEditClick(e, cycle)}
+            >
+              <Pencil className="size-3.5" />
+            </Button>
+          </>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity hover:bg-emerald-100 text-emerald-700"
-          onClick={(e) => handleEditClick(e, cycle)}
-        >
-          <Pencil className="size-3.5" />
-        </Button>
         <div className="flex items-center gap-1.5 opacity-40 group-hover:opacity-100 transition-all">
           <span className="text-[8px] font-black uppercase tracking-widest">View</span>
           <Eye className="size-3.5" />
