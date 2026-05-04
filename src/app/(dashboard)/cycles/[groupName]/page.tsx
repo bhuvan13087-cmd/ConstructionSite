@@ -77,7 +77,6 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       cycleNumber: i + 1
     }));
 
-    // Definition: Active is the chronologically latest
     return {
       activeCycles: numbered.length > 0 ? [numbered[numbered.length - 1]] : [],
       pastCycles: numbered.length > 1 ? numbered.slice(0, numbered.length - 1).reverse() : []
@@ -110,7 +109,6 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
 
   const handleEditClick = (e: React.MouseEvent, cycle: any) => {
     e.stopPropagation()
-    // Identify latest by ID in the current session
     const isLatest = activeCycles.some(ac => ac.id === cycle.id);
     if (!isLatest) {
       toast({ 
@@ -136,23 +134,20 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       const querySnapshot = await getDocs(q);
       const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
       
-      // Dynamic Runtime Verification of Current Cycle
+      // Sort to identify the current sequence
       cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
-      const latestCycle = cycles[0];
 
-      if (!latestCycle || editingCycle.id !== latestCycle.id) {
-        throw new Error("Only current cycle can be edited");
-      }
-
-      // 1. Update current cycle boundaries
+      // 1. Directly update the edited cycle
       batch.update(doc(db, 'cycles', editingCycle.id), {
         startDate: editingCycle.startDate,
         endDate: editingCycle.endDate,
         updatedAt: new Date().toISOString()
       });
 
-      // 2. Auto-adjust immediate previous cycle for continuity (Rule: P.endDate = C.startDate - 1)
-      const previousCycle = cycles[1];
+      // 2. Adjust predecessor for timeline continuity (Rule: P.endDate = C.startDate - 1)
+      const currentIdx = cycles.findIndex(c => c.id === editingCycle.id);
+      const previousCycle = cycles[currentIdx + 1]; // Next in DESC sorted list is chronologically previous
+      
       if (previousCycle) {
         const nextStart = parseISO(editingCycle.startDate);
         const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
@@ -168,11 +163,11 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       await withTimeout(batch.commit());
       await createAuditLog(db, user, `Timeline Corrected: Updated current cycle for ${groupName} and auto-adjusted preceding boundary.`);
       
-      toast({ title: "Timeline Corrected", description: "Current and previous operational periods synchronized." })
+      toast({ title: "Timeline Corrected", description: "Operational periods synchronized." })
       setIsEditDialogOpen(false)
       setEditingCycle(null)
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Sync Error", description: error.message || "Failed to sync timeline." })
+      toast({ variant: "destructive", title: "Update Error", description: error.message || "Failed to update record." })
     } finally {
       setIsActionPending(false)
       document.body.style.pointerEvents = 'auto';
@@ -286,7 +281,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
             <form onSubmit={handleUpdateCycle} className="space-y-6">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-primary font-headline uppercase tracking-tight"><Pencil className="size-5" /> Edit Audit Period</DialogTitle>
-                <DialogDescription className="text-xs">Modifying the current cycle will automatically adjust the previous boundary to ensure a continuous timeline.</DialogDescription>
+                <DialogDescription className="text-xs">Modifying the operational boundaries will automatically adjust neighboring cycles for continuity.</DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">

@@ -133,25 +133,21 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       const querySnapshot = await getDocs(q);
       const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
       
-      // FRESH IDENTIFICATION: Sort DESC
+      // Sort chronologically DESC
       cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
-      const latestCycleInDb = cycles[0];
 
       if (isUpdate) {
-        // Validation: Must be the latest to be edited
-        if (latestCycle.id !== latestCycleInDb?.id) {
-          throw new Error("Only current cycle can be edited");
-        }
-
-        // 1. Update Current
+        // Direct update the existing cycle
         batch.update(doc(db, 'cycles', latestCycle.id), {
           startDate: startDate,
           endDate: endDate,
           updatedAt: new Date().toISOString()
         });
 
-        // 2. Adjust Previous (Rule: P.endDate = C.startDate - 1)
-        const previousCycle = cycles[1];
+        // Continuity Fix: Adjust previous cycle if it exists (Rule: P.endDate = C.startDate - 1)
+        const currentIdx = cycles.findIndex(c => c.id === latestCycle.id);
+        const previousCycle = cycles[currentIdx + 1];
+        
         if (previousCycle) {
           const nextStart = parseISO(startDate);
           const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
@@ -161,7 +157,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           });
         }
       } else {
-        // Create New logic
+        // Create new cycle record
         const newRef = doc(collection(db, 'cycles'));
         batch.set(newRef, {
           name: group.name,
@@ -171,11 +167,12 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           createdAt: new Date().toISOString()
         });
 
-        // Adjust the former latest
-        if (latestCycleInDb) {
+        // Continuity Fix: Adjust the former latest
+        const formerLatest = cycles[0];
+        if (formerLatest) {
           const nextStart = parseISO(startDate);
           const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-          batch.update(doc(db, 'cycles', latestCycleInDb.id), { 
+          batch.update(doc(db, 'cycles', formerLatest.id), { 
             endDate: fixedEnd,
             updatedAt: new Date().toISOString()
           });
@@ -183,8 +180,8 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       }
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Cycle Sync: ${group.name} registry updated. Continuity enforced.`);
-      toast({ title: "Timeline Synchronized", description: "Operational boundaries corrected." });
+      await createAuditLog(db, user, `Cycle Logic Applied: ${group.name} registry updated. Continuity enforced.`);
+      toast({ title: "Timeline Synchronized", description: "Operational boundaries saved." });
       setIsOpen(false);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Persistence Error", description: error.message || "Failed to save cycle." });
@@ -209,7 +206,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><CalendarDays className="size-4" />{isUpdate ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
-          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Registry will auto-adjust for zero overlap.</DialogDescription>
+          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Operational timeline will auto-adjust for zero overlap.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-2 gap-3">
@@ -486,7 +483,7 @@ export default function RoundsPage() {
     const cycleIdInternal = cycle.id;
 
     const gNameClean = String(activePopupGroupName).replace(/group/gi, '').trim().toLowerCase();
-    const groupMemberIds = new Set(members.filter(m => {
+    groupMemberIds = new Set(members.filter(m => {
       const mGroup = String(m?.chitGroup || "").replace(/group/gi, '').trim().toLowerCase();
       return mGroup === gNameClean;
     }).map(m => m.id));
@@ -619,7 +616,6 @@ export default function RoundsPage() {
             });
             const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
             
-            // Definition: Current cycle is chronologically latest
             const activeCycle = groupCycles.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
             const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
             
@@ -756,7 +752,6 @@ export default function RoundsPage() {
   });
   const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
   
-  // Definition: Active is the chronologically latest
   const currentActiveCycle = groupCyclesForActive.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
   const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
 
