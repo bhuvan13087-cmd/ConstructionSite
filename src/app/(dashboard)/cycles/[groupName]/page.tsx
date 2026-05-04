@@ -73,7 +73,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
     })
 
     const sortedUnique = Array.from(uniqueMap.values()).sort((a, b) => 
-      String(a.startDate).localeCompare(String(b.startDate))
+      String(a.startDate || "").localeCompare(String(b.startDate || ""))
     );
 
     const numbered = sortedUnique.map((c, i) => ({
@@ -129,29 +129,40 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       const querySnapshot = await getDocs(q);
       let cycles = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
       
+      // Update local state with the edited cycle
       cycles = cycles.map(c => c.id === editingCycle.id ? { ...c, startDate: editingCycle.startDate, endDate: editingCycle.endDate } : c);
       
-      cycles.sort((a, b) => a.startDate.localeCompare(b.startDate));
+      // Chronological sort to apply self-healing timeline logic
+      cycles.sort((a, b) => (a.startDate as string || "").localeCompare(b.startDate as string || ""));
       
+      // Self-Healing Loop: Ensure ZERO overlap
       for (let i = 0; i < cycles.length - 1; i++) {
-        const nextStart = parseISO(cycles[i+1].startDate);
-        const expectedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+        const current = cycles[i];
+        const next = cycles[i+1];
         
-        if (cycles[i].endDate !== expectedEnd) {
-          cycles[i].endDate = expectedEnd;
-          batch.update(doc(db, 'cycles', cycles[i].id), { 
-            endDate: expectedEnd,
-            updatedAt: new Date().toISOString()
-          });
+        // Zero Overlap Rule: If next cycle starts on or before previous cycle ends
+        if (next.startDate <= current.endDate) {
+          const nextStart = parseISO(next.startDate);
+          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+          
+          if (current.endDate !== fixedEnd) {
+            current.endDate = fixedEnd;
+            batch.update(doc(db, 'cycles', current.id), { 
+              endDate: fixedEnd,
+              updatedAt: new Date().toISOString()
+            });
+          }
         }
       }
       
+      // Batch update the specifically edited cycle
       batch.update(doc(db, 'cycles', editingCycle.id), {
         startDate: editingCycle.startDate,
         endDate: editingCycle.endDate,
         updatedAt: new Date().toISOString()
       });
 
+      // Synchronize Payment IDs if timeline shifted
       const groupMembers = membersData?.filter(m => {
         const mGroup = String(m?.chitGroup || "").trim().toLowerCase();
         const gName = groupName.toLowerCase();
@@ -178,7 +189,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       }
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Chain-Synced cycles for ${groupName}: Timeline and payment IDs adjusted.`);
+      await createAuditLog(db, user, `Chain-Synced cycles for ${groupName}: Timeline overlap protected and payment IDs adjusted.`);
       
       toast({ title: "Timeline Synchronized", description: "Cycles and historical windows have been corrected." })
       setIsEditDialogOpen(false)
@@ -296,7 +307,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
             <form onSubmit={handleUpdateCycle} className="space-y-6">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2"><Pencil className="size-5 text-primary" /> Edit Audit Period</DialogTitle>
-                <DialogDescription>Modifying the start date will automatically synchronize previous cycle end dates.</DialogDescription>
+                <DialogDescription className="text-xs">Modifying the start date will automatically adjust boundaries to ensure zero overlap with other cycles.</DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">

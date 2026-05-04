@@ -144,19 +144,26 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         cycles.push({ id: 'NEW_TEMP', startDate: finalStart, endDate: finalEnd, name: group.name, status: 'active' });
       }
 
-      cycles.sort((a, b) => (a.startDate as string).localeCompare(b.startDate as string));
+      // Chronological sort to apply self-healing timeline logic
+      cycles.sort((a, b) => (a.startDate as string || "").localeCompare(b.startDate as string || ""));
       
       for (let i = 0; i < cycles.length - 1; i++) {
-        const nextStart = parseISO(cycles[i+1].startDate);
-        const expectedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+        const current = cycles[i];
+        const next = cycles[i+1];
         
-        if (cycles[i].endDate !== expectedEnd) {
-          cycles[i].endDate = expectedEnd;
-          if (cycles[i].id !== 'NEW_TEMP') {
-            batch.update(doc(db, 'cycles', cycles[i].id), { 
-              endDate: expectedEnd,
-              updatedAt: new Date().toISOString()
-            });
+        // Overlap Detection & Self-Healing: C.startDate <= P.endDate
+        if (next.startDate <= current.endDate) {
+          const nextStart = parseISO(next.startDate);
+          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+          
+          if (current.endDate !== fixedEnd) {
+            current.endDate = fixedEnd;
+            if (current.id !== 'NEW_TEMP') {
+              batch.update(doc(db, 'cycles', current.id), { 
+                endDate: fixedEnd,
+                updatedAt: new Date().toISOString()
+              });
+            }
           }
         }
       }
@@ -177,9 +184,10 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           createdAt: new Date().toISOString()
         });
         const newIdx = cycles.findIndex(c => c.id === 'NEW_TEMP');
-        cycles[newIdx].id = newRef.id;
+        if (newIdx !== -1) cycles[newIdx].id = newRef.id;
       }
 
+      // Sync Payments with updated cycle boundaries
       const pQuery = query(collection(db, 'payments'), where('memberId', '!=', 'null'));
       const pSnapshot = await getDocs(pQuery);
       
@@ -195,7 +203,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       });
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Timeline Chain-Synced for ${group.name}. Cycle updated/created.`);
+      await createAuditLog(db, user, `Timeline Chain-Synced for ${group.name}. Cycle updated/created with overlap protection.`);
       toast({ title: "Cycle Saved", description: "Operational timeline and payments synchronized." });
       setIsOpen(false);
     } catch (error: any) {
@@ -221,7 +229,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight"><CalendarDays className="size-4 text-primary" />{isLatestActive ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
-          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Timeline will auto-adjust boundaries.</DialogDescription>
+          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Timeline will auto-adjust boundaries to prevent overlap.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-2 gap-3">
@@ -479,7 +487,7 @@ export default function RoundsPage() {
     })
 
     const sortedUnique = Array.from(uniqueMap.values()).sort((a, b) => 
-      String(a.startDate).localeCompare(String(b.startDate))
+      String(a.startDate || "").localeCompare(String(b.startDate || ""))
     );
     
     return sortedUnique.map((c, i) => ({
@@ -627,7 +635,7 @@ export default function RoundsPage() {
               const gNameClean = String(group?.name || "").replace(/group/gi, '').trim().toLowerCase();
               return cNameClean === gNameClean;
             });
-            const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate))).sort((a, b) => a.localeCompare(b));
+            const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
             const activeCycle = groupCycles.find(c => c.status === 'active');
             const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
             const currentOccupancy = members?.filter(m => m.status !== 'inactive' && String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase()).length || 0;
@@ -750,7 +758,7 @@ export default function RoundsPage() {
     const targetClean = String(currentRound?.name || "").replace(/group/gi, '').trim().toLowerCase();
     return cNameClean === targetClean;
   });
-  const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate))).sort((a, b) => a.localeCompare(b));
+  const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
   const currentActiveCycle = groupCyclesForActive.find(c => c.status === 'active');
   const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
 
