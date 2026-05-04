@@ -145,25 +145,23 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       }
 
       // Chronological sort to apply self-healing timeline logic
-      cycles.sort((a, b) => (a.startDate as string || "").localeCompare(b.startDate as string || ""));
+      cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
       
+      // Strict Continuity Enforcer: previous.endDate = current.startDate - 1 day
       for (let i = 0; i < cycles.length - 1; i++) {
         const current = cycles[i];
         const next = cycles[i+1];
         
-        // Overlap Detection & Self-Healing: C.startDate <= P.endDate
-        if (next.startDate <= current.endDate) {
-          const nextStart = parseISO(next.startDate);
-          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-          
-          if (current.endDate !== fixedEnd) {
-            current.endDate = fixedEnd;
-            if (current.id !== 'NEW_TEMP') {
-              batch.update(doc(db, 'cycles', current.id), { 
-                endDate: fixedEnd,
-                updatedAt: new Date().toISOString()
-              });
-            }
+        const nextStart = parseISO(next.startDate);
+        const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+        
+        if (current.endDate !== fixedEnd) {
+          current.endDate = fixedEnd;
+          if (current.id !== 'NEW_TEMP') {
+            batch.update(doc(db, 'cycles', current.id), { 
+              endDate: fixedEnd,
+              updatedAt: new Date().toISOString()
+            });
           }
         }
       }
@@ -203,8 +201,8 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       });
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Timeline Chain-Synced for ${group.name}. Cycle updated/created with overlap protection.`);
-      toast({ title: "Cycle Saved", description: "Operational timeline and payments synchronized." });
+      await createAuditLog(db, user, `Timeline Sync: Cycle ${group.name} updated. Preceding cycle endDates adjusted for continuity.`);
+      toast({ title: "Timeline Synchronized", description: "Operational boundaries corrected." });
       setIsOpen(false);
     } catch (error: any) {
       toast({ variant: "destructive", title: "Persistence Error", description: error.message || "Failed to save cycle." });
@@ -228,8 +226,8 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         onEscapeKeyDown={handlePopupBlur}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight"><CalendarDays className="size-4 text-primary" />{isLatestActive ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
-          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Timeline will auto-adjust boundaries to prevent overlap.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><CalendarDays className="size-4" />{isLatestActive ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
+          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Registry will auto-adjust for zero overlap.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
           <div className="grid grid-cols-2 gap-3">
@@ -487,7 +485,7 @@ export default function RoundsPage() {
     })
 
     const sortedUnique = Array.from(uniqueMap.values()).sort((a, b) => 
-      String(a.startDate || "").localeCompare(String(b.startDate || ""))
+      (String(a.startDate || "")).localeCompare(String(b.startDate || ""))
     );
     
     return sortedUnique.map((c, i) => ({
@@ -668,7 +666,7 @@ export default function RoundsPage() {
                 <CardContent className="p-5 flex-1 space-y-4">
                   <div className="space-y-3">
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Scheme Amount</span><span className="font-bold text-primary">₹{(group.monthlyAmount || 0).toLocaleString()}</span></div>
-                    <div className="flex justify-between items-center text-xs"><span className="text-amber-600 font-semibold">Pending</span><span className={cn("font-bold text-sm", groupPendingCount > 0 ? "text-amber-500" : "text-emerald-600")}>{groupPendingCount}</span></div>
+                    <div className="flex justify-between items-center text-xs"><span className="text-amber-600 font-semibold">Pending Count</span><span className={cn("font-bold text-sm", groupPendingCount > 0 ? "text-amber-500" : "text-emerald-600")}>{groupPendingCount}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Occupancy</span><span className="font-black tabular-nums">{currentOccupancy} / {group.totalMembers}</span></div>
                     <div className="pt-4 border-t border-dashed border-border/60 mt-4"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
                   </div>
@@ -714,7 +712,7 @@ export default function RoundsPage() {
         <Dialog open={isAddChitDialogOpen} onOpenChange={(o) => { if(!o) document.body.style.pointerEvents = 'auto'; setIsAddChitDialogOpen(o); }}>
           <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
             <form onSubmit={handleAddChit}>
-              <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight">New Scheme</DialogTitle></DialogHeader>
+              <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight text-primary">New Scheme</DialogTitle></DialogHeader>
               <div className="grid gap-4 py-4">
                 <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Scheme Name</Label><Input value={newChit.name} onChange={e => setNewChit({...newChit, name: e.target.value})} required className="h-10 rounded-xl text-sm font-bold" placeholder="e.g. Group A" /></div>
                 <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Amount (₹)</Label><Input type="number" value={newChit.monthlyAmount || ""} onChange={e => setNewChit({...newChit, monthlyAmount: Number(e.target.value)})} required className="h-10 rounded-xl text-sm font-bold" /></div>
@@ -730,7 +728,7 @@ export default function RoundsPage() {
           <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
             {chitToEdit && (
               <form onSubmit={handleUpdateChit}>
-                <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight">Edit Scheme</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight text-primary">Edit Scheme</DialogTitle></DialogHeader>
                 <div className="grid gap-4 py-4">
                   <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Scheme Name</Label><Input value={chitToEdit.name} onChange={e => setChitToEdit({...chitToEdit, name: e.target.value})} required className="h-10 rounded-xl text-sm font-bold" /></div>
                   <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Amount (₹)</Label><Input type="number" value={chitToEdit.monthlyAmount || ""} onChange={e => setChitToEdit({...chitToEdit, monthlyAmount: Number(e.target.value)})} required className="h-10 rounded-xl text-sm font-bold" /></div>
@@ -775,14 +773,14 @@ export default function RoundsPage() {
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
         <Card className="shadow-sm border-l-4 border-l-primary/40 bg-card rounded-xl h-full flex flex-col">
           <CardHeader className="p-2.5 pb-1 flex flex-row items-center justify-between min-h-[38px]"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Scheme Amount</CardTitle></CardHeader>
-          <CardContent className="p-2.5 pt-0 flex-1 flex flex-col justify-center"><div className="text-lg font-bold tabular-nums tracking-tight">₹{(currentRound?.monthlyAmount || 0).toLocaleString()}</div></CardContent>
+          <CardContent className="p-2.5 pt-0 flex-1 flex flex-col justify-center"><div className="text-lg font-bold tabular-nums tracking-tight text-primary">₹{(currentRound?.monthlyAmount || 0).toLocaleString()}</div></CardContent>
         </Card>
         <Card className="shadow-sm border-l-4 border-l-primary bg-card rounded-xl h-full flex flex-col">
           <CardHeader className="p-2.5 pb-1 flex flex-row items-center justify-between min-h-[38px]"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Occupancy</CardTitle></CardHeader>
-          <CardContent className="p-2.5 pt-0 flex-1 flex flex-col justify-center"><div className="text-lg font-bold tabular-nums tracking-tight">{assignedMembers.length} / {currentRound?.totalMembers}</div></CardContent>
+          <CardContent className="p-2.5 pt-0 flex-1 flex flex-col justify-center"><div className="text-lg font-bold tabular-nums tracking-tight text-primary">{assignedMembers.length} / {currentRound?.totalMembers}</div></CardContent>
         </Card>
         <Card className="shadow-sm border-l-4 border-l-amber-500 bg-card rounded-xl h-full flex flex-col">
-          <CardHeader className="p-2.5 pb-1 flex flex-row items-center justify-between min-h-[38px]"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Pending</CardTitle></CardHeader>
+          <CardHeader className="p-2.5 pb-1 flex flex-row items-center justify-between min-h-[38px]"><CardTitle className="text-[10px] uppercase font-bold text-muted-foreground tracking-widest">Pending Count</CardTitle></CardHeader>
           <CardContent className="p-2.5 pt-0 flex-1 flex flex-col justify-center"><div className="text-lg font-bold tabular-nums text-amber-600 tracking-tight">{assignedMembers.filter(m => m.memberStatus === 'pending').length}</div></CardContent>
         </Card>
         <Card className="shadow-sm border-l-4 border-l-emerald-500 bg-card rounded-xl h-full flex flex-col">
@@ -794,7 +792,7 @@ export default function RoundsPage() {
       <div className="rounded-2xl border bg-card shadow-sm overflow-hidden border-border/60">
         <div className="p-5 border-b bg-muted/30 flex justify-between items-center">
           <div className="flex items-center gap-4">
-            <h3 className="text-sm font-bold flex items-center gap-2 tracking-tight uppercase"><Users className="size-4 text-primary" /> Board Participants</h3>
+            <h3 className="text-sm font-bold flex items-center gap-2 tracking-tight uppercase text-primary"><Users className="size-4" /> Board Participants</h3>
             {activeCycleNumber && <Badge className="bg-primary/10 text-primary border-none text-[10px] font-black uppercase tracking-widest px-2.5">Active Cycle {activeCycleNumber}</Badge>}
           </div>
         </div>
@@ -830,7 +828,7 @@ export default function RoundsPage() {
                 <>
                   <div className="bg-primary/5 p-4 pb-5 text-center relative border-b border-border/40"><Button variant="ghost" size="icon" className="absolute left-3 top-3 h-7 w-7 rounded-full hover:bg-white/80 text-primary transition-all shadow-sm border border-border/20" onClick={() => setIsEditingMember(true)}><Edit3 className="size-3.5" /></Button><div className="mx-auto mb-2 h-14 w-14 rounded-2xl bg-white text-primary flex items-center justify-center font-black text-lg shadow-lg border-2 border-primary/10 uppercase ring-4 ring-primary/5">{getInitials(selectedProfileMember.name)}</div><div className="space-y-0.5"><DialogTitle className="text-base font-black uppercase tracking-tight text-primary truncate px-2 text-center">{selectedProfileMember.name}</DialogTitle><div className="flex items-center justify-center"><Badge className="text-[8px] font-black uppercase tracking-widest bg-primary text-white border-none px-2.5 h-4">{selectedProfileMember.paymentType || currentRound?.collectionType}</Badge></div></div></div>
                   <div className="p-4 space-y-3 bg-white"><div className="grid gap-2"><div className="flex items-center gap-3 group"><div className="h-7 w-7 rounded-lg bg-muted/50 flex items-center justify-center text-muted-foreground transition-colors"><Phone className="size-3" /></div><div className="flex flex-col"><span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground/60 leading-none mb-0.5">Phone Contact</span><span className="font-bold text-[11px] tabular-nums text-foreground">{selectedProfileMember.phone}</span></div></div><div className="flex items-center gap-3 group"><div className="h-7 w-7 rounded-lg bg-muted/50 flex items-center justify-center text-muted-foreground transition-colors"><CalendarDays className="size-3" /></div><div className="flex flex-col"><span className="text-[8px] font-black uppercase tracking-widest text-muted-foreground/60 leading-none mb-0.5">Joining Date</span><span className="font-bold text-[11px] text-foreground">{selectedProfileMember.joinDate ? format(parseISO(selectedProfileMember.joinDate), 'dd MMM yyyy') : 'N/A'}</span></div></div></div><div className="pt-1"><div className="p-3 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-between shadow-inner relative overflow-hidden group"><div className="absolute -right-3 -bottom-3 opacity-5 transition-transform duration-500"><IndianRupee className="size-14 text-emerald-900" /></div><div className="relative z-10"><span className="text-[8px] font-black uppercase tracking-widest text-emerald-600/80">Cycle Paid</span><p className="text-lg font-black text-emerald-700 tabular-nums tracking-tighter">₹{(totalPaidByMember.get(selectedProfileMember.id) || 0).toLocaleString()}</p></div><div className="h-8 w-8 rounded-xl bg-emerald-600 text-white flex items-center justify-center shadow-md relative z-10"><Wallet className="size-3.5" /></div></div></div></div>
-                  <div className="p-3 bg-muted/5 border-t border-border/40"><Button onClick={() => setIsMemberProfileDialogOpen(false)} className="w-full font-black uppercase tracking-[0.2em] h-10 rounded-xl text-[9px] shadow-sm">Close Profile</Button></div>
+                  <div className="p-3 bg-muted/5 border-t border-border/40"><Button onClick={() => setIsMemberProfileDialogOpen(false)} className="w-full font-black uppercase tracking-[0.2em] h-10 rounded-xl text-[9px] shadow-sm bg-primary hover:bg-primary/90 text-white">Close Profile</Button></div>
                 </>
               )}
             </div>
@@ -873,7 +871,7 @@ export default function RoundsPage() {
                 <Button variant="outline" onClick={() => window.print()} className="w-full sm:flex-1 font-bold h-10 rounded-xl text-xs uppercase tracking-widest gap-2">
                   <Printer className="size-3.5" /> Print Ledger
                 </Button>
-                <Button onClick={() => setIsHistoryDialogOpen(false)} className="w-full sm:flex-1 font-bold h-10 rounded-xl text-xs uppercase tracking-widest">Close</Button>
+                <Button onClick={() => setIsHistoryDialogOpen(false)} className="w-full sm:flex-1 font-bold h-10 rounded-xl text-xs uppercase tracking-widest bg-primary hover:bg-primary/90 text-white">Close</Button>
               </DialogFooter>
             </div>
           )}
@@ -884,14 +882,14 @@ export default function RoundsPage() {
       <Dialog open={isAddMemberDialogOpen} onOpenChange={(o) => { if(!o) document.body.style.pointerEvents = 'auto'; setIsAddMemberDialogOpen(o); }}>
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           <form onSubmit={handleAddMemberToScheme}>
-            <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight">Register Member</DialogTitle><DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Adding to <span className="text-primary">{currentRound?.name}</span></DialogDescription></DialogHeader>
+            <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight text-primary">Register Member</DialogTitle><DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Adding to <span className="text-primary">{currentRound?.name}</span></DialogDescription></DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Full Name</Label><Input value={newMember.name} onChange={e => setNewMember({...newMember, name: e.target.value})} required className="h-10 rounded-xl text-sm font-bold border-muted/60" /></div>
               <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Phone Number</Label><Input value={newMember.phone} onChange={e => setNewMember({...newMember, phone: e.target.value})} required className="h-10 rounded-xl text-sm font-bold tabular-nums border-muted/60" /></div>
               <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Join Date</Label><Input type="date" value={newMember.joinDate} onChange={e => setNewMember({...newMember, joinDate: e.target.value})} required className="h-10 rounded-xl text-sm font-bold border-muted/60" /></div>
               <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Payment Mode</Label><Select value={newMember.paymentType} onValueChange={v => setNewMember({...newMember, paymentType: v})}><SelectTrigger className="h-10 rounded-xl text-sm font-bold border-muted/60"><SelectValue placeholder="Inherit" /></SelectTrigger><SelectContent><SelectItem value="Daily">Daily</SelectItem><SelectItem value="Monthly">Monthly</SelectItem></SelectContent></Select></div>
             </div>
-            <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] shadow-md">Complete Registration</Button></DialogFooter>
+            <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] shadow-md bg-primary hover:bg-primary/90 text-white">Complete Registration</Button></DialogFooter>
           </form>
         </DialogContent>
       </Dialog>
@@ -906,7 +904,7 @@ export default function RoundsPage() {
                 <div className="space-y-1"><Label className="text-[9px] font-black uppercase text-muted-foreground">Select Date</Label><div className="relative"><CalendarDays className="absolute left-3 top-1/2 -translate-y-1/2 size-3.5 text-muted-foreground pointer-events-none" /><Input type="date" value={auditDate} onChange={e => setAuditDate(e.target.value)} className="pl-9 h-10 font-bold text-xs rounded-xl border-muted/60" /></div></div>
                 <div className="flex flex-col items-center justify-center p-5 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200 text-center"><p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-600/60 mb-1.5">Daily Intake</p><div className="text-3xl font-black text-emerald-600 tabular-nums tracking-tighter">₹{getGroupCollectionForDate(currentRound.name, auditDate).toLocaleString()}</div></div>
               </div>
-              <DialogFooter><Button onClick={() => setIsDailyAuditOpen(false)} className="w-full font-bold h-10 rounded-xl text-xs uppercase tracking-widest">Close Audit</Button></DialogFooter>
+              <DialogFooter><Button onClick={() => setIsDailyAuditOpen(false)} className="w-full font-bold h-10 rounded-xl text-xs uppercase tracking-widest bg-primary hover:bg-primary/90 text-white">Close Audit</Button></DialogFooter>
             </>
           )}
         </DialogContent>
@@ -917,13 +915,13 @@ export default function RoundsPage() {
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedMemberForPayment && (
             <form onSubmit={handleQuickPayment}>
-              <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight">Record Payment</DialogTitle><DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Entry for <span className="text-primary">{selectedMemberForPayment.name}</span></DialogDescription></DialogHeader>
+              <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight text-primary">Record Payment</DialogTitle><DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Entry for <span className="text-primary">{selectedMemberForPayment.name}</span></DialogDescription></DialogHeader>
               <div className="grid gap-4 py-2">
                 <div className="grid gap-1"><Label className="text-[9px] font-black uppercase text-muted-foreground">Amount (₹)</Label><Input type="number" value={paymentData.amount} onChange={e => setPaymentData({...paymentData, amount: Number(e.target.value)})} required className="h-11 text-base font-black text-primary rounded-xl border-muted/60" /></div>
                 <div className="grid gap-1"><Label className="text-[9px] font-black uppercase text-muted-foreground">Target Date</Label><Input type="date" value={paymentData.date} onChange={e => setPaymentData({...paymentData, date: e.target.value})} required className="h-10 rounded-xl text-sm font-bold border-muted/60" /></div>
                 <div className="grid gap-1"><Label className="text-[9px] font-black uppercase text-muted-foreground">Method</Label><Select value={paymentData.method} onValueChange={(v) => setPaymentData({...paymentData, method: v})}><SelectTrigger className="h-10 rounded-xl text-sm font-bold border-muted/60"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Cash">Cash</SelectItem><SelectItem value="UPI">UPI</SelectItem></SelectContent></Select></div>
               </div>
-              <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-[0.98] transition-all text-xs">{isActionPending ? <Loader2 className="size-3 mr-2 animate-spin" /> : <CheckCircle2 className="size-3 mr-2" />}Confirm Entry</Button></DialogFooter>
+              <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-[0.98] transition-all text-xs text-white">{isActionPending ? <Loader2 className="size-3 mr-2 animate-spin" /> : <CheckCircle2 className="size-3 mr-2" />}Confirm Entry</Button></DialogFooter>
             </form>
           )}
         </DialogContent>

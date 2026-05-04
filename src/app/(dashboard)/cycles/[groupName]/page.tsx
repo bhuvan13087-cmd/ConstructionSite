@@ -133,25 +133,22 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       cycles = cycles.map(c => c.id === editingCycle.id ? { ...c, startDate: editingCycle.startDate, endDate: editingCycle.endDate } : c);
       
       // Chronological sort to apply self-healing timeline logic
-      cycles.sort((a, b) => (a.startDate as string || "").localeCompare(b.startDate as string || ""));
+      cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
       
-      // Self-Healing Loop: Ensure ZERO overlap
+      // Chain Synchronization: Ensure zero gaps and zero overlaps (Rule: prev.endDate = next.startDate - 1)
       for (let i = 0; i < cycles.length - 1; i++) {
         const current = cycles[i];
         const next = cycles[i+1];
         
-        // Zero Overlap Rule: If next cycle starts on or before previous cycle ends
-        if (next.startDate <= current.endDate) {
-          const nextStart = parseISO(next.startDate);
-          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-          
-          if (current.endDate !== fixedEnd) {
-            current.endDate = fixedEnd;
-            batch.update(doc(db, 'cycles', current.id), { 
-              endDate: fixedEnd,
-              updatedAt: new Date().toISOString()
-            });
-          }
+        const nextStart = parseISO(next.startDate);
+        const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+        
+        if (current.endDate !== fixedEnd) {
+          current.endDate = fixedEnd;
+          batch.update(doc(db, 'cycles', current.id), { 
+            endDate: fixedEnd,
+            updatedAt: new Date().toISOString()
+          });
         }
       }
       
@@ -189,9 +186,9 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       }
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Chain-Synced cycles for ${groupName}: Timeline overlap protected and payment IDs adjusted.`);
+      await createAuditLog(db, user, `Chain-Synced cycles for ${groupName}: Start date modification triggered auto-correction of preceding endDates.`);
       
-      toast({ title: "Timeline Synchronized", description: "Cycles and historical windows have been corrected." })
+      toast({ title: "Timeline Corrected", description: "Operational periods and payments synchronized." })
       setIsEditDialogOpen(false)
       setEditingCycle(null)
     } catch (error: any) {
@@ -306,21 +303,21 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
           {editingCycle && (
             <form onSubmit={handleUpdateCycle} className="space-y-6">
               <DialogHeader>
-                <DialogTitle className="flex items-center gap-2"><Pencil className="size-5 text-primary" /> Edit Audit Period</DialogTitle>
-                <DialogDescription className="text-xs">Modifying the start date will automatically adjust boundaries to ensure zero overlap with other cycles.</DialogDescription>
+                <DialogTitle className="flex items-center gap-2 text-primary font-headline uppercase tracking-tight"><Pencil className="size-5" /> Edit Audit Period</DialogTitle>
+                <DialogDescription className="text-xs">Modifying the start date will automatically adjust boundaries to ensure zero overlap with preceding cycles.</DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">Start Date</Label>
-                  <Input type="date" value={editingCycle.startDate} onChange={e => setEditingCycle({...editingCycle, startDate: e.target.value})} className="h-11 rounded-xl font-bold" required disabled={isActionPending} />
+                  <Input type="date" value={editingCycle.startDate} onChange={e => setEditingCycle({...editingCycle, startDate: e.target.value})} className="h-11 rounded-xl font-bold border-muted/60" required disabled={isActionPending} />
                 </div>
                 <div className="grid gap-2">
                   <Label className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground ml-1">End Date</Label>
-                  <Input type="date" value={editingCycle.endDate} onChange={e => setEditingCycle({...editingCycle, endDate: e.target.value})} className="h-11 rounded-xl font-bold" required disabled={isActionPending} />
+                  <Input type="date" value={editingCycle.endDate} onChange={e => setEditingCycle({...editingCycle, endDate: e.target.value})} className="h-11 rounded-xl font-bold border-muted/60" required disabled={isActionPending} />
                 </div>
               </div>
               <DialogFooter>
-                <Button type="submit" disabled={isActionPending} className="w-full h-12 font-black uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all">
+                <Button type="submit" disabled={isActionPending} className="w-full h-12 font-black uppercase tracking-[0.2em] shadow-lg active:scale-95 transition-all bg-primary hover:bg-primary/90 text-white">
                   {isActionPending ? <Loader2 className="size-4 mr-2 animate-spin" /> : <Save className="size-4 mr-2" />} Save & Sync Timeline
                 </Button>
               </DialogFooter>
