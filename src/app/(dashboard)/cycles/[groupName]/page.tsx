@@ -2,12 +2,12 @@
 "use client"
 
 import * as React from "react"
-import { Loader2, ChevronLeft, ChevronRight, History, Pencil, Save, ShieldCheck, Archive, RefreshCcw, Eye } from "lucide-react"
+import { Loader2, ChevronLeft, History, Pencil, Save, ShieldCheck, Archive, Eye } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useFirestore, useCollection, useMemoFirebase, useUser } from "@/firebase"
-import { collection, query, orderBy, doc, updateDoc, addDoc, where, getDocs, writeBatch } from "firebase/firestore"
+import { collection, query, orderBy, doc, where, getDocs, writeBatch } from "firebase/firestore"
 import { useRouter } from "next/navigation"
-import { format, parseISO, isValid, subDays } from "date-fns"
+import { format, parseISO, subDays } from "date-fns"
 import { cn, withTimeout } from "@/lib/utils"
 import {
   Dialog,
@@ -49,9 +49,6 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
   const cyclesQuery = useMemoFirebase(() => query(collection(db, 'cycles'), orderBy('startDate', 'desc')), [db])
   const { data: allCycles, isLoading } = useCollection(cyclesQuery)
 
-  const membersQuery = useMemoFirebase(() => collection(db, 'members'), [db])
-  const { data: membersData } = useCollection(membersQuery)
-
   const { activeCycles, pastCycles } = React.useMemo(() => {
     if (!Array.isArray(allCycles)) return { activeCycles: [], pastCycles: [] }
     
@@ -62,7 +59,6 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       return (mGroup === gName || mGroup === gNameClean);
     });
 
-    // Deduplicate by start date
     const uniqueMap = new Map<string, any>()
     filtered.forEach((c) => {
       const start = String(c?.startDate || "-")
@@ -81,9 +77,10 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       cycleNumber: i + 1
     }));
 
+    // Definition: Active is the chronologically latest
     return {
-      activeCycles: numbered.filter(c => c.status === 'active'),
-      pastCycles: numbered.filter(c => c.status !== 'active').reverse()
+      activeCycles: numbered.length > 0 ? [numbered[numbered.length - 1]] : [],
+      pastCycles: numbered.length > 1 ? numbered.slice(0, numbered.length - 1).reverse() : []
     }
   }, [allCycles, groupName])
 
@@ -113,8 +110,9 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
 
   const handleEditClick = (e: React.MouseEvent, cycle: any) => {
     e.stopPropagation()
-    // STRICT RULE: Prevent manual modification of historical records
-    if (cycle.status !== 'active') {
+    // Identify latest by ID in the current session
+    const isLatest = activeCycles.some(ac => ac.id === cycle.id);
+    if (!isLatest) {
       toast({ 
         variant: "destructive", 
         title: "Access Restricted", 
@@ -136,73 +134,41 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
       
       const q = query(collection(db, 'cycles'), where('name', '==', groupName));
       const querySnapshot = await getDocs(q);
-      let cycles = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
       
-      const targetCycle = cycles.find(c => c.id === editingCycle.id);
-      if (!targetCycle || targetCycle.status !== 'active') {
-        throw new Error("Modification of historical records is restricted to preserve audit integrity.");
+      // Dynamic Runtime Verification of Current Cycle
+      cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
+      const latestCycle = cycles[0];
+
+      if (!latestCycle || editingCycle.id !== latestCycle.id) {
+        throw new Error("Only current cycle can be edited");
       }
 
-      // Update local set with the edited cycle for continuity calculation
-      cycles = cycles.map(c => c.id === editingCycle.id ? { ...c, startDate: editingCycle.startDate, endDate: editingCycle.endDate } : c);
-      
-      // Chronological sort to apply self-healing timeline logic
-      cycles.sort((a, b) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
-      
-      // Chain Synchronization: Ensure zero gaps and zero overlaps (Rule: prev.endDate = next.startDate - 1)
-      for (let i = 0; i < cycles.length - 1; i++) {
-        const current = cycles[i];
-        const next = cycles[i+1];
-        
-        const nextStart = parseISO(next.startDate);
-        const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-        
-        if (current.endDate !== fixedEnd) {
-          current.endDate = fixedEnd;
-          batch.update(doc(db, 'cycles', current.id), { 
-            endDate: fixedEnd,
-            updatedAt: new Date().toISOString()
-          });
-        }
-      }
-      
-      // Batch update the specifically edited cycle
+      // 1. Update current cycle boundaries
       batch.update(doc(db, 'cycles', editingCycle.id), {
         startDate: editingCycle.startDate,
         endDate: editingCycle.endDate,
         updatedAt: new Date().toISOString()
       });
 
-      // Synchronize Payment IDs if timeline shifted
-      const groupMembers = membersData?.filter(m => {
-        const mGroup = String(m?.chitGroup || "").trim().toLowerCase();
-        const gName = groupName.toLowerCase();
-        return (mGroup === gName || mGroup === gName.replace(/Group/gi, '').trim());
-      }) || [];
-      const memberIds = groupMembers.map(m => m.id);
-      
-      if (memberIds.length > 0) {
-        for (let i = 0; i < memberIds.length; i += 30) {
-          const chunk = memberIds.slice(i, i + 30);
-          const pQuery = query(collection(db, 'payments'), where('memberId', 'in', chunk));
-          const pSnapshot = await getDocs(pQuery);
-          
-          pSnapshot.docs.forEach(pDoc => {
-            const pData = pDoc.data();
-            const tDate = pData.targetDate || (pData.paymentDate ? (pData.paymentDate.toDate ? format(pData.paymentDate.toDate(), 'yyyy-MM-dd') : pData.paymentDate.split('T')[0]) : null);
-            if (!tDate) return;
-            const matchingCycle = cycles.find(c => tDate >= c.startDate && tDate <= c.endDate);
-            if (matchingCycle && pData.cycleId !== matchingCycle.id) {
-              batch.update(pDoc.ref, { cycleId: matchingCycle.id });
-            }
+      // 2. Auto-adjust immediate previous cycle for continuity (Rule: P.endDate = C.startDate - 1)
+      const previousCycle = cycles[1];
+      if (previousCycle) {
+        const nextStart = parseISO(editingCycle.startDate);
+        const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+        
+        if (previousCycle.endDate !== fixedEnd) {
+          batch.update(doc(db, 'cycles', previousCycle.id), { 
+            endDate: fixedEnd,
+            updatedAt: new Date().toISOString()
           });
         }
       }
 
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Chain-Synced cycles for ${groupName}: Start date modification triggered auto-correction of preceding endDates.`);
+      await createAuditLog(db, user, `Timeline Corrected: Updated current cycle for ${groupName} and auto-adjusted preceding boundary.`);
       
-      toast({ title: "Timeline Corrected", description: "Operational periods and payments synchronized." })
+      toast({ title: "Timeline Corrected", description: "Current and previous operational periods synchronized." })
       setIsEditDialogOpen(false)
       setEditingCycle(null)
     } catch (error: any) {
@@ -320,7 +286,7 @@ export default function GroupCyclesPage({ params }: { params: Promise<{ groupNam
             <form onSubmit={handleUpdateCycle} className="space-y-6">
               <DialogHeader>
                 <DialogTitle className="flex items-center gap-2 text-primary font-headline uppercase tracking-tight"><Pencil className="size-5" /> Edit Audit Period</DialogTitle>
-                <DialogDescription className="text-xs">Modifying the start date will automatically adjust boundaries to ensure zero overlap with preceding cycles.</DialogDescription>
+                <DialogDescription className="text-xs">Modifying the current cycle will automatically adjust the previous boundary to ensure a continuous timeline.</DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4">
                 <div className="grid gap-2">

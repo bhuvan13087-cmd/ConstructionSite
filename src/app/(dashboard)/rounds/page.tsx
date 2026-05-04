@@ -110,11 +110,11 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   const { user } = useUser()
   const { toast } = useToast()
 
-  const isLatestActive = latestCycle && latestCycle.status === 'active';
+  const isUpdate = !!(latestCycle && latestCycle.id);
 
   useEffect(() => {
     if (isOpen) {
-      if (isLatestActive) {
+      if (isUpdate) {
         setStartDate(latestCycle.startDate || "")
         setEndDate(latestCycle.endDate || "")
       } else {
@@ -122,86 +122,68 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         setEndDate("")
       }
     }
-  }, [isOpen, latestCycle, isLatestActive])
+  }, [isOpen, latestCycle, isUpdate])
 
   const handleSave = async () => {
     setIsSaving(true);
     try {
       const batch = writeBatch(db);
-      const now = new Date();
-      let finalStart = startDate || format(now, 'yyyy-MM-dd');
-      let finalEnd = endDate || format(addDays(parseISO(finalStart), 5), 'yyyy-MM-dd');
-
+      
       const q = query(collection(db, 'cycles'), where('name', '==', group.name));
       const querySnapshot = await getDocs(q);
-      let cycles = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
       
-      const targetCycleId = isLatestActive ? latestCycle.id : null;
-      
-      if (targetCycleId) {
-        cycles = cycles.map(c => c.id === targetCycleId ? { ...c, startDate: finalStart, endDate: finalEnd } : c);
-      } else {
-        cycles.push({ id: 'NEW_TEMP', startDate: finalStart, endDate: finalEnd, name: group.name, status: 'active' } as any);
-      }
+      // FRESH IDENTIFICATION: Sort DESC
+      cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
+      const latestCycleInDb = cycles[0];
 
-      // Chronological sort to apply self-healing timeline logic
-      cycles.sort((a: any, b: any) => (String(a.startDate || "")).localeCompare(String(b.startDate || "")));
-      
-      // Strict Continuity Enforcer: previous.endDate = next.startDate - 1 day
-      for (let i = 0; i < cycles.length - 1; i++) {
-        const current = cycles[i] as any;
-        const next = cycles[i+1] as any;
-        
-        const nextStart = parseISO(next.startDate);
-        const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-        
-        if (current.endDate !== fixedEnd) {
-          current.endDate = fixedEnd;
-          if (current.id !== 'NEW_TEMP') {
-            batch.update(doc(db, 'cycles', current.id), { 
-              endDate: fixedEnd,
-              updatedAt: new Date().toISOString()
-            });
-          }
+      if (isUpdate) {
+        // Validation: Must be the latest to be edited
+        if (latestCycle.id !== latestCycleInDb?.id) {
+          throw new Error("Only current cycle can be edited");
         }
-      }
 
-      if (targetCycleId) {
-        batch.update(doc(db, 'cycles', targetCycleId), {
-          startDate: finalStart,
-          endDate: finalEnd,
+        // 1. Update Current
+        batch.update(doc(db, 'cycles', latestCycle.id), {
+          startDate: startDate,
+          endDate: endDate,
           updatedAt: new Date().toISOString()
         });
+
+        // 2. Adjust Previous (Rule: P.endDate = C.startDate - 1)
+        const previousCycle = cycles[1];
+        if (previousCycle) {
+          const nextStart = parseISO(startDate);
+          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+          batch.update(doc(db, 'cycles', previousCycle.id), { 
+            endDate: fixedEnd,
+            updatedAt: new Date().toISOString()
+          });
+        }
       } else {
+        // Create New logic
         const newRef = doc(collection(db, 'cycles'));
         batch.set(newRef, {
           name: group.name,
-          startDate: finalStart,
-          endDate: finalEnd,
+          startDate: startDate,
+          endDate: endDate,
           status: 'active',
           createdAt: new Date().toISOString()
         });
-        const newIdx = cycles.findIndex((c: any) => c.id === 'NEW_TEMP');
-        if (newIdx !== -1) (cycles[newIdx] as any).id = newRef.id;
+
+        // Adjust the former latest
+        if (latestCycleInDb) {
+          const nextStart = parseISO(startDate);
+          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
+          batch.update(doc(db, 'cycles', latestCycleInDb.id), { 
+            endDate: fixedEnd,
+            updatedAt: new Date().toISOString()
+          });
+        }
       }
 
-      // Sync Payments with updated cycle boundaries
-      const pQuery = query(collection(db, 'payments'), where('memberId', '!=', 'null'));
-      const pSnapshot = await getDocs(pQuery);
-      
-      pSnapshot.docs.forEach(pDoc => {
-        const pData = pDoc.data();
-        const targetDate = pData.targetDate || (pData.paymentDate ? (pData.paymentDate.toDate ? format(pData.paymentDate.toDate(), 'yyyy-MM-dd') : pData.paymentDate.split('T')[0]) : null);
-        if (!targetDate) return;
-        
-        const matchingCycle = cycles.find((c: any) => targetDate >= c.startDate && targetDate <= c.endDate) as any;
-        if (matchingCycle && pData.cycleId !== matchingCycle.id) {
-          batch.update(pDoc.ref, { cycleId: matchingCycle.id });
-        }
-      });
-
       await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Timeline Sync: Cycle ${group.name} updated. Preceding cycle endDates adjusted for continuity.`);
+      await createAuditLog(db, user, `Cycle Sync: ${group.name} registry updated. Continuity enforced.`);
       toast({ title: "Timeline Synchronized", description: "Operational boundaries corrected." });
       setIsOpen(false);
     } catch (error: any) {
@@ -215,8 +197,8 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if(!open) document.body.style.pointerEvents = 'auto'; setIsOpen(open); }}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8 rounded-full transition-colors", isLatestActive ? "text-primary/70 hover:text-primary hover:bg-primary/10" : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50")}>
-          {isLatestActive ? <CalendarDays className="size-4" /> : <Plus className="size-4" />}
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8 rounded-full transition-colors", isUpdate ? "text-primary/70 hover:text-primary hover:bg-primary/10" : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50")}>
+          {isUpdate ? <CalendarDays className="size-4" /> : <Plus className="size-4" />}
         </Button>
       </DialogTrigger>
       <DialogContent 
@@ -226,7 +208,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         onEscapeKeyDown={handlePopupBlur}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><CalendarDays className="size-4" />{isLatestActive ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
+          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><CalendarDays className="size-4" />{isUpdate ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
           <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Registry will auto-adjust for zero overlap.</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 py-4">
@@ -235,7 +217,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
             <div className="space-y-1"><Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">End</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 text-xs rounded-xl font-bold border-muted/60" disabled={isSaving} /></div>
           </div>
         </div>
-        <DialogFooter><Button onClick={handleSave} disabled={isSaving} className="w-full font-black uppercase tracking-[0.1em] h-11 rounded-xl active:scale-[0.98] transition-all shadow-md">{isSaving ? <Loader2 className="size-3 mr-2 animate-spin" /> : <Save className="size-3 mr-2" />}{isLatestActive ? 'Apply' : 'Launch'}</Button></DialogFooter>
+        <DialogFooter><Button onClick={handleSave} disabled={isSaving} className="w-full font-black uppercase tracking-[0.1em] h-11 rounded-xl active:scale-[0.98] transition-all shadow-md">{isSaving ? <Loader2 className="size-3 mr-2 animate-spin" /> : <Save className="size-3 mr-2" />}{isUpdate ? 'Apply' : 'Launch'}</Button></DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -529,7 +511,9 @@ export default function RoundsPage() {
     if (alreadyPaid) { toast({ variant: "destructive", title: "Duplicate Entry", description: "Already paid for this date." }); return; }
     setIsActionPending(true);
     try {
-      const activeCycle = (allCycles || []).find(c => String(c.name).trim().toLowerCase() === String(currentRound.name).trim().toLowerCase() && c.status === 'active');
+      const groupCycles = (allCycles || []).filter(c => String(c.name).trim().toLowerCase() === String(currentRound.name).trim().toLowerCase());
+      const activeCycle = groupCycles.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
+      
       const paymentRef = doc(collection(db, 'payments'));
       await addDoc(collection(db, 'payments'), {
         id: paymentRef.id,
@@ -634,8 +618,11 @@ export default function RoundsPage() {
               return cNameClean === gNameClean;
             });
             const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
-            const activeCycle = groupCycles.find(c => c.status === 'active');
+            
+            // Definition: Current cycle is chronologically latest
+            const activeCycle = groupCycles.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
             const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
+            
             const currentOccupancy = members?.filter(m => m.status !== 'inactive' && String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase()).length || 0;
             const groupPendingCount = membersWithCalculatedStats.filter(m => String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase() && m.status !== 'inactive' && m.memberStatus === 'pending').length;
 
@@ -655,7 +642,7 @@ export default function RoundsPage() {
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary/70 hover:text-primary transition-colors" onClick={() => { setActivePopupGroupName(group.name); setSelectedReconciliationCycleId(activeCycle?.id || null); setIsCollectionPopupOpen(true); }}><Wallet className="size-4" /></Button>
-                  <GroupCycleControl group={group} latestCycle={activeCycle || groupCycles[0]} />
+                  <GroupCycleControl group={group} latestCycle={activeCycle} />
                 </div>
                 <CardHeader className="p-5 pb-3 space-y-1.5 border-b border-border/40">
                   <div className="flex items-center gap-2">
@@ -768,7 +755,9 @@ export default function RoundsPage() {
     return cNameClean === targetClean;
   });
   const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
-  const currentActiveCycle = groupCyclesForActive.find(c => c.status === 'active');
+  
+  // Definition: Active is the chronologically latest
+  const currentActiveCycle = groupCyclesForActive.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
   const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
 
   return (
