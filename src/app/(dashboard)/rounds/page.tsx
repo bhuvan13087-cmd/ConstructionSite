@@ -642,7 +642,7 @@ export default function RoundsPage() {
                 </div>
                 <CardHeader className="p-5 pb-3 space-y-1.5 border-b border-border/40">
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="w-fit text-[10px] font-black uppercase tracking-widest px-2 py-0.5 bg-primary/5 border-primary/20 text-primary">{group.collectionType}</Badge>
+                    <Badge variant="outline" className="w-fit text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 bg-primary/5 border-primary/20 text-primary">{group.collectionType}</Badge>
                     {activeCycle && (
                       <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[10px] font-black uppercase tracking-tighter h-5">
                         {differenceInDays(parseISO(activeCycle.endDate), parseISO(activeCycle.startDate)) + 1} Days
