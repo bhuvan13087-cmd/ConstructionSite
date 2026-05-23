@@ -856,7 +856,11 @@ export default function RoundsPage() {
                   <TableBody>
                     {allPayments.filter(p => p.memberId === historyMember.id && (p.status === 'success' || p.status === 'paid')).length > 0 ? (
                       allPayments.filter(p => p.memberId === historyMember.id && (p.status === 'success' || p.status === 'paid')).map((p, i) => (
-                        <TableRow key={i} className="hover:bg-muted/5 transition-colors border-b last:border-none"><TableCell className="text-[10px] font-bold tabular-nums py-2">{getRecordDate(p)}</TableCell><TableCell className="text-[10px] font-black text-emerald-600 tabular-nums py-2">₹{getPaymentAmount(p).toLocaleString()}</TableCell><TableCell className="text-[8px] font-bold text-muted-foreground text-right uppercase tracking-widest">{p.method || 'Cash'}</TableCell></TableRow>
+                        <TableRow key={i} className="hover:bg-muted/5 transition-colors border-b last:border-none">
+                          <TableCell className="text-[10px] font-bold tabular-nums py-2">{getRecordDate(p) ? format(parseISO(getRecordDate(p)!), 'dd-MM-yyyy') : '-'}</TableCell>
+                          <TableCell className="text-[10px] font-black text-emerald-600 tabular-nums py-2">₹{getPaymentAmount(p).toLocaleString()}</TableCell>
+                          <TableCell className="text-[8px] font-bold text-muted-foreground text-right uppercase tracking-widest">{p.method || 'Cash'}</TableCell>
+                        </TableRow>
                       ))
                     ) : <TableRow><TableCell colSpan={3} className="h-20 text-center text-[8px] font-bold uppercase text-muted-foreground/40 italic">Empty</TableCell></TableRow>}
                   </TableBody>
@@ -946,7 +950,7 @@ export default function RoundsPage() {
                 .filter(p => p.memberId === historyMember.id && (p.status === 'success' || p.status === 'paid'))
                 .map((p, i) => (
                   <tr key={i} style={{ borderBottom: '1px dashed #eee' }}>
-                    <td style={{ padding: '4px 0' }}>{getRecordDate(p)}</td>
+                    <td style={{ padding: '4px 0' }}>{getRecordDate(p) ? format(parseISO(getRecordDate(p)!), 'dd-MM-yyyy') : '-'}</td>
                     <td style={{ textAlign: 'right', padding: '4px 0' }}>₹{getPaymentAmount(p).toLocaleString()}</td>
                   </tr>
                 ))}
