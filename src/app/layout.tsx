@@ -6,6 +6,11 @@ import { FirebaseClientProvider } from '@/firebase/client-provider';
 export const metadata: Metadata = {
   title: 'ChitFund Pro | Admin Management',
   description: 'Professional Chit Fund Management Application',
+  icons: {
+    icon: '/chitfund.png',
+    shortcut: '/chitfund.png',
+    apple: '/chitfund.png',
+  },
 };
 
 export default function RootLayout({
