@@ -236,6 +236,7 @@ export default function RoundsPage() {
   const [isPendingDetailsOpen, setIsPendingDetailsOpen] = useState(false)
   const [isHistoryDialogOpen, setIsHistoryDialogOpen] = useState(false)
   const [isActionPending, setIsActionPending] = useState(false)
+  const [isExpiryPopupOpen, setIsExpiryPopupOpen] = useState(false)
   
   const [isCollectionPopupOpen, setIsCollectionPopupOpen] = useState(false)
   const [activePopupGroupName, setActivePopupGroupName] = useState<string | null>(null)
@@ -249,7 +250,11 @@ export default function RoundsPage() {
   const [selectedProfileMember, setSelectedProfileMember] = useState<any>(null)
   const [selectedPendingMember, setSelectedPendingMember] = useState<any>(null)
   const [newMember, setNewMember] = useState(INITIAL_MEMBER_STATE)
-  const [paymentData, setPaymentData] = useState(INITIAL_PAYMENT_STATE)
+  const [paymentData, setPaymentData] = INITIAL_PAYMENT_STATE && {
+    method: "Cash",
+    amount: 0,
+    date: format(new Date(), 'yyyy-MM-dd')
+  } ? INITIAL_PAYMENT_STATE : { method: "Cash", amount: 0, date: format(new Date(), 'yyyy-MM-dd') }
   const [newChit, setNewChit] = useState(INITIAL_CHIT_STATE)
   
   const { toast } = useToast()
@@ -499,6 +504,27 @@ export default function RoundsPage() {
     return cyclePayments.reduce((acc, p) => acc + getPaymentAmount(p), 0);
   }, [activePopupGroupName, selectedReconciliationCycleId, allPayments, members, allCycles]);
 
+  const groupCyclesForActive = (allCycles || []).filter(c => {
+    const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
+    const targetClean = String(currentRound?.name || "").replace(/group/gi, '').trim().toLowerCase();
+    return cNameClean === targetClean;
+  });
+  const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
+  
+  const currentActiveCycle = groupCyclesForActive.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
+  const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
+
+  const isBoardExpired = useMemo(() => {
+    if (!currentActiveCycle?.endDate) return false;
+    return isAfter(startOfDay(new Date()), startOfDay(parseISO(currentActiveCycle.endDate)));
+  }, [currentActiveCycle]);
+
+  useEffect(() => {
+    if (selectedChitId && isBoardExpired) {
+      setIsExpiryPopupOpen(true);
+    }
+  }, [selectedChitId, isBoardExpired]);
+
   const handleQuickPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!db || !selectedMemberForPayment || !currentRound || isActionPending) return;
@@ -598,7 +624,7 @@ export default function RoundsPage() {
     } catch (e: any) { toast({ variant: "destructive", title: "Error", description: e.message || "Failed to update profile." }); } finally { setIsActionPending(false); }
   }
 
-  if (isRoleLoading || isRoundsLoading) return (<div className="flex h-[60vh] items-center justify-center"><Loader2 className="size-8 animate-spin text-primary" /></div>)
+  if (isRoleLoading || isRoundsLoading || !mounted) return (<div className="flex h-[60vh] items-center justify-center"><Loader2 className="size-8 animate-spin text-primary" /></div>)
 
   if (!selectedChitId) {
     return (
@@ -622,6 +648,8 @@ export default function RoundsPage() {
             const currentOccupancy = members?.filter(m => m.status !== 'inactive' && String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase()).length || 0;
             const groupPendingCount = membersWithCalculatedStats.filter(m => String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase() && m.status !== 'inactive' && m.memberStatus === 'pending').length;
 
+            const isExpired = activeCycle && isAfter(startOfDay(new Date()), startOfDay(parseISO(activeCycle.endDate)));
+
             return (
               <Card key={group.id} className="group hover:shadow-xl transition-all border-border/60 overflow-hidden flex flex-col relative bg-card shadow-sm rounded-2xl">
                 <div className="absolute top-3 right-3 flex items-center gap-1">
@@ -644,8 +672,8 @@ export default function RoundsPage() {
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-fit text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 bg-primary/5 border-primary/20 text-primary">{group.collectionType}</Badge>
                     {activeCycle && (
-                      <Badge className="bg-emerald-50 text-emerald-700 border-emerald-100 text-[10px] font-black uppercase tracking-tighter h-5">
-                        {differenceInDays(parseISO(activeCycle.endDate), parseISO(activeCycle.startDate)) + 1} Days
+                      <Badge className={cn("text-[10px] font-black uppercase tracking-tighter h-5", isExpired ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-emerald-50 text-emerald-700 border-emerald-100")}>
+                        {isExpired ? 'Expired' : `${differenceInDays(parseISO(activeCycle.endDate), parseISO(activeCycle.startDate)) + 1} Days`}
                       </Badge>
                     )}
                   </div>
@@ -656,12 +684,25 @@ export default function RoundsPage() {
                       <>{cycleNumber ? `Cycle ${cycleNumber} | ` : ''}{format(parseISO(activeCycle.startDate), 'MMM dd')} → {format(parseISO(activeCycle.endDate), 'MMM dd')}</>
                     ) : 'No Active Cycle'}
                   </div>
+                  {isExpired && (
+                    <div className="flex items-center gap-1.5 mt-1 bg-destructive/10 px-2 py-0.5 rounded-md w-fit border border-destructive/20 animate-pulse">
+                      <AlertCircle className="size-3 text-destructive" />
+                      <span className="text-[8px] font-black text-destructive uppercase tracking-tighter">Cycle Completed</span>
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent className="p-5 flex-1 space-y-4">
                   <div className="space-y-3">
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Scheme Amount</span><span className="font-bold text-primary">₹{(group.monthlyAmount || 0).toLocaleString()}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-amber-600 font-semibold">Pending Count</span><span className={cn("font-bold text-sm", groupPendingCount > 0 ? "text-amber-500" : "text-emerald-600")}>{groupPendingCount}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Occupancy</span><span className="font-black tabular-nums">{currentOccupancy} / {group.totalMembers}</span></div>
+                    {isExpired && (
+                      <div className="pt-2 border-t border-destructive/10 mt-2">
+                        <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">
+                          Last cycle ended on: <span className="text-destructive">{format(parseISO(activeCycle.endDate), 'dd-MM-yyyy')}</span>
+                        </p>
+                      </div>
+                    )}
                     <div className="pt-4 border-t border-dashed border-border/60 mt-4"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
                   </div>
                 </CardContent>
@@ -745,16 +786,6 @@ export default function RoundsPage() {
     )
   }
 
-  const groupCyclesForActive = (allCycles || []).filter(c => {
-    const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
-    const targetClean = String(currentRound?.name || "").replace(/group/gi, '').trim().toLowerCase();
-    return cNameClean === targetClean;
-  });
-  const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
-  
-  const currentActiveCycle = groupCyclesForActive.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
-  const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
-
   return (
     <div className="space-y-8 animate-in fade-in duration-500 pb-10">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -762,8 +793,31 @@ export default function RoundsPage() {
           <Button variant="outline" size="icon" onClick={() => setSelectedChitId(null)} className="rounded-full h-10 w-10 shadow-sm active:scale-[0.98] transition-all"><ChevronLeft className="size-5" /></Button>
           <div className="min-w-0"><div className="flex items-center gap-2 mb-1"><h2 className="text-xl sm:text-2xl font-black truncate tracking-tight text-primary font-headline uppercase">{currentRound?.name}</h2><Badge variant="secondary" className="text-[9px] font-black tracking-tighter bg-primary/10 text-primary border-none">{currentRound?.collectionType}</Badge></div></div>
         </div>
-        <div className="flex items-center gap-3"><Button onClick={() => setIsAddMemberDialogOpen(true)} className="font-bold gap-2 h-11 px-6 shadow-lg active:scale-[0.98] transition-all"><UserPlus className="size-5" /> Add Member</Button></div>
+        <div className="flex items-center gap-3">
+          <Button 
+            onClick={() => setIsAddMemberDialogOpen(true)} 
+            disabled={isActionPending || isBoardExpired}
+            className="font-bold gap-2 h-11 px-6 shadow-lg active:scale-[0.98] transition-all"
+          >
+            <UserPlus className="size-5" /> Add Member
+          </Button>
+        </div>
       </div>
+
+      {isBoardExpired && (
+        <div className="bg-destructive/5 border border-destructive/20 p-4 rounded-2xl flex items-center justify-between gap-4 mb-6 animate-in slide-in-from-top-1">
+          <div className="flex items-center gap-3">
+            <div className="h-12 w-12 rounded-xl bg-destructive/10 flex items-center justify-center text-destructive">
+              <AlertCircle className="size-6" />
+            </div>
+            <div>
+              <p className="text-[10px] font-black uppercase text-destructive tracking-widest mb-0.5">Payments & Registration Locked</p>
+              <p className="text-xs font-bold text-foreground/70">The operational cycle for this group ended on <span className="text-destructive">{format(parseISO(currentActiveCycle!.endDate), 'dd-MM-yyyy')}</span>. Please update the registry.</p>
+            </div>
+          </div>
+          <GroupCycleControl group={currentRound} latestCycle={currentActiveCycle} />
+        </div>
+      )}
 
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 items-stretch">
         <Card className="shadow-sm border-l-4 border-l-primary/40 bg-card rounded-xl h-full flex flex-col">
@@ -800,7 +854,7 @@ export default function RoundsPage() {
                   <TableCell className="pl-6 py-4"><div className="flex items-center gap-4 cursor-pointer" onClick={() => { setSelectedProfileMember(m); setIsEditingMember(false); setIsMemberProfileDialogOpen(true); }}><div className="h-10 w-10 rounded-xl bg-secondary text-primary flex items-center justify-center font-black text-xs uppercase">{getInitials(m.name)}</div><div className="flex flex-col min-0-w"><span className="text-sm font-bold truncate tracking-tight">{m.name}</span><span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{m.paymentType || currentRound?.collectionType}</span></div></div></TableCell>
                   <TableCell><button onClick={() => { setSelectedPendingMember(m); setIsPendingDetailsOpen(true); }} className={cn("px-4 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest tabular-nums", m.calculatedPendingDays > 0 ? "text-destructive font-bold" : "text-muted-foreground/40")}>{m.calculatedPendingDays} Days</button></TableCell>
                   <TableCell><Badge variant={m.memberStatus === 'paid' ? 'default' : 'secondary'} className={cn("text-[9px] font-black uppercase tracking-widest px-3 py-1 border-none shadow-sm", m.memberStatus === 'paid' ? "bg-emerald-500" : (m.memberStatus === 'waiting' ? "bg-blue-100 text-blue-700" : "bg-amber-100 text-amber-700"))}>{m.memberStatus.toUpperCase()}</Badge></TableCell>
-                  <TableCell className="text-right pr-6"><div className="flex items-center justify-end gap-1.5"><Button variant="ghost" size="icon" className={cn("h-9 w-9 rounded-xl transition-all", m.memberStatus === 'paid' ? "text-emerald-500 bg-emerald-50" : "text-emerald-600 hover:bg-emerald-50 active:scale-90")} disabled={m.memberStatus === 'paid' || isActionPending || !currentActiveCycle} onClick={() => { setSelectedMemberForPayment(m); setPaymentData({ ...INITIAL_PAYMENT_STATE, amount: m.monthlyAmount || currentRound?.monthlyAmount || 800, date: format(new Date(), 'yyyy-MM-dd') }); setIsQuickPaymentDialogOpen(true); }}><IndianRupee className="size-4.5" /></Button><Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:bg-muted/5 rounded-xl" onClick={() => { setHistoryMember(m); setIsHistoryDialogOpen(true); }}><History className="size-4.5" /></Button></div></TableCell>
+                  <TableCell className="text-right pr-6"><div className="flex items-center justify-end gap-1.5"><Button variant="ghost" size="icon" className={cn("h-9 w-9 rounded-xl transition-all", m.memberStatus === 'paid' ? "text-emerald-500 bg-emerald-50" : "text-emerald-600 hover:bg-emerald-50 active:scale-90")} disabled={m.memberStatus === 'paid' || isActionPending || !currentActiveCycle || isBoardExpired} onClick={() => { setSelectedMemberForPayment(m); setPaymentData({ ...INITIAL_PAYMENT_STATE, amount: m.monthlyAmount || currentRound?.monthlyAmount || 800, date: format(new Date(), 'yyyy-MM-dd') }); setIsQuickPaymentDialogOpen(true); }}><IndianRupee className="size-4.5" /></Button><Button variant="ghost" size="icon" className="h-9 w-9 text-muted-foreground hover:bg-muted/5 rounded-xl" onClick={() => { setHistoryMember(m); setIsHistoryDialogOpen(true); }}><History className="size-4.5" /></Button></div></TableCell>
                 </TableRow>
               )) : <TableRow><TableCell colSpan={4} className="h-48 text-center text-[11px] uppercase tracking-[0.2em] text-muted-foreground/60 font-bold italic">No participant records located</TableCell></TableRow>}
             </TableBody>
@@ -813,6 +867,7 @@ export default function RoundsPage() {
         <DialogContent className="sm:max-w-[310px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedProfileMember && (
             <div className="flex flex-col">
+              <DialogTitle className="sr-only">Member Profile: {selectedProfileMember.name}</DialogTitle>
               {isEditingMember ? (
                 <form onSubmit={handleUpdateMemberProfile} className="flex flex-col">
                   <div className="bg-primary p-4 text-white text-center border-b border-white/10"><DialogHeader><div className="mx-auto mb-2 h-10 w-10 rounded-2xl bg-white/10 text-white flex items-center justify-center shadow-inner"><Edit3 className="size-4" /></div><DialogTitle className="text-base font-black uppercase tracking-tight text-white">Edit Registry</DialogTitle><DialogDescription className="text-[8px] font-bold uppercase tracking-widest text-white/60">Member Details</DialogDescription></DialogHeader></div>
@@ -836,7 +891,8 @@ export default function RoundsPage() {
         <DialogContent className="sm:max-w-[310px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedPendingMember && (
             <div className="flex flex-col">
-              <div className="bg-primary/5 p-4 text-center relative border-b border-border/40"><div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-white text-primary flex items-center justify-center shadow-lg border-2 border-primary/10 ring-4 ring-primary/5"><History className="size-6" /></div><div className="space-y-0.5"><DialogTitle className="text-lg font-black uppercase tracking-tight text-primary leading-tight text-center">Pending Details</DialogTitle><DialogDescription className="text-sm font-black text-primary px-4 text-center">{selectedPendingMember.name}</DialogDescription></div></div>
+              <DialogTitle className="sr-only">Pending Details for {selectedPendingMember.name}</DialogTitle>
+              <div className="bg-primary/5 p-4 text-center relative border-b border-border/40"><div className="mx-auto mb-2 h-12 w-12 rounded-2xl bg-white text-primary flex items-center justify-center shadow-lg border-2 border-primary/10 ring-4 ring-primary/5"><History className="size-6" /></div><div className="space-y-0.5"><h3 className="text-lg font-black uppercase tracking-tight text-primary leading-tight text-center">Pending Details</h3><DialogDescription className="text-sm font-black text-primary px-4 text-center">{selectedPendingMember.name}</DialogDescription></div></div>
               <div className="p-4 space-y-4 bg-white"><div className="p-3 rounded-2xl bg-primary/5 border border-primary/10 flex items-center justify-between shadow-inner relative overflow-hidden group"><div className="absolute -right-4 -bottom-4 opacity-5 transition-transform duration-500"><IndianRupee className="size-16 text-primary-foreground fill-primary" /></div><div className="relative z-10"><span className="text-[8px] font-black uppercase tracking-widest text-primary/70">Estimated Debt</span><p className="text-2xl font-black text-primary tabular-nums tracking-tighter">₹{(selectedPendingMember.calculatedPendingAmount || 0).toLocaleString()}</p></div><div className="h-9 w-9 rounded-xl bg-primary text-white flex items-center justify-center shadow-md relative z-10"><Wallet className="size-4" /></div></div><div className="space-y-1.5"><div className="flex items-center justify-between px-1"><h4 className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/80">Missed Dates Ledger</h4><Badge variant="outline" className="text-[8px] font-black uppercase tracking-tighter border-primary/20 text-primary bg-primary/5 px-1.5 h-4">{selectedPendingMember.calculatedPendingDays || 0} Missed</Badge></div><ScrollArea className="h-[120px] rounded-xl border border-border/50 bg-muted/5 p-1.5"><div className="grid gap-1">{missedDatesForSelectedMember.length > 0 ? missedDatesForSelectedMember.map((dateStr, idx) => (<div key={idx} className="flex items-center justify-between px-3 py-2 bg-white rounded-lg border border-border/40 shadow-sm"><div className="flex items-center gap-3"><CalendarDays className="size-3.5 text-primary/40" /><span className="text-[11px] font-bold tabular-nums text-foreground/80">{format(parseISO(dateStr), 'dd-MM-yyyy')}</span></div></div>)) : <div className="h-24 flex flex-col items-center justify-center space-y-1.5"><CheckCircle2 className="size-6 text-emerald-500" /><p className="text-[8px] font-bold uppercase text-muted-foreground tracking-[0.2em]">Registry Clear</p></div>}</div></ScrollArea></div></div>
               <div className="p-3 bg-muted/5 border-t border-border/40"><Button onClick={() => setIsPendingDetailsOpen(false)} className="w-full font-black uppercase tracking-[0.2em] h-11 rounded-xl text-[9px] shadow-sm bg-primary hover:bg-primary/90 text-white">Close Audit</Button></div>
             </div>
@@ -923,6 +979,39 @@ export default function RoundsPage() {
               <DialogFooter><Button type="submit" disabled={isActionPending} className="w-full h-11 font-black uppercase tracking-[0.1em] bg-emerald-600 hover:bg-emerald-700 shadow-sm active:scale-[0.98] transition-all text-xs text-white">{isActionPending ? <Loader2 className="size-3 mr-2 animate-spin" /> : <CheckCircle2 className="size-3 mr-2" />}Confirm Entry</Button></DialogFooter>
             </form>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Expiry Guard Popup */}
+      <Dialog open={isExpiryPopupOpen} onOpenChange={setIsExpiryPopupOpen}>
+        <DialogContent className="sm:max-w-[400px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
+          <div className="bg-destructive/5 p-8 text-center space-y-6">
+            <DialogTitle className="sr-only">Cycle Expired Notification</DialogTitle>
+            <div className="mx-auto w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center animate-bounce shadow-inner">
+              <AlertCircle className="size-10 text-destructive" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-2xl font-black uppercase tracking-tighter text-destructive">⚠️ Cycle Completed</h3>
+              <p className="text-sm font-bold text-muted-foreground px-6 leading-relaxed">
+                The operational window for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>.
+              </p>
+            </div>
+            <div className="p-4 bg-white rounded-2xl border border-destructive/10 shadow-sm">
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Status</p>
+              <p className="text-xs font-bold text-destructive">Payments are temporarily locked</p>
+            </div>
+            <div className="space-y-4 pt-4">
+              <Button 
+                onClick={() => setIsExpiryPopupOpen(false)}
+                className="w-full h-12 rounded-xl font-black uppercase tracking-[0.2em] shadow-lg shadow-primary/20"
+              >
+                [ Open Group ]
+              </Button>
+              <p className="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest">
+                Please create the next cycle to continue
+              </p>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 
