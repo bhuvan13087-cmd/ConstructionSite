@@ -3,7 +3,8 @@
 
 import { useState } from "react"
 import { useRouter } from "next/navigation"
-import { Loader2, Lock, ShieldCheck, Mail, KeyRound } from "lucide-react"
+import Image from "next/image"
+import { Loader2, Mail, KeyRound } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -30,7 +31,6 @@ export default function LoginPage() {
         title: "Welcome Back",
         description: "Authentication successful. Accessing seat reservations...",
       })
-      // Redirect to Chit Rounds by default as per production requirement
       router.push("/rounds")
     } catch (error: any) {
       let errorMessage = "Login failed. Please try again"
@@ -53,8 +53,6 @@ export default function LoginPage() {
         description: errorMessage,
       })
       setLoading(false)
-    } finally {
-      // Success is handled by redirect
     }
   }
 
@@ -73,20 +71,26 @@ export default function LoginPage() {
         />
       </div>
 
-      <Card className="relative z-10 w-full max-w-[420px] border-none shadow-[0_20px_50px_rgba(0,0,0,0.1)] rounded-2xl overflow-hidden bg-white">
-        {/* Top Accent Bar */}
+      <Card className="relative z-10 w-full max-w-[420px] border-none shadow-[0_20px_50px_rgba(0,0,0,0.1)] rounded-3xl overflow-hidden bg-white">
         <div className="h-2 w-full bg-gradient-to-r from-primary to-accent" />
         
-        <CardHeader className="space-y-4 pt-10 pb-6 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/5 shadow-inner">
-            <ShieldCheck className="h-8 w-8 text-primary" />
+        <CardHeader className="space-y-4 pt-12 pb-6 text-center">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-[2rem] bg-white shadow-xl shadow-black/5 p-4 border ring-8 ring-primary/5">
+            <Image 
+              src="/chitfund.png" 
+              alt="Logo" 
+              width={64} 
+              height={64} 
+              className="object-contain"
+              priority
+            />
           </div>
-          <div className="space-y-1">
-            <CardTitle className="text-3xl font-extrabold tracking-tight text-slate-900 font-headline">
-              Admin Login
+          <div className="space-y-1.5">
+            <CardTitle className="text-3xl font-black tracking-tight text-primary font-headline uppercase">
+              Admin Portal
             </CardTitle>
-            <CardDescription className="text-slate-500 font-medium px-4">
-              Enter your credentials to access the portal
+            <CardDescription className="text-slate-500 font-bold uppercase tracking-widest text-[10px]">
+              Cloud Management Protocol
             </CardDescription>
           </div>
         </CardHeader>
@@ -96,13 +100,13 @@ export default function LoginPage() {
             <div className="space-y-2">
               <Label 
                 htmlFor="email" 
-                className="text-xs font-bold uppercase tracking-widest text-slate-500 ml-1"
+                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 ml-1"
               >
-                Email Address
+                Identification
               </Label>
               <div className="relative group">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors">
-                  <Mail className="h-4 w-4" />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors">
+                  <Mail className="size-4" />
                 </div>
                 <Input
                   id="email"
@@ -111,7 +115,7 @@ export default function LoginPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
-                  className="pl-10 h-12 bg-slate-50 border-slate-200 focus:bg-white focus:ring-primary/20 transition-all text-slate-900 font-medium rounded-xl"
+                  className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white focus:ring-primary/20 transition-all text-slate-900 font-bold rounded-2xl"
                 />
               </div>
             </div>
@@ -119,13 +123,13 @@ export default function LoginPage() {
             <div className="space-y-2">
               <Label 
                 htmlFor="password" 
-                className="text-xs font-bold uppercase tracking-widest text-slate-500 ml-1"
+                className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500 ml-1"
               >
-                Password
+                Security Key
               </Label>
               <div className="relative group">
-                <div className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors">
-                  <KeyRound className="h-4 w-4" />
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-primary transition-colors">
+                  <KeyRound className="size-4" />
                 </div>
                 <Input
                   id="password"
@@ -134,7 +138,7 @@ export default function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
-                  className="pl-10 h-12 bg-slate-50 border-slate-200 focus:bg-white focus:ring-primary/20 transition-all text-slate-900 font-medium rounded-xl"
+                  className="pl-11 h-12 bg-slate-50 border-slate-200 focus:bg-white focus:ring-primary/20 transition-all text-slate-900 font-bold rounded-2xl"
                 />
               </div>
             </div>
@@ -143,20 +147,20 @@ export default function LoginPage() {
           <CardFooter className="pb-12 flex flex-col gap-4">
             <Button 
               type="submit" 
-              className="w-full h-12 text-base font-bold rounded-xl shadow-lg bg-primary hover:bg-primary/90 shadow-primary/20 active:scale-[0.98] transition-all" 
+              className="w-full h-14 text-base font-black uppercase tracking-[0.15em] rounded-2xl shadow-xl bg-primary hover:bg-primary/90 shadow-primary/20 active:scale-[0.98] transition-all" 
               disabled={loading}
             >
               {loading ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Authenticating...
+                  Verifying...
                 </>
               ) : (
-                "Sign In"
+                "Authorize Access"
               )}
             </Button>
-            <p className="text-center text-[10px] text-slate-400 font-medium uppercase tracking-tighter">
-              Authorized Personnel Only
+            <p className="text-center text-[9px] text-slate-400 font-black uppercase tracking-[0.3em]">
+              Secured Endpoint
             </p>
           </CardFooter>
         </form>

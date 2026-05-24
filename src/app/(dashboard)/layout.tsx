@@ -8,7 +8,7 @@ import { Toaster } from "@/components/ui/toaster"
 import { useUser } from "@/firebase"
 import { useRouter } from "next/navigation"
 import { format } from "date-fns"
-import { Clock } from "lucide-react"
+import Image from "next/image"
 
 export default function DashboardLayout({
   children,
@@ -47,22 +47,33 @@ export default function DashboardLayout({
           <header className="flex h-16 shrink-0 items-center justify-between border-b px-4 sm:px-6 sticky top-0 bg-background/80 backdrop-blur-md z-40">
             <div className="flex items-center gap-2 sm:gap-4">
               <SidebarTrigger className="-ml-1" />
-              <div className="flex flex-col">
-                <h1 className="font-headline font-semibold text-base sm:text-lg text-primary truncate max-w-[150px] sm:max-w-none">
-                  Admin Panel
-                </h1>
-                <div className="hidden xs:flex items-center gap-1 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
-                  <Clock className="size-2.5" /> Backend Automated Sync
+              <div className="flex items-center gap-3">
+                <div className="hidden xs:flex h-8 w-8 rounded-lg bg-primary/5 items-center justify-center p-1 border shadow-sm">
+                  <Image 
+                    src="/chitfund.png" 
+                    alt="Logo" 
+                    width={24} 
+                    height={24} 
+                    className="object-contain"
+                  />
+                </div>
+                <div className="flex flex-col">
+                  <h1 className="font-headline font-black text-base sm:text-lg text-primary truncate max-w-[150px] sm:max-w-none tracking-tight uppercase">
+                    Admin Panel
+                  </h1>
+                  <div className="hidden xs:flex items-center gap-1 text-[9px] font-bold text-muted-foreground uppercase tracking-widest">
+                    <span className="h-1 w-1 rounded-full bg-emerald-500 animate-pulse" /> Cloud Registry Active
+                  </div>
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 sm:gap-4">
                <div className="flex items-center gap-1.5 sm:gap-2 bg-muted/50 px-2.5 sm:px-4 py-1.5 rounded-full border shadow-sm transition-all hover:bg-muted/70">
-                  <span className="text-[9px] sm:text-xs font-bold text-primary uppercase tracking-wider">
+                  <span className="text-[9px] sm:text-xs font-black text-primary uppercase tracking-wider">
                     {currentTime ? format(currentTime, 'EEE') : '...'}
                   </span>
                   <span className="text-xs text-muted-foreground">|</span>
-                  <span className="text-[9px] sm:text-xs font-medium text-foreground tabular-nums">
+                  <span className="text-[9px] sm:text-xs font-bold text-foreground tabular-nums">
                     {currentTime ? format(currentTime, 'MMM dd, yyyy') : '...'}
                   </span>
                </div>

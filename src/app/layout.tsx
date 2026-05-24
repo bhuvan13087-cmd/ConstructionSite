@@ -8,7 +8,6 @@ export const metadata: Metadata = {
   description: 'Professional Chit Fund Management Application',
   icons: {
     icon: '/chitfund.png',
-    shortcut: '/chitfund.png',
     apple: '/chitfund.png',
   },
 };
