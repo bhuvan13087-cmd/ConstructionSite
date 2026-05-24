@@ -1,4 +1,3 @@
-
 "use client"
 
 import * as React from "react"
@@ -57,20 +56,20 @@ export function AppSidebar() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader className="border-b border-sidebar-border/50 py-6 px-4">
-        <div className="flex items-center gap-3 px-1">
-          <div className="h-9 w-9 rounded-xl bg-white flex items-center justify-center shadow-md shadow-black/10 overflow-hidden shrink-0">
+      <SidebarHeader className="border-b border-sidebar-border/50 py-8 px-4">
+        <div className="flex items-center gap-4 px-1">
+          <div className="h-12 w-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-black/20 overflow-hidden shrink-0 p-1 ring-4 ring-white/10">
             <Image 
               src="/chitfund.png" 
               alt="ChitFund Pro Logo" 
-              width={32} 
-              height={32} 
+              width={44} 
+              height={44} 
               className="object-contain"
             />
           </div>
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-            <span className="font-black text-sm tracking-tight leading-none text-white">CHITFUND</span>
-            <span className="text-[10px] font-bold text-accent uppercase tracking-widest mt-0.5">Management</span>
+            <span className="font-black text-lg tracking-tight leading-none text-white">CHITFUND</span>
+            <span className="text-[10px] font-bold text-accent uppercase tracking-widest mt-1">Management</span>
           </div>
         </div>
       </SidebarHeader>

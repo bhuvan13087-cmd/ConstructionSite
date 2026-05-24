@@ -1,4 +1,3 @@
-
 "use client"
 
 import { useState, useEffect } from "react"
@@ -48,12 +47,12 @@ export default function DashboardLayout({
             <div className="flex items-center gap-2 sm:gap-4">
               <SidebarTrigger className="-ml-1" />
               <div className="flex items-center gap-3">
-                <div className="hidden xs:flex h-8 w-8 rounded-lg bg-primary/5 items-center justify-center p-1 border shadow-sm">
+                <div className="hidden xs:flex h-10 w-10 rounded-xl bg-white items-center justify-center p-0.5 border shadow-sm ring-4 ring-primary/5">
                   <Image 
                     src="/chitfund.png" 
                     alt="Logo" 
-                    width={24} 
-                    height={24} 
+                    width={36} 
+                    height={36} 
                     className="object-contain"
                   />
                 </div>
