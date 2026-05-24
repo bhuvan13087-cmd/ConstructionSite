@@ -58,13 +58,13 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border/50 py-8 px-4">
-        <div className="flex items-center gap-4 px-1">
-          <div className="h-16 w-16 flex items-center justify-center shrink-0">
+        <div className="flex items-center gap-3 px-1">
+          <div className="h-14 w-14 flex items-center justify-center shrink-0">
             <Image 
               src="/chitfund.png" 
               alt="ChitFund Pro Logo" 
-              width={64} 
-              height={64} 
+              width={56} 
+              height={56} 
               className="object-contain"
             />
           </div>

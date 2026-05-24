@@ -75,12 +75,12 @@ export default function LoginPage() {
         <div className="h-2 w-full bg-gradient-to-r from-primary to-accent" />
         
         <CardHeader className="space-y-4 pt-12 pb-6 text-center">
-          <div className="mx-auto flex h-36 w-36 items-center justify-center">
+          <div className="mx-auto flex h-32 w-32 items-center justify-center">
             <Image 
               src="/chitfund.png" 
               alt="Logo" 
-              width={140} 
-              height={140} 
+              width={128} 
+              height={128} 
               className="object-contain"
               priority
             />

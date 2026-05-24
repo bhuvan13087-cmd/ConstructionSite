@@ -48,13 +48,14 @@ export default function DashboardLayout({
             <div className="flex items-center gap-2 sm:gap-4">
               <SidebarTrigger className="-ml-1" />
               <div className="flex items-center gap-3">
-                <div className="hidden xs:flex h-14 w-14 items-center justify-center overflow-visible">
+                <div className="flex h-12 w-12 items-center justify-center overflow-visible">
                   <Image 
                     src="/chitfund.png" 
                     alt="Logo" 
-                    width={56} 
-                    height={56} 
+                    width={48} 
+                    height={48} 
                     className="object-contain"
+                    priority
                   />
                 </div>
                 <div className="flex flex-col">
