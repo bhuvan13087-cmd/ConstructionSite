@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState } from "react"
@@ -74,12 +75,12 @@ export default function LoginPage() {
         <div className="h-2 w-full bg-gradient-to-r from-primary to-accent" />
         
         <CardHeader className="space-y-4 pt-12 pb-6 text-center">
-          <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[2.5rem] bg-white shadow-2xl shadow-black/10 p-2 border-2 border-slate-50 ring-8 ring-primary/5">
+          <div className="mx-auto flex h-36 w-36 items-center justify-center">
             <Image 
               src="/chitfund.png" 
               alt="Logo" 
-              width={80} 
-              height={80} 
+              width={140} 
+              height={140} 
               className="object-contain"
               priority
             />

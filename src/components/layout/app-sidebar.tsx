@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -58,17 +59,17 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border/50 py-8 px-4">
         <div className="flex items-center gap-4 px-1">
-          <div className="h-12 w-12 rounded-2xl bg-white flex items-center justify-center shadow-lg shadow-black/20 overflow-hidden shrink-0 p-1 ring-4 ring-white/10">
+          <div className="h-16 w-16 flex items-center justify-center shrink-0">
             <Image 
               src="/chitfund.png" 
               alt="ChitFund Pro Logo" 
-              width={44} 
-              height={44} 
+              width={64} 
+              height={64} 
               className="object-contain"
             />
           </div>
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">
-            <span className="font-black text-lg tracking-tight leading-none text-white">CHITFUND</span>
+            <span className="font-black text-xl tracking-tight leading-none text-white">CHITFUND</span>
             <span className="text-[10px] font-bold text-accent uppercase tracking-widest mt-1">Management</span>
           </div>
         </div>

@@ -388,10 +388,11 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
                     {selectedHistoryMember.cyclePayments.length > 0 ? (
                       selectedHistoryMember.cyclePayments.map((p: any, i: number) => {
                         const pAmt = Number(p.amountPaid || p.amount || 0);
-                        const pDate = p.targetDate || (p.paymentDate?.toDate ? format(p.paymentDate.toDate(), 'yyyy-MM-dd') : format(new Date(p.paymentDate), 'yyyy-MM-dd'));
+                        const rawPDate = p.targetDate || (p.paymentDate?.toDate ? format(p.paymentDate.toDate(), 'yyyy-MM-dd') : format(new Date(p.paymentDate), 'yyyy-MM-dd'));
+                        const displayDate = rawPDate && isValid(parseISO(rawPDate)) ? format(parseISO(rawPDate), 'dd-MM-yyyy') : rawPDate;
                         return (
                           <TableRow key={i} className="hover:bg-muted/5 border-b last:border-none">
-                            <TableCell className="text-[10px] font-bold tabular-nums py-3">{pDate}</TableCell>
+                            <TableCell className="text-[10px] font-bold tabular-nums py-3">{displayDate}</TableCell>
                             <TableCell className="text-[10px] font-black text-emerald-600 tabular-nums py-3">₹{pAmt.toLocaleString()}</TableCell>
                             <TableCell className="text-[10px] font-bold text-muted-foreground text-right py-3 uppercase">{p.method || 'Cash'}</TableCell>
                           </TableRow>
