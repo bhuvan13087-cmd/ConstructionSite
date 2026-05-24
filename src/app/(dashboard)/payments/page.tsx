@@ -111,7 +111,6 @@ export default function PaymentsPage() {
   const heartsQuery = useMemoFirebase(() => collection(db, 'monthLocks'), [db]);
   const { data: monthLocks } = useCollection(heartsQuery);
 
-  // Global UI Interaction Cleanup
   useEffect(() => {
     return () => {
       document.body.style.pointerEvents = 'auto';
@@ -346,7 +345,7 @@ export default function PaymentsPage() {
                       const pAmt = getPAmount(p);
                       return (
                         <TableRow key={p.id} className={cn("hover:bg-muted/10 transition-colors", isCorrected && "opacity-60 bg-muted/5")}>
-                          <TableCell className="text-[10px] sm:text-xs font-medium tabular-nums text-muted-foreground"><div className="flex items-center gap-1.5">{isLocked && <Lock className="size-2.5 text-amber-600" title="Month Locked" />}{pDateStr}</div></TableCell>
+                          <TableCell className="text-[10px] sm:text-xs font-medium tabular-nums text-muted-foreground"><div className="flex items-center gap-1.5">{isLocked && <Lock className="size-2.5 text-amber-600" title="Month Locked" />}{pDateStr !== "-" && isValid(parseISO(pDateStr)) ? format(parseISO(pDateStr), 'dd-MM-yyyy') : pDateStr}</div></TableCell>
                           <TableCell className={cn("font-semibold text-xs sm:text-sm", isCorrected && "line-through")}><button onClick={() => openAuditProfile(p.memberId)} className="hover:text-primary hover:underline transition-all text-left">{p.memberName}</button></TableCell>
                           <TableCell className={cn("font-bold text-xs sm:text-sm tabular-nums", isCorrected ? "text-muted-foreground" : "text-emerald-600")}>₹{pAmt.toLocaleString()}</TableCell>
                           <TableCell className="hidden md:table-cell"><Badge variant={isCorrected ? "secondary" : "outline"} className={cn("text-[8px] uppercase font-bold", isCorrected ? "bg-amber-50 text-amber-700" : "bg-emerald-50 text-emerald-700 border-emerald-200")}>{isCorrected ? "Corrected" : "Paid"}</Badge></TableCell>
@@ -434,7 +433,7 @@ export default function PaymentsPage() {
                     <span className="font-semibold">{paymentToCorrect.memberName}</span>
                     <span className="font-bold text-emerald-600">₹{getPAmount(paymentToCorrect).toLocaleString()}</span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground">{getPDateStr(paymentToCorrect) || "No target date"}</div>
+                  <div className="text-[10px] text-muted-foreground">{getPDateStr(paymentToCorrect) && isValid(parseISO(getPDateStr(paymentToCorrect)!)) ? format(parseISO(getPDateStr(paymentToCorrect)!), 'dd-MM-yyyy') : "No target date"}</div>
                 </div>
 
                 <div className="grid gap-4">
@@ -542,7 +541,7 @@ export default function PaymentsPage() {
       </Dialog>
 
       <Dialog open={isAuditProfileOpen} onOpenChange={(open) => { if (!open) { setSelectedAuditMember(null); document.body.style.pointerEvents = 'auto'; } setIsAuditProfileOpen(open); }}>
-        <DialogContent className="sm:max-w-[400px]"><DialogHeader><DialogTitle className="flex items-center gap-2"><User className="size-5 text-primary" /> Member Profile</DialogTitle></DialogHeader>{selectedAuditMember && (<div className="space-y-4 py-4"><div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Name</span><span className="font-bold text-sm">{selectedAuditMember.name}</span></div><div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Status</span><Badge variant={selectedAuditMember.status === 'active' ? 'default' : 'secondary'} className="uppercase font-bold text-[9px]">{selectedAuditMember.status}</Badge></div><div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg"><span className="text-xs font-bold uppercase text-emerald-600">Cycle Contribution</span><span className="font-bold text-sm text-emerald-700">₹{(totalPaidByMember.get(selectedAuditMember.id) || 0).toLocaleString()}</span></div>{selectedAuditMember.status === 'inactive' ? (<div className="p-4 border border-destructive/20 bg-destructive/5 rounded-lg space-y-2"><span className="text-[10px] font-bold uppercase text-destructive tracking-widest block">Active Period</span><div className="flex items-center gap-2 font-bold text-sm text-foreground">{selectedAuditMember.joinDate ? format(parseISO(selectedAuditMember.joinDate), 'MMM dd, yyyy') : '-'}<span className="text-muted-foreground">→</span>{selectedAuditMember.deactivatedAt ? format(parseISO(selectedAuditMember.deactivatedAt), 'MMM dd, yyyy') : '-'}</div></div>) : (<div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Joined Date</span><span className="font-bold text-sm">{selectedAuditMember.joinDate ? format(parseISO(selectedAuditMember.joinDate), 'MMM dd, yyyy') : '-'}</span></div>)}</div>)}<DialogFooter><Button onClick={() => setIsAuditProfileOpen(false)} className="w-full sm:w-auto font-bold uppercase text-[10px] tracking-widest">Close</Button></DialogFooter></DialogContent>
+        <DialogContent className="sm:max-w-[400px]"><DialogHeader><DialogTitle className="flex items-center gap-2"><User className="size-5 text-primary" /> Member Profile</DialogTitle></DialogHeader>{selectedAuditMember && (<div className="space-y-4 py-4"><div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Name</span><span className="font-bold text-sm">{selectedAuditMember.name}</span></div><div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Status</span><Badge variant={selectedAuditMember.status === 'active' ? 'default' : 'secondary'} className="uppercase font-bold text-[9px]">{selectedAuditMember.status}</Badge></div><div className="flex justify-between items-center p-3 bg-emerald-50 rounded-lg"><span className="text-xs font-bold uppercase text-emerald-600">Cycle Contribution</span><span className="font-bold text-sm text-emerald-700">₹{(totalPaidByMember.get(selectedAuditMember.id) || 0).toLocaleString()}</span></div>{selectedAuditMember.status === 'inactive' ? (<div className="p-4 border border-destructive/20 bg-destructive/5 rounded-lg space-y-2"><span className="text-[10px] font-bold uppercase text-destructive tracking-widest block">Active Period</span><div className="flex items-center gap-2 font-bold text-sm text-foreground">{selectedAuditMember.joinDate ? format(parseISO(selectedAuditMember.joinDate), 'dd MMM yyyy') : '-'}<span className="text-muted-foreground">→</span>{selectedAuditMember.deactivatedAt ? format(parseISO(selectedAuditMember.deactivatedAt), 'dd MMM yyyy') : '-'}</div></div>) : (<div className="flex justify-between items-center p-3 bg-muted/30 rounded-lg"><span className="text-xs font-bold uppercase text-muted-foreground">Joined Date</span><span className="font-bold text-sm">{selectedAuditMember.joinDate ? format(parseISO(selectedAuditMember.joinDate), 'dd MMM yyyy') : '-'}</span></div>)}</div>)}<DialogFooter><Button onClick={() => setIsAuditProfileOpen(false)} className="w-full sm:w-auto font-bold uppercase text-[10px] tracking-widest">Close</Button></DialogFooter></DialogContent>
       </Dialog>
 
       <Dialog open={isHistoryOpen} onOpenChange={(open) => { if (!open) { setHistoryMember(null); document.body.style.pointerEvents = 'auto'; } setIsHistoryOpen(open); }}>
@@ -566,7 +565,7 @@ export default function PaymentsPage() {
                       <TableRow key={i}>
                         <TableCell className="text-sm font-semibold">{e.month || 'Current Cycle'}</TableCell>
                         <TableCell className="text-sm font-bold text-emerald-600">₹{getPAmount(e).toLocaleString()}</TableCell>
-                        <TableCell className="text-right text-xs text-muted-foreground font-medium">{getPDateStr(e) || "-"}</TableCell>
+                        <TableCell className="text-right text-xs text-muted-foreground font-medium">{getPDateStr(e) && isValid(parseISO(getPDateStr(e)!)) ? format(parseISO(getPDateStr(e)!), 'dd-MM-yyyy') : (getPDateStr(e) || "-")}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>

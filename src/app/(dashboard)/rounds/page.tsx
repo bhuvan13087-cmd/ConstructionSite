@@ -133,18 +133,15 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       const querySnapshot = await getDocs(q);
       const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
       
-      // Sort chronologically DESC
       cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
 
       if (isUpdate) {
-        // Direct update the existing cycle
         batch.update(doc(db, 'cycles', latestCycle.id), {
           startDate: startDate,
           endDate: endDate,
           updatedAt: new Date().toISOString()
         });
 
-        // Continuity Fix: Adjust previous cycle if it exists (Rule: P.endDate = C.startDate - 1)
         const currentIdx = cycles.findIndex(c => c.id === latestCycle.id);
         const previousCycle = cycles[currentIdx + 1];
         
@@ -157,7 +154,6 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           });
         }
       } else {
-        // Create new cycle record
         const newRef = doc(collection(db, 'cycles'));
         batch.set(newRef, {
           name: group.name,
@@ -167,7 +163,6 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
           createdAt: new Date().toISOString()
         });
 
-        // Continuity Fix: Adjust the former latest
         const formerLatest = cycles[0];
         if (formerLatest) {
           const nextStart = parseISO(startDate);
@@ -708,7 +703,6 @@ export default function RoundsPage() {
           })}
         </div>
 
-        {/* Total Collections Reconciliation Dialog */}
         <Dialog open={isCollectionPopupOpen} onOpenChange={(o) => { if(!o) document.body.style.pointerEvents = 'auto'; setIsCollectionPopupOpen(o); }}>
           <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
             {activePopupGroupName && (
@@ -858,7 +852,6 @@ export default function RoundsPage() {
         </div>
       </div>
 
-      {/* Member Profile Dialog */}
       <Dialog open={isMemberProfileDialogOpen} onOpenChange={(o) => { if(!o) { setSelectedProfileMember(null); setIsEditingMember(false); document.body.style.pointerEvents = 'auto'; } setIsMemberProfileDialogOpen(o); }}>
         <DialogContent className="sm:max-w-[310px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedProfileMember && (
@@ -882,7 +875,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Pending Details Dialog */}
       <Dialog open={isPendingDetailsOpen} onOpenChange={(o) => { if(!o) { setSelectedPendingMember(null); document.body.style.pointerEvents = 'auto'; } setIsPendingDetailsOpen(o); }}>
         <DialogContent className="sm:max-w-[310px] p-0 overflow-hidden border-none shadow-2xl rounded-3xl" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedPendingMember && (
@@ -896,7 +888,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Payment History Dialog */}
       <Dialog open={isHistoryDialogOpen} onOpenChange={(o) => { if(!o) { setHistoryMember(null); document.body.style.pointerEvents = 'auto'; } setIsHistoryDialogOpen(o); }}>
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {historyMember && (
@@ -929,7 +920,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Add Member Dialog */}
       <Dialog open={isAddMemberDialogOpen} onOpenChange={(o) => { if(!o) document.body.style.pointerEvents = 'auto'; setIsAddMemberDialogOpen(o); }}>
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           <form onSubmit={handleAddMemberToScheme}>
@@ -945,7 +935,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Audit Ledger Dialog */}
       <Dialog open={isDailyAuditOpen} onOpenChange={(o) => { if(!o) document.body.style.pointerEvents = 'auto'; setIsDailyAuditOpen(o); }}>
         <DialogContent className="sm:max-w-[320px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {currentRound && (
@@ -961,7 +950,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Record Payment Dialog */}
       <Dialog open={isQuickPaymentDialogOpen} onOpenChange={(o) => { if(!o) { setSelectedMemberForPayment(null); document.body.style.pointerEvents = 'auto'; } setIsQuickPaymentDialogOpen(o); }}>
         <DialogContent className="sm:max-w-[340px]" onOpenAutoFocus={(e) => e.preventDefault()} onInteractOutside={handlePopupBlur} onEscapeKeyDown={handlePopupBlur}>
           {selectedMemberForPayment && (
@@ -980,54 +968,64 @@ export default function RoundsPage() {
 
       {/* Expiry Guard Popup */}
       <Dialog open={isExpiryPopupOpen} onOpenChange={setIsExpiryPopupOpen}>
-        <DialogContent className="sm:max-w-[400px] rounded-3xl p-0 overflow-hidden border-none shadow-2xl">
-          <div className="bg-destructive/5 p-8 text-center space-y-6">
-            <DialogTitle className="sr-only">Cycle Expired Notification</DialogTitle>
-            <div className="mx-auto w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center animate-bounce shadow-inner">
-              <AlertCircle className="size-10 text-destructive" />
-            </div>
-            <div className="space-y-2">
-              <h3 className="text-2xl font-black uppercase tracking-tighter text-destructive">⚠️ Cycle Completed</h3>
-              <p className="text-sm font-bold text-muted-foreground px-6 leading-relaxed">
-                The operational window for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>.
-              </p>
-            </div>
-
-            {/* Visual Icon Guidance */}
-            <div className="p-4 bg-white/80 rounded-2xl border border-border/60 shadow-sm flex flex-col items-center gap-3">
-              <div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-sm border border-emerald-100/50">
-                <CalendarDays className="size-5" />
+        <DialogContent className="sm:max-w-[420px] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl">
+          <div className="flex flex-col bg-white">
+            <div className="bg-destructive/5 p-10 text-center relative border-b border-border/40">
+              <DialogTitle className="sr-only">Cycle Expired Notification</DialogTitle>
+              <div className="mx-auto mb-6 w-20 h-20 rounded-[2.5rem] bg-white text-destructive flex items-center justify-center shadow-lg ring-8 ring-destructive/5">
+                <AlertCircle className="size-10 animate-pulse" />
               </div>
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">
-                Use this cycle icon to create the next cycle
-              </p>
+              <h3 className="text-2xl font-black uppercase tracking-tight text-primary leading-tight">Registry Notice</h3>
+              <p className="text-[10px] font-black uppercase tracking-[0.3em] text-destructive/60 mt-2">Operational Window Closed</p>
             </div>
 
-            <div className="p-4 bg-white rounded-2xl border border-destructive/10 shadow-sm">
-              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Status</p>
-              <p className="text-xs font-bold text-destructive">Payments are temporarily locked</p>
-            </div>
+            <div className="p-8 space-y-8">
+              <div className="space-y-4">
+                <div className="p-5 rounded-3xl bg-muted/30 border border-border/40 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-black uppercase tracking-widest text-muted-foreground/70">Cycle End Date</p>
+                    <p className="text-base font-black text-primary tabular-nums">
+                      {currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}
+                    </p>
+                  </div>
+                  <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">
+                    <Clock className="size-5" />
+                  </div>
+                </div>
 
-            <div className="space-y-3 pt-4">
-              <Button 
-                onClick={() => { setSelectedChitId(null); setIsExpiryPopupOpen(false); }}
-                className="w-full h-12 rounded-xl font-black uppercase tracking-[0.15em] shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-white"
-              >
-                [ Open Group ]
-              </Button>
-              <Button 
-                variant="ghost" 
-                onClick={() => setIsExpiryPopupOpen(false)}
-                className="w-full h-10 font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted"
-              >
-                Cancel
-              </Button>
+                <div className="p-6 rounded-3xl bg-emerald-50 border border-emerald-100/50 flex flex-col items-center gap-3 text-center">
+                  <div className="h-12 w-12 rounded-2xl bg-white text-emerald-600 flex items-center justify-center shadow-md shadow-emerald-200/50 ring-4 ring-emerald-500/5">
+                    <CalendarDays className="size-6" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-700/70">Visual Guidance</p>
+                    <p className="text-[11px] font-bold text-emerald-800/80 leading-relaxed max-w-[220px]">
+                      Use the <span className="text-emerald-600 font-black">Calendar Icon</span> on the dashboard card to create the next cycle.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3 pt-2">
+                <Button 
+                  onClick={() => { setSelectedChitId(null); setIsExpiryPopupOpen(false); }}
+                  className="w-full h-14 rounded-2xl font-black uppercase tracking-[0.15em] shadow-xl shadow-primary/20 bg-primary hover:bg-primary/90 text-white text-xs active:scale-[0.98] transition-all"
+                >
+                  Return to Dashboard
+                </Button>
+                <Button 
+                  variant="ghost" 
+                  onClick={() => setIsExpiryPopupOpen(false)}
+                  className="w-full h-10 font-bold uppercase tracking-widest text-[9px] text-muted-foreground hover:bg-muted rounded-xl"
+                >
+                  Dismiss & View Records
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Bluetooth Thermal Printer Hidden Receipt Layout */}
       {historyMember && (
         <div id="thermal-receipt" className="hidden">
           <div style={{ textAlign: 'center', marginBottom: '10px', borderBottom: '1px dashed black', paddingBottom: '10px' }}>
