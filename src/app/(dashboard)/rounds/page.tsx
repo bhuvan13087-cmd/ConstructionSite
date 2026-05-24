@@ -250,11 +250,7 @@ export default function RoundsPage() {
   const [selectedProfileMember, setSelectedProfileMember] = useState<any>(null)
   const [selectedPendingMember, setSelectedPendingMember] = useState<any>(null)
   const [newMember, setNewMember] = useState(INITIAL_MEMBER_STATE)
-  const [paymentData, setPaymentData] = INITIAL_PAYMENT_STATE && {
-    method: "Cash",
-    amount: 0,
-    date: format(new Date(), 'yyyy-MM-dd')
-  } ? INITIAL_PAYMENT_STATE : { method: "Cash", amount: 0, date: format(new Date(), 'yyyy-MM-dd') }
+  const [paymentData, setPaymentData] = useState(INITIAL_PAYMENT_STATE)
   const [newChit, setNewChit] = useState(INITIAL_CHIT_STATE)
   
   const { toast } = useToast()
@@ -812,7 +808,7 @@ export default function RoundsPage() {
             </div>
             <div>
               <p className="text-[10px] font-black uppercase text-destructive tracking-widest mb-0.5">Payments & Registration Locked</p>
-              <p className="text-xs font-bold text-foreground/70">The operational cycle for this group ended on <span className="text-destructive">{format(parseISO(currentActiveCycle!.endDate), 'dd-MM-yyyy')}</span>. Please update the registry.</p>
+              <p className="text-xs font-bold text-foreground/70">The operational cycle for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>. Please update the registry.</p>
             </div>
           </div>
           <GroupCycleControl group={currentRound} latestCycle={currentActiveCycle} />
