@@ -693,13 +693,13 @@ export default function RoundsPage() {
                     <div className="flex justify-between items-center text-xs"><span className="text-amber-600 font-semibold">Pending Count</span><span className={cn("font-bold text-sm", groupPendingCount > 0 ? "text-amber-500" : "text-emerald-600")}>{groupPendingCount}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Occupancy</span><span className="font-black tabular-nums">{currentOccupancy} / {group.totalMembers}</span></div>
                     {isExpired && (
-                      <div className="pt-2 border-t border-destructive/10 mt-2">
+                      <div className="pt-2 border-t border-destructive/10">
                         <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">
                           Last cycle ended on: <span className="text-destructive">{format(parseISO(activeCycle.endDate), 'dd-MM-yyyy')}</span>
                         </p>
                       </div>
                     )}
-                    <div className="pt-4 border-t border-dashed border-border/60 mt-4"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
+                    <div className="pt-4 border-t border-dashed border-border/60"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
                   </div>
                 </CardContent>
                 <CardFooter className="p-1.5 bg-muted/5 border-t border-border/40"><Button variant="ghost" className="w-full h-7 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-primary hover:text-primary-foreground rounded-lg" onClick={() => setSelectedChitId(group.id)}>View Board</Button></CardFooter>
@@ -808,7 +808,7 @@ export default function RoundsPage() {
             </div>
             <div>
               <p className="text-[10px] font-black uppercase text-destructive tracking-widest mb-0.5">Payments & Registration Locked</p>
-              <p className="text-xs font-bold text-foreground/70">The operational cycle for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>. Please update the registry.</p>
+              <p className="text-xs font-bold text-foreground/70">The operational window for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>. Please update the registry.</p>
             </div>
           </div>
           <GroupCycleControl group={currentRound} latestCycle={currentActiveCycle} />
@@ -992,20 +992,36 @@ export default function RoundsPage() {
                 The operational window for this group ended on <span className="text-destructive">{currentActiveCycle?.endDate ? format(parseISO(currentActiveCycle.endDate), 'dd-MM-yyyy') : '-'}</span>.
               </p>
             </div>
+
+            {/* Visual Icon Guidance */}
+            <div className="p-4 bg-white/80 rounded-2xl border border-border/60 shadow-sm flex flex-col items-center gap-3">
+              <div className="h-9 w-9 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-sm border border-emerald-100/50">
+                <CalendarDays className="size-5" />
+              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/80">
+                Use this cycle icon to create the next cycle
+              </p>
+            </div>
+
             <div className="p-4 bg-white rounded-2xl border border-destructive/10 shadow-sm">
               <p className="text-[10px] font-black uppercase tracking-widest text-muted-foreground/60 mb-1">Status</p>
               <p className="text-xs font-bold text-destructive">Payments are temporarily locked</p>
             </div>
-            <div className="space-y-4 pt-4">
+
+            <div className="space-y-3 pt-4">
               <Button 
-                onClick={() => setIsExpiryPopupOpen(false)}
-                className="w-full h-12 rounded-xl font-black uppercase tracking-[0.2em] shadow-lg shadow-primary/20"
+                onClick={() => { setSelectedChitId(null); setIsExpiryPopupOpen(false); }}
+                className="w-full h-12 rounded-xl font-black uppercase tracking-[0.15em] shadow-lg shadow-primary/20 bg-primary hover:bg-primary/90 text-white"
               >
                 [ Open Group ]
               </Button>
-              <p className="text-[10px] font-bold text-muted-foreground/40 uppercase tracking-widest">
-                Please create the next cycle to continue
-              </p>
+              <Button 
+                variant="ghost" 
+                onClick={() => setIsExpiryPopupOpen(false)}
+                className="w-full h-10 font-bold uppercase tracking-widest text-[10px] text-muted-foreground hover:bg-muted"
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </DialogContent>
