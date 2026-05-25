@@ -48,13 +48,13 @@ export default function DashboardLayout({
             <div className="flex items-center gap-2 sm:gap-4">
               <SidebarTrigger className="-ml-1" />
               <div className="flex items-center gap-3">
-                <div className="flex h-12 w-12 items-center justify-center overflow-visible">
+                <div className="flex h-12 w-12 items-center justify-center overflow-hidden">
                   <Image 
                     src="/chitfund.png" 
                     alt="Logo" 
                     width={48} 
                     height={48} 
-                    className="object-contain"
+                    className="object-contain scale-[1.5] transform-gpu"
                     priority
                   />
                 </div>
