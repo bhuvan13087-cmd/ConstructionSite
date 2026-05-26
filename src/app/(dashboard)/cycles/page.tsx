@@ -1,3 +1,4 @@
+
 "use client"
 
 import { useState, useEffect } from "react"
@@ -57,6 +58,7 @@ export default function CyclesPage() {
             endDate: "2026-03-29",
             status: "completed",
             type: "recovered",
+            cycle: "Cycle 1",
             createdAt: new Date().toISOString(),
             completedAt: new Date().toISOString()
           });

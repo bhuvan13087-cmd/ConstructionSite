@@ -155,11 +155,13 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
         }
       } else {
         const newRef = doc(collection(db, 'cycles'));
+        const nextCycleNumber = cycles.length + 1;
         batch.set(newRef, {
           name: group.name,
           startDate: startDate,
           endDate: endDate,
           status: 'active',
+          cycle: `Cycle ${nextCycleNumber}`,
           createdAt: new Date().toISOString()
         });
 
