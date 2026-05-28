@@ -236,7 +236,7 @@ export default function DashboardPage() {
             <div className="absolute top-0 right-0 p-3 opacity-0 group-hover:opacity-100 transition-opacity"><ArrowRight className="size-4 text-primary" /></div>
             <CardHeader className="p-5 pb-2 bg-muted/10 border-b border-border/40">
               <div className="flex items-center justify-between">
-                <CardTitle className="text-[11px] font-black uppercase text-muted-foreground tracking-[0.3em] break-words whitespace-normal leading-tight">Group {scheme.name}</CardTitle>
+                <CardTitle className="text-[11px] font-bold whitespace-nowrap overflow-visible uppercase text-muted-foreground tracking-[0.3em] leading-tight">Group {scheme.name}</CardTitle>
                 <Badge variant="outline" className="text-[8px] font-black border-none bg-primary/5 text-primary/60 shrink-0">{scheme.collectionType}</Badge>
               </div>
             </CardHeader>

@@ -152,7 +152,7 @@ export default function CyclesPage() {
                 <span className="text-[8px] font-black tracking-[0.2em] uppercase text-muted-foreground/50">
                   Audit Unit
                 </span>
-                <span className="font-black text-lg text-primary block tracking-tighter uppercase leading-tight">
+                <span className="font-bold text-lg text-primary block tracking-tighter uppercase whitespace-nowrap overflow-visible leading-tight">
                   {name}
                 </span>
                 <div className="pt-2 flex items-center gap-1.5">
