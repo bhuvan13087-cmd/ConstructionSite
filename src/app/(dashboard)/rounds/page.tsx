@@ -58,7 +58,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { useToast } from "@/hooks/use-toast"
 import { useFirestore, useCollection, useMemoFirebase, useUser } from "@/firebase"
-import { collection, query, doc, serverTimestamp, orderBy, writeBatch, updateDoc, deleteDoc, addDoc, where, getDocs } from "firebase/firestore"
+import { collection, query, doc, serverTimestamp, orderBy, writeBatch, updateDoc, deleteDoc, addDoc,维护, getDocs, where, setDoc } from "firebase/firestore"
 import { useRole } from "@/hooks/use-role"
 import { format, parseISO, isSameMonth, eachDayOfInterval, isBefore, isAfter, startOfDay, endOfDay, differenceInDays, addDays, max, isValid, subDays } from "date-fns"
 import { cn, withTimeout } from "@/lib/utils"
@@ -103,6 +103,7 @@ const handlePopupBlur = (e: any) => {
 function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: any }) {
   const [startDate, setStartDate] = useState("")
   const [endDate, setEndDate] = useState("")
+  const [status, setStatus] = useState("active")
   const [isOpen, setIsOpen] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   
@@ -110,78 +111,94 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   const { user } = useUser()
   const { toast } = useToast()
 
-  const isUpdate = !!(latestCycle && latestCycle.id);
+  const isActive = latestCycle && latestCycle.status === 'active';
 
   useEffect(() => {
     if (isOpen) {
-      if (isUpdate) {
+      if (isActive) {
         setStartDate(latestCycle.startDate || "")
         setEndDate(latestCycle.endDate || "")
+        setStatus(latestCycle.status || "active")
       } else {
-        setStartDate("")
+        setStartDate(format(new Date(), 'yyyy-MM-dd'))
         setEndDate("")
+        setStatus("active")
       }
     }
-  }, [isOpen, latestCycle, isUpdate])
+  }, [isOpen, latestCycle, isActive])
 
-  const handleSave = async () => {
+  const handleLaunchNewCycle = async () => {
     setIsSaving(true);
     try {
-      const batch = writeBatch(db);
-      
+      // 1. Fetch group cycles to find highest cycleNumber
       const q = query(collection(db, 'cycles'), where('name', '==', group.name));
       const querySnapshot = await getDocs(q);
-      const cycles = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
+      const existingCycles = querySnapshot.docs.map(doc => doc.data());
       
-      cycles.sort((a, b) => b.startDate.localeCompare(a.startDate));
-
-      if (isUpdate) {
-        batch.update(doc(db, 'cycles', latestCycle.id), {
-          startDate: startDate,
-          endDate: endDate,
-          updatedAt: new Date().toISOString()
-        });
-
-        const currentIdx = cycles.findIndex(c => c.id === latestCycle.id);
-        const previousCycle = cycles[currentIdx + 1];
-        
-        if (previousCycle) {
-          const nextStart = parseISO(startDate);
-          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-          batch.update(doc(db, 'cycles', previousCycle.id), { 
-            endDate: fixedEnd,
-            updatedAt: new Date().toISOString()
-          });
+      let maxNum = 0;
+      existingCycles.forEach((c: any) => {
+        const num = Number(c.cycleNumber) || 0;
+        if (num > maxNum) maxNum = num;
+        // Fallback check for "Cycle X" string
+        if (c.cycle && typeof c.cycle === 'string') {
+          const match = c.cycle.match(/Cycle (\d+)/);
+          if (match) {
+            const mNum = Number(match[1]);
+            if (mNum > maxNum) maxNum = mNum;
+          }
         }
-      } else {
-        const newRef = doc(collection(db, 'cycles'));
-        const nextCycleNumber = cycles.length + 1;
-        batch.set(newRef, {
-          name: group.name,
-          startDate: startDate,
-          endDate: endDate,
-          status: 'active',
-          cycle: `Cycle ${nextCycleNumber}`,
-          createdAt: new Date().toISOString()
-        });
+      });
 
-        const formerLatest = cycles[0];
-        if (formerLatest) {
-          const nextStart = parseISO(startDate);
-          const fixedEnd = format(subDays(nextStart, 1), 'yyyy-MM-dd');
-          batch.update(doc(db, 'cycles', formerLatest.id), { 
-            endDate: fixedEnd,
-            updatedAt: new Date().toISOString()
-          });
-        }
-      }
+      const nextNumber = maxNum + 1;
+      const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      await withTimeout(batch.commit());
-      await createAuditLog(db, user, `Cycle Logic Applied: ${group.name} registry updated. Continuity enforced.`);
-      toast({ title: "Timeline Synchronized", description: "Operational boundaries saved." });
+      // 2. Create NEW document (Never overwrite)
+      const newRef = doc(collection(db, 'cycles'));
+      await setDoc(newRef, {
+        name: group.name,
+        group: group.name,
+        cycleNumber: nextNumber,
+        cycle: `Cycle ${nextNumber}`,
+        startDate: todayStr,
+        endDate: null,
+        status: "active",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        completedAt: null
+      });
+
+      await createAuditLog(db, user, `Launched New Operational Period: ${group.name} - Cycle ${nextNumber}`);
+      toast({ title: "New Cycle Launched", description: `Group ${group.name} is now in Cycle ${nextNumber}.` });
       setIsOpen(false);
     } catch (error: any) {
-      toast({ variant: "destructive", title: "Persistence Error", description: error.message || "Failed to save cycle." });
+      toast({ variant: "destructive", title: "Launch Failed", description: error.message || "Failed to initialize cycle." });
+    } finally {
+      setIsSaving(false);
+      document.body.style.pointerEvents = 'auto';
+    }
+  };
+
+  const handleUpdateActiveCycle = async () => {
+    if (!latestCycle) return;
+    setIsSaving(true);
+    try {
+      const updateData: any = {
+        startDate,
+        endDate: endDate || null,
+        status,
+        updatedAt: new Date().toISOString()
+      };
+      
+      if (status === 'completed' && !latestCycle.completedAt) {
+        updateData.completedAt = new Date().toISOString();
+      }
+
+      await updateDoc(doc(db, 'cycles', latestCycle.id), updateData);
+      await createAuditLog(db, user, `Updated Cycle Boundaries for ${group.name} (${latestCycle.cycle})`);
+      toast({ title: "Registry Updated", description: "Operational timeline synchronized." });
+      setIsOpen(false);
+    } catch (error: any) {
+      toast({ variant: "destructive", title: "Update Error", description: error.message || "Failed to update record." });
     } finally {
       setIsSaving(false);
       document.body.style.pointerEvents = 'auto';
@@ -191,27 +208,76 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if(!open) document.body.style.pointerEvents = 'auto'; setIsOpen(open); }}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className={cn("h-8 w-8 rounded-full transition-colors", isUpdate ? "text-primary/70 hover:text-primary hover:bg-primary/10" : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50")}>
-          {isUpdate ? <CalendarDays className="size-4" /> : <Plus className="size-4" />}
+        <Button variant="ghost" size="icon" className={cn("h-8 w-8 rounded-full transition-colors", isActive ? "text-primary/70 hover:text-primary hover:bg-primary/10" : "text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50")}>
+          {isActive ? <CalendarDays className="size-4" /> : <Plus className="size-4" />}
         </Button>
       </DialogTrigger>
       <DialogContent 
-        className="sm:max-w-[320px]" 
+        className="sm:max-w-[340px]" 
         onOpenAutoFocus={(e) => e.preventDefault()}
         onInteractOutside={handlePopupBlur}
         onEscapeKeyDown={handlePopupBlur}
       >
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary"><CalendarDays className="size-4" />{isUpdate ? 'Update Period' : 'Start New Cycle'}</DialogTitle>
-          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">Operational timeline will auto-adjust for zero overlap.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2 text-base font-headline uppercase tracking-tight text-primary">
+            {isActive ? <Edit3 className="size-4" /> : <TrendingUp className="size-4" />}
+            {isActive ? 'Update Cycle' : 'Launch Next Cycle'}
+          </DialogTitle>
+          <DialogDescription className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/60">
+            {isActive ? 'Modify existing operational boundaries.' : 'Establish the next sequential audit period.'}
+          </DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4 py-4">
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1"><Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Start</Label><Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-10 text-xs rounded-xl font-bold border-muted/60" disabled={isSaving} /></div>
-            <div className="space-y-1"><Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">End</Label><Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 text-xs rounded-xl font-bold border-muted/60" disabled={isSaving} /></div>
+
+        {isActive ? (
+          <div className="grid gap-4 py-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Start Date</Label>
+                <Input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="h-10 text-xs rounded-xl font-bold" />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">End Date</Label>
+                <Input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="h-10 text-xs rounded-xl font-bold" />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-[9px] font-black uppercase tracking-widest text-muted-foreground">Cycle Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger className="h-10 text-xs font-bold rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active" className="text-xs">Active (Collect Payments)</SelectItem>
+                  <SelectItem value="completed" className="text-xs">Completed (Archive Period)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        </div>
-        <DialogFooter><Button onClick={handleSave} disabled={isSaving} className="w-full font-black uppercase tracking-[0.1em] h-11 rounded-xl active:scale-[0.98] transition-all shadow-md">{isSaving ? <Loader2 className="size-3 mr-2 animate-spin" /> : <Save className="size-3 mr-2" />}{isUpdate ? 'Apply' : 'Launch'}</Button></DialogFooter>
+        ) : (
+          <div className="py-6 space-y-6">
+            <div className="p-4 bg-emerald-50 rounded-2xl border border-dashed border-emerald-200 text-center">
+              <p className="text-[10px] font-black uppercase text-emerald-600/70 mb-1">New Cycle Identifier</p>
+              <p className="text-2xl font-black text-emerald-700 uppercase tracking-tighter">
+                Cycle Step-Up
+              </p>
+            </div>
+            <div className="flex items-start gap-3 bg-muted/30 p-3 rounded-xl">
+              <Info className="size-4 text-primary shrink-0 mt-0.5" />
+              <p className="text-[10px] font-bold text-muted-foreground leading-relaxed">
+                Start date will be automatically set to today. End date remains open until manually set by admin.
+              </p>
+            </div>
+          </div>
+        )}
+
+        <DialogFooter>
+          <Button 
+            onClick={isActive ? handleUpdateActiveCycle : handleLaunchNewCycle} 
+            disabled={isSaving} 
+            className="w-full font-black uppercase tracking-[0.1em] h-12 rounded-xl active:scale-[0.98] transition-all shadow-md"
+          >
+            {isSaving ? <Loader2 className="size-3 mr-2 animate-spin" /> : <CheckCircle2 className="size-3 mr-2" />}
+            {isActive ? 'Update Registry' : 'Launch Period'}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   )
@@ -312,7 +378,7 @@ export default function RoundsPage() {
           try {
             const rawJoinDate = parseISO(m.joinDate);
             const cycleStart = parseISO(activeCycle.startDate);
-            const cycleEnd = parseISO(activeCycle.endDate);
+            const cycleEnd = activeCycle.endDate ? parseISO(activeCycle.endDate) : today;
             const effectiveStart = startOfDay(max([rawJoinDate, cycleStart]));
             const effectiveEnd = isBefore(today, cycleEnd) ? today : cycleEnd;
             if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
@@ -329,7 +395,7 @@ export default function RoundsPage() {
       } else {
         const hasPaidThisCycle = mPayments.some(p => {
           const pDate = getRecordDate(p);
-          return pDate && pDate >= activeCycle.startDate && pDate <= activeCycle.endDate;
+          return pDate && pDate >= activeCycle.startDate && (activeCycle.endDate ? pDate <= activeCycle.endDate : true);
         });
         
         if (hasPaidThisCycle) {
@@ -345,7 +411,7 @@ export default function RoundsPage() {
             const dueDateLimit = startOfDay(addDays(cycleStart, numericDueDate - 1));
             const countFrom = addDays(dueDateLimit, 1);
             const effectiveStart = startOfDay(max([rawJoinDate, cycleStart, countFrom]));
-            const effectiveEnd = isBefore(today, parseISO(activeCycle.endDate)) ? today : parseISO(activeCycle.endDate);
+            const effectiveEnd = activeCycle.endDate && isBefore(parseISO(activeCycle.endDate), today) ? parseISO(activeCycle.endDate) : today;
             if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
               pendingDaysCount = differenceInDays(effectiveEnd, effectiveStart) + 1;
             }
@@ -370,7 +436,7 @@ export default function RoundsPage() {
         const activeCycle = (allCycles || []).find(c => String(c.name).trim().toLowerCase() === String(member.chitGroup).trim().toLowerCase() && c.status === 'active');
         if (!activeCycle) return;
         const pDate = getRecordDate(p);
-        if (pDate && pDate >= activeCycle.startDate && pDate <= activeCycle.endDate) {
+        if (pDate && pDate >= activeCycle.startDate && (activeCycle.endDate ? pDate <= activeCycle.endDate : true)) {
           const amt = getPaymentAmount(p);
           if (amt > 0) {
             const current = map.get(p.memberId) || 0;
@@ -398,7 +464,7 @@ export default function RoundsPage() {
         try {
           const rawJoinDate = parseISO(m.joinDate);
           const cycleStart = parseISO(activeCycle.startDate);
-          const cycleEnd = parseISO(activeCycle.endDate);
+          const cycleEnd = activeCycle.endDate ? parseISO(activeCycle.endDate) : today;
           const effectiveStart = startOfDay(max([rawJoinDate, cycleStart]));
           const effectiveEnd = isBefore(today, cycleEnd) ? today : cycleEnd;
           if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
@@ -440,7 +506,7 @@ export default function RoundsPage() {
     if (!activeCycle || !allPayments || !members) return 0;
     const groupMemberIds = new Set(members.filter(m => String(m.chitGroup).trim().toLowerCase() === String(groupName).trim().toLowerCase()).map(m => m.id));
     return allPayments
-      .filter(p => groupMemberIds.has(p.memberId) && (p.status === 'success' || p.status === 'paid') && getRecordDate(p) >= activeCycle.startDate && getRecordDate(p) <= activeCycle.endDate)
+      .filter(p => groupMemberIds.has(p.memberId) && (p.status === 'success' || p.status === 'paid') && getRecordDate(p) >= activeCycle.startDate && (activeCycle.endDate ? getRecordDate(p) <= activeCycle.endDate : true))
       .reduce((acc, p) => acc + getPaymentAmount(p), 0);
   };
 
@@ -491,7 +557,7 @@ export default function RoundsPage() {
       if (p.status && !['success', 'paid', 'verified'].includes(p.status.toLowerCase())) return false;
       if (p.cycleId === cycleIdInternal) return true;
       const pDate = getRecordDate(p);
-      return pDate && pDate >= startDate && pDate <= endDate;
+      return pDate && pDate >= startDate && (endDate ? pDate <= endDate : true);
     });
 
     return cyclePayments.reduce((acc, p) => acc + getPaymentAmount(p), 0);
@@ -504,7 +570,7 @@ export default function RoundsPage() {
   });
   const uniqueStartsForActive = Array.from(new Set(groupCyclesForActive.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
   
-  const currentActiveCycle = groupCyclesForActive.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
+  const currentActiveCycle = groupCyclesForActive.find(c => c.status === 'active');
   const activeCycleNumber = currentActiveCycle ? uniqueStartsForActive.indexOf(currentActiveCycle.startDate) + 1 : null;
 
   const isBoardExpired = useMemo(() => {
@@ -527,8 +593,7 @@ export default function RoundsPage() {
     if (alreadyPaid) { toast({ variant: "destructive", title: "Duplicate Entry", description: "Already paid for this date." }); return; }
     setIsActionPending(true);
     try {
-      const groupCycles = (allCycles || []).filter(c => String(c.name).trim().toLowerCase() === String(currentRound.name).trim().toLowerCase());
-      const activeCycle = groupCycles.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
+      const activeCycle = (allCycles || []).find(c => String(c.name).trim().toLowerCase() === String(currentRound.name).trim().toLowerCase() && c.status === 'active');
       
       const paymentRef = doc(collection(db, 'payments'));
       await addDoc(collection(db, 'payments'), {
@@ -635,17 +700,17 @@ export default function RoundsPage() {
             });
             const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
             
-            const activeCycle = groupCycles.sort((a,b) => b.startDate.localeCompare(a.startDate))[0];
+            const activeCycle = groupCycles.find(c => c.status === 'active');
             const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
             
             const currentOccupancy = members?.filter(m => m.status !== 'inactive' && String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase()).length || 0;
             const groupPendingCount = membersWithCalculatedStats.filter(m => String(m.chitGroup).trim().toLowerCase() === String(group.name).trim().toLowerCase() && m.status !== 'inactive' && m.memberStatus === 'pending').length;
 
-            const isExpired = activeCycle && isAfter(startOfDay(new Date()), startOfDay(parseISO(activeCycle.endDate)));
+            const isExpired = activeCycle && activeCycle.endDate && isAfter(startOfDay(new Date()), startOfDay(parseISO(activeCycle.endDate)));
 
             return (
               <Card key={group.id} className="group hover:shadow-xl transition-all border-border/60 overflow-hidden flex flex-col relative bg-card shadow-sm rounded-2xl">
-                <div className="absolute top-3 right-3 flex items-center gap-1">
+                <div className="absolute top-3 right-3 flex items-center gap-2">
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full transition-colors">
@@ -661,20 +726,20 @@ export default function RoundsPage() {
                   <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-primary/10 text-primary/70 hover:text-primary transition-colors" onClick={() => { setActivePopupGroupName(group.name); setSelectedReconciliationCycleId(activeCycle?.id || null); setIsCollectionPopupOpen(true); }}><Wallet className="size-4" /></Button>
                   <GroupCycleControl group={group} latestCycle={activeCycle} />
                 </div>
-                <CardHeader className="p-5 pb-3 space-y-1.5 border-b border-border/40">
+                <CardHeader className="p-5 pb-3 space-y-1.5 border-b border-border/40 pr-28">
                   <div className="flex items-center gap-2">
                     <Badge variant="outline" className="w-fit text-[10px] font-black uppercase tracking-widest px-2.5 py-0.5 bg-primary/5 border-primary/20 text-primary">{group.collectionType}</Badge>
                     {activeCycle && (
                       <Badge className={cn("text-[10px] font-black uppercase tracking-tighter h-5", isExpired ? "bg-destructive/10 text-destructive border-destructive/20" : "bg-emerald-50 text-emerald-700 border-emerald-100")}>
-                        {isExpired ? 'Expired' : `${differenceInDays(parseISO(activeCycle.endDate), parseISO(activeCycle.startDate)) + 1} Days`}
+                        {isExpired ? 'Expired' : activeCycle.endDate ? `${differenceInDays(parseISO(activeCycle.endDate), parseISO(activeCycle.startDate)) + 1} Days` : 'In Progress'}
                       </Badge>
                     )}
                   </div>
-                  <CardTitle className="text-xl font-bold tracking-tight text-foreground truncate pr-16">{getDisplayName(group.name)}</CardTitle>
+                  <CardTitle className="text-xl font-bold tracking-tight text-foreground truncate pr-28">{getDisplayName(group.name)}</CardTitle>
                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
                     <Calendar className="size-3 text-primary/40" />
                     {activeCycle ? (
-                      <>{cycleNumber ? `Cycle ${cycleNumber} | ` : ''}{format(parseISO(activeCycle.startDate), 'MMM dd')} → {format(parseISO(activeCycle.endDate), 'MMM dd')}</>
+                      <>{cycleNumber ? `Cycle ${cycleNumber} | ` : ''}{format(parseISO(activeCycle.startDate), 'MMM dd')} → {activeCycle.endDate ? format(parseISO(activeCycle.endDate), 'MMM dd') : '...'}</>
                     ) : 'No Active Cycle'}
                   </div>
                   {isExpired && (
@@ -684,20 +749,13 @@ export default function RoundsPage() {
                     </div>
                   )}
                 </CardHeader>
-                <CardContent className="p-5 flex-1 space-y-4">
-                  <div className="space-y-3">
+                <CardContent className="p-5 flex-1 flex flex-col justify-between">
+                  <div className="space-y-2">
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Scheme Amount</span><span className="font-bold text-primary">₹{(group.monthlyAmount || 0).toLocaleString()}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-amber-600 font-semibold">Pending Count</span><span className={cn("font-bold text-sm", groupPendingCount > 0 ? "text-amber-500" : "text-emerald-600")}>{groupPendingCount}</span></div>
                     <div className="flex justify-between items-center text-xs"><span className="text-muted-foreground font-semibold">Occupancy</span><span className="font-black tabular-nums">{currentOccupancy} / {group.totalMembers}</span></div>
-                    {isExpired && (
-                      <div className="pt-2 border-t border-destructive/10">
-                        <p className="text-[8px] font-bold text-muted-foreground uppercase tracking-widest">
-                          Last cycle ended on: <span className="text-destructive">{format(parseISO(activeCycle.endDate), 'dd-MM-yyyy')}</span>
-                        </p>
-                      </div>
-                    )}
-                    <div className="pt-4 border-t border-dashed border-border/60"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
                   </div>
+                  <div className="pt-4 mt-2 border-t border-dashed border-border/60"><div className="flex justify-between items-center"><span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground/70">Cycle Collection</span><span className="font-black text-emerald-600 text-base tabular-nums">₹{getGroupActiveCycleCollection(group.name).toLocaleString()}</span></div></div>
                 </CardContent>
                 <CardFooter className="p-1.5 bg-muted/5 border-t border-border/40"><Button variant="ghost" className="w-full h-7 font-black text-[10px] uppercase tracking-[0.2em] hover:bg-primary hover:text-primary-foreground rounded-lg" onClick={() => setSelectedChitId(group.id)}>View Board</Button></CardFooter>
               </Card>
@@ -718,7 +776,7 @@ export default function RoundsPage() {
                       <SelectContent className="max-h-[300px]">
                         {reconciliationCycles.length > 0 ? reconciliationCycles.map(c => (
                           <SelectItem key={c.id} value={c.id} className="text-xs">
-                            {c.displayLabel} ({format(parseISO(c.startDate), 'dd MMM yyyy')} - {format(parseISO(c.endDate), 'dd MMM yyyy')})
+                            {c.displayLabel} ({format(parseISO(c.startDate), 'dd MMM yyyy')} - {c.endDate ? format(parseISO(c.endDate), 'dd MMM yyyy') : '...'})
                           </SelectItem>
                         )) : <div className="p-4 text-center text-[9px] font-bold uppercase text-muted-foreground italic">No cycles available</div>}
                       </SelectContent>
@@ -1002,7 +1060,7 @@ export default function RoundsPage() {
                   <div className="space-y-1">
                     <p className="text-[9px] font-black uppercase tracking-[0.2em] text-emerald-700/70">Visual Guidance</p>
                     <p className="text-[11px] font-bold text-emerald-800/80 leading-relaxed max-w-[220px]">
-                      Use the <span className="text-emerald-600 font-black">Calendar Icon</span> on the dashboard card to create the next cycle.
+                      Use the <span className="text-emerald-600 font-black">Calendar Icon</span> on the dashboard card to manage or complete the cycle.
                     </p>
                   </div>
                 </div>
