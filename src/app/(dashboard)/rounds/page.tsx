@@ -58,7 +58,7 @@ import { ScrollArea } from "@/components/ui/scroll-area"
 import { Calendar as CalendarPicker } from "@/components/ui/calendar"
 import { useToast } from "@/hooks/use-toast"
 import { useFirestore, useCollection, useMemoFirebase, useUser } from "@/firebase"
-import { collection, query, doc, serverTimestamp, orderBy, writeBatch, updateDoc, deleteDoc, addDoc,维护, getDocs, where, setDoc } from "firebase/firestore"
+import { collection, query, doc, serverTimestamp, orderBy, writeBatch, updateDoc, deleteDoc, addDoc, getDocs,维护, where, setDoc } from "firebase/firestore"
 import { useRole } from "@/hooks/use-role"
 import { format, parseISO, isSameMonth, eachDayOfInterval, isBefore, isAfter, startOfDay, endOfDay, differenceInDays, addDays, max, isValid, subDays } from "date-fns"
 import { cn, withTimeout } from "@/lib/utils"
@@ -130,7 +130,6 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   const handleLaunchNewCycle = async () => {
     setIsSaving(true);
     try {
-      // 1. Fetch group cycles to find highest cycleNumber
       const q = query(collection(db, 'cycles'), where('name', '==', group.name));
       const querySnapshot = await getDocs(q);
       const existingCycles = querySnapshot.docs.map(doc => doc.data());
@@ -139,7 +138,6 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       existingCycles.forEach((c: any) => {
         const num = Number(c.cycleNumber) || 0;
         if (num > maxNum) maxNum = num;
-        // Fallback check for "Cycle X" string
         if (c.cycle && typeof c.cycle === 'string') {
           const match = c.cycle.match(/Cycle (\d+)/);
           if (match) {
@@ -152,7 +150,6 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
       const nextNumber = maxNum + 1;
       const todayStr = format(new Date(), 'yyyy-MM-dd');
 
-      // 2. Create NEW document (Never overwrite)
       const newRef = doc(collection(db, 'cycles'));
       await setDoc(newRef, {
         name: group.name,
@@ -483,7 +480,7 @@ export default function RoundsPage() {
 
   const getDisplayName = (name: string) => {
     if (!name) return "";
-    return `Group ${name.replace(/Group/gi, '').trim()}`;
+    return "Group " + name.replace(/Group/gi, '').trim();
   };
 
   const getGroupCollectionForDate = (groupName: string, dateStr: string) => {
@@ -735,7 +732,7 @@ export default function RoundsPage() {
                       </Badge>
                     )}
                   </div>
-                  <CardTitle className="text-xl font-bold tracking-tight text-foreground truncate pr-28">{getDisplayName(group.name)}</CardTitle>
+                  <CardTitle className="text-xl font-bold tracking-tight text-foreground pr-28 break-words whitespace-normal leading-tight">{getDisplayName(group.name)}</CardTitle>
                   <div className="flex items-center gap-1.5 text-[10px] font-bold text-muted-foreground/60 uppercase tracking-widest">
                     <Calendar className="size-3 text-primary/40" />
                     {activeCycle ? (
@@ -799,7 +796,7 @@ export default function RoundsPage() {
             <form onSubmit={handleAddChit}>
               <DialogHeader><DialogTitle className="text-lg font-headline uppercase tracking-tight text-primary">New Scheme</DialogTitle></DialogHeader>
               <div className="grid gap-4 py-4">
-                <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Scheme Name</Label><Input value={newChit.name} onChange={e => setNewChit({...newChit, name: e.target.value})} required className="h-10 rounded-xl text-sm font-bold" placeholder="e.g. Group A" /></div>
+                <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Scheme Name</Label><Input value={newChit.name} onChange={e => setNewChit({...newChit, name: e.target.value})} required className="h-10 rounded-xl text-sm font-bold" placeholder="e.g. A" /></div>
                 <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Amount (₹)</Label><Input type="number" value={newChit.monthlyAmount || ""} onChange={e => setNewChit({...newChit, monthlyAmount: Number(e.target.value)})} required className="h-10 rounded-xl text-sm font-bold" /></div>
                 <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Max Members</Label><Input type="number" value={newChit.totalMembers || ""} onChange={e => setNewChit({...newChit, totalMembers: Number(e.target.value)})} required className="h-10 rounded-xl text-sm font-bold" /></div>
                 <div className="grid gap-1.5"><Label className="text-[9px] font-black uppercase text-muted-foreground">Collection Type</Label><Select value={newChit.collectionType} onValueChange={(v) => setNewChit({...newChit, collectionType: v})}><SelectTrigger className="h-10 rounded-xl font-bold"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Daily">Daily</SelectItem><SelectItem value="Monthly">Monthly</SelectItem></SelectContent></Select></div>
@@ -841,7 +838,7 @@ export default function RoundsPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Button variant="outline" size="icon" onClick={() => setSelectedChitId(null)} className="rounded-full h-10 w-10 shadow-sm active:scale-[0.98] transition-all"><ChevronLeft className="size-5" /></Button>
-          <div className="min-w-0"><div className="flex items-center gap-2 mb-1"><h2 className="text-xl sm:text-2xl font-black truncate tracking-tight text-primary font-headline uppercase">{currentRound?.name}</h2><Badge variant="secondary" className="text-[9px] font-black tracking-tighter bg-primary/10 text-primary border-none">{currentRound?.collectionType}</Badge></div></div>
+          <div className="min-w-0"><div className="flex items-center gap-2 mb-1"><h2 className="text-xl sm:text-2xl font-black tracking-tight text-primary font-headline uppercase break-words whitespace-normal">{currentRound?.name}</h2><Badge variant="secondary" className="text-[9px] font-black tracking-tighter bg-primary/10 text-primary border-none">{currentRound?.collectionType}</Badge></div></div>
         </div>
         <div className="flex items-center gap-3">
           <Button 
@@ -1026,7 +1023,6 @@ export default function RoundsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Expiry Guard Popup */}
       <Dialog open={isExpiryPopupOpen} onOpenChange={setIsExpiryPopupOpen}>
         <DialogContent className="sm:max-w-[420px] rounded-[2.5rem] p-0 overflow-hidden border-none shadow-2xl">
           <div className="flex flex-col bg-white">
