@@ -130,9 +130,14 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
   const handleLaunchNewCycle = async () => {
     setIsSaving(true);
     try {
-      const q = query(collection(db, 'cycles'), where('name', '==', group.name));
-      const querySnapshot = await getDocs(q);
-      const existingCycles = querySnapshot.docs.map(doc => doc.data());
+      const querySnapshot = await getDocs(collection(db, 'cycles'));
+      const allCyclesDocs = querySnapshot.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
+      
+      const gNameClean = String(group.name).replace(/group/gi, '').trim().toLowerCase();
+      const existingCycles = allCyclesDocs.filter((c: any) => {
+        const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
+        return cNameClean === gNameClean;
+      });
       
       let maxNum = 0;
       existingCycles.forEach((c: any) => {
@@ -152,6 +157,7 @@ function GroupCycleControl({ group, latestCycle }: { group: any, latestCycle: an
 
       const newRef = doc(collection(db, 'cycles'));
       await setDoc(newRef, {
+        id: newRef.id,
         name: group.name,
         group: group.name,
         cycleNumber: nextNumber,
