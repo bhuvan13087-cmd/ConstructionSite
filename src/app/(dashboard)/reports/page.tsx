@@ -123,18 +123,7 @@ export default function ReportsPage() {
       const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
       const mPayments = payments.filter(p => p.memberId === m.id && (p.status === 'success' || p.status === 'paid' || !p.status));
       if (resolvedType === 'Daily') {
-        const groupCycles = allCycles.filter(c => {
-          const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
-          const gNameClean = String(m.chitGroup || "").replace(/group/gi, '').trim().toLowerCase();
-          return cNameClean === gNameClean;
-        });
-        const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
-        const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
-        
-        const isProductionLegacyCycle = cycleNumber === 1 || cycleNumber === 2 || cycleNumber === 3;
-        const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
-        const dailyAmt = isProductionLegacyCycle ? 800 : schemeAmt;
-        return mPayments.filter(p => getPDateStr(p) === dateStr).reduce((acc, p) => acc + getPAmount(p), 0) < dailyAmt;
+        return mPayments.filter(p => getPDateStr(p) === dateStr).reduce((acc, p) => acc + getPAmount(p), 0) < (m.monthlyAmount || 800);
       } else {
         const hasPaidThisCycle = mPayments.some(p => getPDateStr(p) >= activeCycle.startDate && getPDateStr(p) <= activeCycle.endDate);
         return !hasPaidThisCycle && (!isSameMonth(date, parseISO(activeCycle.startDate)) || date.getDate() > (scheme?.dueDate || 5));

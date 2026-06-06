@@ -59,15 +59,13 @@ export function AppSidebar() {
     <Sidebar collapsible="icon">
       <SidebarHeader className="border-b border-sidebar-border/50 py-8 px-4">
         <div className="flex items-center gap-3 px-1">
-          <div className="h-14 w-14 flex items-center justify-center shrink-0">
+          <div className="h-14 w-14 flex items-center justify-center shrink-0 overflow-hidden">
             <Image 
               src="/chitfund.png" 
               alt="ChitFund Pro Logo" 
               width={56} 
               height={56} 
-              className="object-contain scale-[2.2] transform-gpu transition-transform duration-300"
-              quality={100}
-              style={{ imageRendering: 'high-quality' }}
+              className="object-contain scale-[1.5] transform-gpu"
             />
           </div>
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">
