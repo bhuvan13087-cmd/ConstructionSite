@@ -75,13 +75,15 @@ export default function LoginPage() {
         <div className="h-2 w-full bg-gradient-to-r from-primary to-accent" />
         
         <CardHeader className="space-y-4 pt-12 pb-6 text-center">
-          <div className="mx-auto flex h-32 w-32 items-center justify-center overflow-hidden">
+          <div className="mx-auto flex h-32 w-32 items-center justify-center">
             <Image 
               src="/chitfund.png" 
               alt="Logo" 
               width={128} 
               height={128} 
-              className="object-contain scale-[1.5] transform-gpu"
+              className="object-contain scale-[2.2] transform-gpu"
+              quality={100}
+              style={{ imageRendering: 'high-quality' }}
               priority
             />
           </div>

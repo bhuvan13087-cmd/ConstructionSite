@@ -102,6 +102,10 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
     const endDate = selectedCycle.endDate
     const cycleIdInternal = selectedCycle.id
 
+    const today = startOfDay(new Date());
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const effectiveEndDateStr = endDate || todayStr;
+
     // RESILIENT DATE EXTRACTION
     const getPDateStr = (p: any) => {
       if (p.targetDate && typeof p.targetDate === 'string') return p.targetDate.trim();
@@ -136,20 +140,22 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
           if (p.status !== 'success' && p.status !== 'paid') return false;
           if (p.cycleId === cycleIdInternal) return true;
           const pDate = getPDateStr(p);
-          return pDate && pDate >= startDate && pDate <= endDate;
+          return pDate && pDate >= startDate && pDate <= effectiveEndDateStr;
         });
 
-        const totalPaidInCycle = mPayments.reduce((s, p) => s + (p.amountPaid || 0), 0);
+        const totalPaidInCycle = mPayments.reduce((s, p) => s + (p.amountPaid || p.amount || 0), 0);
         
         let expectedAmount = 0;
         if (resolvedType === 'Daily') {
+          const isProductionLegacyCycle = cycleNumber === 1 || cycleNumber === 2 || cycleNumber === 3;
+          const dailyAmt = isProductionLegacyCycle ? 800 : schemeAmt;
           const join = m.joinDate ? parseISO(m.joinDate) : parseISO(startDate);
           const start = parseISO(startDate);
-          const end = parseISO(endDate);
+          const end = parseISO(effectiveEndDateStr);
           const effectiveStart = startOfDay(max([join, start]));
           if (!isAfter(effectiveStart, end)) {
             const interval = eachDayOfInterval({ start: effectiveStart, end });
-            expectedAmount = interval.length * schemeAmt;
+            expectedAmount = interval.length * dailyAmt;
           }
         } else {
           expectedAmount = schemeAmt; // Monthly is 1 unit per cycle round
@@ -172,7 +178,7 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
     setSelectedMember(member)
     setPaymentData({
       amount: member.pendingAmount,
-      date: selectedCycle.startDate, 
+      date: selectedCycle?.startDate || format(new Date(), 'yyyy-MM-dd'), 
       method: "Cash"
     })
     setIsPaymentOpen(true)
@@ -194,12 +200,12 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
         status: "success",
         method: paymentData.method,
         settlementType: "historical",
-        cycleId: selectedCycle.id,
+        cycleId: selectedCycle?.id || "",
         createdAt: serverTimestamp()
       }
 
       await addDoc(collection(db, 'payments'), paymentRecord)
-      await createAuditLog(db, user, `Settled Historical Arrears ₹${paymentData.amount} for ${selectedMember.name} in ${groupName} (${selectedCycle.startDate} Cycle)`)
+      await createAuditLog(db, user, `Settled Historical Arrears ₹${paymentData.amount} for ${selectedMember.name} in ${groupName} (${selectedCycle?.startDate || ""} Cycle)`)
 
       toast({ title: "Payment Recorded", description: "Arrears settled for historical record." })
       setIsPaymentOpen(false)
@@ -294,8 +300,8 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
                   <Input 
                     type="date" 
                     value={paymentData.date} 
-                    min={selectedCycle.startDate}
-                    max={selectedCycle.endDate}
+                    min={selectedCycle?.startDate || undefined}
+                    max={selectedCycle?.endDate || undefined}
                     onChange={e => setPaymentData({...paymentData, date: e.target.value})}
                     className="h-11 rounded-xl font-bold"
                     required

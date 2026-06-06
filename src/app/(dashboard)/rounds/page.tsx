@@ -368,15 +368,33 @@ export default function RoundsPage() {
       const mPayments = allPayments.filter(p => p.memberId === m.id && (p.status === 'success' || p.status === 'paid'));
       const scheme = chitSchemes.find(r => String(r.name).trim().toLowerCase() === String(m.chitGroup).trim().toLowerCase());
       const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
+      const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
       
-      let pendingDaysCount = 0;
-      let memberStatus: 'paid' | 'pending' | 'waiting' = 'pending';
-
       if (!activeCycle) {
         return { ...m, calculatedPendingDays: 0, calculatedPendingAmount: 0, memberStatus: 'paid' as const };
       }
 
+      // Filter payments belonging to this member and either this cycle ID or active cycle range
+      const mPaymentsInCycle = mPayments.filter(p => {
+        if (activeCycle.id && p.cycleId === activeCycle.id) return true;
+        const pDate = getRecordDate(p);
+        return pDate && pDate >= activeCycle.startDate && (activeCycle.endDate ? pDate <= activeCycle.endDate : true);
+      });
+      const totalPaidInCycle = mPaymentsInCycle.reduce((acc, p) => acc + getPaymentAmount(p), 0);
+
+      let expectedAmount = 0;
+      let dailyAmt = schemeAmt;
       if (resolvedType === 'Daily') {
+        const groupCycles = (allCycles || []).filter(c => {
+          const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
+          const gNameClean = String(m.chitGroup || "").replace(/group/gi, '').trim().toLowerCase();
+          return cNameClean === gNameClean;
+        });
+        const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
+        const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
+        
+        const isProductionLegacyCycle = cycleNumber === 1 || cycleNumber === 2 || cycleNumber === 3;
+        dailyAmt = isProductionLegacyCycle ? 800 : schemeAmt;
         if (m.joinDate && m.status !== 'inactive') {
           try {
             const rawJoinDate = parseISO(m.joinDate);
@@ -386,43 +404,30 @@ export default function RoundsPage() {
             const effectiveEnd = isBefore(today, cycleEnd) ? today : cycleEnd;
             if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
               const interval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
-              interval.forEach(day => {
-                const dStr = format(day, 'yyyy-MM-dd');
-                const dayPaymentSum = mPayments.filter(p => getRecordDate(p) === dStr).reduce((acc, p) => acc + getPaymentAmount(p), 0);
-                if (dayPaymentSum < (m.monthlyAmount || 800)) { pendingDaysCount++; }
-              });
+              expectedAmount = interval.length * dailyAmt;
             }
           } catch (e) {}
         }
-        memberStatus = mPayments.filter(p => getRecordDate(p) === todayStr).reduce((acc, p) => acc + getPaymentAmount(p), 0) >= (m.monthlyAmount || 800) ? 'paid' : 'pending';
       } else {
-        const hasPaidThisCycle = mPayments.some(p => {
-          const pDate = getRecordDate(p);
-          return pDate && pDate >= activeCycle.startDate && (activeCycle.endDate ? pDate <= activeCycle.endDate : true);
-        });
-        
-        if (hasPaidThisCycle) {
-          memberStatus = 'paid';
-          pendingDaysCount = 0;
-        } else {
-          const cycleStart = parseISO(activeCycle.startDate);
-          const numericDueDate = scheme?.dueDate || 5;
-          let isPastDue = !isSameMonth(today, cycleStart) || today.getDate() > numericDueDate;
-          if (!isPastDue) { memberStatus = 'waiting'; } else {
-            memberStatus = 'pending';
-            const rawJoinDate = parseISO(m.joinDate);
-            const dueDateLimit = startOfDay(addDays(cycleStart, numericDueDate - 1));
-            const countFrom = addDays(dueDateLimit, 1);
-            const effectiveStart = startOfDay(max([rawJoinDate, cycleStart, countFrom]));
-            const effectiveEnd = activeCycle.endDate && isBefore(parseISO(activeCycle.endDate), today) ? parseISO(activeCycle.endDate) : today;
-            if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
-              pendingDaysCount = differenceInDays(effectiveEnd, effectiveStart) + 1;
-            }
-          }
-        }
+        expectedAmount = schemeAmt;
       }
 
-      return { ...m, calculatedPendingDays: pendingDaysCount, calculatedPendingAmount: pendingDaysCount * (m.monthlyAmount || 800), memberStatus: memberStatus };
+      const pendingAmount = Math.max(0, expectedAmount - totalPaidInCycle);
+      const pendingDaysCount = Math.ceil(pendingAmount / dailyAmt);
+
+      let memberStatus: 'paid' | 'pending' | 'waiting' = 'pending';
+      if (pendingAmount <= 0) {
+        memberStatus = 'paid';
+      } else if (resolvedType === 'Daily') {
+        memberStatus = 'pending';
+      } else {
+        const cycleStart = parseISO(activeCycle.startDate);
+        const numericDueDate = scheme?.dueDate || 5;
+        let isPastDue = !isSameMonth(today, cycleStart) || today.getDate() > numericDueDate;
+        memberStatus = isPastDue ? 'pending' : 'waiting';
+      }
+
+      return { ...m, calculatedPendingDays: pendingDaysCount, calculatedPendingAmount: pendingAmount, memberStatus };
     });
   }, [members, allPayments, chitSchemes, allCycles]);
 
@@ -458,7 +463,7 @@ export default function RoundsPage() {
     if (!activeCycle) return [];
     const scheme = chitSchemes.find(r => String(r.name).trim().toLowerCase() === String(m.chitGroup).trim().toLowerCase());
     const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
-    const mPayments = allPayments.filter(p => p.memberId === m.id && (p.status === 'success' || p.status === 'paid'));
+    const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
     const missed: string[] = [];
     const today = startOfDay(new Date());
 
@@ -472,11 +477,11 @@ export default function RoundsPage() {
           const effectiveEnd = isBefore(today, cycleEnd) ? today : cycleEnd;
           if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
             const interval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
-            interval.forEach(day => {
-              const dStr = format(day, 'yyyy-MM-dd');
-              const daySum = mPayments.filter(p => getRecordDate(p) === dStr).reduce((acc, p) => acc + getPaymentAmount(p), 0);
-              if (daySum < (m.monthlyAmount || 800)) { missed.push(dStr); }
-            });
+            const pendingDays = Math.ceil((m.calculatedPendingAmount || 0) / schemeAmt);
+            const startIndex = Math.max(0, interval.length - pendingDays);
+            for (let i = startIndex; i < interval.length; i++) {
+              missed.push(format(interval[i], 'yyyy-MM-dd'));
+            }
           }
         } catch (e) {}
       }

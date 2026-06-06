@@ -2,7 +2,7 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { Search, Phone, Calendar, CheckCircle2, Clock, Pencil, Loader2, Trash2, MoreVertical, Ban, History as HistoryIcon, ChevronDown, ShieldCheck, AlertCircle, Save } from "lucide-react"
+import { Search, Phone, Calendar, CheckCircle2, Clock, Pencil, Loader2, Trash2, MoreVertical, Ban, History as HistoryIcon, ChevronDown, ShieldCheck, AlertCircle, Save, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -112,38 +112,68 @@ export default function MembersPage() {
       const mPayments = payments.filter(p => p.memberId === m.id && (p.status === 'success' || p.status === 'paid'));
       const scheme = (chitRounds || []).find(r => r.name === m.chitGroup);
       const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
+      const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
       
-      let memberStatus: 'paid' | 'pending' | 'waiting' = 'pending';
-
       if (!activeCycle) {
         return { ...m, memberStatus: 'paid' as const, totalPaidSum: 0 };
       }
 
+      const effectiveEndDateStr = activeCycle.endDate || todayStr;
+
+      const mPaymentsInCycle = mPayments.filter(p => {
+        if (activeCycle.id && p.cycleId === activeCycle.id) return true;
+        const pDate = p.targetDate || (p.paymentDate?.toDate ? format(p.paymentDate.toDate(), 'yyyy-MM-dd') : null);
+        return pDate && pDate >= activeCycle.startDate && pDate <= effectiveEndDateStr;
+      });
+      const totalPaidSum = mPaymentsInCycle.reduce((acc, p) => acc + (p.amountPaid || p.amount || 0), 0);
+
+      let expectedAmount = 0;
       if (resolvedType === 'Daily') {
-        const isPaidToday = mPayments.filter(p => p.targetDate === todayStr).reduce((acc, p) => acc + (p.amountPaid || 0), 0) >= (m.monthlyAmount || 800);
-        memberStatus = isPaidToday ? 'paid' : 'pending';
-      } else {
-        const hasPaidThisCycle = mPayments.some(p => {
-          const pDate = p.targetDate || (p.paymentDate?.toDate ? format(p.paymentDate.toDate(), 'yyyy-MM-dd') : null);
-          return pDate && pDate >= activeCycle.startDate && pDate <= activeCycle.endDate;
+        const groupCycles = (allCycles || []).filter(c => {
+          const cNameClean = String(c?.name || "").replace(/group/gi, '').trim().toLowerCase();
+          const gNameClean = String(m.chitGroup || "").replace(/group/gi, '').trim().toLowerCase();
+          return cNameClean === gNameClean;
         });
-        if (hasPaidThisCycle) { memberStatus = 'paid'; } else {
-          const cycleStart = parseISO(activeCycle.startDate);
-          const numericDueDate = scheme?.dueDate || 5;
-          let isPastDue = !isSameMonth(today, cycleStart) || today.getDate() > numericDueDate;
-          if (!isPastDue) { memberStatus = 'waiting'; } else { memberStatus = 'pending'; }
+        const uniqueStarts = Array.from(new Set(groupCycles.map(c => c.startDate || ""))).filter(Boolean).sort((a, b) => a.localeCompare(b));
+        const cycleNumber = activeCycle ? uniqueStarts.indexOf(activeCycle.startDate) + 1 : null;
+        
+        const isProductionLegacyCycle = cycleNumber === 1 || cycleNumber === 2 || cycleNumber === 3;
+        const dailyAmt = isProductionLegacyCycle ? 800 : schemeAmt;
+        if (m.joinDate && m.status !== 'inactive') {
+          try {
+            const rawJoinDate = parseISO(m.joinDate);
+            const cycleStart = parseISO(activeCycle.startDate);
+            const cycleEnd = activeCycle.endDate ? parseISO(activeCycle.endDate) : today;
+            const effectiveStart = startOfDay(max([rawJoinDate, cycleStart]));
+            const effectiveEnd = isBefore(today, cycleEnd) ? today : cycleEnd;
+            if (isBefore(effectiveStart, addDays(effectiveEnd, 1))) {
+              const interval = eachDayOfInterval({ start: effectiveStart, end: effectiveEnd });
+              expectedAmount = interval.length * dailyAmt;
+            }
+          } catch (e) {}
         }
+      } else {
+        expectedAmount = schemeAmt;
+      }
+
+      const pendingAmount = Math.max(0, expectedAmount - totalPaidSum);
+
+      let memberStatus: 'paid' | 'pending' | 'waiting' = 'pending';
+      if (pendingAmount <= 0) {
+        memberStatus = 'paid';
+      } else if (resolvedType === 'Daily') {
+        memberStatus = 'pending';
+      } else {
+        const cycleStart = parseISO(activeCycle.startDate);
+        const numericDueDate = scheme?.dueDate || 5;
+        let isPastDue = !isSameMonth(today, cycleStart) || today.getDate() > numericDueDate;
+        memberStatus = isPastDue ? 'pending' : 'waiting';
       }
 
       return { 
         ...m, 
         memberStatus: memberStatus, 
-        totalPaidSum: mPayments
-          .filter(p => {
-            const pDate = p.targetDate || (p.paymentDate?.toDate ? format(p.paymentDate.toDate(), 'yyyy-MM-dd') : null);
-            return pDate && pDate >= activeCycle.startDate && pDate <= activeCycle.endDate;
-          })
-          .reduce((acc, p) => acc + (p.amountPaid || 0), 0) 
+        totalPaidSum: totalPaidSum
       };
     });
   }, [members, payments, chitRounds, allCycles]);

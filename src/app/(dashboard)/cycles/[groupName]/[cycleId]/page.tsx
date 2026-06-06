@@ -119,6 +119,10 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
 
     const getPAmount = (p: any) => Number(p.amountPaid || p.amount || 0);
 
+    const today = startOfDay(new Date());
+    const todayStr = format(today, 'yyyy-MM-dd');
+    const effectiveEndDateStr = endDate || todayStr;
+
     // Filter payments strictly within this cycle range OR matching cycle ID
     const cyclePayments = (Array.isArray(paymentsData) ? paymentsData : [])
       .filter(p => {
@@ -126,7 +130,7 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
         if (p.status && !['success', 'paid', 'verified'].includes(p.status.toLowerCase())) return false
         if (p.cycleId === cycleIdInternal) return true;
         const recordDate = getPDateStr(p);
-        return recordDate && recordDate >= startDate && recordDate <= endDate;
+        return recordDate && recordDate >= startDate && recordDate <= effectiveEndDateStr;
       })
 
     const totalCollection = cyclePayments.reduce((sum, p) => sum + getPAmount(p), 0)
@@ -150,23 +154,26 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
       );
       const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
       const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
+      const isProductionLegacyCycle = cycleNumber === 1 || cycleNumber === 2 || cycleNumber === 3;
+      const dailyAmt = (resolvedType === 'Daily' && isProductionLegacyCycle) ? 800 : schemeAmt;
 
       // AGGREGATE EXPECTED CALCULATION (Independent of Payment Dates)
       let expectedAmount = 0;
       if (resolvedType === 'Daily') {
         const join = m.joinDate ? parseISO(m.joinDate) : parseISO(startDate);
         const start = parseISO(startDate);
-        const end = parseISO(endDate);
+        const end = parseISO(effectiveEndDateStr);
         const effectiveStart = startOfDay(max([join, start]));
         if (!isAfter(effectiveStart, end)) {
-          expectedAmount = eachDayOfInterval({ start: effectiveStart, end }).length * schemeAmt;
+          expectedAmount = eachDayOfInterval({ start: effectiveStart, end }).length * dailyAmt;
         }
       } else {
         expectedAmount = schemeAmt;
       }
 
       // Status is strictly Paid vs Pending based on aggregate contribution
-      const isPaid = totalCycleContribution >= expectedAmount;
+      const pendingAmount = Math.max(0, expectedAmount - totalCycleContribution);
+      const isPaid = pendingAmount <= 0;
 
       return {
         ...m,
@@ -175,7 +182,8 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
         cyclePayments: mCyclePayments,
         totalCycleContribution,
         resolvedType,
-        expectedAmount
+        expectedAmount,
+        pendingAmount
       }
     })
 
