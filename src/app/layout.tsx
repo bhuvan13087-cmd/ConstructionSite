@@ -7,9 +7,18 @@ export const metadata: Metadata = {
   title: 'ChitFund Pro | Admin Management',
   description: 'Professional Chit Fund Management Application',
   icons: {
-    icon: '/chitfund.png',
-    apple: '/chitfund.png',
+    icon: [
+      { url: '/favicon-16x16.png?v=2', sizes: '16x16', type: 'image/png' },
+      { url: '/favicon-32x32.png?v=2', sizes: '32x32', type: 'image/png' },
+      { url: '/favicon-48x48.png?v=2', sizes: '48x48', type: 'image/png' },
+      { url: '/favicon-64x64.png?v=2', sizes: '64x64', type: 'image/png' },
+      { url: '/favicon.ico?v=2', sizes: 'any' }
+    ],
+    apple: [
+      { url: '/apple-touch-icon.png?v=2', sizes: '180x180', type: 'image/png' }
+    ],
   },
+  manifest: '/manifest.json',
 };
 
 export default function RootLayout({

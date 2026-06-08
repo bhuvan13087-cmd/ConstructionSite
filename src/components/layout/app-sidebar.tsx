@@ -65,7 +65,7 @@ export function AppSidebar() {
               alt="ChitFund Pro Logo" 
               width={56} 
               height={56} 
-              className="object-contain scale-[1.5] transform-gpu"
+              className="object-contain"
             />
           </div>
           <div className="flex flex-col group-data-[collapsible=icon]:hidden">

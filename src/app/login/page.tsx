@@ -81,7 +81,7 @@ export default function LoginPage() {
               alt="Logo" 
               width={128} 
               height={128} 
-              className="object-contain scale-[1.5] transform-gpu"
+              className="object-contain"
               priority
             />
           </div>

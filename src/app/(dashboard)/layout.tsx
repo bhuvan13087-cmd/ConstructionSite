@@ -54,7 +54,7 @@ export default function DashboardLayout({
                     alt="Logo" 
                     width={48} 
                     height={48} 
-                    className="object-contain scale-[1.5] transform-gpu"
+                    className="object-contain"
                     priority
                   />
                 </div>
