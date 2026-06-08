@@ -120,10 +120,18 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
     const getPAmount = (p: any) => Number(p.amountPaid || p.amount || 0);
 
     // Filter payments strictly within this cycle range OR matching cycle ID
+    const isCycleCompleted = selectedCycle?.status === 'completed';
     const cyclePayments = (Array.isArray(paymentsData) ? paymentsData : [])
       .filter(p => {
         if (!memberIds.has(p.memberId)) return false
         if (p.status && !['success', 'paid', 'verified'].includes(p.status.toLowerCase())) return false
+        
+        // For completed cycles, calculate strictly using that cycle's payments linked by cycleId.
+        if (isCycleCompleted) {
+          return p.cycleId === cycleIdInternal;
+        }
+        
+        // For active/open cycles, maintain the original date range fallback logic untouched.
         if (p.cycleId === cycleIdInternal) return true;
         const recordDate = getPDateStr(p);
         return recordDate && recordDate >= startDate && recordDate <= endDate;
@@ -159,10 +167,20 @@ export default function CycleDetailsPage({ params }: { params: Promise<{ groupNa
         const end = parseISO(endDate);
         const effectiveStart = startOfDay(max([join, start]));
         if (!isAfter(effectiveStart, end)) {
-          expectedAmount = eachDayOfInterval({ start: effectiveStart, end }).length * schemeAmt;
+          const days = eachDayOfInterval({ start: effectiveStart, end }).length;
+          // For completed Cycles 1 & 2 (historical), lock daily amount to 800. For future/active cycles, use group's scheme amount.
+          if (isCompleted && cycleNumber !== null && cycleNumber <= 2) {
+            expectedAmount = days * 800;
+          } else {
+            expectedAmount = days * schemeAmt;
+          }
         }
       } else {
-        expectedAmount = schemeAmt;
+        if (isCompleted && cycleNumber !== null && cycleNumber <= 2) {
+          expectedAmount = 800;
+        } else {
+          expectedAmount = schemeAmt;
+        }
       }
 
       // Status is strictly Paid vs Pending based on aggregate contribution

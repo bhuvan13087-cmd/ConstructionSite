@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Input } from "@/components/ui/input"
 import { useFirestore, useCollection, useMemoFirebase, useUser } from "@/firebase"
-import { collection, query, orderBy, addDoc, serverTimestamp, doc } from "firebase/firestore"
+import { collection, query, orderBy, addDoc, serverTimestamp, doc, updateDoc, increment } from "firebase/firestore"
 import { useRouter } from "next/navigation"
 import { format, parseISO, isValid, eachDayOfInterval, isAfter, max, startOfDay } from "date-fns"
 import { useToast } from "@/hooks/use-toast"
@@ -130,10 +130,21 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
         const resolvedType = (m.paymentType || scheme?.collectionType || "Daily");
         const schemeAmt = Number(m.monthlyAmount || scheme?.monthlyAmount || 800);
         
-        // Filter payments belonging to this member and either this cycle ID or date range
+        const isCycleCompleted = selectedCycle?.status === 'completed';
+        // Filter payments belonging to this member
         const mPayments = paymentsData.filter(p => {
           if (p.memberId !== m.id) return false;
-          if (p.status !== 'success' && p.status !== 'paid') return false;
+          
+          // Case-insensitive status matching
+          const pStatus = String(p?.status || "").toLowerCase();
+          if (pStatus !== 'success' && pStatus !== 'paid' && pStatus !== 'verified') return false;
+          
+          // For completed cycles, calculate strictly using that cycle's payments linked by cycleId.
+          if (isCycleCompleted) {
+            return p.cycleId === cycleIdInternal;
+          }
+          
+          // For active/open cycles, maintain original date range fallback logic untouched.
           if (p.cycleId === cycleIdInternal) return true;
           const pDate = getPDateStr(p);
           return pDate && pDate >= startDate && pDate <= endDate;
@@ -142,6 +153,7 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
         const totalPaidInCycle = mPayments.reduce((s, p) => s + (p.amountPaid || 0), 0);
         
         let expectedAmount = 0;
+        const isCompleted = selectedCycle?.status === 'completed';
         if (resolvedType === 'Daily') {
           const join = m.joinDate ? parseISO(m.joinDate) : parseISO(startDate);
           const start = parseISO(startDate);
@@ -149,10 +161,20 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
           const effectiveStart = startOfDay(max([join, start]));
           if (!isAfter(effectiveStart, end)) {
             const interval = eachDayOfInterval({ start: effectiveStart, end });
-            expectedAmount = interval.length * schemeAmt;
+            const days = interval.length;
+            // For completed Cycles 1 & 2 (historical), lock daily amount to 800. For future/active cycles, use group's scheme amount.
+            if (isCompleted && cycleNumber !== null && cycleNumber <= 2) {
+              expectedAmount = days * 800;
+            } else {
+              expectedAmount = days * schemeAmt;
+            }
           }
         } else {
-          expectedAmount = schemeAmt; // Monthly is 1 unit per cycle round
+          if (isCompleted && cycleNumber !== null && cycleNumber <= 2) {
+            expectedAmount = 800;
+          } else {
+            expectedAmount = schemeAmt; // Monthly is 1 unit per cycle round
+          }
         }
 
         const pendingAmount = Math.max(0, expectedAmount - totalPaidInCycle);
@@ -172,7 +194,7 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
     setSelectedMember(member)
     setPaymentData({
       amount: member.pendingAmount,
-      date: selectedCycle.startDate, 
+      date: format(new Date(), 'yyyy-MM-dd'), 
       method: "Cash"
     })
     setIsPaymentOpen(true)
@@ -184,13 +206,15 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
 
     setIsActionPending(true)
     try {
+      const now = new Date()
       const paymentRecord = {
         memberId: selectedMember.id,
         memberName: selectedMember.name,
-        month: format(parseISO(paymentData.date), 'MMMM yyyy'),
-        targetDate: paymentData.date,
+        month: format(now, 'MMMM yyyy'),
+        targetDate: format(now, 'yyyy-MM-dd'),
         amountPaid: Number(paymentData.amount),
-        paymentDate: new Date().toISOString(),
+        paymentDate: now.toISOString(),
+        settledAt: now.toISOString(),
         status: "success",
         method: paymentData.method,
         settlementType: "historical",
@@ -198,7 +222,12 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
         createdAt: serverTimestamp()
       }
 
+      // 1. Create a payment record linked to the cycle
       await addDoc(collection(db, 'payments'), paymentRecord)
+      // 2. Increment member cumulative totalPaid
+      await updateDoc(doc(db, 'members', selectedMember.id), {
+        totalPaid: increment(Number(paymentData.amount))
+      })
       await createAuditLog(db, user, `Settled Historical Arrears ₹${paymentData.amount} for ${selectedMember.name} in ${groupName} (${selectedCycle.startDate} Cycle)`)
 
       toast({ title: "Payment Recorded", description: "Arrears settled for historical record." })
@@ -289,18 +318,7 @@ export default function HistoryCollectionPage({ params }: { params: Promise<{ gr
                     required
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-[10px] font-black uppercase text-muted-foreground ml-1">Target Registry Date</Label>
-                  <Input 
-                    type="date" 
-                    value={paymentData.date} 
-                    min={selectedCycle.startDate}
-                    max={selectedCycle.endDate}
-                    onChange={e => setPaymentData({...paymentData, date: e.target.value})}
-                    className="h-11 rounded-xl font-bold"
-                    required
-                  />
-                </div>
+                {/* Do not require cycle date selection for historical arrears processing */}
                 <div className="space-y-1.5">
                   <Label className="text-[10px] font-black uppercase text-muted-foreground ml-1">Payment Method</Label>
                   <Select value={paymentData.method} onValueChange={v => setPaymentData({...paymentData, method: v})}>
