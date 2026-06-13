@@ -1,117 +1,74 @@
 rules_version = '2';
-
-/**
- * FIRESTORE SECURITY RULES - PROTOTYPING MODE
- * 
- * Updated to ensure all authenticated users have full administrative access.
- * Triggers deployment to resolve permission errors on collections.
- */
-
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // --- Helper Functions ---
-
-    /** @description Checks if the user is authenticated with Firebase Auth. */
-    function isSignedIn() {
+    
+    // Check if the request is authenticated with Firebase Auth
+    function isAuthenticated() {
       return request.auth != null;
     }
 
-    /** @description Checks if the user is authorized. In this prototype, any signed-in user is an admin. */
+    // Retrieve the user document data from Firestore
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Verify if the authenticated user has an active account in Firestore
+    function isActiveUser() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+             getUserData().status == 'active';
+    }
+
+    // Verify if the authenticated user is an active admin
     function isAdmin() {
-      return isSignedIn();
+      return isActiveUser() && getUserData().role == 'admin';
     }
 
-    /** @description Verifies the document exists and the user is an authorized admin. */
-    function isExistingAdmin() {
-      return isAdmin() && resource != null;
+    match /users/{userId} {
+      // Allow user profile read if the user is authenticated and either:
+      // 1. Reading their own profile
+      // 2. Is an active admin reading any profile
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      
+      // Allow user profile creation if the user is authenticated and either:
+      // 1. Creating their own profile (e.g., initial setup or registration)
+      // 2. Is an active admin creating a profile
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      
+      // Allow user profile update if the user is authenticated and either:
+      // 1. Is an active admin updating a profile
+      // 2. Is updating their own profile and is active, but is NOT changing their role or status
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          request.auth.uid == userId && 
+          isActiveUser() && 
+          request.resource.data.role == resource.data.role && 
+          request.resource.data.status == resource.data.status
+        )
+      );
+      
+      // Only active admins can delete user profiles
+      allow delete: if isAdmin();
     }
 
-    /** @description Ensures relational integrity by matching internal ID field to the document path. */
-    function matchesPathId(idField) {
-      return request.resource.data.id == idField;
+    match /sites/{siteId} {
+      // Allow read access to construction sites only for active users (admins or engineers)
+      allow read: if isActiveUser();
+      
+      // Allow write/modify access to construction sites only for active admins
+      allow write: if isAdmin();
     }
 
-    /** @description Ensures that once set, the internal ID field cannot be changed. */
-    function isIdImmutable() {
-      return request.resource.data.id == resource.data.id;
-    }
-
-    // --- Collection Rules ---
-
-    /**
-     * @description Access control for the Admin designation collection.
-     */
-    match /roles_admin/{adminUid} {
-      allow get: if isSignedIn() && request.auth.uid == adminUid;
-      allow list: if false;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Management of Chit Fund Members.
-     */
-    match /members/{memberId} {
-      allow get, list: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isExistingAdmin();
-      allow delete: if isExistingAdmin();
-    }
-
-    /**
-     * @description Management of payment transactions.
-     */
-    match /payments/{paymentId} {
-      allow get, list: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isExistingAdmin();
-      allow delete: if isExistingAdmin();
-    }
-
-    /**
-     * @description Records of completed Chit Rounds and winners.
-     */
-    match /chitRounds/{roundId} {
-      allow get, list: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isExistingAdmin();
-      allow delete: if isExistingAdmin();
-    }
-
-    /**
-     * @description System Audit Logs.
-     */
-    match /auditLogs/{logId} {
-      allow list, get, create: if isAdmin();
-      allow update, delete: if false;
-    }
-
-    /**
-     * @description Financial Period Locks.
-     */
-    match /monthLocks/{lockId} {
-      allow list, get, create, update, delete: if isAdmin();
-    }
-
-    /**
-     * @description Activity Monitoring Cycles.
-     */
-    match /cycles/{cycleId} {
-      allow list, get, create, update, delete: if isAdmin();
-    }
-
-    /**
-     * @description Monthly Collection Targets.
-     */
-    match /monthlyTargets/{targetId} {
-      allow list, get, create, update, delete: if isAdmin();
+    match /dailyUpdates/{updateId} {
+      // Allow active users (admins or engineers) to read and write daily updates
+      allow read, write: if isActiveUser();
     }
     
-    /**
-     * @description System Metadata for automated tasks.
-     */
-    match /systemMetadata/{docId} {
-      allow get, list, create, update, delete: if isAdmin();
-    }
   }
 }
