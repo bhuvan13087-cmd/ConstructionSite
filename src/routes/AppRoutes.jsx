@@ -27,7 +27,12 @@ export default function AppRoutes() {
 
       {/* Protected Site Engineer Area */}
       <Route element={<ProtectedRoute allowedRoles={["site_engineer", "engineer"]} />}>
-        <Route path="/engineer" element={<EngineerDashboard />} />
+        <Route path="/engineer" element={<EngineerDashboard tab="dashboard" />} />
+        <Route path="/engineer/attendance" element={<EngineerDashboard tab="attendance" />} />
+        <Route path="/engineer/labour" element={<EngineerDashboard tab="labour" />} />
+        <Route path="/engineer/material" element={<EngineerDashboard tab="material" />} />
+        <Route path="/engineer/photos" element={<EngineerDashboard tab="photos" />} />
+        <Route path="/engineer/progress" element={<EngineerDashboard tab="progress" />} />
       </Route>
 
       {/* Fallback route redirection */}

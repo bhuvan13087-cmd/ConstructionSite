@@ -742,7 +742,7 @@ export async function saveLabourDailyCounts(siteId, engineerId, dateStr, countsM
   const db = getDb();
   const batch = writeBatch(db);
   
-  const categories = ["Mason", "Helper", "Painter", "Plumber", "Electrician", "Other"];
+  const categories = Object.keys(countsMap);
   for (const category of categories) {
     const docId = `${siteId}_${dateStr}_${category}`;
     const docRef = doc(db, "labourDailyCount", docId);
@@ -808,7 +808,11 @@ export async function getLabourDailyCountsHistory(siteId) {
                         data.category === "Electrician" ? "Electricians" : "Others";
     
     const countVal = Number(data.count) || 0;
-    historyMap[date][categoryKey] = countVal;
+    if (categoryKey === "Others") {
+      historyMap[date].Others += countVal;
+    } else {
+      historyMap[date][categoryKey] = countVal;
+    }
     historyMap[date].total += countVal;
   });
   

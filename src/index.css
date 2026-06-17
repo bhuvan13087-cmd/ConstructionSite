@@ -1358,6 +1358,77 @@ body:has(.dashboard-layout) {
   }
 }
 
+/* --- Responsiveness Enhancements (Mobile, Tab, Laptop, Monitor) --- */
+
+/* 1. Large Monitors (> 1440px) */
+@media (min-width: 1440px) {
+  .main-content {
+    max-width: 1600px;
+    margin-left: auto;
+    margin-right: auto;
+    width: 100%;
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(5, 1fr); /* 5 cards in a row */
+  }
+}
+
+/* 2. Laptops (1024px to 1439px) */
+@media (min-width: 1024px) and (max-width: 1439px) {
+  .main-content {
+    padding: 30px;
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+}
+
+/* 3. Tablets/Tabs (768px to 1023px) */
+@media (min-width: 768px) and (max-width: 1023px) {
+  .main-content {
+    padding: 24px;
+    gap: 20px;
+  }
+  .metrics-grid {
+    grid-template-columns: repeat(3, 1fr); /* 3 cards in a row */
+    gap: 16px;
+  }
+  .detail-grid {
+    grid-template-columns: 1fr; /* Stack detail grid columns */
+  }
+}
+
+/* 4. Mobiles (up to 767px) */
+@media (max-width: 767px) {
+  .main-content {
+    padding: 16px;
+    gap: 16px;
+  }
+  .page-title {
+    font-size: 22px;
+  }
+  .page-description {
+    font-size: 12px;
+  }
+  .metrics-grid {
+    grid-template-columns: 1fr; /* 1 card per row */
+    gap: 12px;
+  }
+  .status-table th, .status-table td, .data-table th, .data-table td {
+    padding: 12px 14px;
+    font-size: 13px;
+  }
+  /* Improve card padding for narrow screens */
+  .card-body, .modal-form, .modal-body {
+    padding: 16px;
+  }
+  /* Buttons touch target */
+  .btn {
+    padding: 10px 16px;
+    font-size: 12px;
+  }
+}
+
 
 
 

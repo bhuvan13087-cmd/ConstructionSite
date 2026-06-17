@@ -1,7 +1,7 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { HardHat, LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X } from "lucide-react";
+import { HardHat, LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText } from "lucide-react";
 import Button from "../common/Button";
 
 
@@ -83,7 +83,52 @@ export default function Sidebar({ isOpen, onClose }) {
               onClick={onClose}
             >
               <LayoutDashboard size={18} />
-              <span>Engineer Dashboard</span>
+              <span>Dashboard Overview</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/attendance" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <ClipboardCheck size={18} />
+              <span>Labour Attendance</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/labour" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Labour Management</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/material" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Package size={18} />
+              <span>Material Inventory</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/photos" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Camera size={18} />
+              <span>Site Photos</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/progress" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FileText size={18} />
+              <span>Daily Progress</span>
             </NavLink>
           </>
         )}
