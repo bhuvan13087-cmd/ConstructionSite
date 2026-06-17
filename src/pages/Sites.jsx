@@ -2,27 +2,28 @@ import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { 
   getSites, 
-  getSiteEngineers, 
   createSite, 
   updateSite, 
   deleteSite 
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
+import Card from "../components/common/Card";
+import Button from "../components/common/Button";
+import Badge from "../components/common/Badge";
+import Modal from "../components/common/Modal";
 import { 
   Plus, 
   Search, 
   Edit3, 
   Trash2, 
   Save, 
-  X, 
   MapPin, 
-  Users, 
-  Building2 
+  Building2,
+  Calendar
 } from "lucide-react";
 
 export default function Sites() {
   const [sites, setSites] = useState([]);
-  const [engineers, setEngineers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -34,10 +35,11 @@ export default function Sites() {
   const [formMode, setFormMode] = useState("add"); // "add" or "edit"
   const [formId, setFormId] = useState("");
   const [formName, setFormName] = useState("");
+  const [formClientName, setFormClientName] = useState("");
   const [formLocation, setFormLocation] = useState("");
-  const [formStatus, setFormStatus] = useState("active");
-  const [formSelectedEngineers, setFormSelectedEngineers] = useState([]);
-  const [formOldEngineers, setFormOldEngineers] = useState([]); // to clear associations on edit
+  const [formStartDate, setFormStartDate] = useState("");
+  const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
+  const [formStatus, setFormStatus] = useState("Planning");
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -51,12 +53,15 @@ export default function Sites() {
       setLoading(true);
       const fetchedSites = await getSites();
       setSites(fetchedSites);
-
-      const fetchedEngineers = await getSiteEngineers();
-      setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading sites page data:", err);
-      showToast(`Failed to load sites: ${err.message}`, "error");
+      if (err.code === "permission-denied") {
+        showToast("Access Denied: You do not have permission to view sites.", "error");
+      } else if (err.code === "unavailable" || err.message?.includes("offline") || !navigator.onLine) {
+        showToast("Database Offline: Please check your network connection.", "error");
+      } else {
+        showToast(`Failed to load sites: ${err.message}`, "error");
+      }
     } finally {
       setLoading(false);
     }
@@ -68,6 +73,7 @@ export default function Sites() {
 
   const filteredSites = sites.filter(site => 
     site.siteName?.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
+    site.clientName?.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
     site.location?.toLowerCase().includes(searchQuery.toLowerCase().trim())
   );
 
@@ -75,10 +81,11 @@ export default function Sites() {
     setFormMode("add");
     setFormId("");
     setFormName("");
+    setFormClientName("");
     setFormLocation("");
-    setFormStatus("active");
-    setFormSelectedEngineers([]);
-    setFormOldEngineers([]);
+    setFormStartDate("");
+    setFormExpectedEndDate("");
+    setFormStatus("Planning");
     setShowFormModal(true);
   };
 
@@ -86,43 +93,64 @@ export default function Sites() {
     setFormMode("edit");
     setFormId(site.id);
     setFormName(site.siteName || "");
+    setFormClientName(site.clientName || "");
     setFormLocation(site.location || "");
-    setFormStatus(site.status || "active");
-    const assigned = site.assignedEngineers || [];
-    setFormSelectedEngineers(assigned);
-    setFormOldEngineers(assigned);
+    setFormStartDate(site.startDate || "");
+    setFormExpectedEndDate(site.expectedEndDate || "");
+    setFormStatus(site.status || "Planning");
     setShowFormModal(true);
-  };
-
-  const handleCheckboxChange = (engId) => {
-    setFormSelectedEngineers(prev => 
-      prev.includes(engId)
-        ? prev.filter(id => id !== engId)
-        : [...prev, engId]
-    );
   };
 
   const handleFormSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
 
+    // Validation checks
+    if (!formName.trim()) {
+      showToast("Site Name is required.", "error");
+      return;
+    }
+    if (!formClientName.trim()) {
+      showToast("Client Name is required.", "error");
+      return;
+    }
+    if (!formLocation.trim()) {
+      showToast("Location is required.", "error");
+      return;
+    }
+    if (!formStartDate) {
+      showToast("Start Date is required.", "error");
+      return;
+    }
+    if (!formExpectedEndDate) {
+      showToast("Expected End Date is required.", "error");
+      return;
+    }
+    if (new Date(formExpectedEndDate) < new Date(formStartDate)) {
+      showToast("Expected End Date cannot be before Start Date.", "error");
+      return;
+    }
+
+    setLoading(true);
     try {
       if (formMode === "add") {
         await createSite(
           formName.trim(), 
+          formClientName.trim(), 
           formLocation.trim(), 
-          formStatus, 
-          formSelectedEngineers
+          formStartDate, 
+          formExpectedEndDate, 
+          formStatus
         );
         showToast("Construction Site added successfully.", "success");
       } else {
         await updateSite(
           formId,
           formName.trim(),
+          formClientName.trim(),
           formLocation.trim(),
-          formStatus,
-          formSelectedEngineers,
-          formOldEngineers
+          formStartDate,
+          formExpectedEndDate,
+          formStatus
         );
         showToast("Construction Site updated successfully.", "success");
       }
@@ -131,22 +159,34 @@ export default function Sites() {
       await loadData();
     } catch (err) {
       console.error("Form action failed:", err);
-      showToast(err.message || "Failed to save site.", "error");
+      if (err.code === "permission-denied") {
+        showToast("Access Denied: You do not have permission to modify sites.", "error");
+      } else if (err.code === "unavailable" || err.message?.includes("offline") || !navigator.onLine) {
+        showToast("Database Offline: Please check your network connection.", "error");
+      } else {
+        showToast(err.message || "Failed to save site.", "error");
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handleDeleteSite = async (site) => {
-    if (confirm(`Are you sure you want to delete the site "${site.siteName}"? This will clear all engineer assignments.`)) {
+    if (confirm(`Are you sure you want to delete the site "${site.siteName}"?`)) {
       setLoading(true);
       try {
-        await deleteSite(site.id, site.assignedEngineers || []);
+        await deleteSite(site.id);
         showToast("Site deleted successfully.", "success");
         await loadData();
       } catch (err) {
         console.error("Deletion failed:", err);
-        showToast(`Failed to delete site: ${err.message}`, "error");
+        if (err.code === "permission-denied") {
+          showToast("Access Denied: You do not have permission to delete sites.", "error");
+        } else if (err.code === "unavailable" || err.message?.includes("offline") || !navigator.onLine) {
+          showToast("Database Offline: Please check your network connection.", "error");
+        } else {
+          showToast(`Failed to delete site: ${err.message}`, "error");
+        }
       } finally {
         setLoading(false);
       }
@@ -154,7 +194,7 @@ export default function Sites() {
   };
 
   return (
-    <Layout title="Construction Sites" description="Manage active civil construction projects and allocate field engineers.">
+    <Layout title="Construction Sites" description="Manage active civil construction projects and track details.">
       {toast.show && (
         <div id="toast-container" className="toast-container">
           <div className={`toast toast-${toast.type}`}>
@@ -170,187 +210,188 @@ export default function Sites() {
             <Search className="input-icon" size={16} />
             <input 
               type="text" 
-              placeholder="Search sites by name or location..." 
+              placeholder="Search sites by name, client, or location..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
             />
           </div>
         </div>
-        <button onClick={handleOpenAddModal} className="btn btn-primary btn-add">
-          <Plus size={16} />
-          <span>Add Site</span>
-        </button>
+        <Button onClick={handleOpenAddModal} icon={Plus} className="btn-add">
+          Add Site
+        </Button>
       </div>
 
       {/* Main Table */}
-      <div className="table-card">
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
+      <Card variant="table">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Site Name</th>
+              <th>Client Name</th>
+              <th>Location</th>
+              <th>Start Date</th>
+              <th>Expected End Date</th>
+              <th>Status</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredSites.length === 0 ? (
               <tr>
-                <th>Site ID</th>
-                <th>Site Name</th>
-                <th>Location</th>
-                <th>Status</th>
-                <th>Assigned Engineers</th>
-                <th className="text-right">Actions</th>
+                <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                  No construction sites found. Click "Add Site" to register one.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredSites.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "30px" }}>
-                    No construction sites found. Click "Add Site" to register one.
-                  </td>
-                </tr>
-              ) : (
-                filteredSites.map((site) => {
-                  const statusClass = site.status === "active" ? "badge-success" : "badge-danger";
-                  const statusText = site.status === "active" ? "Active" : "Inactive";
-                  const assignedCount = site.assignedEngineers ? site.assignedEngineers.length : 0;
-
-                  return (
-                    <tr key={site.id}>
-                      <td className="font-mono" style={{ fontWeight: 700 }}>{site.id}</td>
-                      <td>{site.siteName}</td>
-                      <td>
-                        <span className="badge badge-pending">
-                          <MapPin size={12} style={{ marginRight: "4px", verticalAlign: "middle" }} />
-                          {site.location}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={`badge ${statusClass}`}>{statusText}</span>
-                      </td>
-                      <td>
-                        {assignedCount === 0 ? (
-                          <span style={{ color: "var(--text-muted)", fontSize: "13px" }}>Unassigned</span>
-                        ) : (
-                          <span className="badge badge-success">
-                            <Users size={12} style={{ marginRight: "4px", verticalAlign: "middle" }} />
-                            {assignedCount} Engineers
-                          </span>
-                        )}
-                      </td>
-                      <td>
-                        <div className="table-actions">
-                          <button onClick={() => handleOpenEditModal(site)} className="btn-icon btn-edit-action" title="Edit Site">
-                            <Edit3 size={16} />
-                          </button>
-                          <button onClick={() => handleDeleteSite(site)} className="btn-icon" title="Delete Site" style={{ color: "var(--danger-500)" }}>
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+            ) : (
+              filteredSites.map((site) => {
+                return (
+                  <tr key={site.id}>
+                    <td style={{ fontWeight: 700 }}>{site.siteName}</td>
+                    <td>{site.clientName || "--"}</td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)" }} />
+                        <span>{site.location}</span>
+                      </div>
+                    </td>
+                    <td className="font-mono">{site.startDate || "--"}</td>
+                    <td className="font-mono">{site.expectedEndDate || "--"}</td>
+                    <td>
+                      <Badge status={site.status || "Planning"} />
+                    </td>
+                    <td>
+                      <div className="table-actions">
+                        <button onClick={() => handleOpenEditModal(site)} className="btn-icon btn-edit-action" title="Edit Site">
+                          <Edit3 size={16} />
+                        </button>
+                        <button onClick={() => handleDeleteSite(site)} className="btn-icon" title="Delete Site" style={{ color: "var(--danger-500)" }}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </Card>
 
       {/* MODAL: ADD/EDIT SITE */}
-      {showFormModal && (
-        <div className="modal-overlay" style={{ display: "flex" }}>
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>{formMode === "add" ? "Add Construction Site" : "Edit Construction Site"}</h3>
-              <button onClick={() => setShowFormModal(false)} type="button" className="btn-close-modal">
-                <X size={18} />
-              </button>
+      <Modal 
+        isOpen={showFormModal} 
+        onClose={() => setShowFormModal(false)} 
+        title={formMode === "add" ? "Add Construction Site" : "Edit Construction Site"}
+      >
+        <form onSubmit={handleFormSubmit} style={{ margin: 0, padding: 0 }}>
+          <div className="form-group">
+            <label htmlFor="site-name">Site Name</label>
+            <div className="input-wrapper">
+              <Building2 className="input-icon" size={16} />
+              <input 
+                type="text" 
+                id="site-name" 
+                placeholder="E.g., Greenwood Apartments" 
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                required 
+              />
             </div>
-            <form onSubmit={handleFormSubmit} className="modal-form">
-              <div className="form-group">
-                <label htmlFor="site-name">Site Name</label>
-                <div className="input-wrapper">
-                  <Building2 className="input-icon" size={16} />
-                  <input 
-                    type="text" 
-                    id="site-name" 
-                    placeholder="E.g., Greenwood Apartments" 
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="site-location">Location</label>
-                <div className="input-wrapper">
-                  <MapPin className="input-icon" size={16} />
-                  <input 
-                    type="text" 
-                    id="site-location" 
-                    placeholder="E.g., Sector 45" 
-                    value={formLocation}
-                    onChange={(e) => setFormLocation(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="site-status">Status</label>
-                <div className="input-wrapper">
-                  <select 
-                    id="site-status" 
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value)}
-                    style={{
-                      width: "100%",
-                      padding: "14px 16px",
-                      borderRadius: "var(--radius-md)",
-                      border: "1px solid var(--border-color)",
-                      backgroundColor: "var(--primary-50)",
-                      outline: "none",
-                      fontWeight: 500,
-                      cursor: "pointer"
-                    }}
-                  >
-                    <option value="active">Active Project</option>
-                    <option value="inactive">Inactive Project</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Allocate Site Engineers</label>
-                <div className="checkbox-grid">
-                  {engineers.length === 0 ? (
-                    <span style={{ color: "var(--text-muted)", fontSize: "13px", gridColumn: "1/-1" }}>
-                      No active engineers available.
-                    </span>
-                  ) : (
-                    engineers.map(eng => (
-                      <label key={eng.id} className="checkbox-label">
-                        <input 
-                          type="checkbox" 
-                          value={eng.id} 
-                          checked={formSelectedEngineers.includes(eng.id)}
-                          onChange={() => handleCheckboxChange(eng.id)}
-                        />
-                        <span> {eng.fullName}</span>
-                      </label>
-                    ))
-                  )}
-                </div>
-                <p className="field-hint">Assign one or multiple engineers to manage this site.</p>
-              </div>
-
-              <div className="modal-actions">
-                <button onClick={() => setShowFormModal(false)} type="button" className="btn btn-outline">Cancel</button>
-                <button type="submit" className="btn btn-primary">
-                  <Save size={16} />
-                  <span>Save Site</span>
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+
+          <div className="form-group">
+            <label htmlFor="client-name">Client Name</label>
+            <div className="input-wrapper">
+              <Building2 className="input-icon" size={16} style={{ opacity: 0.6 }} />
+              <input 
+                type="text" 
+                id="client-name" 
+                placeholder="E.g., Greenwood Developers" 
+                value={formClientName}
+                onChange={(e) => setFormClientName(e.target.value)}
+                required 
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="site-location">Location</label>
+            <div className="input-wrapper">
+              <MapPin className="input-icon" size={16} />
+              <input 
+                type="text" 
+                id="site-location" 
+                placeholder="E.g., Sector 45" 
+                value={formLocation}
+                onChange={(e) => setFormLocation(e.target.value)}
+                required 
+              />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="start-date">Start Date</label>
+              <div className="input-wrapper">
+                <Calendar className="input-icon" size={16} />
+                <input 
+                  type="date" 
+                  id="start-date" 
+                  value={formStartDate}
+                  onChange={(e) => setFormStartDate(e.target.value)}
+                  required 
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="expected-end-date">Expected End Date</label>
+              <div className="input-wrapper">
+                <Calendar className="input-icon" size={16} />
+                <input 
+                  type="date" 
+                  id="expected-end-date" 
+                  value={formExpectedEndDate}
+                  onChange={(e) => setFormExpectedEndDate(e.target.value)}
+                  required 
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="site-status">Status</label>
+            <div className="input-wrapper">
+              <select 
+                id="site-status" 
+                value={formStatus}
+                onChange={(e) => setFormStatus(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  outline: "none",
+                  fontWeight: 500,
+                  cursor: "pointer"
+                }}
+              >
+                <option value="Planning">Planning</option>
+                <option value="Active">Active</option>
+                <option value="Completed">Completed</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="modal-actions" style={{ margin: "24px -24px -24px -24px" }}>
+            <Button variant="outline" onClick={() => setShowFormModal(false)}>Cancel</Button>
+            <Button type="submit" icon={Save}>
+              Save Site
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

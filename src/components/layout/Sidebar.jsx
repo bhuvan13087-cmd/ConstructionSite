@@ -1,7 +1,9 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { HardHat, LayoutDashboard, Users, MapPin, LogOut, X } from "lucide-react";
+import { HardHat, LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X } from "lucide-react";
+import Button from "../common/Button";
+
 
 export default function Sidebar({ isOpen, onClose }) {
   const { userProfile, logout } = useAuth();
@@ -62,6 +64,15 @@ export default function Sidebar({ isOpen, onClose }) {
               <MapPin size={18} />
               <span>Construction Sites</span>
             </NavLink>
+
+            <NavLink 
+              to="/admin/assignments" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <ClipboardCheck size={18} />
+              <span>Site Assignments</span>
+            </NavLink>
           </>
         ) : (
           <>
@@ -86,10 +97,9 @@ export default function Sidebar({ isOpen, onClose }) {
             <p className="user-email" id="display-admin-email">{userProfile?.email || ""}</p>
           </div>
         </div>
-        <button onClick={handleLogout} className="btn btn-outline btn-logout" style={{ width: "100%", justifyContent: "center" }}>
-          <LogOut size={16} />
-          <span>Sign Out</span>
-        </button>
+        <Button onClick={handleLogout} variant="outline" icon={LogOut} className="btn-logout" style={{ width: "100%" }}>
+          Sign Out
+        </Button>
       </div>
     </aside>
   );

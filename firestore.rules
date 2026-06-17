@@ -69,6 +69,80 @@ service cloud.firestore {
       // Allow active users (admins or engineers) to read and write daily updates
       allow read, write: if isActiveUser();
     }
+
+    match /attendance/{attendanceId} {
+      // Allow active users to read and write attendance
+      allow read, write: if isActiveUser();
+    }
+
+    match /sitePhotos/{photoId} {
+      // Allow active users to read and write site photos
+      allow read, write: if isActiveUser();
+    }
+
+    match /siteAssignments/{assignmentId} {
+      // Allow read access to active users (admins or engineers)
+      allow read: if isActiveUser();
+      
+      // Allow write/modify access only to active admins
+      allow write: if isAdmin();
+    }
+
+    match /materials/{materialId} {
+      // Allow read access to admins, or active engineers if the site is in their assignedSites list
+      allow read: if isAdmin() || (
+        isActiveUser() && 
+        (resource == null || resource.data.siteId in getUserData().assignedSites)
+      );
+      
+      // Allow creation only by active engineers assigned to the site, saving under their own UID
+      allow create: if isActiveUser() && 
+                    (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
+                    request.resource.data.engineerId == request.auth.uid &&
+                    request.resource.data.siteId in getUserData().assignedSites;
+      
+      // Updates and deletes are restricted to admin
+      allow update, delete: if isAdmin();
+    }
+
+    match /workers/{workerId} {
+      allow read: if isAdmin() || (
+        isActiveUser() && 
+        (resource == null || resource.data.siteId in getUserData().assignedSites)
+      );
+      allow write: if isAdmin() || (
+        isActiveUser() && 
+        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
+        request.resource.data.engineerId == request.auth.uid &&
+        request.resource.data.siteId in getUserData().assignedSites
+      );
+    }
+
+    match /labourAttendance/{attendanceId} {
+      allow read: if isAdmin() || (
+        isActiveUser() && 
+        (resource == null || resource.data.siteId in getUserData().assignedSites)
+      );
+      allow write: if isAdmin() || (
+        isActiveUser() && 
+        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
+        request.resource.data.markedBy == request.auth.uid &&
+        request.resource.data.siteId in getUserData().assignedSites
+      );
+    }
+
+    match /labourDailyCount/{countId} {
+      allow read: if isAdmin() || (
+        isActiveUser() && 
+        (resource == null || resource.data.siteId in getUserData().assignedSites)
+      );
+      allow write: if isAdmin() || (
+        isActiveUser() && 
+        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
+        request.resource.data.engineerId == request.auth.uid &&
+        request.resource.data.siteId in getUserData().assignedSites
+      );
+    }
     
   }
 }

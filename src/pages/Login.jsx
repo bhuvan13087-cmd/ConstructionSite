@@ -5,13 +5,14 @@ import { createUserProfile } from "../services/firebaseService";
 import { useAuth } from "../context/AuthContext";
 import { ShieldCheck, Mail, Lock, KeyRound } from "lucide-react";
 import Loading from "../components/common/Loading";
+import Button from "../components/common/Button";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const { user, userProfile, loading: authLoading, configured } = useAuth();
+  const { user, userProfile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export default function Login() {
 
           // Write admin profile document
           await createUserProfile(user.uid, {
-            fullName: "Admin",
+            fullName: "Admin User",
             username: "admin",
             role: "admin",
             status: "active",
@@ -101,8 +102,8 @@ export default function Login() {
         </div>
 
         {error && (
-          <div className="info-alert" style={{ borderColor: "var(--accent-danger)", backgroundColor: "rgba(239, 68, 68, 0.1)" }}>
-            <div className="info-text" style={{ color: "var(--text-primary)" }}>
+          <div className="info-alert" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)" }}>
+            <div className="info-text" style={{ color: "var(--danger-600)" }}>
               <strong>Error:</strong> {error}
             </div>
           </div>
@@ -139,10 +140,15 @@ export default function Login() {
             </div>
           </div>
 
-          <button type="submit" className="btn btn-primary" id="btn-login-submit" style={{ width: "100%" }}>
-            <KeyRound size={18} />
-            <span>Authorize & Enter</span>
-          </button>
+          <Button 
+            type="submit" 
+            id="btn-login-submit" 
+            icon={KeyRound} 
+            isLoading={loading}
+            style={{ width: "100%", marginTop: "8px" }}
+          >
+            Authorize & Enter
+          </Button>
         </form>
       </section>
       <Loading show={loading} text="Authorizing..." />

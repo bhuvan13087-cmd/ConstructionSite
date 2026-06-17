@@ -29,7 +29,7 @@ export async function getUserProfile(uid) {
   const userDocRef = doc(db, "users", uid);
   const userDoc = await getDoc(userDocRef);
   if (userDoc.exists()) {
-    return userDoc.data();
+    return { uid, id: uid, ...userDoc.data() };
   }
   return null;
 }
@@ -137,38 +137,8 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
 // CONSTRUCTION SITE SERVICES
 // ==========================================================================
 
-// Seed default sites if collection is empty
+// Seed default sites if collection is empty (Disabled for production)
 export async function seedDefaultSites() {
-  const db = getDb();
-  const sitesCollection = collection(db, "sites");
-  const sitesSnapshot = await getDocs(sitesCollection);
-  
-  if (sitesSnapshot.empty) {
-    console.log("Seeding default sites...");
-    const batch = writeBatch(db);
-    const defaultSites = [
-      { id: "site_a", name: "Greenwood Apartments", location: "Sector 45", status: "active" },
-      { id: "site_b", name: "Metro Station Phase 2", location: "Central Line", status: "active" },
-      { id: "site_c", name: "Downtown Office Tower", location: "Business District", status: "active" },
-      { id: "site_d", name: "Highway Overpass Project", location: "Outer Ring Road", status: "active" }
-    ];
-    
-    defaultSites.forEach(site => {
-      const docRef = doc(db, "sites", site.id);
-      batch.set(docRef, {
-        siteName: site.name,
-        location: site.location,
-        status: site.status,
-        assignedEngineers: [],
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
-    });
-    
-    await batch.commit();
-    console.log("Default sites seeded successfully!");
-    return true;
-  }
   return false;
 }
 
@@ -186,95 +156,52 @@ export async function getSites() {
 }
 
 // Create a new construction site document
-export async function createSite(siteName, location, status, assignedEngineers) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = 28.5355, longitude = 77.3910, radius = 500) {
   const db = getDb();
-  const batch = writeBatch(db);
-  
   const newSiteRef = doc(collection(db, "sites"));
-  const siteId = newSiteRef.id;
 
-  // 1. Create site document
-  batch.set(newSiteRef, {
+  await setDoc(newSiteRef, {
     siteName,
+    clientName,
     location,
+    startDate,
+    expectedEndDate,
     status,
-    assignedEngineers,
+    latitude,
+    longitude,
+    radius,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
-
-  // 2. Add siteId to the engineers' assignedSites list
-  assignedEngineers.forEach(engId => {
-    const userDocRef = doc(db, "users", engId);
-    batch.update(userDocRef, {
-      assignedSites: arrayUnion(siteId)
-    });
-  });
-
-  await batch.commit();
 }
 
-// Update site details and sync engineer assignments
-export async function updateSite(siteId, siteName, location, status, assignedEngineers, oldEngineers = []) {
+// Update site details
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, latitude = 28.5355, longitude = 77.3910, radius = 500) {
   const db = getDb();
-  const batch = writeBatch(db);
   const siteDocRef = doc(db, "sites", siteId);
 
-  // 1. Update site details
-  batch.update(siteDocRef, {
+  await updateDoc(siteDocRef, {
     siteName,
+    clientName,
     location,
+    startDate,
+    expectedEndDate,
     status,
-    assignedEngineers,
+    latitude,
+    longitude,
+    radius,
     updatedAt: serverTimestamp()
   });
-
-  // 2. Identify additions and removals
-  const added = assignedEngineers.filter(id => !oldEngineers.includes(id));
-  const removed = oldEngineers.filter(id => !assignedEngineers.includes(id));
-
-  // 3. Remove siteId from removed engineers
-  removed.forEach(engId => {
-    const userDocRef = doc(db, "users", engId);
-    batch.update(userDocRef, {
-      assignedSites: arrayRemove(siteId)
-    });
-  });
-
-  // 4. Add siteId to added engineers
-  added.forEach(engId => {
-    const userDocRef = doc(db, "users", engId);
-    batch.update(userDocRef, {
-      assignedSites: arrayUnion(siteId)
-    });
-  });
-
-  await batch.commit();
 }
 
-// Delete site document and sync engineer assignments
-export async function deleteSite(siteId, assignedEngineers = []) {
+// Delete site document
+export async function deleteSite(siteId) {
   const db = getDb();
-  const batch = writeBatch(db);
   const siteDocRef = doc(db, "sites", siteId);
-
-  // 1. Delete site document
+  const batch = writeBatch(db);
   batch.delete(siteDocRef);
-
-  // 2. Remove siteId association from engineers
-  assignedEngineers.forEach(engId => {
-    const userDocRef = doc(db, "users", engId);
-    batch.update(userDocRef, {
-      assignedSites: arrayRemove(siteId)
-    });
-  });
-
   await batch.commit();
 }
-
-// ==========================================================================
-// METRICS & ANALYTICS SERVICES
-// ==========================================================================
 
 // Load metric counts for Admin Dashboard
 export async function getDashboardMetrics() {
@@ -283,8 +210,8 @@ export async function getDashboardMetrics() {
   let totalSitesCount = 0;
   let activeEngineersCount = 0;
   let attendanceTodayCount = 0;
-  let totalExpensesSum = 0;
-  let dailyUpdatesCount = 0;
+  let totalMaterialsCount = 0;
+  let activeWorkersCount = 0;
 
   try {
     const sitesSnap = await getDocs(collection(db, "sites"));
@@ -306,16 +233,15 @@ export async function getDashboardMetrics() {
     const attendanceSnap = await getDocs(attendanceQuery);
     attendanceTodayCount = attendanceSnap.size;
 
-    const expensesSnap = await getDocs(collection(db, "expenses"));
-    expensesSnap.forEach(doc => {
-      const amt = Number(doc.data().amount);
-      if (!isNaN(amt)) {
-        totalExpensesSum += amt;
-      }
-    });
+    const materialsSnap = await getDocs(collection(db, "materials"));
+    totalMaterialsCount = materialsSnap.size;
 
-    const updatesSnap = await getDocs(collection(db, "dailyUpdates"));
-    dailyUpdatesCount = updatesSnap.size;
+    const workersQuery = query(
+      collection(db, "workers"),
+      where("status", "==", "active")
+    );
+    const workersSnap = await getDocs(workersQuery);
+    activeWorkersCount = workersSnap.size;
   } catch (err) {
     console.warn("Metrics Query Warning (could be empty collections):", err);
   }
@@ -324,47 +250,575 @@ export async function getDashboardMetrics() {
     totalSites: totalSitesCount,
     activeEngineers: activeEngineersCount,
     attendanceToday: attendanceTodayCount,
-    totalExpenses: totalExpensesSum,
-    dailyUpdates: dailyUpdatesCount
+    totalMaterials: totalMaterialsCount,
+    activeWorkers: activeWorkersCount
   };
 }
 
-// Fetch today's progress updates for the engineer's assigned sites
-export async function getTodayUpdates(siteIds) {
-  if (!siteIds || siteIds.length === 0) return [];
-  const db = getDb();
-  const todayStr = new Date().toISOString().split("T")[0];
-  const updates = [];
-  
-  // Chunk queries into groups of 30 due to Firestore IN query limit
-  const chunks = [];
-  for (let i = 0; i < siteIds.length; i += 30) {
-    chunks.push(siteIds.slice(i, i + 30));
-  }
-  
-  for (const chunk of chunks) {
-    const q = query(
-      collection(db, "dailyUpdates"),
-      where("date", "==", todayStr),
-      where("siteId", "in", chunk)
-    );
-    const snap = await getDocs(q);
-    snap.forEach(doc => {
-      updates.push({ id: doc.id, ...doc.data() });
-    });
-  }
-  return updates;
+// Haversine formula to compute distance in meters
+export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth's radius in meters
+  const phi1 = (lat1 * Math.PI) / 180;
+  const phi2 = (lat2 * Math.PI) / 180;
+  const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+  const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+    Math.cos(phi1) * Math.cos(phi2) *
+    Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c;
 }
 
-// Save or overwrite a daily progress log for a site
-export async function saveDailyUpdate(updateData) {
+// Get the engineer's attendance record for a specific date
+export async function getTodayAttendance(engineerId, dateStr) {
   const db = getDb();
-  const docId = `${updateData.siteId}_${updateData.date}`;
-  const docRef = doc(db, "dailyUpdates", docId);
-  await setDoc(docRef, {
-    ...updateData,
+  const attendanceColl = collection(db, "attendance");
+  const q = query(
+    attendanceColl,
+    where("engineerId", "==", engineerId),
+    where("date", "==", dateStr)
+  );
+  const snap = await getDocs(q);
+  if (snap.empty) return null;
+  
+  const records = [];
+  snap.forEach(doc => {
+    records.push({ id: doc.id, ...doc.data() });
+  });
+  return records[0];
+}
+
+// Mark attendance
+export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, photoUrl = "") {
+  const db = getDb();
+  const existing = await getTodayAttendance(engineerId, dateStr);
+  if (existing) {
+    throw new Error("Attendance already marked for today.");
+  }
+  
+  const newAttendanceRef = doc(collection(db, "attendance"));
+  await setDoc(newAttendanceRef, {
+    engineerId,
+    siteId,
+    date: dateStr,
+    checkInTime: serverTimestamp(),
+    latitude,
+    longitude,
+    photoUrl,
+    status: "present"
+  });
+}
+
+// Save site photo
+export async function saveSitePhoto(engineerId, siteId, imageUrl, latitude, longitude) {
+  const db = getDb();
+  const newPhotoRef = doc(collection(db, "sitePhotos"));
+  await setDoc(newPhotoRef, {
+    engineerId,
+    siteId,
+    imageUrl,
+    latitude,
+    longitude,
+    capturedAt: serverTimestamp()
+  });
+}
+
+// Get photos captured by the engineer
+export async function getSitePhotos(engineerId) {
+  const db = getDb();
+  const photosColl = collection(db, "sitePhotos");
+  const q = query(photosColl, where("engineerId", "==", engineerId));
+  const snap = await getDocs(q);
+  
+  const photos = [];
+  snap.forEach(doc => {
+    photos.push({ id: doc.id, ...doc.data() });
+  });
+  return photos.sort((a, b) => {
+    const timeA = a.capturedAt?.seconds || (a.capturedAt ? new Date(a.capturedAt).getTime() : 0);
+    const timeB = b.capturedAt?.seconds || (b.capturedAt ? new Date(b.capturedAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// Save progress report (daily updates)
+export async function saveDailyProgressReport(engineerId, siteId, description, progress, photoIds = []) {
+  const db = getDb();
+  const newUpdateRef = doc(collection(db, "dailyUpdates"));
+  await setDoc(newUpdateRef, {
+    engineerId,
+    siteId,
+    description,
+    progress,
+    photoIds,
+    createdAt: serverTimestamp()
+  });
+}
+
+// Get daily updates for an engineer
+export async function getDailyUpdatesForEngineer(engineerId) {
+  const db = getDb();
+  const updatesColl = collection(db, "dailyUpdates");
+  const q = query(updatesColl, where("engineerId", "==", engineerId));
+  const snap = await getDocs(q);
+  
+  const updates = [];
+  snap.forEach(doc => {
+    updates.push({ id: doc.id, ...doc.data() });
+  });
+  return updates.sort((a, b) => {
+    const timeA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const timeB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// ==========================================================================
+// SITE ASSIGNMENT SERVICES
+// ==========================================================================
+
+// Get all active sites assigned to an engineer
+export async function getAssignedSitesForEngineer(engineerId) {
+  const db = getDb();
+  
+  // 1. Fetch user profile to get assignedSites list directly
+  const profile = await getUserProfile(engineerId);
+  if (!profile || !profile.assignedSites || profile.assignedSites.length === 0) {
+    return [];
+  }
+  
+  const assignedSiteIds = profile.assignedSites;
+
+  // 2. Query sites collection for all these site documents
+  const allSites = await getSites();
+  return allSites.filter(site => assignedSiteIds.includes(site.id));
+}
+
+// Get all site assignments (detailed list with site and engineer profiles)
+export async function getSiteAssignmentsDetailed() {
+  const db = getDb();
+  const assignmentsColl = collection(db, "siteAssignments");
+  const snapshot = await getDocs(assignmentsColl);
+  
+  // Fetch sites and users collections to resolve names
+  const sites = await getSites();
+  const usersCollection = collection(db, "users");
+  const usersSnapshot = await getDocs(usersCollection);
+  
+  const usersMap = {};
+  usersSnapshot.forEach(doc => {
+    usersMap[doc.id] = doc.data();
+  });
+
+  const detailedAssignments = [];
+  snapshot.forEach(docSnap => {
+    const data = docSnap.data();
+    const site = sites.find(s => s.id === data.siteId);
+    const engineer = usersMap[data.engineerId];
+
+    detailedAssignments.push({
+      id: docSnap.id,
+      siteId: data.siteId,
+      engineerId: data.engineerId,
+      assignedBy: data.assignedBy,
+      assignedAt: data.assignedAt,
+      status: data.status,
+      siteName: site ? site.siteName : `Site (ID: ${data.siteId})`,
+      location: site ? site.location : "--",
+      engineerName: engineer ? engineer.fullName : `Engineer (ID: ${data.engineerId})`,
+      engineerEmail: engineer ? engineer.email : "--"
+    });
+  });
+
+  return detailedAssignments.sort((a, b) => {
+    const timeA = a.assignedAt?.seconds || (a.assignedAt ? new Date(a.assignedAt).getTime() : 0);
+    const timeB = b.assignedAt?.seconds || (b.assignedAt ? new Date(b.assignedAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// Assign engineer to site
+export async function assignEngineerToSite(siteId, engineerId, adminId) {
+  const db = getDb();
+  
+  // Validation: Check if site selection is valid
+  const sites = await getSites();
+  const siteExists = sites.some(s => s.id === siteId);
+  if (!siteExists) {
+    throw new Error("Invalid site selected.");
+  }
+
+  // Validation: Check if engineer exists and is active
+  const engineerDocRef = doc(db, "users", engineerId);
+  const engineerDoc = await getDoc(engineerDocRef);
+  if (!engineerDoc.exists()) {
+    throw new Error("Selected engineer profile does not exist.");
+  }
+  const engineerData = engineerDoc.data();
+  if (engineerData.status !== "active") {
+    throw new Error("Cannot assign site to an inactive engineer.");
+  }
+
+  // Validation: Prevent duplicate active assignment
+  const assignmentsColl = collection(db, "siteAssignments");
+  const q = query(
+    assignmentsColl,
+    where("siteId", "==", siteId),
+    where("engineerId", "==", engineerId),
+    where("status", "==", "active")
+  );
+  const existingSnapshot = await getDocs(q);
+  if (!existingSnapshot.empty) {
+    throw new Error("This engineer is already actively assigned to this site.");
+  }
+
+  // Write new assignment doc
+  const batch = writeBatch(db);
+  const newAssignmentRef = doc(collection(db, "siteAssignments"));
+  batch.set(newAssignmentRef, {
+    siteId,
+    engineerId,
+    assignedBy: adminId || "admin",
+    assignedAt: serverTimestamp(),
+    status: "active"
+  });
+
+  // Also update engineer's profile assignedSites list
+  batch.update(engineerDocRef, {
+    assignedSites: arrayUnion(siteId)
+  });
+
+  // Also update site's assignedEngineers list
+  const siteDocRef = doc(db, "sites", siteId);
+  batch.update(siteDocRef, {
+    assignedEngineers: arrayUnion(engineerId)
+  });
+
+  await batch.commit();
+}
+
+// Remove engineer from site (delete or deactivate)
+export async function removeEngineerFromSite(assignmentId) {
+  const db = getDb();
+  const assignmentDocRef = doc(db, "siteAssignments", assignmentId);
+  const assignmentDoc = await getDoc(assignmentDocRef);
+  
+  if (!assignmentDoc.exists()) {
+    throw new Error("Assignment record not found.");
+  }
+  const assignmentData = assignmentDoc.data();
+  const { siteId, engineerId } = assignmentData;
+
+  const batch = writeBatch(db);
+  batch.delete(assignmentDocRef);
+
+  // Remove siteId from engineer's assignedSites list
+  const engineerDocRef = doc(db, "users", engineerId);
+  batch.update(engineerDocRef, {
+    assignedSites: arrayRemove(siteId)
+  });
+
+  // Remove engineerId from site's assignedEngineers list
+  const siteDocRef = doc(db, "sites", siteId);
+  batch.update(siteDocRef, {
+    assignedEngineers: arrayRemove(engineerId)
+  });
+
+  await batch.commit();
+}
+
+// ==========================================================================
+// MATERIAL TRACKING SERVICES
+// ==========================================================================
+
+// Add a new material log
+export async function addMaterial(materialData) {
+  const db = getDb();
+  const materialsColl = collection(db, "materials");
+  const newMaterialRef = doc(materialsColl);
+  
+  await setDoc(newMaterialRef, {
+    siteId: materialData.siteId,
+    engineerId: materialData.engineerId,
+    materialName: materialData.materialName,
+    category: materialData.category,
+    quantity: Number(materialData.quantity),
+    unit: materialData.unit,
+    supplierName: materialData.supplierName,
+    purchaseDate: materialData.purchaseDate,
+    notes: materialData.notes || "",
+    invoiceUrl: materialData.invoiceUrl || "",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
 }
+
+// Get materials, optionally filtered by siteId, and resolve names
+export async function getMaterialsDetailed(siteId = null) {
+  const db = getDb();
+  const materialsColl = collection(db, "materials");
+  
+  let q;
+  if (siteId) {
+    q = query(materialsColl, where("siteId", "==", siteId));
+  } else {
+    q = query(materialsColl);
+  }
+  
+  const snap = await getDocs(q);
+  
+  // Fetch users collection to resolve engineer names
+  const usersColl = collection(db, "users");
+  const usersSnap = await getDocs(usersColl);
+  const usersMap = {};
+  usersSnap.forEach(d => {
+    usersMap[d.id] = d.data();
+  });
+  
+  // Fetch sites list to resolve site names
+  const sites = await getSites();
+  const sitesMap = {};
+  sites.forEach(s => {
+    sitesMap[s.id] = s;
+  });
+  
+  const detailedMaterials = [];
+  snap.forEach(docSnap => {
+    const data = docSnap.data();
+    const engineer = usersMap[data.engineerId];
+    const site = sitesMap[data.siteId];
+    
+    detailedMaterials.push({
+      id: docSnap.id,
+      ...data,
+      engineerName: engineer ? engineer.fullName : `Engineer (ID: ${data.engineerId})`,
+      siteName: site ? site.siteName : `Site (ID: ${data.siteId})`
+    });
+  });
+  
+  // Sort by createdAt descending
+  return detailedMaterials.sort((a, b) => {
+    const timeA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const timeB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// ==========================================================================
+// LABOUR MANAGEMENT SERVICES
+// ==========================================================================
+
+// Add a new construction worker
+export async function addWorker(workerData) {
+  const db = getDb();
+  const workersColl = collection(db, "workers");
+  const newWorkerRef = doc(workersColl);
+  
+  await setDoc(newWorkerRef, {
+    siteId: workerData.siteId,
+    engineerId: workerData.engineerId,
+    workerName: workerData.workerName,
+    category: workerData.category,
+    phoneNumber: workerData.phoneNumber,
+    joiningDate: workerData.joiningDate,
+    status: workerData.status || "active",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Toggle a worker's status (Active / Inactive)
+export async function updateWorkerStatus(workerId, status) {
+  const db = getDb();
+  const workerDocRef = doc(db, "workers", workerId);
+  await updateDoc(workerDocRef, {
+    status,
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Fetch workers (optionally filtered by siteId)
+export async function getWorkers(siteId = null) {
+  const db = getDb();
+  const workersColl = collection(db, "workers");
+  
+  let q;
+  if (siteId) {
+    q = query(workersColl, where("siteId", "==", siteId));
+  } else {
+    q = query(workersColl);
+  }
+  
+  const snap = await getDocs(q);
+  const workers = [];
+  snap.forEach(d => {
+    workers.push({ id: d.id, ...d.data() });
+  });
+  
+  // Sort by workerName alphabetically
+  return workers.sort((a, b) => a.workerName.localeCompare(b.workerName));
+}
+
+// Save/Mark daily workers attendance batch (idempotent setDoc writes)
+export async function saveLabourAttendance(siteId, engineerId, dateStr, attendanceList) {
+  const db = getDb();
+  const batch = writeBatch(db);
+  
+  for (const item of attendanceList) {
+    const docId = `${siteId}_${item.workerId}_${dateStr}`;
+    const docRef = doc(db, "labourAttendance", docId);
+    
+    batch.set(docRef, {
+      siteId,
+      workerId: item.workerId,
+      date: dateStr,
+      status: item.status, // "present" or "absent"
+      markedBy: engineerId,
+      createdAt: serverTimestamp()
+    });
+  }
+  
+  await batch.commit();
+}
+
+// Get attendance logs for a site and date
+export async function getLabourAttendance(siteId, dateStr) {
+  const db = getDb();
+  const attendanceColl = collection(db, "labourAttendance");
+  const q = query(
+    attendanceColl,
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(d => {
+    records.push({ id: d.id, ...d.data() });
+  });
+  return records;
+}
+
+// Get attendance summary history (dates & counts) for admin reports
+export async function getLabourAttendanceSummary(siteId) {
+  const db = getDb();
+  const attendanceColl = collection(db, "labourAttendance");
+  const q = query(attendanceColl, where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  
+  const summaryMap = {};
+  snap.forEach(d => {
+    const data = d.data();
+    const date = data.date;
+    if (!summaryMap[date]) {
+      summaryMap[date] = { present: 0, absent: 0 };
+    }
+    if (data.status === "present") {
+      summaryMap[date].present += 1;
+    } else {
+      summaryMap[date].absent += 1;
+    }
+  });
+  
+  const summaryList = Object.keys(summaryMap).map(date => ({
+    date,
+    present: summaryMap[date].present,
+    absent: summaryMap[date].absent
+  }));
+  
+  // Sort by date descending
+  return summaryList.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// ==========================================================================
+// DAILY LABOUR COUNTS SERVICES (COUNT-BASED SYSTEM)
+// ==========================================================================
+
+// Save daily category counts for workers (idempotent writes using deterministic IDs)
+export async function saveLabourDailyCounts(siteId, engineerId, dateStr, countsMap) {
+  const db = getDb();
+  const batch = writeBatch(db);
+  
+  const categories = ["Mason", "Helper", "Painter", "Plumber", "Electrician", "Other"];
+  for (const category of categories) {
+    const docId = `${siteId}_${dateStr}_${category}`;
+    const docRef = doc(db, "labourDailyCount", docId);
+    const count = Number(countsMap[category]) || 0;
+    
+    batch.set(docRef, {
+      siteId,
+      engineerId,
+      date: dateStr,
+      category,
+      count,
+      createdAt: serverTimestamp()
+    });
+  }
+  
+  await batch.commit();
+}
+
+// Fetch worker counts for a specific site and date
+export async function getLabourDailyCounts(siteId, dateStr) {
+  const db = getDb();
+  const countsColl = collection(db, "labourDailyCount");
+  const q = query(
+    countsColl,
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  
+  const snap = await getDocs(q);
+  const counts = {};
+  // Pre-populate with 0 for all categories
+  const categories = ["Mason", "Helper", "Painter", "Plumber", "Electrician", "Other"];
+  categories.forEach(cat => {
+    counts[cat] = 0;
+  });
+  
+  snap.forEach(d => {
+    const data = d.data();
+    counts[data.category] = Number(data.count) || 0;
+  });
+  return counts;
+}
+
+// Fetch historical daily counts list for Site Engineer Dashboard and Admin Auditing
+export async function getLabourDailyCountsHistory(siteId) {
+  const db = getDb();
+  const countsColl = collection(db, "labourDailyCount");
+  const q = query(countsColl, where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  
+  // Group by date to show a clean list of dates with counts
+  const historyMap = {};
+  snap.forEach(d => {
+    const data = d.data();
+    const date = data.date;
+    if (!historyMap[date]) {
+      historyMap[date] = { date, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0 };
+    }
+    const categoryKey = data.category === "Mason" ? "Masons" :
+                        data.category === "Helper" ? "Helpers" :
+                        data.category === "Painter" ? "Painters" :
+                        data.category === "Plumber" ? "Plumbers" :
+                        data.category === "Electrician" ? "Electricians" : "Others";
+    
+    const countVal = Number(data.count) || 0;
+    historyMap[date][categoryKey] = countVal;
+    historyMap[date].total += countVal;
+  });
+  
+  return Object.values(historyMap).sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// Aggregates counts by date to support the Admin Dashboard (aliased to getLabourDailyCountsHistory)
+export async function getLabourDailyCountsSummary(siteId) {
+  return getLabourDailyCountsHistory(siteId);
+}
+
+
 

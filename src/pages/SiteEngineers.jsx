@@ -8,13 +8,16 @@ import {
 } from "../services/firebaseService";
 import { registerEngineerAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
+import Card from "../components/common/Card";
+import Button from "../components/common/Button";
+import Badge from "../components/common/Badge";
+import Modal from "../components/common/Modal";
 import { 
   Plus, 
   Search, 
   Eye, 
   Edit3, 
   Save, 
-  X, 
   User, 
   Mail, 
   Lock, 
@@ -215,255 +218,235 @@ export default function SiteEngineers() {
             />
           </div>
         </div>
-        <button onClick={handleOpenAddModal} id="btn-add-engineer" className="btn btn-primary btn-add">
-          <Plus size={16} />
-          <span>Add Engineer</span>
-        </button>
+        <Button onClick={handleOpenAddModal} id="btn-add-engineer" icon={Plus} className="btn-add">
+          Add Engineer
+        </Button>
       </div>
 
       {/* Main Table */}
-      <div className="table-card">
-        <div className="table-container">
-          <table className="data-table">
-            <thead>
+      <Card variant="table">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Phone Number</th>
+              <th>Status</th>
+              <th>Assigned Sites</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredEngineers.length === 0 ? (
               <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Phone Number</th>
-                <th>Status</th>
-                <th>Assigned Sites</th>
-                <th className="text-right">Actions</th>
+                <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                  No site engineers found. Click "Add Engineer" to register one.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {filteredEngineers.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "30px" }}>
-                    No site engineers found. Click "Add Engineer" to register one.
-                  </td>
-                </tr>
-              ) : (
-                filteredEngineers.map((eng) => {
-                  const statusClass = eng.status === "active" ? "badge-success" : "badge-danger";
-                  const statusText = eng.status === "active" ? "Active" : "Inactive";
-                  const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
+            ) : (
+              filteredEngineers.map((eng) => {
+                const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
 
-                  return (
-                    <tr key={eng.id}>
-                      <td style={{ fontWeight: 700 }}>{eng.fullName}</td>
-                      <td className="font-mono">{eng.email}</td>
-                      <td>{eng.phoneNumber || "--"}</td>
-                      <td>
-                        <span className={`badge ${statusClass}`}>{statusText}</span>
-                      </td>
-                      <td>
-                        <span className="badge badge-pending">{sitesCount} Sites</span>
-                      </td>
-                      <td>
-                        <div className="table-actions">
-                          <button onClick={() => handleOpenDetails(eng)} className="btn-icon btn-view-action" title="View Details">
-                            <Eye size={16} />
-                          </button>
-                          <button onClick={() => handleOpenEditModal(eng)} className="btn-icon btn-edit-action" title="Edit Profile">
-                            <Edit3 size={16} />
-                          </button>
-                          <label className="switch-control" title={eng.status === 'active' ? 'Deactivate' : 'Activate'}>
-                            <input 
-                              type="checkbox" 
-                              className="toggle-status-action" 
-                              checked={eng.status === 'active'}
-                              onChange={() => handleToggleStatus(eng.id, eng.status)}
-                            />
-                            <span className="switch-slider"></span>
-                          </label>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                return (
+                  <tr key={eng.id}>
+                    <td style={{ fontWeight: 700 }}>{eng.fullName}</td>
+                    <td className="font-mono">{eng.email}</td>
+                    <td>{eng.phoneNumber || "--"}</td>
+                    <td>
+                      <Badge status={eng.status || "inactive"} />
+                    </td>
+                    <td>
+                      <Badge status="pending">{sitesCount} Sites</Badge>
+                    </td>
+                    <td>
+                      <div className="table-actions">
+                        <button onClick={() => handleOpenDetails(eng)} className="btn-icon btn-view-action" title="View Details">
+                          <Eye size={16} />
+                        </button>
+                        <button onClick={() => handleOpenEditModal(eng)} className="btn-icon btn-edit-action" title="Edit Profile">
+                          <Edit3 size={16} />
+                        </button>
+                        <label className="switch-control" title={eng.status === 'active' ? 'Deactivate' : 'Activate'}>
+                          <input 
+                            type="checkbox" 
+                            className="toggle-status-action" 
+                            checked={eng.status === 'active'}
+                            onChange={() => handleToggleStatus(eng.id, eng.status)}
+                          />
+                          <span className="switch-slider"></span>
+                        </label>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </Card>
 
       {/* MODAL: ADD/EDIT SITE ENGINEER */}
-      {showFormModal && (
-        <div className="modal-overlay" style={{ display: "flex" }}>
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>{formMode === "add" ? "Add Site Engineer" : "Edit Site Engineer"}</h3>
-              <button onClick={() => setShowFormModal(false)} type="button" className="btn-close-modal">
-                <X size={18} />
-              </button>
+      <Modal 
+        isOpen={showFormModal} 
+        onClose={() => setShowFormModal(false)} 
+        title={formMode === "add" ? "Add Site Engineer" : "Edit Site Engineer"}
+      >
+        <form onSubmit={handleFormSubmit} style={{ margin: 0, padding: 0 }}>
+          <div className="form-group">
+            <label htmlFor="engineer-name">Full Name</label>
+            <div className="input-wrapper">
+              <User className="input-icon" size={16} />
+              <input 
+                type="text" 
+                id="engineer-name" 
+                placeholder="John Doe" 
+                value={formName}
+                onChange={(e) => setFormName(e.target.value)}
+                required 
+              />
             </div>
-            <form onSubmit={handleFormSubmit} className="modal-form">
-              <div className="form-group">
-                <label htmlFor="engineer-name">Full Name</label>
-                <div className="input-wrapper">
-                  <User className="input-icon" size={16} />
-                  <input 
-                    type="text" 
-                    id="engineer-name" 
-                    placeholder="John Doe" 
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="engineer-email">Email Address</label>
-                <div className="input-wrapper">
-                  <Mail className="input-icon" size={16} />
-                  <input 
-                    type="email" 
-                    id="engineer-email" 
-                    placeholder="john.doe@example.com" 
-                    value={formEmail}
-                    onChange={(e) => setFormEmail(e.target.value)}
-                    disabled={formMode === "edit"}
-                    required 
-                  />
-                </div>
-              </div>
-
-              {formMode === "add" && (
-                <div className="form-group">
-                  <label htmlFor="engineer-password">Password</label>
-                  <div className="input-wrapper">
-                    <Lock className="input-icon" size={16} />
-                    <input 
-                      type="password" 
-                      id="engineer-password" 
-                      placeholder="••••••••" 
-                      value={formPassword}
-                      onChange={(e) => setFormPassword(e.target.value)}
-                      required 
-                    />
-                  </div>
-                  <p className="field-hint">Enter a security password (min 6 characters).</p>
-                </div>
-              )}
-
-              <div className="form-group">
-                <label htmlFor="engineer-phone">Phone Number</label>
-                <div className="input-wrapper">
-                  <Phone className="input-icon" size={16} />
-                  <input 
-                    type="tel" 
-                    id="engineer-phone" 
-                    placeholder="+91 9876543210" 
-                    value={formPhone}
-                    onChange={(e) => setFormPhone(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label>Assign Construction Sites</label>
-                <div className="checkbox-grid">
-                  {sites.map(site => (
-                    <label key={site.id} className="checkbox-label">
-                      <input 
-                        type="checkbox" 
-                        value={site.id} 
-                        checked={formSelectedSites.includes(site.id)}
-                        onChange={() => handleCheckboxChange(site.id)}
-                      />
-                      <span> {site.siteName}</span>
-                    </label>
-                  ))}
-                </div>
-                <p className="field-hint">Assign one or multiple sites to this engineer.</p>
-              </div>
-
-              <div className="modal-actions">
-                <button onClick={() => setShowFormModal(false)} type="button" className="btn btn-outline">Cancel</button>
-                <button type="submit" className="btn btn-primary">
-                  <Save size={16} />
-                  <span>Save Engineer</span>
-                </button>
-              </div>
-            </form>
           </div>
-        </div>
-      )}
+
+          <div className="form-group">
+            <label htmlFor="engineer-email">Email Address</label>
+            <div className="input-wrapper">
+              <Mail className="input-icon" size={16} />
+              <input 
+                type="email" 
+                id="engineer-email" 
+                placeholder="john.doe@example.com" 
+                value={formEmail}
+                onChange={(e) => setFormEmail(e.target.value)}
+                disabled={formMode === "edit"}
+                required 
+              />
+            </div>
+          </div>
+
+          {formMode === "add" && (
+            <div className="form-group">
+              <label htmlFor="engineer-password">Password</label>
+              <div className="input-wrapper">
+                <Lock className="input-icon" size={16} />
+                <input 
+                  type="password" 
+                  id="engineer-password" 
+                  placeholder="••••••••" 
+                  value={formPassword}
+                  onChange={(e) => setFormPassword(e.target.value)}
+                  required 
+                />
+              </div>
+              <p className="field-hint">Enter a security password (min 6 characters).</p>
+            </div>
+          )}
+
+          <div className="form-group">
+            <label htmlFor="engineer-phone">Phone Number</label>
+            <div className="input-wrapper">
+              <Phone className="input-icon" size={16} />
+              <input 
+                type="tel" 
+                id="engineer-phone" 
+                placeholder="+91 9876543210" 
+                value={formPhone}
+                onChange={(e) => setFormPhone(e.target.value)}
+                required 
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Assign Construction Sites</label>
+            <div className="checkbox-grid">
+              {sites.map(site => (
+                <label key={site.id} className="checkbox-label">
+                  <input 
+                    type="checkbox" 
+                    value={site.id} 
+                    checked={formSelectedSites.includes(site.id)}
+                    onChange={() => handleCheckboxChange(site.id)}
+                  />
+                  <span> {site.siteName}</span>
+                </label>
+              ))}
+            </div>
+            <p className="field-hint">Assign one or multiple sites to this engineer.</p>
+          </div>
+
+          <div className="modal-actions" style={{ margin: "24px -24px -24px -24px" }}>
+            <Button variant="outline" onClick={() => setShowFormModal(false)}>Cancel</Button>
+            <Button type="submit" icon={Save}>
+              Save Engineer
+            </Button>
+          </div>
+        </form>
+      </Modal>
 
       {/* MODAL: SITE ENGINEER DETAILS */}
-      {showDetailsModal && selectedEngineer && (
-        <div className="modal-overlay" style={{ display: "flex" }}>
-          <div className="modal-card">
-            <div className="modal-header">
-              <h3>Site Engineer Details</h3>
-              <button onClick={() => setShowDetailsModal(false)} type="button" className="btn-close-modal">
-                <X size={18} />
-              </button>
-            </div>
-            <div className="modal-body">
-              <div className="detail-profile-header">
-                <div className="detail-avatar">
-                  {selectedEngineer.fullName
-                    ? selectedEngineer.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()
-                    : "SE"}
-                </div>
-                <div className="detail-profile-meta">
-                  <h4>{selectedEngineer.fullName}</h4>
-                  <span className={`badge ${selectedEngineer.status === 'active' ? 'badge-success' : 'badge-danger'}`}>
-                    {selectedEngineer.status === 'active' ? 'Active' : 'Inactive'}
-                  </span>
-                </div>
+      <Modal 
+        isOpen={showDetailsModal} 
+        onClose={() => setShowDetailsModal(false)} 
+        title="Site Engineer Details"
+        footer={<Button variant="outline" onClick={() => setShowDetailsModal(false)}>Close</Button>}
+      >
+        {selectedEngineer && (
+          <div>
+            <div className="detail-profile-header">
+              <div className="detail-avatar">
+                {selectedEngineer.fullName
+                  ? selectedEngineer.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()
+                  : "SE"}
               </div>
-
-              <div className="detail-grid">
-                <div className="detail-info-item">
-                  <span className="detail-info-label">Email Address</span>
-                  <span className="detail-info-value font-mono">{selectedEngineer.email}</span>
-                </div>
-                <div className="detail-info-item">
-                  <span className="detail-info-label">Phone Number</span>
-                  <span className="detail-info-value">{selectedEngineer.phoneNumber || "--"}</span>
-                </div>
-                <div className="detail-info-item">
-                  <span className="detail-info-label">System Role</span>
-                  <span className="detail-info-value font-mono">Site Engineer</span>
-                </div>
-                <div className="detail-info-item">
-                  <span className="detail-info-label">Joined On</span>
-                  <span className="detail-info-value">
-                    {selectedEngineer.createdAt 
-                      ? (selectedEngineer.createdAt.seconds 
-                          ? new Date(selectedEngineer.createdAt.seconds * 1000).toLocaleDateString() 
-                          : new Date(selectedEngineer.createdAt).toLocaleDateString())
-                      : "--"}
-                  </span>
-                </div>
-              </div>
-
-              <div className="detail-sites-section">
-                <h5>Assigned Construction Sites</h5>
-                <ul className="detail-sites-list">
-                  {(!selectedEngineer.assignedSites || selectedEngineer.assignedSites.length === 0) ? (
-                    <li style={{ backgroundColor: "transparent", border: "none", color: "var(--text-muted)", padding: 0 }}>
-                      No construction sites assigned.
-                    </li>
-                  ) : (
-                    selectedEngineer.assignedSites.map(siteId => {
-                      const site = sites.find(s => s.id === siteId);
-                      return <li key={siteId}>{site ? site.siteName : `Site (ID: ${siteId})`}</li>;
-                    })
-                  )}
-                </ul>
+              <div className="detail-profile-meta">
+                <h4>{selectedEngineer.fullName}</h4>
+                <Badge status={selectedEngineer.status} />
               </div>
             </div>
-            <div className="modal-actions">
-              <button onClick={() => setShowDetailsModal(false)} type="button" className="btn btn-outline">Close</button>
+
+            <div className="detail-grid">
+              <div className="detail-info-item">
+                <span className="detail-info-label">Email Address</span>
+                <span className="detail-info-value font-mono">{selectedEngineer.email}</span>
+              </div>
+              <div className="detail-info-item">
+                <span className="detail-info-label">Phone Number</span>
+                <span className="detail-info-value">{selectedEngineer.phoneNumber || "--"}</span>
+              </div>
+              <div className="detail-info-item">
+                <span className="detail-info-label">System Role</span>
+                <span className="detail-info-value font-mono">Site Engineer</span>
+              </div>
+              <div className="detail-info-item">
+                <span className="detail-info-label">Joined On</span>
+                <span className="detail-info-value">
+                  {selectedEngineer.createdAt 
+                    ? (selectedEngineer.createdAt.seconds 
+                        ? new Date(selectedEngineer.createdAt.seconds * 1000).toLocaleDateString() 
+                        : new Date(selectedEngineer.createdAt).toLocaleDateString())
+                    : "--"}
+                </span>
+              </div>
+            </div>
+
+            <div className="detail-sites-section">
+              <h5>Assigned Construction Sites</h5>
+              <ul className="detail-sites-list">
+                {(!selectedEngineer.assignedSites || selectedEngineer.assignedSites.length === 0) ? (
+                  <li style={{ backgroundColor: "transparent", border: "none", color: "var(--text-muted)", padding: 0 }}>
+                    No construction sites assigned.
+                  </li>
+                ) : (
+                  selectedEngineer.assignedSites.map(siteId => {
+                    const site = sites.find(s => s.id === siteId);
+                    return <li key={siteId}>{site ? site.siteName : `Site (ID: ${siteId})`}</li>;
+                  })
+                )}
+              </ul>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>
