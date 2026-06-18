@@ -7,7 +7,14 @@ let secondaryApp = null;
 
 import { firebaseConfig as importedConfig } from "../../env";
 
-export const firebaseConfig = importedConfig;
+export const firebaseConfig = {
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || importedConfig?.apiKey,
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || importedConfig?.authDomain,
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || importedConfig?.projectId,
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || importedConfig?.storageBucket,
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || importedConfig?.messagingSenderId,
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || importedConfig?.appId,
+};
 
 // Check if config exists
 export function getStoredConfig() {
