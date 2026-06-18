@@ -5,6 +5,8 @@ import AdminDashboard from "../pages/AdminDashboard";
 import SiteEngineers from "../pages/SiteEngineers";
 import Sites from "../pages/Sites";
 import SiteAssignments from "../pages/SiteAssignments";
+import AdminMaterials from "../pages/AdminMaterials";
+import AdminLabour from "../pages/AdminLabour";
 import EngineerDashboard from "../pages/EngineerDashboard";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import { useAuth } from "../context/AuthContext";
@@ -24,6 +26,8 @@ export default function AppRoutes() {
         <Route path="/admin/engineers" element={<SiteEngineers />} />
         <Route path="/admin/sites" element={<Sites />} />
         <Route path="/admin/assignments" element={<SiteAssignments />} />
+        <Route path="/admin/materials" element={<AdminMaterials />} />
+        <Route path="/admin/labour" element={<AdminLabour />} />
       </Route>
 
       {/* Protected Site Engineer Area */}

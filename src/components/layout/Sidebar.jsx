@@ -73,6 +73,24 @@ export default function Sidebar({ isOpen, onClose }) {
               <ClipboardCheck size={18} />
               <span>Site Assignments</span>
             </NavLink>
+
+            <NavLink 
+              to="/admin/materials" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Package size={18} />
+              <span>Material Logs</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/labour" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Labour Logs</span>
+            </NavLink>
           </>
         ) : (
           <>
