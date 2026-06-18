@@ -12,6 +12,7 @@ import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
+import Modal from "../components/common/Modal";
 import { 
   Plus, 
   Trash2, 
@@ -27,6 +28,7 @@ export default function SiteAssignments() {
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [assignments, setAssignments] = useState([]);
+  const [showAssignModal, setShowAssignModal] = useState(false);
   
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -129,6 +131,7 @@ export default function SiteAssignments() {
       const adminId = user?.uid || "admin";
       await assignEngineerToSite(selectedSiteId, selectedEngineerId, adminId);
       showToast("Site assignment created successfully!", "success");
+      setShowAssignModal(false);
       await loadData();
     } catch (err) {
       console.error("Assignment submission error:", err);
@@ -177,146 +180,149 @@ export default function SiteAssignments() {
         </div>
       )}
 
-      <div className="assignment-grid">
-        
-        {/* LEFT COLUMN: Create Site Assignment Form */}
-        <Card 
-          variant="accent"
-          title="Assign Engineer to Site"
-        >
-          <form onSubmit={handleAssignSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label htmlFor="assignment-site-select">Select Construction Site</label>
-              <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                <MapPin className="input-icon" size={16} />
-                <select
-                  id="assignment-site-select"
-                  value={selectedSiteId}
-                  onChange={(e) => setSelectedSiteId(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "12px 14px 12px 40px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    backgroundColor: "#ffffff",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    outline: "none"
-                  }}
-                >
-                  {sites.length === 0 ? (
-                    <option value="">No sites registered</option>
-                  ) : (
-                    sites.map(site => (
-                      <option key={site.id} value={site.id}>{site.siteName} ({site.location})</option>
-                    ))
-                  )}
-                </select>
-              </div>
-            </div>
+      {/* Toolbar actions */}
+      <div className="subview-actions-header" style={{ justifyContent: "flex-end", marginBottom: "16px" }}>
+        <Button onClick={() => setShowAssignModal(true)} id="btn-assign-engineer" icon={UserCheck} className="btn-add">
+          Assign Engineer to Site
+        </Button>
+      </div>
 
-            <div className="form-group" style={{ margin: 0 }}>
-              <label htmlFor="assignment-engineer-select">Select Active Engineer</label>
-              <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                <User className="input-icon" size={16} />
-                <select
-                  id="assignment-engineer-select"
-                  value={selectedEngineerId}
-                  onChange={(e) => setSelectedEngineerId(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "12px 14px 12px 40px",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    backgroundColor: "#ffffff",
-                    fontWeight: 600,
-                    cursor: "pointer",
-                    outline: "none"
-                  }}
-                >
-                  {activeEngineersList.length === 0 ? (
-                    <option value="">No active engineers available</option>
-                  ) : (
-                    activeEngineersList.map(eng => (
-                      <option key={eng.id} value={eng.id}>{eng.fullName}</option>
-                    ))
-                  )}
-                </select>
-              </div>
-            </div>
+      {/* Full width Active Assignments table */}
+      <Card variant="table" title="Active Site Allocations">
+        <table className="data-table" style={{ margin: "0" }}>
+          <thead>
+            <tr>
+              <th>Site Name</th>
+              <th>Assigned Engineer</th>
+              <th>Assignment Status</th>
+              <th>Assigned Date</th>
+              <th className="text-right">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {assignments.length === 0 ? (
+              <tr>
+                <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                  No active site assignments found. Click "Assign Engineer to Site" to make one.
+                </td>
+              </tr>
+            ) : (
+              assignments.map((asg) => {
+                const assignedDateStr = asg.assignedAt
+                  ? (asg.assignedAt.seconds
+                      ? new Date(asg.assignedAt.seconds * 1000).toLocaleDateString()
+                      : new Date(asg.assignedAt).toLocaleDateString())
+                  : "N/A";
 
+                return (
+                  <tr key={asg.id}>
+                    <td style={{ fontWeight: 700 }}>{asg.siteName}</td>
+                    <td>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "var(--primary-800)" }}>{asg.engineerName}</div>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-family-body)" }}>{asg.engineerEmail}</div>
+                      </div>
+                    </td>
+                    <td>
+                      <Badge status={asg.status} />
+                    </td>
+                    <td className="font-mono">{assignedDateStr}</td>
+                    <td>
+                      <div className="table-actions" style={{ justifyContent: "flex-end" }}>
+                        <button 
+                          onClick={() => handleRemoveAssignment(asg)} 
+                          className="btn-icon" 
+                          title="Remove Assignment" 
+                          style={{ color: "var(--danger-500)", width: "32px", height: "32px" }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </Card>
+
+      {/* MODAL: ASSIGN ENGINEER TO SITE */}
+      <Modal
+        isOpen={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        title="Assign Engineer to Site"
+        maxWidth="480px"
+      >
+        <form onSubmit={handleAssignSubmit} style={{ margin: 0, padding: 0 }}>
+          <div className="form-group">
+            <label htmlFor="assignment-site-select">Select Construction Site</label>
+            <div className="input-wrapper" style={{ marginTop: "4px" }}>
+              <MapPin className="input-icon" size={16} />
+              <select
+                id="assignment-site-select"
+                value={selectedSiteId}
+                onChange={(e) => setSelectedSiteId(e.target.value)}
+                required
+                style={{
+                  width: "100%",
+                  padding: "12px 14px 12px 40px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  outline: "none"
+                }}
+              >
+                <option value="" disabled>-- Choose a Site --</option>
+                {sites.map(site => (
+                  <option key={site.id} value={site.id}>{site.siteName} ({site.location})</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group" style={{ marginTop: "16px" }}>
+            <label htmlFor="assignment-engineer-select">Select Active Engineer</label>
+            <div className="input-wrapper" style={{ marginTop: "4px" }}>
+              <User className="input-icon" size={16} />
+              <select
+                id="assignment-engineer-select"
+                value={selectedEngineerId}
+                onChange={(e) => setSelectedEngineerId(e.target.value)}
+                required
+                style={{
+                  width: "100%",
+                  padding: "12px 14px 12px 40px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  outline: "none"
+                }}
+              >
+                <option value="" disabled>-- Choose an Engineer --</option>
+                {activeEngineersList.map(eng => (
+                  <option key={eng.id} value={eng.id}>{eng.fullName}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="modal-actions" style={{ margin: "24px -24px -24px -24px" }}>
+            <Button variant="outline" onClick={() => setShowAssignModal(false)}>Cancel</Button>
             <Button 
               type="submit" 
               icon={Plus}
               disabled={sites.length === 0 || activeEngineersList.length === 0}
-              style={{ width: "100%", marginTop: "8px" }}
             >
-              Create Assignment
+              Assign Engineer
             </Button>
-          </form>
-        </Card>
-
-        {/* RIGHT COLUMN: Active Assignments table */}
-        <Card variant="table" title="Active Site Allocations">
-          <table className="data-table" style={{ margin: "0" }}>
-            <thead>
-              <tr>
-                <th>Site Name</th>
-                <th>Assigned Engineer</th>
-                <th>Assignment Status</th>
-                <th>Assigned Date</th>
-                <th className="text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {assignments.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    No active site assignments found. Use the form to assign engineers.
-                  </td>
-                </tr>
-              ) : (
-                assignments.map((asg) => {
-                  const assignedDateStr = asg.assignedAt
-                    ? (asg.assignedAt.seconds
-                        ? new Date(asg.assignedAt.seconds * 1000).toLocaleDateString()
-                        : new Date(asg.assignedAt).toLocaleDateString())
-                    : "N/A";
-
-                  return (
-                    <tr key={asg.id}>
-                      <td style={{ fontWeight: 700 }}>{asg.siteName}</td>
-                      <td>
-                        <div>
-                          <div style={{ fontWeight: 700, color: "var(--primary-800)" }}>{asg.engineerName}</div>
-                          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--font-family-body)" }}>{asg.engineerEmail}</div>
-                        </div>
-                      </td>
-                      <td>
-                        <Badge status={asg.status} />
-                      </td>
-                      <td className="font-mono">{assignedDateStr}</td>
-                      <td>
-                        <div className="table-actions" style={{ justifyContent: "flex-end" }}>
-                          <button 
-                            onClick={() => handleRemoveAssignment(asg)} 
-                            className="btn-icon" 
-                            title="Remove Assignment" 
-                            style={{ color: "var(--danger-500)", width: "32px", height: "32px" }}
-                          >
-                            <Trash2 size={16} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </Card>
-
-      </div>
+          </div>
+        </form>
+      </Modal>
 
       <Loading show={loading} text="Updating assignments..." />
     </Layout>

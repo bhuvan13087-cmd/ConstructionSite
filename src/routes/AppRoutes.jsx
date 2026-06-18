@@ -14,7 +14,8 @@ export default function AppRoutes() {
 
   return (
     <Routes>
-      {/* Login route */}
+      {/* Landing / Login routes */}
+      <Route path="/" element={<Login />} />
       <Route path="/login" element={<Login />} />
 
       {/* Protected Admin Dashboard Area */}

@@ -5,15 +5,9 @@ import { getFirestore } from "firebase/firestore";
 let firebaseApp = null;
 let secondaryApp = null;
 
-// Hardcoded Firebase configuration parameters
-export const firebaseConfig = {
-  apiKey: "AIzaSyBna0WHr527cwXcE76Ek-Nmomq4ayYhZDQ",
-  authDomain: "studio-7044154747-fb0fa.firebaseapp.com",
-  projectId: "studio-7044154747-fb0fa",
-  storageBucket: "studio-7044154747-fb0fa.firebasestorage.app",
-  messagingSenderId: "201376845036",
-  appId: "1:201376845036:web:d50fb937ecc740e480e9c9"
-};
+import { firebaseConfig as importedConfig } from "../../env";
+
+export const firebaseConfig = importedConfig;
 
 // Check if config exists
 export function getStoredConfig() {
@@ -22,7 +16,12 @@ export function getStoredConfig() {
 
 // Check if Firebase is configured
 export function isFirebaseConfigured() {
-  return true;
+  return (
+    firebaseConfig && 
+    firebaseConfig.apiKey && 
+    firebaseConfig.apiKey !== "YOUR_API_KEY_HERE" && 
+    firebaseConfig.apiKey !== ""
+  );
 }
 
 // Initialize Firebase App and secondary instances

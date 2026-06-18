@@ -2,7 +2,9 @@ import {
   signInWithEmailAndPassword, 
   createUserWithEmailAndPassword, 
   signOut, 
-  onAuthStateChanged 
+  onAuthStateChanged,
+  sendPasswordResetEmail,
+  updatePassword
 } from "firebase/auth";
 import { getFirebaseAuth, getSecondaryAuth } from "./config";
 
@@ -38,3 +40,21 @@ export async function registerEngineerAuth(email, password) {
   await signOut(secondaryAuth);
   return userCredential.user;
 }
+
+// Send password reset email
+export async function sendEngineerPasswordReset(email) {
+  const auth = getFirebaseAuth();
+  return sendPasswordResetEmail(auth, email);
+}
+
+// Update password on secondary auth instance by signing in first
+export async function updateEngineerPasswordAuth(email, currentPassword, newPassword) {
+  const secondaryAuth = getSecondaryAuth();
+  // Sign in secondary app session to authenticate the user
+  const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, currentPassword);
+  // Update password
+  await updatePassword(userCredential.user, newPassword);
+  // Sign out secondary app session immediately to prevent caching conflicts
+  await signOut(secondaryAuth);
+}
+

@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
-import { getStoredConfig } from "../firebase/config";
 import { useAuth } from "../context/AuthContext";
 import { getDashboardMetrics, getSites, getMaterialsDetailed, getLabourDailyCountsSummary } from "../services/firebaseService";
-import { MapPin, Users, ClipboardCheck, FileText, Wifi, WifiOff, Package, ExternalLink } from "lucide-react";
+import { MapPin, Users, ClipboardCheck, FileText, Package, ExternalLink } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
@@ -19,7 +18,6 @@ export default function AdminDashboard() {
   });
   const [sites, setSites] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
 
   // Material tracking states
@@ -31,41 +29,6 @@ export default function AdminDashboard() {
   const [selectedLabourSiteId, setSelectedLabourSiteId] = useState("");
   const [labourHistory, setLabourHistory] = useState([]);
   const [labourLoading, setLabourLoading] = useState(false);
-
-  const config = getStoredConfig();
-  const projectId = config?.projectId || "--";
-  const adminEmail = user?.email || userProfile?.email || "admin@gmail.com";
-  
-  const [lastLoginStr, setLastLoginStr] = useState("First Session Access");
-
-  useEffect(() => {
-    if (userProfile?.lastLogin) {
-      const lastLoginVal = userProfile.lastLogin;
-      let dateObj;
-      if (lastLoginVal.seconds) {
-        dateObj = new Date(lastLoginVal.seconds * 1000);
-      } else if (lastLoginVal instanceof Date) {
-        dateObj = lastLoginVal;
-      } else {
-        dateObj = new Date(lastLoginVal);
-      }
-      setLastLoginStr(dateObj.toLocaleString());
-    }
-  }, [userProfile]);
-
-  // Real-time network listener
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener("online", handleOnline);
-    window.addEventListener("offline", handleOffline);
-
-    return () => {
-      window.removeEventListener("online", handleOnline);
-      window.removeEventListener("offline", handleOffline);
-    };
-  }, []);
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -217,63 +180,8 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Connection Properties Panel */}
-      <div className="dashboard-details">
-        <Card 
-          variant="accent" 
-          title="Database Connection Details"
-          headerActions={
-            isOnline ? (
-              <Badge status="success">
-                <Wifi size={12} style={{ marginRight: "4px", verticalAlign: "middle" }} /> Live
-              </Badge>
-            ) : (
-              <Badge status="inactive">
-                <WifiOff size={12} style={{ marginRight: "4px", verticalAlign: "middle" }} /> Offline
-              </Badge>
-            )
-          }
-          className="w-full"
-        >
-          <div className="table-container">
-            <table className="status-table" style={{ margin: "0" }}>
-              <thead>
-                <tr>
-                  <th>Configuration Parameter</th>
-                  <th>Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td>Firebase Project ID</td>
-                  <td className="font-mono">{projectId}</td>
-                </tr>
-                <tr>
-                  <td>Admin Authenticated Email</td>
-                  <td>{adminEmail}</td>
-                </tr>
-                <tr>
-                  <td>Last Login Event</td>
-                  <td className="font-mono">{lastLoginStr}</td>
-                </tr>
-                <tr>
-                  <td>Connection Status</td>
-                  <td>
-                    {isOnline ? (
-                      <Badge status="success">Live Connection</Badge>
-                    ) : (
-                      <Badge status="inactive">Offline / Connection Error</Badge>
-                    )}
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </div>
-
       {/* Created Sites Overview Table */}
-      <div className="dashboard-details" style={{ marginTop: "24px" }}>
+      <div className="dashboard-details">
         <Card 
           variant="table" 
           title="Registered Construction Sites"

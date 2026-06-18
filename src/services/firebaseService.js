@@ -80,7 +80,7 @@ export async function updateEngineerStatus(uid, status) {
 }
 
 // Register or update site engineer user record in Firestore along with site updates
-export async function saveSiteEngineerProfile(id, name, email, phone, selectedSites, isEditMode, oldSites = []) {
+export async function saveSiteEngineerProfile(id, name, email, phone, selectedSites, isEditMode, oldSites = [], holidayAllowance = 24, password = "") {
   const db = getDb();
   const batch = writeBatch(db);
   const userDocRef = doc(db, "users", id);
@@ -90,6 +90,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       fullName: name,
       phoneNumber: phone,
       assignedSites: selectedSites,
+      holidayAllowance: Number(holidayAllowance) || 24,
       updatedAt: serverTimestamp()
     });
     
@@ -117,6 +118,8 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       role: "site_engineer",
       status: "active",
       assignedSites: selectedSites,
+      holidayAllowance: Number(holidayAllowance) || 24,
+      password: password,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -132,6 +135,17 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
   
   await batch.commit();
 }
+
+// Update password field for an engineer in Firestore database
+export async function updateEngineerPasswordInDb(uid, newPassword) {
+  const db = getDb();
+  const userDocRef = doc(db, "users", uid);
+  await updateDoc(userDocRef, {
+    password: newPassword,
+    updatedAt: serverTimestamp()
+  });
+}
+
 
 // ==========================================================================
 // CONSTRUCTION SITE SERVICES
@@ -822,6 +836,132 @@ export async function getLabourDailyCountsHistory(siteId) {
 // Aggregates counts by date to support the Admin Dashboard (aliased to getLabourDailyCountsHistory)
 export async function getLabourDailyCountsSummary(siteId) {
   return getLabourDailyCountsHistory(siteId);
+}
+
+// ==========================================================================
+// SITE ENGINEER PERSONAL ATTENDANCE & LEAVES SERVICES
+// ==========================================================================
+
+// Get stats for engineer's personal attendance and leaves
+export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllowance = 24) {
+  const db = getDb();
+  
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1; // 1-indexed
+  const currentMonthStr = currentMonth < 10 ? `0${currentMonth}` : `${currentMonth}`;
+  const yearMonthPrefix = `${currentYear}-${currentMonthStr}`; // "YYYY-MM"
+  
+  // 1. Fetch all attendance for this engineer
+  const attendanceColl = collection(db, "attendance");
+  const attendanceQuery = query(
+    attendanceColl,
+    where("engineerId", "==", engineerId)
+  );
+  
+  let weekdaysWorkedThisMonth = 0;
+  try {
+    const attendanceSnap = await getDocs(attendanceQuery);
+    attendanceSnap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.date && data.date.startsWith(yearMonthPrefix)) {
+        const parts = data.date.split('-');
+        if (parts.length === 3) {
+          const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+          const dayOfWeek = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
+          // Mon-Fri is 1-5
+          if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+            weekdaysWorkedThisMonth++;
+          }
+        }
+      }
+    });
+  } catch (err) {
+    console.warn("Attendance stats fetch error:", err);
+  }
+  
+  // 2. Fetch all leaves for this engineer
+  const leavesColl = collection(db, "leaves");
+  const leavesQuery = query(
+    leavesColl,
+    where("engineerId", "==", engineerId)
+  );
+  let leavesThisMonth = 0;
+  let leavesThisYear = 0;
+  
+  try {
+    const leavesSnap = await getDocs(leavesQuery);
+    leavesSnap.forEach(docSnap => {
+      const data = docSnap.data();
+      if (data.date) {
+        if (data.date.startsWith(`${currentYear}-`)) {
+          leavesThisYear++;
+        }
+        if (data.date.startsWith(yearMonthPrefix)) {
+          leavesThisMonth++;
+        }
+      }
+    });
+  } catch (err) {
+    console.warn("Leaves query error:", err);
+  }
+  
+  const remainingHolidays = Math.max(0, Number(holidayAllowance) - leavesThisYear);
+  
+  return {
+    weekdaysWorkedThisMonth,
+    leavesThisMonth,
+    leavesThisYear,
+    remainingHolidays
+  };
+}
+
+// Log a leave for an engineer
+export async function logEngineerLeave(engineerId, dateStr, reason) {
+  const db = getDb();
+  
+  // Check if a leave or attendance record already exists for this date
+  const leavesColl = collection(db, "leaves");
+  const qExist = query(
+    leavesColl,
+    where("engineerId", "==", engineerId),
+    where("date", "==", dateStr)
+  );
+  const snapExist = await getDocs(qExist);
+  if (!snapExist.empty) {
+    throw new Error("Leave already logged for this date.");
+  }
+  
+  const newLeaveRef = doc(collection(db, "leaves"));
+  await setDoc(newLeaveRef, {
+    engineerId,
+    date: dateStr,
+    reason: reason || "Personal Leave",
+    status: "approved",
+    createdAt: serverTimestamp()
+  });
+}
+
+// Get all logged leaves for an engineer
+export async function getEngineerLeaves(engineerId) {
+  const db = getDb();
+  const leavesColl = collection(db, "leaves");
+  const q = query(leavesColl, where("engineerId", "==", engineerId));
+  const snap = await getDocs(q);
+  const leaves = [];
+  snap.forEach(d => {
+    leaves.push({ id: d.id, ...d.data() });
+  });
+  return leaves.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// Cancel / Delete a leave record
+export async function deleteEngineerLeave(leaveId) {
+  const db = getDb();
+  const leaveDocRef = doc(db, "leaves", leaveId);
+  const batch = writeBatch(db);
+  batch.delete(leaveDocRef);
+  await batch.commit();
 }
 
 

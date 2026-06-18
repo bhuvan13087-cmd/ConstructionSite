@@ -14,7 +14,11 @@ import {
   getMaterialsDetailed,
   saveLabourDailyCounts,
   getLabourDailyCounts,
-  getLabourDailyCountsHistory
+  getLabourDailyCountsHistory,
+  getEngineerAttendanceAndLeaveStats,
+  logEngineerLeave,
+  getEngineerLeaves,
+  deleteEngineerLeave
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -66,6 +70,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [dailyUpdates, setDailyUpdates] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [activeSiteId, setActiveSiteId] = useState("");
+
+  // Personal stats & leaves states
+  const [personalStats, setPersonalStats] = useState(null);
+  const [loggedLeaves, setLoggedLeaves] = useState([]);
+  const [leaveDate, setLeaveDate] = useState(new Date().toISOString().split("T")[0]);
+  const [leaveReason, setLeaveReason] = useState("Personal Leave");
+  const [leaveSubmitting, setLeaveSubmitting] = useState(false);
   
   // Geolocation mock control (highly useful for remote developer testing)
   const [mockLocation, setMockLocation] = useState(true);
@@ -149,6 +160,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       // Load assigned construction sites
       const filteredSites = await getAssignedSitesForEngineer(engineerId);
       setAssignedSites(filteredSites);
+
+      // Fetch personal stats and leaves
+      try {
+        const stats = await getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24);
+        setPersonalStats(stats);
+        const leaves = await getEngineerLeaves(engineerId);
+        setLoggedLeaves(leaves);
+      } catch (err) {
+        console.error("Failed to load personal attendance/leave stats:", err);
+      }
 
       if (filteredSites.length > 0) {
         // Fallback or default active site
@@ -346,6 +367,57 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast(err.message || "Failed to complete check-in.", "error");
     } finally {
       setAttendanceSubmitting(false);
+    }
+  };
+
+  // Log Leave Handler
+  const handleLogLeave = async (e) => {
+    e.preventDefault();
+    if (!leaveDate) {
+      showToast("Please choose leave date.", "error");
+      return;
+    }
+    const engineerId = userProfile.uid || userProfile.id || "";
+    
+    // Safety check: Cannot log leave if checked present on that date
+    try {
+      const checkInExist = await getTodayAttendance(engineerId, leaveDate);
+      if (checkInExist) {
+        showToast("Cannot log leave: You checked in present on this date.", "error");
+        return;
+      }
+    } catch (err) {
+      console.warn("Attendance validation check failed:", err);
+    }
+
+    setLeaveSubmitting(true);
+    try {
+      await logEngineerLeave(engineerId, leaveDate, leaveReason.trim());
+      showToast(`Leave registered successfully for ${leaveDate}!`, "success");
+      setLeaveDate(new Date().toISOString().split("T")[0]);
+      setLeaveReason("Personal Leave");
+      
+      // Refresh statistics and leaves
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Leave logging failed:", err);
+      showToast(err.message || "Failed to log leave.", "error");
+    } finally {
+      setLeaveSubmitting(false);
+    }
+  };
+
+  // Cancel / Delete Leave Handler
+  const handleDeleteLeave = async (leaveId) => {
+    if (confirm("Are you sure you want to cancel this leave record?")) {
+      try {
+        await deleteEngineerLeave(leaveId);
+        showToast("Leave record removed successfully.", "success");
+        await loadDashboardData();
+      } catch (err) {
+        console.error("Failed to cancel leave:", err);
+        showToast("Failed to cancel leave: " + err.message, "error");
+      }
     }
   };
 
@@ -912,6 +984,121 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   </div>
                 </div>
               )}
+            </Card>
+
+            {/* My Leaves & Holidays summary card */}
+            <Card title="My Leaves & Holiday Summary" icon={Calendar} style={{ borderLeft: "5px solid var(--accent-600)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                
+                {/* Stats block */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div style={{ backgroundColor: "var(--primary-50)", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
+                      Remaining Holidays
+                    </span>
+                    <strong style={{ fontSize: "16px", color: "var(--primary-950)", display: "block", marginTop: "2px" }}>
+                      {personalStats ? personalStats.remainingHolidays : "--"}
+                    </strong>
+                    <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>
+                      of {userProfile?.holidayAllowance || 24} annual days
+                    </span>
+                  </div>
+
+                  <div style={{ backgroundColor: "var(--success-50)", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
+                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
+                      Weekdays Worked (Month)
+                    </span>
+                    <strong style={{ fontSize: "16px", color: "var(--success-700)", display: "block", marginTop: "2px" }}>
+                      {personalStats ? personalStats.weekdaysWorkedThisMonth : "--"}
+                    </strong>
+                    <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>
+                      days checked present
+                    </span>
+                  </div>
+                </div>
+
+                <div style={{ backgroundColor: "var(--danger-50)", padding: "8px 12px", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
+                      Leaves Taken (Month / Year)
+                    </span>
+                    <strong style={{ fontSize: "14px", color: "var(--danger-600)" }}>
+                      {personalStats ? `${personalStats.leavesThisMonth} / ${personalStats.leavesThisYear}` : "-- / --"}
+                    </strong>
+                  </div>
+                  <span style={{ fontSize: "10px", color: "var(--danger-700)", fontWeight: "700" }}>Leave days</span>
+                </div>
+
+                <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
+
+                {/* Log Leave Inline Form */}
+                <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)", textTransform: "uppercase" }}>Log a Leave Day</span>
+                  <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
+                    <div>
+                      <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Date</label>
+                      <input 
+                        type="date" 
+                        value={leaveDate}
+                        onChange={(e) => setLeaveDate(e.target.value)}
+                        required
+                        style={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)" }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Reason</label>
+                      <select 
+                        value={leaveReason}
+                        onChange={(e) => setLeaveReason(e.target.value)}
+                        style={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff" }}
+                      >
+                        <option value="Personal Leave">Personal</option>
+                        <option value="Sick Leave">Sick Leave</option>
+                        <option value="Vacation">Vacation</option>
+                        <option value="Other">Other</option>
+                      </select>
+                    </div>
+                  </div>
+                  <Button type="submit" isLoading={leaveSubmitting} style={{ padding: "6px 12px", fontSize: "11px", width: "100%" }}>
+                    Record Leave Date
+                  </Button>
+                </form>
+
+                {/* Logged Leaves Scroll list */}
+                {loggedLeaves.length > 0 && (
+                  <>
+                    <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)", textTransform: "uppercase" }}>My Leaves History</span>
+                    <div style={{ maxHeight: "110px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {loggedLeaves.map(leave => (
+                        <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", backgroundColor: "#fff", border: "1px solid var(--border-color)", borderRadius: "4px" }}>
+                          <div>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-950)", display: "block" }}>{leave.date}</span>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{leave.reason}</span>
+                          </div>
+                          <button 
+                            type="button" 
+                            onClick={() => handleDeleteLeave(leave.id)}
+                            style={{ 
+                              border: "none", 
+                              backgroundColor: "transparent", 
+                              color: "var(--danger-500)", 
+                              cursor: "pointer", 
+                              padding: "4px",
+                              display: "flex",
+                              alignItems: "center"
+                            }} 
+                            title="Cancel Leave"
+                          >
+                            <Trash2 size={13} style={{ display: "inline-block" }} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                )}
+
+              </div>
             </Card>
 
           </div>
