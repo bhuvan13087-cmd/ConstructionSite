@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
-import { getDashboardMetrics, getSites, getMaterialsDetailed, getLabourDailyCountsSummary } from "../services/firebaseService";
-import { MapPin, Users, ClipboardCheck, FileText, Package, ExternalLink } from "lucide-react";
+import { getDashboardMetrics, getSites, getSiteEngineers } from "../services/firebaseService";
+import { MapPin, Users, ClipboardCheck, Package } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
 
 export default function AdminDashboard() {
-  const { user, userProfile } = useAuth();
+  const { user } = useAuth();
   const [metrics, setMetrics] = useState({
     totalSites: 0,
     activeEngineers: 0,
@@ -17,18 +17,9 @@ export default function AdminDashboard() {
     activeWorkers: 0
   });
   const [sites, setSites] = useState([]);
+  const [engineers, setEngineers] = useState([]);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
-
-  // Material tracking states
-  const [selectedMaterialSiteId, setSelectedMaterialSiteId] = useState("");
-  const [siteMaterials, setSiteMaterials] = useState([]);
-  const [materialsLoading, setMaterialsLoading] = useState(false);
-
-  // Labour auditing states
-  const [selectedLabourSiteId, setSelectedLabourSiteId] = useState("");
-  const [labourHistory, setLabourHistory] = useState([]);
-  const [labourLoading, setLabourLoading] = useState(false);
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -42,12 +33,12 @@ export default function AdminDashboard() {
       setLoading(true);
       const counts = await getDashboardMetrics();
       setMetrics(counts);
+      
       const fetchedSites = await getSites();
       setSites(fetchedSites);
-      if (fetchedSites.length > 0) {
-        setSelectedMaterialSiteId(prev => prev || fetchedSites[0].id);
-        setSelectedLabourSiteId(prev => prev || fetchedSites[0].id);
-      }
+      
+      const fetchedEngineers = await getSiteEngineers();
+      setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Dashboard loading error:", err);
       if (err.code === "permission-denied") {
@@ -66,46 +57,22 @@ export default function AdminDashboard() {
     loadData();
   }, []);
 
-  // Fetch materials whenever selected site changes
-  useEffect(() => {
-    const fetchSiteMaterials = async () => {
-      if (!selectedMaterialSiteId) return;
-      setMaterialsLoading(true);
-      try {
-        const mats = await getMaterialsDetailed(selectedMaterialSiteId);
-        setSiteMaterials(mats);
-      } catch (err) {
-        console.error("Failed to load materials for admin:", err);
-        showToast(`Failed to load materials: ${err.message}`, "error");
-      } finally {
-        setMaterialsLoading(false);
-      }
-    };
+  // Map engineers by ID for quick lookups
+  const engineersMap = {};
+  engineers.forEach(eng => {
+    engineersMap[eng.id] = eng.fullName;
+  });
 
-    fetchSiteMaterials();
-  }, [selectedMaterialSiteId]);
-
-  // Fetch labor workers and attendance summary logs when selected site changes
-  useEffect(() => {
-    const fetchLabourDataForAdmin = async () => {
-      if (!selectedLabourSiteId) return;
-      setLabourLoading(true);
-      try {
-        const history = await getLabourDailyCountsSummary(selectedLabourSiteId);
-        setLabourHistory(history);
-      } catch (err) {
-        console.error("Failed to load labour data for admin:", err);
-        showToast(`Failed to load labour records: ${err.message}`, "error");
-      } finally {
-        setLabourLoading(false);
-      }
-    };
-
-    fetchLabourDataForAdmin();
-  }, [selectedLabourSiteId]);
+  // Calculate sites that have at least one assigned engineer
+  const totalAssignedProjects = sites.filter(
+    site => site.assignedEngineers && site.assignedEngineers.length > 0
+  ).length;
 
   return (
-    <Layout title="Overview Dashboard" description="Real-time status of the Civil Construction Site control systems.">
+    <Layout 
+      title="Overview Dashboard" 
+      description="Executive summary of civil construction site operations, workforce levels, and resource tracking."
+    >
       {toast.show && (
         <div id="toast-container" className="toast-container">
           <div className={`toast toast-${toast.type}`}>
@@ -126,7 +93,7 @@ export default function AdminDashboard() {
       <div className="metrics-grid">
         <div className="metric-card">
           <div className="metric-header">
-            <span className="metric-title">Total Sites</span>
+            <span className="metric-title">Total Construction Sites</span>
             <div className="metric-icon-wrapper info">
               <MapPin size={20} />
             </div>
@@ -137,63 +104,75 @@ export default function AdminDashboard() {
 
         <div className="metric-card">
           <div className="metric-header">
-            <span className="metric-title">Active Engineers</span>
+            <span className="metric-title">Active Site Engineers</span>
             <div className="metric-icon-wrapper success">
               <Users size={20} />
             </div>
           </div>
           <div className="metric-value">{metrics.activeEngineers}</div>
-          <p className="metric-subtext">Engineers on field</p>
+          <p className="metric-subtext">Engineers active on field</p>
         </div>
 
         <div className="metric-card">
           <div className="metric-header">
-            <span className="metric-title">Attendance Today</span>
+            <span className="metric-title">Total Assigned Projects</span>
+            <div className="metric-icon-wrapper primary">
+              <ClipboardCheck size={20} />
+            </div>
+          </div>
+          <div className="metric-value">{totalAssignedProjects}</div>
+          <p className="metric-subtext">Sites with allocated managers</p>
+        </div>
+
+        <div className="metric-card">
+          <div className="metric-header">
+            <span className="metric-title">Today's Attendance Summary</span>
             <div className="metric-icon-wrapper warning">
               <ClipboardCheck size={20} />
             </div>
           </div>
           <div className="metric-value">{metrics.attendanceToday}</div>
-          <p className="metric-subtext">Today's present staff count</p>
+          <p className="metric-subtext">Present site representatives</p>
         </div>
 
         <div className="metric-card">
           <div className="metric-header">
-            <span className="metric-title">Materials Logged</span>
+            <span className="metric-title">Total Materials Logged</span>
             <div className="metric-icon-wrapper danger">
               <Package size={20} />
             </div>
           </div>
           <div className="metric-value">{metrics.totalMaterials}</div>
-          <p className="metric-subtext">Total material logs recorded</p>
+          <p className="metric-subtext">Total inventory ledger receipts</p>
         </div>
 
         <div className="metric-card">
           <div className="metric-header">
-            <span className="metric-title">Active Workers</span>
-            <div className="metric-icon-wrapper primary">
+            <span className="metric-title">Active Workers Count</span>
+            <div className="metric-icon-wrapper success" style={{ backgroundColor: "var(--success-50)", color: "var(--success-600)" }}>
               <Users size={20} />
             </div>
           </div>
           <div className="metric-value">{metrics.activeWorkers}</div>
-          <p className="metric-subtext">Active labor personnel count</p>
+          <p className="metric-subtext">Labor personnel at sites</p>
         </div>
       </div>
 
-      {/* Created Sites Overview Table */}
-      <div className="dashboard-details">
+      {/* Projects & Site Assignments Overview Section */}
+      <div className="dashboard-details" style={{ marginTop: "24px" }}>
         <Card 
           variant="table" 
-          title="Registered Construction Sites"
+          title="Projects & Site Assignments Overview"
           headerActions={
-            <Badge status="success">{sites.length} Projects</Badge>
+            <Badge status="success">{sites.length} Active Projects</Badge>
           }
           className="w-full"
         >
           <table className="data-table" style={{ margin: "0" }}>
             <thead>
               <tr>
-                <th>Site Name</th>
+                <th>Project / Site Name</th>
+                <th>Assigned Site Engineer</th>
                 <th>Location</th>
                 <th>Status</th>
                 <th>Created Date</th>
@@ -202,8 +181,8 @@ export default function AdminDashboard() {
             <tbody>
               {sites.length === 0 ? (
                 <tr>
-                  <td colSpan={4} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    No sites registered in the database.
+                  <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                    No registered construction sites or assignments found.
                   </td>
                 </tr>
               ) : (
@@ -216,17 +195,46 @@ export default function AdminDashboard() {
                   
                   return (
                     <tr key={site.id}>
-                      <td style={{ fontWeight: 700 }}>{site.siteName}</td>
+                      <td style={{ fontWeight: 700, color: "var(--primary-900)" }}>{site.siteName}</td>
+                      <td>
+                        {site.assignedEngineers && site.assignedEngineers.length > 0 ? (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                            {site.assignedEngineers.map(uid => {
+                              const name = engineersMap[uid] || "Unknown Engineer";
+                              return (
+                                <span 
+                                  key={uid} 
+                                  className="badge badge-completed" 
+                                  style={{ 
+                                    fontSize: "11px", 
+                                    padding: "4px 8px",
+                                    fontWeight: "600",
+                                    backgroundColor: "var(--primary-100)",
+                                    color: "var(--primary-800)",
+                                    borderRadius: "var(--radius-sm)"
+                                  }}
+                                >
+                                  {name}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>
+                            No Engineer Assigned
+                          </span>
+                        )}
+                      </td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)" }} />
-                          <span>{site.location}</span>
+                          <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                          <span style={{ fontSize: "13px" }}>{site.location}</span>
                         </div>
                       </td>
                       <td>
                         <Badge status={site.status || "Planning"} />
                       </td>
-                      <td className="font-mono">{createdDateStr}</td>
+                      <td className="font-mono" style={{ fontSize: "13px" }}>{createdDateStr}</td>
                     </tr>
                   );
                 })
@@ -236,193 +244,7 @@ export default function AdminDashboard() {
         </Card>
       </div>
 
-      {/* Material Tracking & Audits Section */}
-      <div className="dashboard-details" style={{ marginTop: "24px" }}>
-        <Card 
-          variant="table" 
-          title="Material Tracking & Audits"
-          headerActions={
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Select Site:</span>
-              <select
-                value={selectedMaterialSiteId}
-                onChange={(e) => setSelectedMaterialSiteId(e.target.value)}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  outline: "none",
-                  cursor: "pointer"
-                }}
-              >
-                {sites.map(site => (
-                  <option key={site.id} value={site.id}>{site.siteName}</option>
-                ))}
-              </select>
-              {materialsLoading ? (
-                <Badge status="pending">Syncing...</Badge>
-              ) : (
-                <Badge status="success">{siteMaterials.length} Logged</Badge>
-              )}
-            </div>
-          }
-          className="w-full"
-        >
-          <table className="data-table" style={{ margin: "0" }}>
-            <thead>
-              <tr>
-                <th>Material Name</th>
-                <th>Category</th>
-                <th>Quantity</th>
-                <th>Supplier</th>
-                <th>Receipt Date</th>
-                <th>Added By Engineer</th>
-                <th>Invoice</th>
-              </tr>
-            </thead>
-            <tbody>
-              {siteMaterials.length === 0 ? (
-                <tr>
-                  <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    {materialsLoading ? "Synchronizing material records..." : "No material receipts recorded for this site."}
-                  </td>
-                </tr>
-              ) : (
-                siteMaterials.map((mat) => {
-                  return (
-                    <tr key={mat.id}>
-                      <td style={{ fontWeight: 700 }}>
-                        <div>
-                          <span>{mat.materialName}</span>
-                          {mat.notes && (
-                            <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "2px" }}>
-                              Note: {mat.notes}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                      <td>
-                        <Badge status="pending">{mat.category}</Badge>
-                      </td>
-                      <td style={{ fontWeight: 600 }}>
-                        {mat.quantity} {mat.unit}{Number(mat.quantity) !== 1 ? 's' : ''}
-                      </td>
-                      <td>{mat.supplierName}</td>
-                      <td className="font-mono">{mat.purchaseDate || "--"}</td>
-                      <td style={{ fontWeight: 600, color: "var(--primary-800)" }}>{mat.engineerName}</td>
-                      <td>
-                        {mat.invoiceUrl ? (
-                          <a 
-                            href={mat.invoiceUrl} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            className="btn-icon"
-                            style={{ 
-                              display: "inline-flex", 
-                              alignItems: "center", 
-                              gap: "4px", 
-                              color: "var(--accent-600)", 
-                              fontSize: "12px",
-                              fontWeight: 700,
-                              textDecoration: "none"
-                            }}
-                          >
-                            <ExternalLink size={14} />
-                            <span>View Bill</span>
-                          </a>
-                        ) : (
-                          <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>No Attachment</span>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </Card>
-      </div>
-
-      {/* Labour Management & Audits Section */}
-      <div className="dashboard-details" style={{ marginTop: "24px" }}>
-        <Card 
-          variant="table" 
-          title="Labour Audits & Supervision"
-          headerActions={
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Select Site:</span>
-              <select
-                value={selectedLabourSiteId}
-                onChange={(e) => setSelectedLabourSiteId(e.target.value)}
-                style={{
-                  padding: "6px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontWeight: 600,
-                  fontSize: "13px",
-                  outline: "none",
-                  cursor: "pointer"
-                }}
-              >
-                {sites.map(site => (
-                  <option key={site.id} value={site.id}>{site.siteName}</option>
-                ))}
-              </select>
-              {labourLoading ? (
-                <Badge status="pending">Loading...</Badge>
-              ) : (
-                <Badge status="success">{labourHistory.length} Days Logged</Badge>
-              )}
-            </div>
-          }
-          className="w-full"
-        >
-          <table className="data-table" style={{ margin: "0" }}>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Masons</th>
-                <th>Helpers</th>
-                <th>Painters</th>
-                <th>Plumbers</th>
-                <th>Electricians</th>
-                <th>Others</th>
-                <th style={{ fontWeight: "bold" }}>Total Workers</th>
-              </tr>
-            </thead>
-            <tbody>
-              {labourHistory.length === 0 ? (
-                <tr>
-                  <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    {labourLoading ? "Loading labour database..." : "No worker counts registered for this site."}
-                  </td>
-                </tr>
-              ) : (
-                labourHistory.map((row) => (
-                  <tr key={row.date}>
-                    <td style={{ fontWeight: 700 }} className="font-mono">{row.date}</td>
-                    <td>{row.Masons}</td>
-                    <td>{row.Helpers}</td>
-                    <td>{row.Painters}</td>
-                    <td>{row.Plumbers}</td>
-                    <td>{row.Electricians}</td>
-                    <td>{row.Others}</td>
-                    <td>
-                      <Badge status="success">{row.total} Workers</Badge>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </Card>
-      </div>
-
-      <Loading show={loading} text="Loading Dashboard..." />
+      <Loading show={loading} text="Loading Executive Overview..." />
     </Layout>
   );
 }
