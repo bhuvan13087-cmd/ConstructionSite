@@ -8,11 +8,10 @@
  */
 
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY_HERE",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
-  appId: "YOUR_APP_ID",
-  measurementId: "YOUR_MEASUREMENT_ID"
+  apiKey: "AIzaSyCwmOam1UHhAzZJNg7Jiuha1lcOy0qlwA8",
+  authDomain: "studio-7044154747-fb0fa.firebaseapp.com",
+  projectId: "studio-7044154747-fb0fa",
+  storageBucket: "studio-7044154747-fb0fa.firebasestorage.app",
+  messagingSenderId: "201376845036",
+  appId: "1:201376845036:web:d50fb937ecc740e480e9c9"
 };
