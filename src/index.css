@@ -2207,6 +2207,645 @@ body:has(.landing-page-container) {
   border-left-color: var(--accent-500);
 }
 
+/* ==========================================================================
+   MOBILE-FIRST ANDROID UI SYSTEM FOR ENGINEER
+   ========================================================================== */
+
+/* Outer wrapper to center the phone frame on desktop screens */
+.mobile-app-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  background-color: var(--primary-900);
+  min-height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  margin: 0;
+  padding: 0;
+}
+
+/* Simulated mobile phone viewport */
+.mobile-app-frame {
+  width: 100%;
+  max-width: 480px;
+  height: 100vh;
+  min-height: 100vh;
+  background-color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+}
+
+/* Bottom Nav bar styled like native Android bottom menu */
+.mobile-bottom-nav {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background-color: #ffffff;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  z-index: 999;
+  box-shadow: 0 -4px 12px rgba(0, 0, 0, 0.05);
+}
+
+.mobile-nav-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 700;
+  background: none;
+  border: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  flex: 1;
+  height: 100%;
+  text-decoration: none;
+  padding: 8px 0;
+}
+
+.mobile-nav-btn:active {
+  background-color: var(--primary-50);
+}
+
+.mobile-nav-btn.active {
+  color: var(--accent-600);
+}
+
+.mobile-nav-btn.active .mobile-nav-indicator {
+  background-color: var(--accent-100);
+  color: var(--accent-700);
+}
+
+.mobile-nav-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 16px;
+  border-radius: 16px;
+  transition: all 0.2s ease;
+}
+
+/* Mobile Header styled like Android Top App Bar */
+.mobile-app-header {
+  height: 56px;
+  background-color: #ffffff;
+  border-bottom: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  position: sticky;
+  top: 0;
+  z-index: 900;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.mobile-app-header h3 {
+  font-family: var(--font-family-title);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--primary-900);
+  margin: 0;
+}
+
+/* Scrollable screen container */
+.mobile-app-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  padding-bottom: 80px; /* leaves room for bottom navigation */
+}
+
+/* Large grid for quick action buttons */
+.mobile-quick-action-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 16px;
+  margin-bottom: 24px;
+}
+
+/* Touch action cards for Home screen */
+.mobile-action-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 20px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-sm);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.mobile-action-card:active {
+  transform: scale(0.96);
+  background-color: var(--primary-50);
+}
+
+.mobile-action-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  background-color: var(--accent-50);
+  color: var(--accent-600);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-action-card.attendance .mobile-action-icon-wrapper {
+  background-color: var(--success-50);
+  color: var(--success-600);
+}
+
+.mobile-action-card.materials .mobile-action-icon-wrapper {
+  background-color: var(--accent-50);
+  color: var(--accent-600);
+}
+
+.mobile-action-card.labour .mobile-action-icon-wrapper {
+  background-color: hsl(38, 90%, 95%);
+  color: var(--warning-600);
+}
+
+.mobile-action-card.progress .mobile-action-icon-wrapper {
+  background-color: var(--danger-50);
+  color: var(--danger-500);
+}
+
+.mobile-action-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--primary-800);
+}
+
+/* Touch list for worker counter items */
+.mobile-labour-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mobile-labour-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.mobile-labour-icon {
+  width: 42px;
+  height: 42px;
+  background-color: var(--primary-50);
+  color: var(--primary-800);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-labour-name {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary-900);
+}
+
+/* Native style adjust count component */
+.counter-control {
+  display: flex;
+  align-items: center;
+  border: 1.5px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  height: 40px;
+  background-color: #ffffff;
+}
+
+.counter-btn {
+  width: 40px;
+  height: 100%;
+  background-color: var(--primary-50);
+  color: var(--primary-900);
+  border: none;
+  font-size: 18px;
+  font-weight: 800;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color var(--transition-fast);
+}
+
+.counter-btn:active {
+  background-color: var(--accent-100);
+}
+
+.counter-value {
+  width: 44px;
+  text-align: center;
+  font-weight: 800;
+  font-size: 15px;
+  color: var(--primary-950);
+}
+
+/* Full-width primary touch button */
+.mobile-btn-large {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border-radius: var(--radius-sm);
+  font-weight: 700;
+  font-size: 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background-color: var(--accent-600);
+  color: #ffffff;
+  border: none;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.15s ease;
+  box-shadow: 0 4px 6px rgba(14, 165, 233, 0.15);
+}
+
+.mobile-btn-large:active {
+  transform: translateY(2px);
+  background-color: var(--accent-700);
+  box-shadow: none;
+}
+
+.mobile-btn-large.success {
+  background-color: var(--success-500);
+  box-shadow: 0 4px 6px rgba(34, 197, 94, 0.15);
+}
+
+.mobile-btn-large.success:active {
+  background-color: var(--success-600);
+}
+
+/* Step tracker for Material wizard flow */
+.mobile-steps-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+  background-color: #ffffff;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+}
+
+.mobile-step-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.mobile-step-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--border-color);
+  transition: background-color 0.2s ease;
+}
+
+.mobile-step-dot.active {
+  background-color: var(--accent-500);
+  transform: scale(1.2);
+}
+
+/* Large category touch selection list */
+.mobile-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mobile-category-item {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-color);
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--primary-800);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.mobile-category-item.active {
+  border-color: var(--accent-500);
+  background-color: var(--accent-50);
+  color: var(--accent-700);
+}
+
+.mobile-category-item:active {
+  background-color: var(--primary-50);
+}
+
+/* Mobile grid for photo ledger entries */
+.mobile-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.mobile-photo-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-photo-img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  background-color: var(--primary-100);
+}
+
+.mobile-photo-info {
+  padding: 8px;
+}
+
+.mobile-photo-time {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: block;
+}
+
+.mobile-photo-loc {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-800);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Android style menu list items (More tab) */
+.mobile-menu-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background-color: var(--border-color);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  margin-bottom: 24px;
+}
+
+.mobile-menu-item {
+  background-color: #ffffff;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  text-decoration: none;
+  color: var(--primary-800);
+  font-weight: 700;
+  font-size: 14px;
+  cursor: pointer;
+  border: none;
+  text-align: left;
+  width: 100%;
+  transition: background-color 0.15s ease;
+}
+
+.mobile-menu-item:active {
+  background-color: var(--primary-50);
+}
+
+.mobile-menu-left {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.mobile-menu-item.danger {
+  color: var(--danger-600);
+}
+
+/* Site card details widget */
+.mobile-site-card {
+  background: linear-gradient(135deg, var(--primary-900), var(--primary-850));
+  color: #ffffff;
+  border-radius: var(--radius-md);
+  padding: 20px;
+  margin-bottom: 16px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: var(--shadow-md);
+}
+
+.mobile-site-card-badge {
+  background-color: rgba(255,255,255,0.1);
+  padding: 4px 10px;
+  border-radius: 50px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  display: inline-block;
+  margin-bottom: 12px;
+}
+
+.mobile-site-card-title {
+  font-family: var(--font-family-title);
+  font-size: 18px;
+  font-weight: 800;
+  margin: 0 0 6px 0;
+  letter-spacing: -0.01em;
+}
+
+.mobile-site-card-loc {
+  font-size: 13px;
+  color: var(--primary-200);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.mobile-site-card-select {
+  background-color: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: var(--radius-sm);
+  width: 100%;
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+  margin-top: 14px;
+  outline: none;
+}
+
+.mobile-site-card-select option {
+  color: var(--primary-950);
+}
+
+/* Attendance checklist widget */
+.mobile-attendance-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+
+.mobile-attendance-left {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-attendance-status-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.mobile-attendance-status-val {
+  font-size: 15px;
+  font-weight: 800;
+}
+
+.mobile-attendance-status-val.checked {
+  color: var(--success-600);
+}
+
+.mobile-attendance-status-val.unchecked {
+  color: var(--warning-600);
+}
+
+.mobile-attendance-btn {
+  background-color: var(--accent-50);
+  color: var(--accent-700);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.mobile-attendance-btn:active {
+  background-color: var(--accent-100);
+}
+
+/* Mobile form design */
+.mobile-form-label {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--primary-700);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+  display: block;
+}
+
+.mobile-input-group {
+  margin-bottom: 18px;
+}
+
+.mobile-textarea {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  background-color: #ffffff;
+  outline: none;
+  font-weight: 500;
+  font-size: 14px;
+  resize: vertical;
+}
+
+.mobile-textarea:focus {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px var(--accent-100);
+}
+
+/* Material Log List cards */
+.mobile-material-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  margin-bottom: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.mobile-material-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 8px;
+}
+
+.mobile-material-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary-900);
+}
+
+.mobile-material-details {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.mobile-material-detail-item {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-material-detail-label {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.mobile-material-detail-value {
+  font-weight: 600;
+  color: var(--primary-800);
+}
+
 
 
 

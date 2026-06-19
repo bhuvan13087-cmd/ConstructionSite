@@ -51,7 +51,10 @@ import {
   Sliders,
   TrendingUp,
   Activity,
-  ChevronRight
+  ChevronRight,
+  LayoutDashboard,
+  LogOut,
+  HardHat
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -179,15 +182,15 @@ async function getReverseGeocode(lat, lng, site) {
 }
 
 const categorySuggestions = {
-  Cement: ["OPC 53 Grade Cement", "PPC Cement", "White Cement", "Sulphate Resistant Cement"],
-  Steel: ["TMT Rebars 12mm", "TMT Rebars 16mm", "Binding Wire", "Structural Steel Section"],
+  Cement: ["UltraTech Cement", "ACC Cement", "OPC 53 Grade Cement", "PPC Cement", "White Cement", "Sulphate Resistant Cement"],
+  Steel: ["Tata Steel", "TMT Rebars 12mm", "TMT Rebars 16mm", "Binding Wire", "Structural Steel Section"],
   Sand: ["River Sand (Fine)", "M-Sand (Manufactured)", "Coarse Sand (Plastering)"],
   Bricks: ["Red Clay Bricks", "Fly Ash Bricks", "AAC Light Blocks", "Solid Concrete Blocks"],
   Other: ["Pipes & Fittings", "Painting Primer", "Waterproofing Chemical", "Electrical PVC Conduit"]
 };
 
 export default function EngineerDashboard({ tab = "dashboard" }) {
-  const { userProfile } = useAuth();
+  const { userProfile, logout } = useAuth();
   const navigate = useNavigate();
   
   // Loader & Toast states
@@ -262,6 +265,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [materialInvoiceFile, setMaterialInvoiceFile] = useState(null);
   const [materialInvoicePreview, setMaterialInvoicePreview] = useState(null);
   const [materialSubmitting, setMaterialSubmitting] = useState(false);
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+  const comboboxRef = useRef(null);
+  const [materialFlow, setMaterialFlow] = useState("list"); // "list" or "add"
+  const [materialStep, setMaterialStep] = useState(1); // 1: category, 2: name, 3: details/invoice
+  const [moreSubView, setMoreSubView] = useState("menu"); // "menu", "photos", "progress", "profile"
   
   // Material search & filter state
   const [materialSearch, setMaterialSearch] = useState("");
@@ -349,6 +357,32 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   useEffect(() => {
     loadDashboardData();
   }, [userProfile]);
+
+  // Close combobox suggestions when clicking outside
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (comboboxRef.current && !comboboxRef.current.contains(event.target)) {
+        setIsSuggestionsOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, []);
+
+  // Sync sub-view under More tab with route parameter
+  useEffect(() => {
+    if (tab === "photos") {
+      setMoreSubView("photos");
+    } else if (tab === "progress") {
+      setMoreSubView("progress");
+    } else if (tab === "profile") {
+      setMoreSubView("profile");
+    } else {
+      setMoreSubView("menu");
+    }
+  }, [tab]);
 
   // Sync labour counts & historical summary whenever active site or select date changes
   useEffect(() => {
@@ -930,6 +964,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setMaterialNotes("");
       setMaterialInvoiceFile(null);
       setMaterialInvoicePreview(null);
+      setMaterialFlow("list");
+      setMaterialStep(1);
 
       await loadDashboardData();
     } catch (err) {
@@ -1062,30 +1098,75 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Full Screen Alert if no sites assigned
   if (assignedSites.length === 0 && !loading) {
     return (
-      <Layout title="Site Engineer Dashboard" description="Construction Field representative portal.">
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px", padding: "16px" }}>
-          <Card title="Engineer Profile" style={{ borderLeft: "5px solid var(--accent-500)" }}>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", alignItems: "center" }}>
-              <div className="user-avatar" style={{ width: "50px", height: "50px", fontSize: "18px", borderRadius: "12px" }}>
-                {userProfile?.fullName ? userProfile.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE"}
+      <div className="mobile-app-container">
+        <div className="mobile-app-frame">
+          <header className="mobile-app-header">
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <HardHat size={22} style={{ color: "var(--accent-600)" }} />
+              <h3>Apex Build</h3>
+            </div>
+          </header>
+          <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "16px", justifyContent: "center" }}>
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-color)",
+              padding: "16px",
+              boxShadow: "var(--shadow-sm)",
+              display: "flex",
+              alignItems: "center",
+              gap: "16px"
+            }}>
+              <div style={{
+                width: "48px",
+                height: "48px",
+                borderRadius: "50%",
+                backgroundColor: "var(--accent-50)",
+                color: "var(--accent-600)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "800",
+                fontSize: "16px"
+              }}>
+                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
               </div>
               <div>
-                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "700" }}>{userProfile?.fullName || "Site Engineer"}</h4>
+                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{userProfile?.fullName || "Site Engineer"}</h4>
                 <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>{userProfile?.email}</p>
               </div>
             </div>
-          </Card>
-          <Card style={{ padding: "40px 20px", textAlign: "center", borderTop: "4px solid var(--danger-500)" }}>
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "12px" }}>
+
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "var(--radius-md)",
+              padding: "32px 16px",
+              textAlign: "center",
+              border: "1px solid var(--border-color)",
+              boxShadow: "var(--shadow-sm)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "12px"
+            }}>
               <AlertTriangle size={36} style={{ color: "var(--danger-500)" }} />
-              <h3 style={{ fontSize: "18px", fontWeight: "700", color: "var(--primary-900)", margin: 0 }}>No Worksite Assigned</h3>
-              <p style={{ color: "var(--text-muted)", fontSize: "13px", maxWidth: "400px", margin: "0 auto", lineHeight: "1.5" }}>
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>No Worksite Assigned</h3>
+              <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: 0, lineHeight: "1.5" }}>
                 You do not currently have any active construction sites allocated. Please contact the project administrator to assign a site to your user profile.
               </p>
+              <button
+                type="button"
+                className="mobile-btn-large"
+                onClick={() => logout()}
+                style={{ backgroundColor: "var(--danger-500)", marginTop: "12px" }}
+              >
+                <LogOut size={16} />
+                <span>Logout Account</span>
+              </button>
             </div>
-          </Card>
+          </div>
         </div>
-      </Layout>
+      </div>
     );
   }
 
@@ -1101,127 +1182,97 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     photos: "Site Inspection Photos",
     progress: "Daily Progress Log Feed"
   };
+  const currentCategorySuggestions = categorySuggestions[materialCategory] || [];
+  const filteredSuggestions = currentCategorySuggestions.filter(sug => {
+    if (!materialName.trim() || currentCategorySuggestions.some(option => option.toLowerCase() === materialName.trim().toLowerCase())) {
+      return true;
+    }
+    return sug.toLowerCase().includes(materialName.toLowerCase().trim());
+  });
 
-  return (
-    <Layout title={pageTitles[tab] || "Site Engineer Dashboard"} description="Record construction field operations, labour stats, and delivery records.">
-      {toast.show && (
-        <div id="toast-container" className="toast-container">
-          <div className={`toast toast-${toast.type}`}>
-            <span className="toast-message">{toast.message}</span>
-          </div>
+  // Mobile UI Render Views
+  const renderHomeView = () => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Site Card */}
+        <div className="mobile-site-card">
+          <span className="mobile-site-card-badge">Active Assignment</span>
+          <h4 className="mobile-site-card-title">{currentSite ? currentSite.siteName : "No Assigned Worksite"}</h4>
+          {currentSite && (
+            <p className="mobile-site-card-loc">
+              <MapPin size={14} /> {currentSite.location}
+            </p>
+          )}
+          
+          {assignedSites.length > 1 && (
+            <select
+              className="mobile-site-card-select"
+              value={activeSiteId}
+              onChange={(e) => setActiveSiteId(e.target.value)}
+            >
+              {assignedSites.map(s => (
+                <option key={s.id} value={s.id}>{s.siteName}</option>
+              ))}
+            </select>
+          )}
         </div>
-      )}
 
-      {/* TOP SELECTOR & DEV OPTIONS PANEL */}
-      <div style={{
-        display: "flex",
-        flexWrap: "wrap",
-        justifyContent: "space-between",
-        alignItems: "center",
-        gap: "16px",
-        padding: "16px",
-        backgroundColor: "#ffffff",
-        border: "1px solid var(--border-color)",
-        borderRadius: "var(--radius-md)",
-        marginBottom: "24px",
-        boxShadow: "0 1px 3px rgba(0,0,0,0.05)"
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: "1 1 auto", minWidth: "250px" }}>
-          <div style={{
-            backgroundColor: "var(--accent-50)",
-            padding: "8px",
-            borderRadius: "var(--radius-sm)",
-            color: "var(--accent-600)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center"
-          }}>
-            <MapPin size={20} />
-          </div>
-          <div style={{ flexGrow: 1 }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--text-muted)" }}>
-              Active Project Worksite
-            </span>
-            {assignedSites.length === 1 ? (
-              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "700", color: "var(--primary-900)" }}>
-                {assignedSites[0].siteName}
-              </h4>
-            ) : (
-              <select
-                value={activeSiteId}
-                onChange={(e) => setActiveSiteId(e.target.value)}
-                style={{
-                  display: "block",
-                  width: "100%",
-                  padding: "4px 8px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontSize: "14px",
-                  fontWeight: "600",
-                  color: "var(--primary-900)",
-                  cursor: "pointer",
-                  outline: "none"
-                }}
-              >
-                {assignedSites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
+        {/* Attendance checklist widget */}
+        <div className="mobile-attendance-card">
+          <div className="mobile-attendance-left">
+            <span className="mobile-attendance-status-label">Your Check-In</span>
+            <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
+              {todayAttendance ? '✓ Checked In Present' : '✗ Not Checked In Yet'}
+            </div>
+            {todayAttendance && (
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                Time: {todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}
+              </span>
             )}
           </div>
+          {!todayAttendance && (
+            <button 
+              type="button" 
+              onClick={() => navigate("/engineer/attendance")} 
+              className="mobile-attendance-btn"
+            >
+              Check In
+            </button>
+          )}
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>
-            <Calendar size={14} style={{ color: "var(--accent-500)" }} />
-            <span>Today: {new Date().toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
-          </div>
-
-          <label style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "8px",
-            fontSize: "12px",
-            fontWeight: "700",
-            color: "var(--accent-600)",
-            cursor: "pointer",
-            userSelect: "none",
-            backgroundColor: "var(--accent-50)",
-            padding: "6px 12px",
-            borderRadius: "var(--radius-sm)",
-            border: "1px solid var(--accent-200)"
-          }}>
+        {/* Developer options */}
+        <div style={{
+          backgroundColor: "#ffffff",
+          borderRadius: "var(--radius-md)",
+          border: "1px solid var(--border-color)",
+          padding: "14px",
+          fontSize: "12px",
+          display: "flex",
+          flexDirection: "column",
+          gap: "10px",
+          boxShadow: "var(--shadow-sm)"
+        }}>
+          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", color: "var(--accent-700)", cursor: "pointer", margin: 0 }}>
             <input 
               type="checkbox" 
               checked={mockLocation} 
               onChange={(e) => setMockLocation(e.target.checked)} 
-              style={{ cursor: "pointer" }}
+              style={{ margin: 0 }}
             />
             <span>Bypass GPS Geofence (Mocking)</span>
           </label>
-
           {mockLocation && (
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              fontSize: "12px",
-              backgroundColor: "#fef3c7",
-              border: "1px solid #fcd34d",
-              padding: "6px 12px",
-              borderRadius: "var(--radius-sm)"
-            }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <span style={{ fontWeight: "700", color: "#b45309" }}>Simulate Test Case:</span>
               <select
                 value={mockCase}
                 onChange={(e) => setMockCase(e.target.value)}
                 style={{
-                  padding: "2px 6px",
+                  padding: "6px",
                   borderRadius: "4px",
                   border: "1px solid #d97706",
                   backgroundColor: "#ffffff",
-                  fontSize: "12px",
                   fontWeight: "600",
                   color: "#b45309",
                   cursor: "pointer",
@@ -1238,1579 +1289,1595 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </div>
           )}
         </div>
+
+        {/* Quick Actions Grid */}
+        <div style={{ marginTop: "8px" }}>
+          <span className="mobile-form-label">Quick Operations</span>
+          <div className="mobile-quick-action-grid">
+            <div className="mobile-action-card attendance" onClick={() => navigate("/engineer/attendance")}>
+              <div className="mobile-action-icon-wrapper">
+                <ClipboardCheck size={20} />
+              </div>
+              <span className="mobile-action-title">Take Attendance</span>
+            </div>
+            
+            <div className="mobile-action-card materials" onClick={() => navigate("/engineer/material")}>
+              <div className="mobile-action-icon-wrapper">
+                <Package size={20} />
+              </div>
+              <span className="mobile-action-title">Add Material</span>
+            </div>
+            
+            <div className="mobile-action-card labour" onClick={() => navigate("/engineer/labour")}>
+              <div className="mobile-action-icon-wrapper">
+                <Users size={20} />
+              </div>
+              <span className="mobile-action-title">Add Labour</span>
+            </div>
+            
+            <div className="mobile-action-card progress" onClick={() => navigate("/engineer/progress")}>
+              <div className="mobile-action-icon-wrapper">
+                <FileText size={20} />
+              </div>
+              <span className="mobile-action-title">Upload Progress</span>
+            </div>
+          </div>
+        </div>
       </div>
+    );
+  };
 
-      {/* RENDER DYNAMIC MODULE TABS */}
+  const renderAttendanceView = () => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ textAlign: "center", marginBottom: "8px" }}>
+          <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
+          <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
+        </div>
 
-      {/* A) OVERVIEW DASHBOARD TAB */}
-      {tab === "dashboard" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          {/* Welcome Banner */}
+        {todayAttendance ? (
           <div style={{
-            background: "linear-gradient(135deg, var(--primary-900) 0%, var(--primary-950) 100%)",
-            color: "#ffffff",
-            padding: "24px",
+            backgroundColor: "#ffffff",
             borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-color)",
+            padding: "24px 16px",
+            boxShadow: "var(--shadow-sm)",
+            textAlign: "center",
             display: "flex",
-            flexWrap: "wrap",
-            justifyContent: "space-between",
+            flexDirection: "column",
             alignItems: "center",
             gap: "16px"
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-              <div style={{
-                width: "48px",
-                height: "48px",
-                borderRadius: "12px",
-                backgroundColor: "var(--accent-500)",
-                color: "var(--primary-950)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontWeight: "800",
-                fontSize: "18px"
-              }}>
-                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+            <div style={{
+              width: "56px",
+              height: "56px",
+              borderRadius: "50%",
+              backgroundColor: "var(--success-50)",
+              color: "var(--success-600)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center"
+            }}>
+              <CheckCircle2 size={32} />
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>Check-In Confirmed</h4>
+              <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>You are marked present at the construction site today.</p>
+            </div>
+            
+            <div style={{
+              width: "100%",
+              backgroundColor: "var(--primary-50)",
+              borderRadius: "8px",
+              border: "1px solid var(--border-color)",
+              padding: "12px",
+              textAlign: "left",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              fontSize: "12px"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-muted)" }}>Worksite:</span>
+                <strong style={{ color: "var(--primary-900)" }}>{currentSite?.siteName}</strong>
               </div>
-              <div>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800" }}>Welcome Back, {userProfile?.fullName || "Site Engineer"}</h2>
-                <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#94a3b8" }}>Civil Representative • Active duty</p>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-muted)" }}>Verified Time:</span>
+                <strong style={{ color: "var(--primary-900)" }}>{todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-muted)" }}>GPS Location:</span>
+                <strong style={{ color: "var(--primary-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.gpsLocationAddress || (todayAttendance.latitude ? `${Number(todayAttendance.latitude).toFixed(4)}, ${Number(todayAttendance.longitude).toFixed(4)}` : "Verified Boundary")}</strong>
               </div>
             </div>
-            {currentSite && (
-              <div style={{ backgroundColor: "rgba(255,255,255,0.08)", padding: "10px 16px", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.12)" }}>
-                <span style={{ display: "block", fontSize: "10px", color: "#94a3b8", fontWeight: "700", textTransform: "uppercase" }}>Selected Site</span>
-                <strong style={{ fontSize: "14px", color: "var(--accent-400)" }}>{currentSite.siteName}</strong>
+
+            {todayAttendance.photoUrl && (
+              <div style={{ width: "100%", height: "160px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                <img src={todayAttendance.photoUrl} alt="Checked in verification" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               </div>
             )}
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-            
-            {/* Project Details Card */}
-            {currentSite && (
-              <Card title="Assigned Site Information" icon={MapPin} style={{ borderLeft: "5px solid var(--accent-500)" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-950)" }}>{currentSite.siteName}</h4>
-                      <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>{currentSite.location}</p>
-                    </div>
-                    <Badge status={currentSite.status || "Planning"} />
-                  </div>
-                  <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Client Name:</span>
-                      <span style={{ fontWeight: "600", color: "var(--primary-800)" }}>{currentSite.clientName || "--"}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Start Date:</span>
-                      <span style={{ fontWeight: "600" }} className="font-mono">{currentSite.startDate || "--"}</span>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Expected Completion:</span>
-                      <span style={{ fontWeight: "600" }} className="font-mono">{currentSite.expectedEndDate || "--"}</span>
-                    </div>
-                  </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {locationCheckStatus !== "granted" && (
+              <div style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--border-color)",
+                padding: "24px 16px",
+                boxShadow: "var(--shadow-sm)",
+                textAlign: "center",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "16px"
+              }}>
+                <div style={{
+                  width: "56px",
+                  height: "56px",
+                  borderRadius: "50%",
+                  backgroundColor: "var(--accent-50)",
+                  color: "var(--accent-600)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}>
+                  <MapPin size={32} />
                 </div>
-              </Card>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>GPS Verification Required</h4>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>To record your attendance, the system must verify that you are physically present within the site radius.</p>
+                </div>
+                
+                {locationCheckStatus === "checking" && (
+                  <div style={{ fontSize: "13px", color: "var(--accent-600)", fontWeight: "600" }}>Detecting location coordinates...</div>
+                )}
+                
+                {locationError && (
+                  <div style={{
+                    backgroundColor: "var(--danger-50)",
+                    color: "var(--danger-600)",
+                    padding: "10px 14px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--danger-100)",
+                    fontSize: "12px",
+                    textAlign: "left",
+                    width: "100%"
+                  }}>
+                    <strong>Error:</strong> {locationError}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handlePreCaptureCheck}
+                  disabled={locationCheckStatus === "checking"}
+                  className="mobile-btn-large"
+                >
+                  <Camera size={18} />
+                  <span>Verify & Open Camera</span>
+                </button>
+              </div>
             )}
 
-            {/* Today's Attendance Summary (Staff check-in) */}
-            <Card title="Today's Attendance Status" icon={ClipboardCheck} style={{ borderLeft: "5px solid var(--primary-500)" }}>
-              {todayAttendance ? (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center", textAlign: "center", padding: "10px 0" }}>
-                  <div style={{ width: "40px", height: "40px", borderRadius: "50%", backgroundColor: "var(--success-50)", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <CheckCircle2 size={24} style={{ color: "var(--success-500)" }} />
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              ref={fileInputRef}
+              onChange={handleAttendancePhotoChange}
+              style={{ display: "none" }}
+            />
+
+            {locationCheckStatus === "granted" && verificationStatus && (
+              <div style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "var(--radius-md)",
+                border: "1px solid var(--border-color)",
+                padding: "16px",
+                boxShadow: "var(--shadow-sm)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "var(--text-muted)" }}>GPS Result</span>
+                  {attendancePhotoUploading ? (
+                    <Badge status="pending">Processing EXIF...</Badge>
+                  ) : (
+                    <Badge status={verificationStatus === "success" ? "success" : "danger"}>
+                      {verificationStatus === "success" ? "Location Verified" : "Verification Failed"}
+                    </Badge>
+                  )}
+                </div>
+
+                {attendancePhotoPreview && (
+                  <div style={{ width: "100%", height: "180px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)", position: "relative" }}>
+                    <img src={attendancePhotoPreview} alt="Captured Check-in" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <button
+                      type="button"
+                      onClick={handleResetVerification}
+                      style={{
+                        position: "absolute",
+                        top: "8px",
+                        right: "8px",
+                        backgroundColor: "rgba(0,0,0,0.6)",
+                        color: "#ffffff",
+                        border: "none",
+                        borderRadius: "50%",
+                        width: "28px",
+                        height: "28px",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
                   </div>
+                )}
+
+                {verificationDetails && (
+                  <div style={{
+                    backgroundColor: verificationStatus === "success" ? "var(--success-50)" : "var(--danger-50)",
+                    borderRadius: "8px",
+                    border: `1.5px solid ${verificationStatus === "success" ? "var(--success-100)" : "var(--danger-100)"}`,
+                    padding: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    fontSize: "12px",
+                    color: verificationStatus === "success" ? "var(--success-800)" : "var(--danger-700)"
+                  }}>
+                    {verificationStatus === "success" ? (
+                      <>
+                        <div style={{ fontWeight: "700" }}>✓ Site Verified: {verificationDetails.expectedSiteName}</div>
+                        <div><strong>Location:</strong> {verificationDetails.capturedAddress}</div>
+                        <div><strong>Distance offset:</strong> {verificationDetails.distance} meters</div>
+                      </>
+                    ) : (
+                      <>
+                        <div style={{ fontWeight: "700" }}>✗ {verificationDetails.message}</div>
+                        {verificationDetails.isNoGps && (
+                          <div>The captured photo does not contain geocoded GPS tags. Please capture photo using the device camera with location enabled.</div>
+                        )}
+                        {verificationDetails.isOld && (
+                          <div>Old photo timestamp detected. You must take a fresh photo inside the browser camera session.</div>
+                        )}
+                        {verificationDetails.distance !== undefined && (
+                          <>
+                            <div>Expected: {verificationDetails.expectedSiteName} ({verificationDetails.expectedAddress})</div>
+                            <div>Captured: {verificationDetails.capturedAddress}</div>
+                            <div>Offset: {verificationDetails.distance} meters (Allowed Radius: {currentSite?.radius || 100}m)</div>
+                          </>
+                        )}
+                        <button
+                          type="button"
+                          onClick={handleResetVerification}
+                          style={{
+                            marginTop: "6px",
+                            padding: "6px 12px",
+                            backgroundColor: "var(--danger-600)",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "4px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            alignSelf: "flex-start"
+                          }}
+                        >
+                          Try Again
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {verificationStatus === "success" && (
+                  <button
+                    type="button"
+                    onClick={handleMarkAttendance}
+                    disabled={attendanceSubmitting}
+                    className="mobile-btn-large success"
+                  >
+                    <Save size={18} />
+                    <span>Submit Present Check-In</span>
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderLabourView = () => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Date Selector */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Count Date</span>
+            {assignedSites.length > 1 && (
+              <select
+                value={activeSiteId}
+                onChange={(e) => setActiveSiteId(e.target.value)}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: "4px",
+                  border: "1px solid var(--border-color)",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--primary-800)",
+                  backgroundColor: "#fff"
+                }}
+              >
+                {assignedSites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="input-wrapper" style={{ marginTop: "4px" }}>
+            <Calendar size={18} className="input-icon" />
+            <input 
+              type="date" 
+              value={labourDate} 
+              onChange={(e) => setLabourDate(e.target.value)} 
+              required 
+              style={{ height: "42px", padding: "10px 14px 10px 40px", fontSize: "14px" }}
+            />
+          </div>
+        </div>
+
+        {/* Workforce headcounts */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <span className="mobile-form-label">Worker Headcounts</span>
+          {categories.map(cat => {
+            const currentVal = countsMap[cat] || 0;
+            const emojis = {
+              Mason: "👷",
+              Helper: "🧱",
+              Electrician: "🔧",
+              Plumber: "🚰",
+              Painter: "🖌️",
+              Other: "📋"
+            };
+            const emoji = emojis[cat] || "🔨";
+            const isCore = ["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(cat);
+            
+            return (
+              <div key={cat} className="mobile-labour-card">
+                <div className="mobile-labour-info">
+                  <span style={{ fontSize: "20px" }}>{emoji}</span>
                   <div>
-                    <h4 style={{ fontWeight: "700", color: "var(--primary-950)", margin: 0, fontSize: "14px" }}>Attendance Verified & Present</h4>
-                    <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>
-                      Checked in: <strong>{todayAttendance.checkInTime?.seconds 
-                        ? new Date(todayAttendance.checkInTime.seconds * 1000).toLocaleTimeString()
-                        : new Date(todayAttendance.checkInTime).toLocaleTimeString()}</strong>
-                    </p>
-                    {todayAttendance.photoUrl && (
-                      <div style={{ marginTop: "10px", width: "120px", height: "90px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)", margin: "10px auto 0 auto" }}>
-                        <img src={todayAttendance.photoUrl} alt="Check-in Selfie" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </div>
+                    <span className="mobile-labour-name">{cat}</span>
+                    {!isCore && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLabourCategory(cat)}
+                        style={{
+                          marginLeft: "8px",
+                          background: "none",
+                          border: "none",
+                          color: "var(--danger-500)",
+                          fontSize: "11px",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          padding: 0
+                        }}
+                      >
+                        Remove
+                      </button>
                     )}
                   </div>
                 </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {/* Stage 1: Location pre-check or warning */}
-                  {locationCheckStatus === "unchecked" && (
-                    <>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "var(--danger-50)", padding: "10px", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--danger-500)" }}>
-                        <AlertCircle size={16} style={{ color: "var(--danger-500)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", color: "var(--danger-700)", fontWeight: "600" }}>
-                          Staff check-in is pending for today.
-                        </span>
-                      </div>
-
-                      <div style={{ border: "1px dashed var(--border-color)", padding: "12px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)", textAlign: "center" }}>
-                        <p style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px" }}>
-                          GPS verification is required before capturing your site selfie.
-                        </p>
-                        <Button 
-                          type="button" 
-                          onClick={handlePreCaptureCheck} 
-                          icon={Camera} 
-                          style={{ padding: "10px 20px", fontSize: "13px", fontWeight: "700" }}
-                        >
-                          Capture Site Photo
-                        </Button>
-                      </div>
-                    </>
-                  )}
-
-                  {locationCheckStatus === "checking" && (
-                    <div style={{ border: "1px solid var(--border-color)", padding: "20px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)", textAlign: "center" }}>
-                      <div className="spinner-small" style={{ border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid var(--primary-600)", borderRadius: "50%", width: "24px", height: "24px", animation: "spin 1s linear infinite", margin: "0 auto 12px auto" }} />
-                      <span style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: "600" }}>Checking device GPS and permissions...</span>
-                    </div>
-                  )}
-
-                  {locationCheckStatus === "warning" && (
-                    <div style={{ 
-                      padding: "20px", 
-                      border: "1px solid var(--danger-200)", 
-                      borderRadius: "var(--radius-sm)", 
-                      backgroundColor: "var(--danger-50)", 
-                      borderLeft: "4px solid var(--danger-500)",
-                      display: "flex", 
-                      flexDirection: "column", 
-                      gap: "14px"
-                    }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <AlertTriangle size={24} style={{ color: "var(--danger-500)" }} />
-                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--danger-800)" }}>
-                          Location Access Required
-                        </h4>
-                      </div>
-                      
-                      <p style={{ margin: 0, fontSize: "13px", color: "var(--danger-700)", lineHeight: "1.5" }}>
-                        Location access is required to verify your site attendance.
-                      </p>
-
-                      {locationError && (
-                        <div style={{ fontSize: "12px", color: "var(--danger-600)", fontWeight: "600", backgroundColor: "rgba(239, 68, 68, 0.08)", padding: "8px", borderRadius: "4px" }}>
-                          {locationError}
-                        </div>
-                      )}
-
-                      <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-                        <Button 
-                          type="button" 
-                          onClick={handleEnableLocation}
-                          style={{ 
-                            flex: 1, 
-                            backgroundColor: "var(--danger-600)", 
-                            color: "#ffffff",
-                            fontSize: "12px",
-                            padding: "8px 12px"
-                          }}
-                        >
-                          Enable Location
-                        </Button>
-                        <Button 
-                          type="button" 
-                          onClick={handleCancelLocationPrecheck}
-                          variant="outline"
-                          style={{ 
-                            flex: 1,
-                            fontSize: "12px",
-                            padding: "8px 12px"
-                          }}
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Stage 2: Camera Capture (once coordinates are received and permission is granted) */}
-                  {locationCheckStatus === "granted" && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      {!attendancePhotoPreview ? (
-                        <div style={{ border: "1px dashed var(--border-color)", padding: "16px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--success-50)", textAlign: "center" }}>
-                          <p style={{ fontSize: "12px", color: "var(--success-700)", fontWeight: "700", marginBottom: "12px" }}>
-                            ✓ Live Location Obtained Successfully!
-                          </p>
-                          <label style={{ 
-                            display: "inline-flex", 
-                            alignItems: "center", 
-                            gap: "8px", 
-                            padding: "10px 20px", 
-                            border: "1px solid var(--success-200)", 
-                            borderRadius: "var(--radius-sm)", 
-                            cursor: "pointer", 
-                            backgroundColor: "#ffffff",
-                            fontSize: "13px",
-                            fontWeight: "700",
-                            color: "var(--success-800)",
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-                          }}>
-                            <Camera size={18} style={{ color: "var(--success-600)" }} />
-                            <span>Capture Selfie Now</span>
-                            <input 
-                              type="file" 
-                              accept="image/*" 
-                              capture="environment" 
-                              style={{ display: "none" }} 
-                              ref={fileInputRef}
-                              onChange={handleAttendancePhotoChange} 
-                            />
-                          </label>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                          {/* Photo Preview */}
-                          <div style={{ position: "relative", width: "100%", height: "180px", borderRadius: "var(--radius-md)", overflow: "hidden", border: "1px solid var(--border-color)", backgroundColor: "#000" }}>
-                            <img src={attendancePhotoPreview} alt="Selfie preview" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
-                            <button 
-                              type="button" 
-                              onClick={handleResetVerification} 
-                              style={{ position: "absolute", top: "8px", right: "8px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
-                            >
-                              <X size={14} />
-                            </button>
-                          </div>
-
-                          {/* Loader during EXIF processing */}
-                          {attendancePhotoUploading && (
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)" }}>
-                              <div className="spinner-small" style={{ border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid var(--primary-600)", borderRadius: "50%", width: "16px", height: "16px", animation: "spin 1s linear infinite" }} />
-                              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Verifying live GPS location & photo EXIF...</span>
-                            </div>
-                          )}
-
-                          {/* Verification: SUCCESS CARD */}
-                          {verificationStatus === "success" && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", backgroundColor: "var(--success-50)", border: "1px solid var(--success-200)", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--success-500)" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--success-700)", fontWeight: "800", fontSize: "14px" }}>
-                                <CheckCircle2 size={18} />
-                                <span>Site Verified Successfully</span>
-                              </div>
-                              <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", color: "var(--success-800)" }}>
-                                <div style={{ fontWeight: "600" }}>✓ Site Name: {currentSite.siteName}</div>
-                                <div>✓ Address matched: {photoAddress}</div>
-                                <div>✓ Distance from site: {verificationDetails.distance === 0 ? "On Site" : `${verificationDetails.distance} meters`}</div>
-                              </div>
-                              
-                              <Button 
-                                type="button" 
-                                onClick={handleMarkAttendance} 
-                                isLoading={attendanceSubmitting} 
-                                icon={ClipboardCheck} 
-                                style={{ 
-                                  marginTop: "6px",
-                                  backgroundColor: "var(--success-600)",
-                                  color: "#ffffff"
-                                }}
-                              >
-                                Continue Attendance Entry
-                              </Button>
-                            </div>
-                          )}
-
-                          {/* Verification: FAILURE CARD */}
-                          {verificationStatus === "failed" && (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", backgroundColor: "var(--danger-50)", border: "1px solid var(--danger-200)", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--danger-500)" }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--danger-700)", fontWeight: "800", fontSize: "14px" }}>
-                                <AlertCircle size={18} />
-                                <span>
-                                  {verificationDetails.isNoPermission ? "Location Permission Blocked" : 
-                                   verificationDetails.isNoGps ? "Invalid Photo" : 
-                                   verificationDetails.isOld ? "Old Photo Detected" : "Location Mismatch"}
-                                </span>
-                              </div>
-
-                              <div style={{ fontSize: "12px", color: "var(--danger-800)", display: "flex", flexDirection: "column", gap: "6px" }}>
-                                {verificationDetails.isNoPermission && (
-                                  <span>Please enable location services and grant permission to allow geo-tagged captures.</span>
-                                )}
-                                
-                                {verificationDetails.isNoGps && (
-                                  <span>No GPS coordinates found in image metadata. Please capture a new geo-tagged photo using your camera.</span>
-                                )}
-
-                                {verificationDetails.isOld && (
-                                  <span>Photo timestamp is too old. Please capture a new live site photo.</span>
-                                )}
-
-                                {!verificationDetails.isNoPermission && !verificationDetails.isNoGps && !verificationDetails.isOld && (
-                                  <>
-                                    <div><strong>Expected Site:</strong> {verificationDetails.expectedSiteName} ({verificationDetails.expectedAddress})</div>
-                                    <div><strong>Captured Location:</strong> {verificationDetails.capturedAddress}</div>
-                                    <div><strong>Device Distance:</strong> {verificationDetails.liveDistance} meters away</div>
-                                    <div><strong>Photo GPS Distance:</strong> {verificationDetails.photoDistance} meters away</div>
-                                    <div style={{ color: "var(--danger-700)", fontWeight: "600", marginTop: "4px" }}>
-                                      Please capture photo from assigned site location.
-                                    </div>
-                                  </>
-                                )}
-                              </div>
-                              
-                              <label style={{ 
-                                display: "inline-flex", 
-                                alignItems: "center", 
-                                justifyContent: "center",
-                                gap: "8px", 
-                                padding: "8px 16px", 
-                                border: "1px solid var(--danger-300)", 
-                                borderRadius: "var(--radius-sm)", 
-                                cursor: "pointer", 
-                                backgroundColor: "#ffffff",
-                                fontSize: "12px",
-                                fontWeight: "700",
-                                color: "var(--danger-700)",
-                                textAlign: "center",
-                                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                                marginTop: "6px"
-                              }}>
-                                <Camera size={14} />
-                                <span>Retake Photo</span>
-                                <input 
-                                  type="file" 
-                                  accept="image/*" 
-                                  capture="environment" 
-                                  style={{ display: "none" }} 
-                                  ref={fileInputRef}
-                                  onChange={handleAttendancePhotoChange} 
-                                />
-                              </label>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-
-            {/* My Leaves & Holidays summary card */}
-            <Card title="My Leaves & Holiday Summary" icon={Calendar} style={{ borderLeft: "5px solid var(--accent-600)" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 
-                {/* Stats block */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                  <div style={{ backgroundColor: "var(--primary-50)", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
-                      Remaining Holidays
-                    </span>
-                    <strong style={{ fontSize: "16px", color: "var(--primary-950)", display: "block", marginTop: "2px" }}>
-                      {personalStats ? personalStats.remainingHolidays : "--"}
-                    </strong>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>
-                      of {userProfile?.holidayAllowance || 24} annual days
-                    </span>
-                  </div>
-
-                  <div style={{ backgroundColor: "var(--success-50)", padding: "8px", borderRadius: "6px", textAlign: "center" }}>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
-                      Weekdays Worked (Month)
-                    </span>
-                    <strong style={{ fontSize: "16px", color: "var(--success-700)", display: "block", marginTop: "2px" }}>
-                      {personalStats ? personalStats.weekdaysWorkedThisMonth : "--"}
-                    </strong>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>
-                      days checked present
-                    </span>
-                  </div>
-                </div>
-
-                <div style={{ backgroundColor: "var(--danger-50)", padding: "8px 12px", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div>
-                    <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>
-                      Leaves Taken (Month / Year)
-                    </span>
-                    <strong style={{ fontSize: "14px", color: "var(--danger-600)" }}>
-                      {personalStats ? `${personalStats.leavesThisMonth} / ${personalStats.leavesThisYear}` : "-- / --"}
-                    </strong>
-                  </div>
-                  <span style={{ fontSize: "10px", color: "var(--danger-700)", fontWeight: "700" }}>Leave days</span>
-                </div>
-
-                <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
-
-                {/* Log Leave Inline Form */}
-                <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)", textTransform: "uppercase" }}>Log a Leave Day</span>
-                  <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
-                    <div>
-                      <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Date</label>
-                      <input 
-                        type="date" 
-                        value={leaveDate}
-                        onChange={(e) => setLeaveDate(e.target.value)}
-                        required
-                        style={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)" }}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Reason</label>
-                      <select 
-                        value={leaveReason}
-                        onChange={(e) => setLeaveReason(e.target.value)}
-                        style={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff" }}
-                      >
-                        <option value="Personal Leave">Personal</option>
-                        <option value="Sick Leave">Sick Leave</option>
-                        <option value="Vacation">Vacation</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                  </div>
-                  <Button type="submit" isLoading={leaveSubmitting} style={{ padding: "6px 12px", fontSize: "11px", width: "100%" }}>
-                    Record Leave Date
-                  </Button>
-                </form>
-
-                {/* Logged Leaves Scroll list */}
-                {loggedLeaves.length > 0 && (
-                  <>
-                    <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: "4px 0" }} />
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)", textTransform: "uppercase" }}>My Leaves History</span>
-                    <div style={{ maxHeight: "110px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "6px" }}>
-                      {loggedLeaves.map(leave => (
-                        <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "6px 10px", backgroundColor: "#fff", border: "1px solid var(--border-color)", borderRadius: "4px" }}>
-                          <div>
-                            <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-950)", display: "block" }}>{leave.date}</span>
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{leave.reason}</span>
-                          </div>
-                          <button 
-                            type="button" 
-                            onClick={() => handleDeleteLeave(leave.id)}
-                            style={{ 
-                              border: "none", 
-                              backgroundColor: "transparent", 
-                              color: "var(--danger-500)", 
-                              cursor: "pointer", 
-                              padding: "4px",
-                              display: "flex",
-                              alignItems: "center"
-                            }} 
-                            title="Cancel Leave"
-                          >
-                            <Trash2 size={13} style={{ display: "inline-block" }} />
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                )}
-
-              </div>
-            </Card>
-
-          </div>
-
-          {/* Quick Stats Grid */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px" }}>
-            
-            {/* Labour Summary Card */}
-            <div style={{ backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderLeft: "4px solid var(--primary-600)", padding: "16px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Labour Present Today</span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: "20px", fontWeight: "800", color: "var(--primary-900)" }}>
-                  {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
-                </h3>
-              </div>
-              <div style={{ backgroundColor: "var(--primary-50)", padding: "8px", borderRadius: "50%", color: "var(--primary-600)" }}>
-                <Users size={20} />
-              </div>
-            </div>
-
-            {/* Material Summary Card */}
-            <div style={{ backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderLeft: "4px solid var(--accent-600)", padding: "16px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Material Logged</span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: "20px", fontWeight: "800", color: "var(--primary-900)" }}>
-                  {materials.filter(m => m.siteId === activeSiteId).length} Deliveries
-                </h3>
-              </div>
-              <div style={{ backgroundColor: "var(--accent-50)", padding: "8px", borderRadius: "50%", color: "var(--accent-600)" }}>
-                <Package size={20} />
-              </div>
-            </div>
-
-            {/* Photo Logs Card */}
-            <div style={{ backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderLeft: "4px solid var(--info-600)", padding: "16px", borderRadius: "8px", boxShadow: "0 1px 3px rgba(0,0,0,0.05)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Site Photos Captured</span>
-                <h3 style={{ margin: "4px 0 0 0", fontSize: "20px", fontWeight: "800", color: "var(--primary-900)" }}>
-                  {sitePhotos.filter(p => p.siteId === activeSiteId).length} Images
-                </h3>
-              </div>
-              <div style={{ backgroundColor: "var(--info-50)", padding: "8px", borderRadius: "50%", color: "var(--info-600)" }}>
-                <Camera size={20} />
-              </div>
-            </div>
-
-          </div>
-
-          {/* Recent site activities & timelines */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-            
-            {/* Recent Progress Logs */}
-            <Card title="Recent Work Updates" icon={FileText} headerActions={<Button onClick={() => navigate("/engineer/progress")} variant="outline" style={{ padding: "4px 8px", fontSize: "11px" }}>Manage</Button>}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "250px", overflowY: "auto" }}>
-                {dailyUpdates.filter(u => u.siteId === activeSiteId).length === 0 ? (
-                  <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", margin: "16px 0" }}>No updates recorded yet.</p>
-                ) : (
-                  dailyUpdates.filter(u => u.siteId === activeSiteId).slice(0, 3).map(update => {
-                    // Extract title description (handles formatted description)
-                    const lines = update.description.split("\n\n");
-                    const workCompleted = lines[0]?.replace("Work Completed: ", "") || update.description;
-                    
-                    return (
-                      <div key={update.id} style={{ padding: "10px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
-                          <span className="font-mono text-muted">
-                            {update.createdAt?.seconds 
-                              ? new Date(update.createdAt.seconds * 1000).toLocaleDateString()
-                              : new Date(update.createdAt).toLocaleDateString()}
-                          </span>
-                          <span style={{ color: "var(--success-600)" }}>{update.progress} Done</span>
-                        </div>
-                        <p style={{ margin: 0, fontSize: "12px", color: "var(--primary-950)", overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                          {workCompleted}
-                        </p>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </Card>
-
-            {/* Recent Photos */}
-            <Card title="Recent Photo Gallery" icon={Camera} headerActions={<Button onClick={() => navigate("/engineer/photos")} variant="outline" style={{ padding: "4px 8px", fontSize: "11px" }}>Upload</Button>}>
-              {sitePhotos.filter(p => p.siteId === activeSiteId).length === 0 ? (
-                <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", margin: "16px 0" }}>No photos uploaded yet.</p>
-              ) : (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-                  {sitePhotos.filter(p => p.siteId === activeSiteId).slice(0, 2).map(photo => (
-                    <div key={photo.id} style={{ border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", overflow: "hidden", backgroundColor: "#fff" }}>
-                      <div style={{ height: "100px" }}>
-                        <img src={photo.imageUrl} alt="Inspection" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                      </div>
-                      <div style={{ padding: "6px", fontSize: "10px" }}>
-                        <span className="font-mono" style={{ color: "var(--text-muted)" }}>
-                          {photo.capturedAt?.seconds 
-                            ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
-                            : new Date(photo.capturedAt).toLocaleDateString()}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-
-          </div>
-
-        </div>
-      )}
-
-      {/* B) ATTENDANCE MODULE TAB (Daily Labour Attendance Tracking) */}
-      {tab === "attendance" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-          
-          {/* Main Attendance Input */}
-          <Card title="Labour Attendance Check-In" icon={ClipboardCheck} style={{ borderLeft: "5px solid var(--primary-600)" }}>
-            <form onSubmit={handleSaveLabourCounts} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-              <div className="form-group">
-                <label htmlFor="labour-date">Supervisor Check-In Date</label>
-                <div className="input-wrapper">
-                  <Calendar size={18} className="input-icon" />
-                  <input 
-                    type="date" 
-                    id="labour-date" 
-                    value={labourDate} 
-                    onChange={(e) => setLabourDate(e.target.value)} 
-                    required 
+                <div className="counter-control">
+                  <button
+                    type="button"
+                    className="counter-btn"
+                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <input
+                    type="number"
+                    value={currentVal}
+                    onChange={(e) => {
+                      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      setCountsMap(prev => ({ ...prev, [cat]: val }));
+                    }}
+                    className="counter-value"
+                    style={{
+                      width: "44px",
+                      border: "none",
+                      textAlign: "center",
+                      fontWeight: "800",
+                      fontSize: "15px",
+                      color: "var(--primary-950)",
+                      background: "transparent",
+                      outline: "none",
+                      padding: 0,
+                      margin: 0
+                    }}
                   />
+                  <button
+                    type="button"
+                    className="counter-btn"
+                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }))}
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
               </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Today's Workers</span>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginTop: "4px" }}>
-                  {categories.map(cat => {
-                    const currentVal = countsMap[cat] || 0;
-                    const emojis = {
-                      Mason: "👷",
-                      Helper: "🧱",
-                      Electrician: "🔧",
-                      Plumber: "🚰",
-                      Painter: "🖌️",
-                      Other: "📋"
-                    };
-                    const emoji = emojis[cat] || "🔨";
-                    return (
-                      <div key={cat} style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        justifyContent: "space-between",
-                        gap: "12px",
-                        padding: "16px",
-                        backgroundColor: "#ffffff",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "12px",
-                        boxShadow: "0 2px 4px rgba(0,0,0,0.02)"
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                          <span style={{ fontSize: "24px" }}>{emoji}</span>
-                          <div>
-                            <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px", display: "block" }}>{cat}</span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Worker Category</span>
-                          </div>
-                        </div>
-                        
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "var(--primary-50)", padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--primary-100)" }}>
-                          <button
-                            type="button"
-                            onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
-                            style={{
-                              width: "32px",
-                              height: "32px",
-                              borderRadius: "50%",
-                              border: "1px solid var(--border-color)",
-                              backgroundColor: "#ffffff",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              fontWeight: "800",
-                              color: "var(--danger-600)",
-                              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                              fontSize: "16px"
-                            }}
-                          >
-                            <Minus size={14} />
-                          </button>
-                          
-                          <input
-                            type="number"
-                            value={currentVal}
-                            min="0"
-                            onChange={(e) => {
-                              const val = Math.max(0, parseInt(e.target.value) || 0);
-                              setCountsMap(prev => ({ ...prev, [cat]: val }));
-                            }}
-                            style={{
-                              width: "70px",
-                              height: "32px",
-                              textAlign: "center",
-                              fontWeight: "800",
-                              fontSize: "15px",
-                              border: "none",
-                              background: "transparent",
-                              margin: 0,
-                              outline: "none",
-                              color: "var(--primary-950)"
-                            }}
-                          />
-
-                          <button
-                            type="button"
-                            onClick={() => setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }))}
-                            style={{
-                              width: "32px",
-                              height: "32px",
-                              borderRadius: "50%",
-                              border: "1px solid var(--border-color)",
-                              backgroundColor: "#ffffff",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              cursor: "pointer",
-                              fontWeight: "800",
-                              color: "var(--success-600)",
-                              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
-                              fontSize: "16px"
-                            }}
-                          >
-                            <Plus size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* Autocalculate Summary Box */}
-              <div style={{
-                padding: "16px",
-                backgroundColor: "var(--primary-900)",
-                color: "#ffffff",
-                borderRadius: "12px",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
-                marginTop: "16px",
-                border: "1px solid var(--primary-950)"
-              }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <Users size={20} style={{ color: "var(--accent-400)" }} />
-                  <div>
-                    <span style={{ fontSize: "14px", fontWeight: "700", display: "block" }}>Total Workers Present</span>
-                    <span style={{ fontSize: "11px", opacity: 0.8 }}>Sum of all categories</span>
-                  </div>
-                </div>
-                <strong style={{ fontSize: "20px", color: "var(--accent-400)" }}>
-                  {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
-                </strong>
-              </div>
-
-              <Button type="submit" isLoading={labourSaving} icon={Save} style={{ width: "100%", padding: "12px", fontSize: "14px" }}>
-                Save Daily Attendance Counts
-              </Button>
-            </form>
-          </Card>
-
-          {/* Historical Logs List */}
-          <Card title="Attendance Counts History" icon={Clock}>
-            {labourHistoryLoading ? (
-              <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", padding: "16px" }}>Syncing database logs...</p>
-            ) : labourHistory.length === 0 ? (
-              <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", padding: "16px" }}>No historical daily counts registered yet.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "400px", overflowY: "auto" }}>
-                {labourHistory.map(row => (
-                  <div key={row.date} style={{
-                    padding: "12px",
-                    border: "1px solid var(--border-color)",
-                    borderRadius: "8px",
-                    backgroundColor: "#ffffff",
-                    boxShadow: "0 1px 2px rgba(0,0,0,0.02)"
-                  }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                      <span className="font-mono" style={{ fontWeight: "700", color: "var(--primary-950)" }}>{row.date}</span>
-                      <Badge status="success">{row.total} Workers</Badge>
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px" }}>
-                      <span style={{ padding: "3px 6px", backgroundColor: "var(--primary-50)", borderRadius: "4px", color: "var(--primary-700)" }}>Masons: {row.Masons}</span>
-                      <span style={{ padding: "3px 6px", backgroundColor: "var(--primary-50)", borderRadius: "4px", color: "var(--primary-700)" }}>Helpers: {row.Helpers}</span>
-                      <span style={{ padding: "3px 6px", backgroundColor: "var(--primary-50)", borderRadius: "4px", color: "var(--primary-700)" }}>Others: {row.Others}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+            );
+          })}
         </div>
-      )}
 
-      {/* C) LABOUR MANAGEMENT MODULE TAB */}
-      {tab === "labour" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-            
-            {/* Add Labour Category Card */}
-            <Card title="Add Labour Category" icon={Plus} style={{ borderLeft: "5px solid var(--accent-500)" }}>
-              <form onSubmit={handleAddLabourCategory} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div className="form-group">
-                  <label htmlFor="new-category-input">New Category Name</label>
-                  <div className="input-wrapper">
-                    <Plus size={18} className="input-icon" />
-                    <input 
-                      type="text" 
-                      id="new-category-input"
-                      placeholder="E.g., Welder, Carpenter, Supervisor"
-                      value={newCategoryName}
-                      onChange={(e) => setNewCategoryName(e.target.value)}
-                      required 
-                    />
-                  </div>
-                </div>
-                <Button type="submit" icon={Plus} style={{ width: "100%" }}>
-                  Add Category Type
-                </Button>
-              </form>
-            </Card>
-
-            {/* Manage Labour Types */}
-            <Card title="Manage Labour Types" icon={Sliders}>
-              <p style={{ margin: "0 0 12px 0", fontSize: "12px", color: "var(--text-muted)" }}>
-                Core system categories are locked. Custom added types can be removed below.
-              </p>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                {categories.map(cat => {
-                  const isCore = ["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(cat);
-                  return (
-                    <div key={cat} style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "8px 12px",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "var(--radius-sm)",
-                      backgroundColor: isCore ? "var(--primary-50)" : "#ffffff"
-                    }}>
-                      <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--primary-900)" }}>
-                        {cat} {isCore && <span style={{ fontSize: "10px", color: "var(--text-muted)", marginLeft: "4px" }}>(Core)</span>}
-                      </span>
-                      {!isCore && (
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteLabourCategory(cat)}
-                          style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--danger-500)",
-                            cursor: "pointer",
-                            padding: "4px"
-                          }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </Card>
-
+        {/* Add custom trade category */}
+        <div style={{
+          backgroundColor: "#ffffff",
+          border: "1px solid var(--border-color)",
+          borderRadius: "var(--radius-md)",
+          padding: "16px",
+          boxShadow: "var(--shadow-sm)",
+          marginTop: "8px"
+        }}>
+          <span className="mobile-form-label">Add Custom Worker Type</span>
+          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+            <input
+              type="text"
+              placeholder="E.g. Welder, Carpenter"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                border: "1px solid var(--border-color)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "13px",
+                outline: "none",
+                margin: 0
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleAddLabourCategory}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "var(--accent-50)",
+                color: "var(--accent-700)",
+                border: "1px solid var(--accent-200)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "13px",
+                fontWeight: "700",
+                cursor: "pointer"
+              }}
+            >
+              Add
+            </button>
           </div>
-
-          {/* Today's Labour Summary Cards */}
-          <Card title="Today's Labour Summary" icon={Users} variant="accent">
-            <p style={{ margin: "0 0 16px 0", fontSize: "13px", color: "var(--text-muted)" }}>
-              Detailed counts breakdown logged for <strong>{new Date().toISOString().split("T")[0]}</strong>.
-            </p>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px" }}>
-              {categories.map(cat => {
-                const count = countsMap[cat] || 0;
-                return (
-                  <div key={cat} style={{
-                    padding: "16px",
-                    border: "1px solid var(--border-color)",
-                    borderRadius: "8px",
-                    backgroundColor: "#ffffff",
-                    textAlign: "center",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-                    borderTop: "3px solid var(--primary-500)"
-                  }}>
-                    <span style={{ display: "block", fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: "4px" }}>
-                      {cat}
-                    </span>
-                    <strong style={{ fontSize: "22px", color: "var(--primary-950)" }}>
-                      {count} <span style={{ fontSize: "12px", fontWeight: "normal", color: "var(--text-muted)" }}>Workers</span>
-                    </strong>
-                  </div>
-                );
-              })}
-            </div>
-          </Card>
-
         </div>
-      )}
 
-      {/* D) MATERIAL MANAGEMENT MODULE TAB */}
-      {tab === "material" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "24px" }}>
-          
-          {/* Add Material Log */}
-          <Card title="Log Material Received" icon={Plus} style={{ borderLeft: "5px solid var(--accent-500)" }}>
-            <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              
-              <div className="form-group">
-                <label>Material Category</label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
-                  {["Cement", "Steel", "Sand", "Bricks", "Other"].map(catOption => (
-                    <button
-                      type="button"
-                      key={catOption}
-                      onClick={() => {
-                        setMaterialCategory(catOption);
-                        setMaterialName("");
-                      }}
-                      style={{
-                        flex: "1 0 auto",
-                        padding: "10px 14px",
-                        borderRadius: "8px",
-                        border: materialCategory === catOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                        backgroundColor: materialCategory === catOption ? "var(--accent-50)" : "#ffffff",
-                        color: materialCategory === catOption ? "var(--accent-700)" : "var(--primary-800)",
-                        fontWeight: "700",
-                        fontSize: "13px",
-                        cursor: "pointer",
-                        transition: "all var(--transition-fast)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: materialCategory === catOption ? "0 2px 4px rgba(14, 165, 233, 0.1)" : "none"
-                      }}
-                    >
-                      {catOption}
-                    </button>
-                  ))}
-                </div>
-              </div>
+        {/* Workforce Total Count */}
+        <div style={{
+          backgroundColor: "var(--primary-900)",
+          color: "#ffffff",
+          borderRadius: "var(--radius-md)",
+          padding: "16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          boxShadow: "var(--shadow-md)",
+          marginTop: "16px"
+        }}>
+          <div>
+            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Total Workers Present</span>
+            <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--accent-400)" }}>
+              {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
+            </span>
+          </div>
+          <button
+            type="button"
+            className="mobile-attendance-btn"
+            style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
+            onClick={handleSaveLabourCounts}
+            disabled={labourSaving}
+          >
+            {labourSaving ? "Saving..." : "Save Counts"}
+          </button>
+        </div>
 
-              <div className="form-group">
-                <label>Unit</label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
-                  {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
-                    <button
-                      type="button"
-                      key={unitOption}
-                      onClick={() => setMaterialUnit(unitOption)}
-                      style={{
-                        flex: "1 0 auto",
-                        padding: "10px 14px",
-                        borderRadius: "8px",
-                        border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                        backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
-                        color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
-                        fontWeight: "700",
-                        fontSize: "13px",
-                        cursor: "pointer",
-                        transition: "all var(--transition-fast)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: materialUnit === unitOption ? "0 2px 4px rgba(14, 165, 233, 0.1)" : "none"
-                      }}
-                    >
-                      {unitOption}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="material-name">Material Name</label>
-                <div className="input-wrapper">
-                  <Package size={18} className="input-icon" />
-                  <input 
-                    type="text" 
-                    id="material-name"
-                    placeholder="Select Suggestion below or enter custom name..."
-                    value={materialName}
-                    onChange={(e) => setMaterialName(e.target.value)}
-                    required 
-                  />
-                </div>
-                
-                {/* Suggestions list for Material Name */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
-                  {(categorySuggestions[materialCategory] || []).map(sug => (
-                    <button
-                      type="button"
-                      key={sug}
-                      onClick={() => setMaterialName(sug)}
-                      style={{
-                        padding: "4px 10px",
-                        borderRadius: "16px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: materialName === sug ? "var(--primary-100)" : "#ffffff",
-                        color: materialName === sug ? "var(--primary-800)" : "var(--text-muted)",
-                        fontSize: "11px",
-                        fontWeight: "600",
-                        cursor: "pointer",
-                        transition: "all 0.2s"
-                      }}
-                    >
-                      {sug}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
-                <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                  <label htmlFor="material-quantity">Quantity</label>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "stretch",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    overflow: "hidden",
-                    backgroundColor: "#ffffff",
-                    height: "42px",
-                    marginTop: "4px"
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--danger-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderRight: "1px solid var(--border-color)",
-                        transition: "background var(--transition-fast)"
-                      }}
-                    >
-                      -10
-                    </button>
-                    <input 
-                      type="number" 
-                      id="material-quantity"
-                      placeholder="Qty"
-                      min="0.01"
-                      step="any"
-                      value={materialQuantity}
-                      onChange={(e) => setMaterialQuantity(e.target.value)}
-                      required 
-                      style={{
-                        border: "none",
-                        outline: "none",
-                        textAlign: "center",
-                        flex: 1,
-                        fontSize: "15px",
-                        fontWeight: "700",
-                        color: "var(--primary-950)",
-                        backgroundColor: "transparent",
-                        margin: 0,
-                        padding: 0,
-                        boxShadow: "none"
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--success-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderLeft: "1px solid var(--border-color)",
-                        transition: "background var(--transition-fast)"
-                      }}
-                    >
-                      +10
-                    </button>
+        {/* History logs */}
+        <div style={{ marginTop: "24px" }}>
+          <span className="mobile-form-label">Workforce History Logs</span>
+          {labourHistoryLoading ? (
+            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>Loading logs...</div>
+          ) : labourHistory.length === 0 ? (
+            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>No past records found.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {labourHistory.map(row => (
+                <div key={row.date} style={{
+                  padding: "12px 16px",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "var(--radius-md)",
+                  backgroundColor: "#ffffff",
+                  boxShadow: "var(--shadow-sm)"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <span className="font-mono" style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "13px" }}>{row.date}</span>
+                    <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
+                    {Object.entries(row).map(([k, v]) => {
+                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt"].includes(k)) return null;
+                      return <span key={k}>{k}: {v}</span>;
+                    }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
                   </div>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
 
-                <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                  <label htmlFor="material-date">Receipt Date</label>
-                  <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                    <Calendar size={18} className="input-icon" />
-                    <input 
-                      type="date" 
-                      id="material-date"
-                      value={materialPurchaseDate}
-                      onChange={(e) => setMaterialPurchaseDate(e.target.value)}
-                      required 
-                      style={{ height: "42px" }}
-                    />
-                  </div>
-                </div>
-              </div>
+  const renderMaterialView = () => {
+    if (materialFlow === "list") {
+      const activeMaterials = materials
+        .filter(m => m.siteId === activeSiteId)
+        .filter(m => {
+          const query = materialSearch.toLowerCase().trim();
+          if (!query) return true;
+          return (
+            m.materialName.toLowerCase().includes(query) ||
+            m.category.toLowerCase().includes(query) ||
+            m.supplierName.toLowerCase().includes(query)
+          );
+        })
+        .filter(m => {
+          if (!materialDateFilter) return true;
+          return m.purchaseDate === materialDateFilter;
+        });
 
-              <div className="form-group">
-                <label htmlFor="material-supplier">Supplier Name</label>
-                <div className="input-wrapper">
-                  <Briefcase size={18} className="input-icon" />
-                  <input 
-                    type="text" 
-                    id="material-supplier"
-                    placeholder="Select suggestion or type..."
-                    value={materialSupplier}
-                    onChange={(e) => setMaterialSupplier(e.target.value)}
-                    required 
-                  />
-                </div>
-                
-                {/* Supplier Suggestions */}
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
-                  {(() => {
-                    const uniqueSuppliers = Array.from(new Set(materials.map(m => m.supplierName).filter(Boolean)));
-                    const defaultSuppliers = ["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."];
-                    const list = Array.from(new Set([...uniqueSuppliers.slice(0, 2), ...defaultSuppliers])).slice(0, 4);
-                    return list.map(sug => (
-                      <button
-                        type="button"
-                        key={sug}
-                        onClick={() => setMaterialSupplier(sug)}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: "16px",
-                          border: "1px solid var(--border-color)",
-                          backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
-                          color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
-                          fontSize: "11px",
-                          fontWeight: "600",
-                          cursor: "pointer"
-                        }}
-                      >
-                        {sug}
-                      </button>
-                    ));
-                  })()}
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="material-notes">Notes (Optional)</label>
-                <textarea 
-                  id="material-notes"
-                  placeholder="Inspection notes, challan number, etc..."
-                  value={materialNotes}
-                  onChange={(e) => setMaterialNotes(e.target.value)}
-                  style={{ minHeight: "50px" }}
-                />
-              </div>
-
-              <div className="form-group">
-                <label>Upload Material Photo</label>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                  <label style={{ 
-                    display: "flex", 
-                    flexDirection: "column", 
-                    alignItems: "center", 
-                    gap: "6px", 
-                    padding: "20px 16px", 
-                    border: "2px dashed var(--border-color)", 
-                    borderRadius: "8px", 
-                    cursor: "pointer", 
-                    backgroundColor: "var(--primary-50)",
-                    textAlign: "center"
-                  }}>
-                    <Camera size={24} style={{ color: "var(--primary-600)" }} />
-                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Challan Photo</span>
-                    <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
-                  </label>
-                  {materialInvoiceFile && (
-                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--success-600)", textAlign: "center" }}>
-                      Selected: {materialInvoiceFile.name}
-                    </span>
-                  )}
-                </div>
-                {materialInvoicePreview && (
-                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
-                    <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} /></button>
-                  </div>
-                )}
-              </div>
-
-              <Button type="submit" isLoading={materialSubmitting} icon={Save} style={{ width: "100%", marginTop: "4px" }}>
-                Save Material Log
-              </Button>
-            </form>
-          </Card>
-
-          {/* Search & Filter Material History */}
-          <Card title="Material Inventory History" icon={Package}>
-            
-            {/* Searching Filters */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "16px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "4px 10px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
-                <Search size={16} style={{ color: "var(--text-muted)" }} />
-                <input 
-                  type="text" 
-                  placeholder="Search item name, supplier, category..."
-                  value={materialSearch}
-                  onChange={(e) => setMaterialSearch(e.target.value)}
-                  style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: "6px 0", margin: 0 }}
-                />
-              </div>
-              
-              <div className="form-group" style={{ margin: 0 }}>
-                <label style={{ fontSize: "11px", fontWeight: "700" }}>Filter by Date</label>
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Search bar & filter */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
+              <Search size={16} style={{ color: "var(--text-muted)" }} />
+              <input 
+                type="text" 
+                placeholder="Search materials, suppliers..."
+                value={materialSearch}
+                onChange={(e) => setMaterialSearch(e.target.value)}
+                style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div style={{ flex: 1 }}>
                 <input 
                   type="date" 
                   value={materialDateFilter} 
                   onChange={(e) => setMaterialDateFilter(e.target.value)} 
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
                 />
-                {materialDateFilter && (
-                  <button 
-                    type="button" 
-                    onClick={() => setMaterialDateFilter("")}
-                    style={{
-                      background: "none",
-                      border: "none",
-                      color: "var(--danger-600)",
-                      fontSize: "11px",
-                      cursor: "pointer",
-                      textDecoration: "underline",
-                      padding: "4px 0",
-                      alignSelf: "flex-start"
+              </div>
+              {materialDateFilter && (
+                <button 
+                  type="button" 
+                  onClick={() => setMaterialDateFilter("")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--danger-600)",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    textDecoration: "underline"
+                  }}
+                >
+                  Clear Date
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* List display */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {activeMaterials.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
+              </div>
+            ) : (
+              activeMaterials.map(m => (
+                <div key={m.id} className="mobile-material-card">
+                  <div className="mobile-material-header">
+                    <div>
+                      <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
+                      <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
+                    </div>
+                    <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
+                      {m.quantity} {m.unit}s
+                    </span>
+                  </div>
+                  
+                  <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
+                    <div className="mobile-material-detail-item">
+                      <span className="mobile-material-detail-label">Supplier</span>
+                      <span className="mobile-material-detail-value">{m.supplierName}</span>
+                    </div>
+                    <div className="mobile-material-detail-item" style={{ textAlign: "right" }}>
+                      <span className="mobile-material-detail-label">Delivery Date</span>
+                      <span className="mobile-material-detail-value">{m.purchaseDate}</span>
+                    </div>
+                  </div>
+
+                  {m.notes && (
+                    <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "6px 10px", borderRadius: "4px", fontStyle: "italic" }}>
+                      "{m.notes}"
+                    </p>
+                  )}
+
+                  {m.invoiceUrl && (
+                    <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
+                      <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
+                        View Challan Photo
+                      </a>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+
+          <button
+            type="button"
+            className="mobile-btn-large"
+            onClick={() => {
+              setMaterialFlow("add");
+              setMaterialStep(1);
+            }}
+            style={{ position: "sticky", bottom: "16px", zIndex: 10, boxShadow: "0 4px 10px rgba(14, 165, 233, 0.3)" }}
+          >
+            <Plus size={18} />
+            <span>Log New Material</span>
+          </button>
+        </div>
+      );
+    }
+
+    // Material receipt wizard flow
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div className="mobile-steps-header">
+          <div className="mobile-step-indicator">
+            <span>Step {materialStep} of 3</span>
+            <div style={{ display: "flex", gap: "6px" }}>
+              <div className={`mobile-step-dot ${materialStep >= 1 ? 'active' : ''}`} />
+              <div className={`mobile-step-dot ${materialStep >= 2 ? 'active' : ''}`} />
+              <div className={`mobile-step-dot ${materialStep >= 3 ? 'active' : ''}`} />
+            </div>
+          </div>
+          <button 
+            type="button" 
+            onClick={() => {
+              setMaterialFlow("list");
+              setMaterialStep(1);
+            }}
+            style={{ background: "none", border: "none", color: "var(--danger-500)", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
+          >
+            Cancel
+          </button>
+        </div>
+
+        {/* Step 1: Category selection */}
+        {materialStep === 1 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <span className="mobile-form-label">Choose Material Category</span>
+            <div className="mobile-category-list">
+              {["Cement", "Steel", "Sand", "Bricks", "Other"].map(cat => {
+                const emojis = {
+                  Cement: "🧱",
+                  Steel: "🧬",
+                  Sand: "⏳",
+                  Bricks: "🧱",
+                  Other: "📦"
+                };
+                const emoji = emojis[cat] || "📦";
+                return (
+                  <div 
+                    key={cat} 
+                    className={`mobile-category-item ${materialCategory === cat ? 'active' : ''}`}
+                    onClick={() => {
+                      setMaterialCategory(cat);
+                      setMaterialName(""); 
+                      setMaterialStep(2);
                     }}
                   >
-                    Clear Date Filter
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <span style={{ fontSize: "20px" }}>{emoji}</span>
+                      <span>{cat}</span>
+                    </div>
+                    <ChevronRight size={18} />
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Name Input */}
+        {materialStep === 2 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div>
+              <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
+            </div>
+
+            <div style={{ position: "relative" }} ref={comboboxRef}>
+              <span className="mobile-form-label">Material Name</span>
+              <div className="input-wrapper" style={{ marginTop: "4px" }}>
+                <Package size={18} className="input-icon" />
+                <input 
+                  type="text" 
+                  placeholder={materialCategory === "Other" ? "Enter custom material name..." : "Search or type material name..."}
+                  value={materialName}
+                  onChange={(e) => {
+                    setMaterialName(e.target.value);
+                    setIsSuggestionsOpen(true);
+                  }}
+                  onFocus={() => setIsSuggestionsOpen(true)}
+                  required 
+                  autoComplete="off"
+                  style={{ height: "42px", paddingLeft: "40px" }}
+                />
+              </div>
+              
+              {isSuggestionsOpen && materialCategory !== "Other" && (
+                <div style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  zIndex: 50,
+                  backgroundColor: "#ffffff",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "var(--radius-sm)",
+                  boxShadow: "var(--shadow-md)",
+                  maxHeight: "180px",
+                  overflowY: "auto",
+                  marginTop: "4px"
+                }}>
+                  {filteredSuggestions.length > 0 ? (
+                    filteredSuggestions.map(sug => {
+                      const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
+                      return (
+                        <button
+                          type="button"
+                          key={sug}
+                          onClick={() => {
+                            setMaterialName(sug);
+                            setIsSuggestionsOpen(false);
+                          }}
+                          style={{
+                            display: "block",
+                            width: "100%",
+                            padding: "10px 14px",
+                            textAlign: "left",
+                            backgroundColor: isSelected ? "var(--accent-50)" : "#ffffff",
+                            color: isSelected ? "var(--accent-700)" : "var(--primary-800)",
+                            border: "none",
+                            borderBottom: "1px solid #f1f5f9",
+                            fontWeight: isSelected ? "700" : "500",
+                            fontSize: "13px",
+                            cursor: "pointer"
+                          }}
+                        >
+                          {sug}
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div style={{ padding: "10px 14px", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
+                      Using custom name: "{materialName}"
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+              <button
+                type="button"
+                className="mobile-btn-large"
+                style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
+                onClick={() => setMaterialStep(1)}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="mobile-btn-large"
+                style={{ flex: 1 }}
+                disabled={!materialName.trim()}
+                onClick={() => setMaterialStep(3)}
+              >
+                Next Step
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Logistics details */}
+        {materialStep === 3 && (
+          <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Category & Name:</span>
+              <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{materialCategory} • {materialName}</strong>
+            </div>
+
+            {/* Units selection */}
+            <div>
+              <span className="mobile-form-label">Unit Type</span>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
+                  <button
+                    type="button"
+                    key={unitOption}
+                    onClick={() => setMaterialUnit(unitOption)}
+                    style={{
+                      flex: "1 0 auto",
+                      padding: "8px 12px",
+                      borderRadius: "6px",
+                      border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
+                      backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
+                      color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {unitOption}
                   </button>
-                )}
+                ))}
               </div>
             </div>
 
-            {/* List of Deliveries */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "450px", overflowY: "auto" }}>
-              {materials
-                .filter(m => m.siteId === activeSiteId)
-                .filter(m => {
-                  const query = materialSearch.toLowerCase().trim();
-                  if (!query) return true;
-                  return (
-                    m.materialName.toLowerCase().includes(query) ||
-                    m.category.toLowerCase().includes(query) ||
-                    m.supplierName.toLowerCase().includes(query)
-                  );
-                })
-                .filter(m => {
-                  if (!materialDateFilter) return true;
-                  return m.purchaseDate === materialDateFilter;
-                })
-                .length === 0 ? (
-                  <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>
-                    No material delivery logs match current filters.
-                  </p>
-                ) : (
-                  materials
-                    .filter(m => m.siteId === activeSiteId)
-                    .filter(m => {
-                      const query = materialSearch.toLowerCase().trim();
-                      if (!query) return true;
-                      return (
-                        m.materialName.toLowerCase().includes(query) ||
-                        m.category.toLowerCase().includes(query) ||
-                        m.supplierName.toLowerCase().includes(query)
-                      );
-                    })
-                    .filter(m => {
-                      if (!materialDateFilter) return true;
-                      return m.purchaseDate === materialDateFilter;
-                    })
-                    .map(m => {
-                      const getRelativeDateStr = (dateStr) => {
-                        const today = new Date().toISOString().split("T")[0];
-                        const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-                        if (dateStr === today) return "Today";
-                        if (dateStr === yesterday) return "Yesterday";
-                        return dateStr;
-                      };
-                      return (
-                        <div key={m.id} style={{
-                          padding: "16px",
-                          border: "1px solid var(--border-color)",
-                          borderRadius: "12px",
-                          backgroundColor: "#ffffff",
-                          boxShadow: "0 2px 4px rgba(0,0,0,0.02)",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "10px"
-                        }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div>
-                              <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                                {m.category}
-                              </span>
-                              <strong style={{ display: "block", fontSize: "14px", color: "var(--primary-950)", marginTop: "2px" }}>
-                                {m.materialName}
-                              </strong>
-                            </div>
-                            <Badge status="success" style={{ padding: "6px 12px", borderRadius: "20px", fontWeight: "800", fontSize: "13px" }}>
-                              {m.quantity} {m.unit}s
-                            </Badge>
-                          </div>
-
-                          <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: 0 }} />
-
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" }}>
-                            <span style={{ color: "var(--text-muted)" }}>
-                              Supplier: <strong style={{ color: "var(--primary-900)" }}>{m.supplierName}</strong>
-                            </span>
-                            <span style={{ fontWeight: "700", color: "var(--accent-600)" }}>
-                              {getRelativeDateStr(m.purchaseDate)}
-                            </span>
-                          </div>
-
-                          {m.notes && (
-                            <div style={{ fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "8px", borderRadius: "6px", fontStyle: "italic" }}>
-                              "{m.notes}"
-                            </div>
-                          )}
-
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: "var(--text-muted)" }}>
-                            <span>Added by {m.engineerName || "Site Engineer"}</span>
-                            {m.invoiceUrl && (
-                              <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
-                                View Bill Photo
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                )}
+            {/* Counter */}
+            <div>
+              <span className="mobile-form-label">Quantity</span>
+              <div style={{
+                display: "flex",
+                alignItems: "stretch",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--border-color)",
+                overflow: "hidden",
+                backgroundColor: "#ffffff",
+                height: "44px",
+                marginTop: "4px"
+              }}>
+                <button
+                  type="button"
+                  onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
+                  style={{
+                    padding: "0 14px",
+                    border: "none",
+                    background: "var(--primary-50)",
+                    color: "var(--danger-600)",
+                    cursor: "pointer",
+                    fontWeight: "800",
+                    fontSize: "14px",
+                    borderRight: "1px solid var(--border-color)"
+                  }}
+                >
+                  -10
+                </button>
+                <input 
+                  type="number" 
+                  placeholder="0.0"
+                  min="0.01"
+                  step="any"
+                  value={materialQuantity}
+                  onChange={(e) => setMaterialQuantity(e.target.value)}
+                  required 
+                  style={{
+                    border: "none",
+                    outline: "none",
+                    textAlign: "center",
+                    flex: 1,
+                    fontSize: "16px",
+                    fontWeight: "800",
+                    color: "var(--primary-950)",
+                    backgroundColor: "transparent",
+                    margin: 0,
+                    padding: 0
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
+                  style={{
+                    padding: "0 14px",
+                    border: "none",
+                    background: "var(--primary-50)",
+                    color: "var(--success-600)",
+                    cursor: "pointer",
+                    fontWeight: "800",
+                    fontSize: "14px",
+                    borderLeft: "1px solid var(--border-color)"
+                  }}
+                >
+                  +10
+                </button>
+              </div>
             </div>
-          </Card>
-        </div>
-      )}
 
-      {/* E) SITE PHOTO MODULE TAB */}
-      {tab === "photos" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-          
-          {/* Capture Site Photo */}
-          <Card title="Capture Progress Photo" icon={Camera} style={{ borderLeft: "5px solid var(--primary-600)" }}>
-            <form onSubmit={handlePhotoUpload} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>
-                Geotag and timestamp are recorded automatically.
-              </p>
-              
-              <div className="form-group">
-                <label>Site Picture Source</label>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                  <label style={{ 
-                    display: "flex", 
-                    flexDirection: "column", 
-                    alignItems: "center", 
-                    gap: "6px", 
-                    padding: "24px 16px", 
-                    border: "2px dashed var(--border-color)", 
-                    borderRadius: "8px", 
-                    cursor: "pointer", 
-                    backgroundColor: "var(--primary-50)" 
-                  }}>
-                    <Camera size={32} style={{ color: "var(--text-muted)" }} />
-                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
-                    <input 
-                      type="file" 
-                      accept="image/*" 
-                      capture="environment" 
-                      style={{ display: "none" }} 
-                      onChange={(e) => handleFileChange(e, setSitePhotoFile, setSitePhotoPreview)} 
-                    />
-                  </label>
-                  {sitePhotoFile && (
-                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--success-600)", textAlign: "center" }}>
-                      Selected: {sitePhotoFile.name}
-                    </span>
-                  )}
-                </div>
+            {/* Supplier */}
+            <div>
+              <span className="mobile-form-label">Supplier Company</span>
+              <div className="input-wrapper">
+                <Briefcase size={18} className="input-icon" />
+                <input 
+                  type="text" 
+                  placeholder="Enter supplier name..."
+                  value={materialSupplier}
+                  onChange={(e) => setMaterialSupplier(e.target.value)}
+                  required 
+                  style={{ height: "42px", paddingLeft: "40px" }}
+                />
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                {["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."].map(sug => (
+                  <button
+                    type="button"
+                    key={sug}
+                    onClick={() => setMaterialSupplier(sug)}
+                    style={{
+                      padding: "4px 10px",
+                      borderRadius: "16px",
+                      border: "1px solid var(--border-color)",
+                      backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
+                      color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
+                      fontSize: "11px",
+                      fontWeight: "600",
+                      cursor: "pointer"
+                    }}
+                  >
+                    {sug}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-                {sitePhotoPreview && (
-                  <div style={{ marginTop: "12px", position: "relative", width: "100%", height: "180px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
-                    <img src={sitePhotoPreview} alt="Site preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button type="button" onClick={() => { setSitePhotoFile(null); setSitePhotoPreview(null); }} style={{ position: "absolute", top: "8px", right: "8px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={14} /></button>
+            {/* Date */}
+            <div>
+              <span className="mobile-form-label">Receipt Date</span>
+              <div className="input-wrapper">
+                <Calendar size={18} className="input-icon" />
+                <input 
+                  type="date" 
+                  value={materialPurchaseDate}
+                  onChange={(e) => setMaterialPurchaseDate(e.target.value)}
+                  required 
+                  style={{ height: "42px", paddingLeft: "40px" }}
+                />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div>
+              <span className="mobile-form-label">Remarks / Notes</span>
+              <textarea 
+                className="mobile-textarea"
+                placeholder="Challan number, inspection info, etc..."
+                value={materialNotes}
+                onChange={(e) => setMaterialNotes(e.target.value)}
+                style={{ minHeight: "50px" }}
+              />
+            </div>
+
+            {/* Invoice Photo */}
+            <div>
+              <span className="mobile-form-label">Upload Challan Photo</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                <label style={{ 
+                  display: "flex", 
+                  flexDirection: "column", 
+                  alignItems: "center", 
+                  gap: "6px", 
+                  padding: "20px 16px", 
+                  border: "2px dashed var(--border-color)", 
+                  borderRadius: "8px", 
+                  cursor: "pointer", 
+                  backgroundColor: "var(--primary-50)",
+                  textAlign: "center"
+                }}>
+                  <Camera size={24} style={{ color: "var(--primary-600)" }} />
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
+                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
+                </label>
+                {materialInvoicePreview && (
+                  <div style={{ position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", alignSelf: "center" }}>
+                    <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
                   </div>
                 )}
               </div>
+            </div>
 
-              <Button type="submit" isLoading={photoSubmitting} icon={Upload} disabled={!sitePhotoPreview} style={{ width: "100%" }}>
-                Upload Geotagged Photo
-              </Button>
+            {/* Form Actions */}
+            <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+              <button
+                type="button"
+                className="mobile-btn-large"
+                style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
+                onClick={() => setMaterialStep(2)}
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                className="mobile-btn-large"
+                style={{ flex: 1 }}
+                disabled={materialSubmitting}
+              >
+                {materialSubmitting ? "Saving..." : "Save Delivery"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    );
+  };
+
+  const renderMoreView = () => {
+    if (moreSubView === "menu") {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* User profile card */}
+          <div style={{
+            backgroundColor: "#ffffff",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-color)",
+            padding: "16px",
+            boxShadow: "var(--shadow-sm)",
+            display: "flex",
+            alignItems: "center",
+            gap: "16px"
+          }}>
+            <div style={{
+              width: "48px",
+              height: "48px",
+              borderRadius: "50%",
+              backgroundColor: "var(--accent-50)",
+              color: "var(--accent-700)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: "800",
+              fontSize: "16px"
+            }}>
+              {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+            </div>
+            <div>
+              <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{userProfile?.fullName || "Site Engineer"}</h4>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>{userProfile?.email}</p>
+              <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--accent-600)", textTransform: "uppercase" }}>Civil Engineer Panel</span>
+            </div>
+          </div>
+
+          {/* Menu stack */}
+          <div className="mobile-menu-list">
+            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/photos")}>
+              <div className="mobile-menu-left">
+                <Camera size={18} style={{ color: "var(--primary-600)" }} />
+                <span>Site Photos Gallery</span>
+              </div>
+              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+            </button>
+
+            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/progress")}>
+              <div className="mobile-menu-left">
+                <FileText size={18} style={{ color: "var(--primary-600)" }} />
+                <span>Daily Progress DPR</span>
+              </div>
+              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+            </button>
+
+            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/profile")}>
+              <div className="mobile-menu-left">
+                <Calendar size={18} style={{ color: "var(--primary-600)" }} />
+                <span>Profile & Leaves Log</span>
+              </div>
+              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+            </button>
+
+            <button type="button" className="mobile-menu-item danger" onClick={() => logout()}>
+              <div className="mobile-menu-left">
+                <LogOut size={18} style={{ color: "var(--danger-500)" }} />
+                <span>Logout Account</span>
+              </div>
+              <ChevronRight size={16} style={{ color: "var(--danger-500)" }} />
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (moreSubView === "photos") {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+            <button 
+              type="button" 
+              onClick={() => navigate("/engineer/more")}
+              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+            >
+              ← Back
+            </button>
+            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Site Inspection Photos</h4>
+          </div>
+
+          {/* Photo form */}
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
+            <span className="mobile-form-label">Upload Geotagged Progress Photo</span>
+            <form onSubmit={handlePhotoUpload} style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "8px" }}>
+              <label style={{ 
+                display: "flex", 
+                flexDirection: "column", 
+                alignItems: "center", 
+                gap: "6px", 
+                padding: "20px 16px", 
+                border: "2px dashed var(--border-color)", 
+                borderRadius: "8px", 
+                cursor: "pointer", 
+                backgroundColor: "var(--primary-50)",
+                textAlign: "center"
+              }}>
+                <Camera size={28} style={{ color: "var(--primary-600)" }} />
+                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
+                <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setSitePhotoFile, setSitePhotoPreview)} />
+              </label>
+              
+              {sitePhotoPreview && (
+                <div style={{ position: "relative", width: "100%", height: "160px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                  <img src={sitePhotoPreview} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <button type="button" onClick={() => { setSitePhotoFile(null); setSitePhotoPreview(null); }} style={{ position: "absolute", top: "6px", right: "6px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={12} /></button>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                className="mobile-btn-large"
+                disabled={photoSubmitting || !sitePhotoPreview}
+                style={{ padding: "12px" }}
+              >
+                {photoSubmitting ? "Uploading..." : "Upload Photo"}
+              </button>
             </form>
-          </Card>
+          </div>
 
-          {/* Photo Gallery Grid */}
-          <Card title="Site Photos Gallery" icon={Camera}>
+          {/* Photo gallery */}
+          <div>
+            <span className="mobile-form-label">Inspection Photo Gallery</span>
             {sitePhotos.filter(p => p.siteId === activeSiteId).length === 0 ? (
-              <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", padding: "24px" }}>
-                No site photos logged for this project yet.
-              </p>
+              <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No photos uploaded for this site yet.</p>
+              </div>
             ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", maxHeight: "450px", overflowY: "auto" }}>
+              <div className="mobile-photo-grid">
                 {sitePhotos.filter(p => p.siteId === activeSiteId).map(photo => (
-                  <div key={photo.id} style={{
-                    border: "1px solid var(--border-color)",
-                    borderRadius: "8px",
-                    overflow: "hidden",
-                    backgroundColor: "#ffffff",
-                    boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
-                  }}>
-                    <a href={photo.imageUrl} target="_blank" rel="noopener noreferrer" style={{ display: "block", height: "110px" }}>
-                      <img src={photo.imageUrl} alt="Progress inspection" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  <div key={photo.id} className="mobile-photo-card">
+                    <a href={photo.imageUrl} target="_blank" rel="noopener noreferrer">
+                      <img src={photo.imageUrl} alt="Progress inspection" className="mobile-photo-img" />
                     </a>
-                    <div style={{ padding: "8px", fontSize: "10px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <span className="font-mono" style={{ color: "var(--text-muted)" }}>
+                    <div className="mobile-photo-info">
+                      <span className="mobile-photo-time">
                         {photo.capturedAt?.seconds 
-                          ? new Date(photo.capturedAt.seconds * 1000).toLocaleString()
-                          : new Date(photo.capturedAt).toLocaleString()}
+                          ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
+                          : new Date(photo.capturedAt).toLocaleDateString()}
                       </span>
-                      <span style={{ fontWeight: "700", color: "var(--accent-600)" }}>
-                        GPS: {Number(photo.latitude).toFixed(5)}, {Number(photo.longitude).toFixed(5)}
-                      </span>
+                      <div className="mobile-photo-loc">GPS: {Number(photo.latitude).toFixed(4)}, {Number(photo.longitude).toFixed(4)}</div>
                     </div>
                   </div>
                 ))}
               </div>
             )}
-          </Card>
+          </div>
         </div>
-      )}
+      );
+    }
 
-      {/* F) DAILY PROGRESS MODULE TAB */}
-      {tab === "progress" && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: "24px" }}>
-          
-          {/* Submit progress updates */}
-          <Card title="Log Daily Progress Updates" icon={Plus} style={{ borderLeft: "5px solid var(--primary-600)" }}>
+    if (moreSubView === "progress") {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+            <button 
+              type="button" 
+              onClick={() => navigate("/engineer/more")}
+              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+            >
+              ← Back
+            </button>
+            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Daily Progress DPR Log</h4>
+          </div>
+
+          {/* Progress updates Form */}
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
             <form onSubmit={handleProgressSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               
-              <div className="form-group">
-                <label>Estimated Progress Completed</label>
-                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
+              <div>
+                <span className="mobile-form-label">Estimated Progress Completed ({progressPercent}%)</span>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
                   <input 
                     type="range" 
                     min="0" 
                     max="100" 
                     value={progressPercent}
                     onChange={(e) => setProgressPercent(Number(e.target.value))}
-                    style={{ flexGrow: 1, accentColor: "var(--accent-500)", cursor: "pointer", height: "6px" }}
+                    style={{ flexGrow: 1, accentColor: "var(--accent-50)", cursor: "pointer", height: "6px" }}
                   />
-                  <span className="badge badge-success" style={{ fontWeight: 800, fontSize: "12px", minWidth: "46px", textAlign: "center" }}>
+                  <span className="badge badge-success" style={{ fontWeight: 800, fontSize: "12px", minWidth: "46px", textAlign: "center", border: "none" }}>
                     {progressPercent}%
                   </span>
                 </div>
               </div>
 
-              <div className="form-group">
-                <label htmlFor="work-completed">Work Completed Today</label>
+              <div>
+                <span className="mobile-form-label">Work Completed Today</span>
                 <textarea 
-                  id="work-completed" 
+                  className="mobile-textarea"
                   placeholder="Describe pours completed, walls built, etc..."
                   value={workDescription}
                   onChange={(e) => setWorkDescription(e.target.value)}
                   required 
-                  style={{ minHeight: "80px" }}
+                  style={{ minHeight: "60px" }}
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="issues-obstacles">Issues / Delay Obstacles</label>
+              <div>
+                <span className="mobile-form-label">Issues / Delay Obstacles</span>
                 <input 
                   type="text" 
-                  id="issues-obstacles"
-                  placeholder="E.g. Material shortage, heavy rain delays..."
+                  placeholder="E.g. Delay due to cement delivery lag..."
                   value={issuesText}
                   onChange={(e) => setIssuesText(e.target.value)}
+                  style={{ padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "13px", width: "100%", margin: 0 }}
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="progress-notes">Notes / Special Instructions</label>
+              <div>
+                <span className="mobile-form-label">Notes / Instructions</span>
                 <input 
                   type="text" 
-                  id="progress-notes"
-                  placeholder="E.g. Structural engineer inspected the footings..."
+                  placeholder="E.g. Inspector checked reinforcement today..."
                   value={notesText}
                   onChange={(e) => setNotesText(e.target.value)}
+                  style={{ padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "13px", width: "100%", margin: 0 }}
                 />
               </div>
 
-              <div className="form-group">
-                <label>Attach Work Photo (Optional)</label>
-                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
+              <div>
+                <span className="mobile-form-label">Attach Progress Photo (Optional)</span>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "4px" }}>
                   <label style={{ cursor: "pointer", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px dashed var(--border-color)", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--primary-50)", fontSize: "11px", fontWeight: 700 }}>
                     <Camera size={14} />
                     <span>Choose Photo</span>
                     <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setProgressPhotoFile, setProgressPhotoPreview)} />
                   </label>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "160px" }}>
-                    {progressPhotoFile ? progressPhotoFile.name : "No file attached"}
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                    {progressPhotoFile ? progressPhotoFile.name : "No photo chosen"}
                   </span>
                 </div>
                 {progressPhotoPreview && (
-                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "4px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
                     <img src={progressPhotoPreview} alt="Work preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button type="button" onClick={() => { setProgressPhotoFile(null); setProgressPhotoPreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} /></button>
+                    <button type="button" onClick={() => { setProgressPhotoFile(null); setProgressPhotoPreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
                   </div>
                 )}
               </div>
 
-              <Button type="submit" isLoading={progressSubmitting} icon={Save} style={{ width: "100%" }}>
-                Submit Daily Progress Report
-              </Button>
+              <button
+                type="submit"
+                className="mobile-btn-large"
+                disabled={progressSubmitting}
+                style={{ padding: "12px" }}
+              >
+                {progressSubmitting ? "Submitting..." : "Submit Progress Log"}
+              </button>
             </form>
-          </Card>
+          </div>
 
-          {/* Progress logs timeline */}
-          <Card title="Progress Reports History" icon={FileText}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", maxHeight: "450px", overflowY: "auto", paddingLeft: "10px" }}>
+          {/* DPR timeline */}
+          <div>
+            <span className="mobile-form-label">DPR Reports History</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {dailyUpdates.filter(u => u.siteId === activeSiteId).length === 0 ? (
-                <p style={{ fontSize: "12px", color: "var(--text-muted)", textAlign: "center", padding: "24px 0" }}>
-                  No reports logged for this project yet.
-                </p>
+                <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                  <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No daily reports submitted yet.</p>
+                </div>
               ) : (
-                dailyUpdates.filter(u => u.siteId === activeSiteId).map((row) => {
-                  // Parse description strings
-                  const lines = row.description.split("\n\n");
+                dailyUpdates.filter(u => u.siteId === activeSiteId).map(row => {
+                  const lines = row.description.split("\\n\\n");
                   const workLine = lines[0]?.replace("Work Completed: ", "") || row.description;
                   const issuesLine = lines[1]?.replace("Issues/Blockers: ", "");
                   const notesLine = lines[2]?.replace("Notes/Remarks: ", "");
-
+                  
                   return (
                     <div key={row.id} style={{
-                      position: "relative",
-                      paddingLeft: "20px",
-                      borderLeft: "2px solid var(--primary-200)",
-                      paddingBottom: "8px"
+                      padding: "12px 16px",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "var(--radius-md)",
+                      backgroundColor: "#ffffff",
+                      boxShadow: "var(--shadow-sm)"
                     }}>
-                      {/* Timeline dot */}
-                      <div style={{
-                        position: "absolute",
-                        left: "-6px",
-                        top: "4px",
-                        width: "10px",
-                        height: "10px",
-                        borderRadius: "50%",
-                        backgroundColor: "var(--primary-600)",
-                        border: "2px solid #fff"
-                      }} />
-                      
-                      <div style={{
-                        padding: "12px",
-                        backgroundColor: "var(--primary-50)",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "8px",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.01)"
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                          <span className="font-mono" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-900)" }}>
-                            {row.createdAt?.seconds 
-                              ? new Date(row.createdAt.seconds * 1000).toLocaleDateString()
-                              : new Date(row.createdAt).toLocaleDateString()}
-                          </span>
-                          <Badge status="success">{row.progress}</Badge>
-                        </div>
-                        
-                        <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--primary-950)" }}>
-                          <strong>Work Completed:</strong> {workLine}
-                        </p>
-                        
-                        {issuesLine && issuesLine !== "None" && (
-                          <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--danger-700)" }}>
-                            <strong>Issues:</strong> {issuesLine}
-                          </p>
-                        )}
-
-                        {notesLine && notesLine !== "None" && (
-                          <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-muted)" }}>
-                            <strong>Notes:</strong> {notesLine}
-                          </p>
-                        )}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                        <span className="font-mono" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)" }}>
+                          {row.createdAt?.seconds 
+                            ? new Date(row.createdAt.seconds * 1000).toLocaleDateString()
+                            : new Date(row.createdAt).toLocaleDateString()}
+                        </span>
+                        <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.progress}</span>
                       </div>
+                      
+                      <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--primary-950)" }}>
+                        <strong>Work:</strong> {workLine}
+                      </p>
+                      {issuesLine && issuesLine !== "None" && (
+                        <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--danger-600)" }}>
+                          <strong>Issues:</strong> {issuesLine}
+                        </p>
+                      )}
+                      {notesLine && notesLine !== "None" && (
+                        <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                          <strong>Notes:</strong> {notesLine}
+                        </p>
+                      )}
                     </div>
                   );
                 })
               )}
             </div>
-          </Card>
+          </div>
+        </div>
+      );
+    }
+
+    if (moreSubView === "profile") {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+            <button 
+              type="button" 
+              onClick={() => navigate("/engineer/more")}
+              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+            >
+              ← Back
+            </button>
+            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Profile & Leaves Summary</h4>
+          </div>
+
+          {/* Leaves stats widget */}
+          <div style={{
+            backgroundColor: "#ffffff",
+            borderRadius: "var(--radius-md)",
+            border: "1px solid var(--border-color)",
+            padding: "16px",
+            boxShadow: "var(--shadow-sm)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px"
+          }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+              <div style={{ backgroundColor: "var(--primary-50)", padding: "10px", borderRadius: "6px", textAlign: "center" }}>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Remaining Holidays</span>
+                <strong style={{ fontSize: "18px", color: "var(--primary-950)", display: "block", marginTop: "2px" }}>
+                  {personalStats ? personalStats.remainingHolidays : "--"}
+                </strong>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>of {userProfile?.holidayAllowance || 24} annual days</span>
+              </div>
+              <div style={{ backgroundColor: "var(--success-50)", padding: "10px", borderRadius: "6px", textAlign: "center" }}>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Days Worked (Month)</span>
+                <strong style={{ fontSize: "18px", color: "var(--success-700)", display: "block", marginTop: "2px" }}>
+                  {personalStats ? personalStats.weekdaysWorkedThisMonth : "--"}
+                </strong>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>checked present</span>
+              </div>
+            </div>
+            
+            <div style={{ backgroundColor: "var(--danger-50)", padding: "10px 12px", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Leaves Taken (Month / Year)</span>
+                <strong style={{ fontSize: "14px", color: "var(--danger-600)" }}>
+                  {personalStats ? `${personalStats.leavesThisMonth} / ${personalStats.leavesThisYear}` : "-- / --"}
+                </strong>
+              </div>
+              <span style={{ fontSize: "10px", color: "var(--danger-700)", fontWeight: "700" }}>Leave days</span>
+            </div>
+          </div>
+
+          {/* Log Leave Form */}
+          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
+            <span className="mobile-form-label">Request / Log Leave Day</span>
+            <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "8px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
+                <div>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Date</label>
+                  <input 
+                    type="date" 
+                    value={leaveDate}
+                    onChange={(e) => setLeaveDate(e.target.value)}
+                    required
+                    style={{ padding: "6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Reason</label>
+                  <select 
+                    value={leaveReason}
+                    onChange={(e) => setLeaveReason(e.target.value)}
+                    style={{ padding: "6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff" }}
+                  >
+                    <option value="Personal Leave">Personal</option>
+                    <option value="Sick Leave">Sick Leave</option>
+                    <option value="Vacation">Vacation</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+              </div>
+              <button type="submit" disabled={leaveSubmitting} className="mobile-btn-large" style={{ padding: "10px", fontSize: "12px" }}>
+                {leaveSubmitting ? "Submitting..." : "Log Leave Day"}
+              </button>
+            </form>
+          </div>
+
+          {/* Logged Leaves history */}
+          {loggedLeaves.length > 0 && (
+            <div>
+              <span className="mobile-form-label">Logged Leaves History</span>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {loggedLeaves.map(leave => (
+                  <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)" }}>
+                    <div>
+                      <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-900)" }}>{leave.date}</span>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>{leave.reason}</span>
+                    </div>
+                    <button 
+                      type="button" 
+                      onClick={() => handleDeleteLeave(leave.id)}
+                      style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  return (
+    <div className="mobile-app-container">
+      {toast.show && (
+        <div id="toast-container" className="toast-container">
+          <div className={`toast toast-${toast.type}`}>
+            <span className="toast-message">{toast.message}</span>
+          </div>
         </div>
       )}
 
+      <div className="mobile-app-frame">
+        {/* Top Header */}
+        <header className="mobile-app-header">
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <HardHat size={22} style={{ color: "var(--accent-600)" }} />
+            <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>
+              {tab === "attendance" ? "Attendance" : 
+               tab === "material" ? "Materials" : 
+               tab === "labour" ? "Workforce" : 
+               ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Apex Build"}
+            </h3>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }} className="font-mono">
+              {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            </span>
+            <div style={{
+              width: "28px",
+              height: "28px",
+              borderRadius: "50%",
+              backgroundColor: "var(--accent-50)",
+              color: "var(--accent-700)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: "800",
+              fontSize: "12px"
+            }}>
+              {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable View Content */}
+        <div className="mobile-app-content">
+          {tab === "attendance" && renderAttendanceView()}
+          {tab === "material" && renderMaterialView()}
+          {tab === "labour" && renderLabourView()}
+          {["more", "photos", "progress", "profile"].includes(tab) && renderMoreView()}
+          {(tab === "dashboard" || !tab) && renderHomeView()}
+        </div>
+
+        {/* Bottom Navigation */}
+        <nav className="mobile-bottom-nav">
+          <button 
+            type="button" 
+            className={`mobile-nav-btn ${tab === "dashboard" || !tab ? "active" : ""}`}
+            onClick={() => navigate("/engineer")}
+          >
+            <div className="mobile-nav-indicator">
+              <LayoutDashboard size={20} />
+            </div>
+            <span>Home</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`mobile-nav-btn ${tab === "attendance" ? "active" : ""}`}
+            onClick={() => navigate("/engineer/attendance")}
+          >
+            <div className="mobile-nav-indicator">
+              <ClipboardCheck size={20} />
+            </div>
+            <span>Attendance</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`mobile-nav-btn ${tab === "material" ? "active" : ""}`}
+            onClick={() => navigate("/engineer/material")}
+          >
+            <div className="mobile-nav-indicator">
+              <Package size={20} />
+            </div>
+            <span>Materials</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`mobile-nav-btn ${tab === "labour" ? "active" : ""}`}
+            onClick={() => navigate("/engineer/labour")}
+          >
+            <div className="mobile-nav-indicator">
+              <Users size={20} />
+            </div>
+            <span>Labour</span>
+          </button>
+
+          <button 
+            type="button" 
+            className={`mobile-nav-btn ${["more", "photos", "progress", "profile"].includes(tab) ? "active" : ""}`}
+            onClick={() => navigate("/engineer/more")}
+          >
+            <div className="mobile-nav-indicator">
+              <Sliders size={20} />
+            </div>
+            <span>More</span>
+          </button>
+        </nav>
+      </div>
+
       <Loading show={loading} text="Synchronizing Worksite Database..." />
-    </Layout>
+    </div>
   );
 }
