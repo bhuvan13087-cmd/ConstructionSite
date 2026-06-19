@@ -201,7 +201,7 @@ input, textarea, button, select {
   align-items: center;
 }
 
-.input-wrapper input, .form-group textarea, .input-wrapper select {
+.input-wrapper input, .form-group input, .form-group textarea, .input-wrapper select, .form-group select {
   width: 100%;
   padding: 12px 14px;
   border-radius: var(--radius-sm);
@@ -213,7 +213,7 @@ input, textarea, button, select {
   transition: all var(--transition-fast);
 }
 
-.input-wrapper input:focus, .form-group textarea:focus, .input-wrapper select:focus {
+.input-wrapper input:focus, .form-group input:focus, .form-group textarea:focus, .input-wrapper select:focus, .form-group select:focus {
   border-color: var(--accent-500);
   box-shadow: 0 0 0 3px var(--accent-100);
 }

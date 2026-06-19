@@ -1826,13 +1826,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             <form onSubmit={handleSaveLabourCounts} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               <div className="form-group">
                 <label htmlFor="labour-date">Supervisor Check-In Date</label>
-                <input 
-                  type="date" 
-                  id="labour-date" 
-                  value={labourDate} 
-                  onChange={(e) => setLabourDate(e.target.value)} 
-                  required 
-                />
+                <div className="input-wrapper">
+                  <Calendar size={18} className="input-icon" />
+                  <input 
+                    type="date" 
+                    id="labour-date" 
+                    value={labourDate} 
+                    onChange={(e) => setLabourDate(e.target.value)} 
+                    required 
+                  />
+                </div>
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
@@ -2017,14 +2020,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <form onSubmit={handleAddLabourCategory} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                 <div className="form-group">
                   <label htmlFor="new-category-input">New Category Name</label>
-                  <input 
-                    type="text" 
-                    id="new-category-input"
-                    placeholder="E.g., Welder, Carpenter, Supervisor"
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    required 
-                  />
+                  <div className="input-wrapper">
+                    <Plus size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      id="new-category-input"
+                      placeholder="E.g., Welder, Carpenter, Supervisor"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      required 
+                    />
+                  </div>
                 </div>
                 <Button type="submit" icon={Plus} style={{ width: "100%" }}>
                   Add Category Type
@@ -2117,53 +2123,84 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <Card title="Log Material Received" icon={Plus} style={{ borderLeft: "5px solid var(--accent-500)" }}>
             <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               
-              <div style={{ display: "flex", gap: "12px" }}>
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="material-category">Material Category</label>
-                  <select
-                    id="material-category"
-                    value={materialCategory}
-                    onChange={(e) => {
-                      setMaterialCategory(e.target.value);
-                      setMaterialName(""); // reset material name when category changes
-                    }}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
-                  >
-                    <option value="Cement">Cement</option>
-                    <option value="Steel">Steel</option>
-                    <option value="Sand">Sand</option>
-                    <option value="Bricks">Bricks</option>
-                    <option value="Other">Other</option>
-                  </select>
+              <div className="form-group">
+                <label>Material Category</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                  {["Cement", "Steel", "Sand", "Bricks", "Other"].map(catOption => (
+                    <button
+                      type="button"
+                      key={catOption}
+                      onClick={() => {
+                        setMaterialCategory(catOption);
+                        setMaterialName("");
+                      }}
+                      style={{
+                        flex: "1 0 auto",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        border: materialCategory === catOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
+                        backgroundColor: materialCategory === catOption ? "var(--accent-50)" : "#ffffff",
+                        color: materialCategory === catOption ? "var(--accent-700)" : "var(--primary-800)",
+                        fontWeight: "700",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        transition: "all var(--transition-fast)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: materialCategory === catOption ? "0 2px 4px rgba(14, 165, 233, 0.1)" : "none"
+                      }}
+                    >
+                      {catOption}
+                    </button>
+                  ))}
                 </div>
+              </div>
 
-                <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="material-unit">Unit</label>
-                  <select
-                    id="material-unit"
-                    value={materialUnit}
-                    onChange={(e) => setMaterialUnit(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
-                  >
-                    <option value="Bag">Bag</option>
-                    <option value="Kg">Kg</option>
-                    <option value="Ton">Ton</option>
-                    <option value="Load">Load</option>
-                    <option value="Pieces">Pieces</option>
-                  </select>
+              <div className="form-group">
+                <label>Unit</label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px" }}>
+                  {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
+                    <button
+                      type="button"
+                      key={unitOption}
+                      onClick={() => setMaterialUnit(unitOption)}
+                      style={{
+                        flex: "1 0 auto",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
+                        backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
+                        color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
+                        fontWeight: "700",
+                        fontSize: "13px",
+                        cursor: "pointer",
+                        transition: "all var(--transition-fast)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: materialUnit === unitOption ? "0 2px 4px rgba(14, 165, 233, 0.1)" : "none"
+                      }}
+                    >
+                      {unitOption}
+                    </button>
+                  ))}
                 </div>
               </div>
 
               <div className="form-group">
                 <label htmlFor="material-name">Material Name</label>
-                <input 
-                  type="text" 
-                  id="material-name"
-                  placeholder="Select Suggestion below or enter custom name..."
-                  value={materialName}
-                  onChange={(e) => setMaterialName(e.target.value)}
-                  required 
-                />
+                <div className="input-wrapper">
+                  <Package size={18} className="input-icon" />
+                  <input 
+                    type="text" 
+                    id="material-name"
+                    placeholder="Select Suggestion below or enter custom name..."
+                    value={materialName}
+                    onChange={(e) => setMaterialName(e.target.value)}
+                    required 
+                  />
+                </div>
                 
                 {/* Suggestions list for Material Name */}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
@@ -2193,23 +2230,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
                 <div className="form-group" style={{ flex: 1, margin: 0 }}>
                   <label htmlFor="material-quantity">Quantity</label>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "stretch",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--border-color)",
+                    overflow: "hidden",
+                    backgroundColor: "#ffffff",
+                    height: "42px",
+                    marginTop: "4px"
+                  }}>
                     <button
                       type="button"
                       onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
                       style={{
-                        width: "36px",
-                        height: "36px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
+                        padding: "0 14px",
+                        border: "none",
+                        background: "var(--primary-50)",
+                        color: "var(--danger-600)",
                         cursor: "pointer",
                         fontWeight: "800",
-                        color: "var(--danger-600)",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                        fontSize: "14px",
+                        borderRight: "1px solid var(--border-color)",
+                        transition: "background var(--transition-fast)"
                       }}
                     >
                       -10
@@ -2223,24 +2266,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       value={materialQuantity}
                       onChange={(e) => setMaterialQuantity(e.target.value)}
                       required 
-                      style={{ textAlign: "center", flex: 1, margin: 0, height: "36px" }}
+                      style={{
+                        border: "none",
+                        outline: "none",
+                        textAlign: "center",
+                        flex: 1,
+                        fontSize: "15px",
+                        fontWeight: "700",
+                        color: "var(--primary-950)",
+                        backgroundColor: "transparent",
+                        margin: 0,
+                        padding: 0,
+                        boxShadow: "none"
+                      }}
                     />
                     <button
                       type="button"
                       onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
                       style={{
-                        width: "36px",
-                        height: "36px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--border-color)",
-                        backgroundColor: "#ffffff",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
+                        padding: "0 14px",
+                        border: "none",
+                        background: "var(--primary-50)",
+                        color: "var(--success-600)",
                         cursor: "pointer",
                         fontWeight: "800",
-                        color: "var(--success-600)",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                        fontSize: "14px",
+                        borderLeft: "1px solid var(--border-color)",
+                        transition: "background var(--transition-fast)"
                       }}
                     >
                       +10
@@ -2250,27 +2302,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                 <div className="form-group" style={{ flex: 1, margin: 0 }}>
                   <label htmlFor="material-date">Receipt Date</label>
-                  <input 
-                    type="date" 
-                    id="material-date"
-                    value={materialPurchaseDate}
-                    onChange={(e) => setMaterialPurchaseDate(e.target.value)}
-                    required 
-                    style={{ height: "36px" }}
-                  />
+                  <div className="input-wrapper" style={{ marginTop: "4px" }}>
+                    <Calendar size={18} className="input-icon" />
+                    <input 
+                      type="date" 
+                      id="material-date"
+                      value={materialPurchaseDate}
+                      onChange={(e) => setMaterialPurchaseDate(e.target.value)}
+                      required 
+                      style={{ height: "42px" }}
+                    />
+                  </div>
                 </div>
               </div>
 
               <div className="form-group">
                 <label htmlFor="material-supplier">Supplier Name</label>
-                <input 
-                  type="text" 
-                  id="material-supplier"
-                  placeholder="Select suggestion or type..."
-                  value={materialSupplier}
-                  onChange={(e) => setMaterialSupplier(e.target.value)}
-                  required 
-                />
+                <div className="input-wrapper">
+                  <Briefcase size={18} className="input-icon" />
+                  <input 
+                    type="text" 
+                    id="material-supplier"
+                    placeholder="Select suggestion or type..."
+                    value={materialSupplier}
+                    onChange={(e) => setMaterialSupplier(e.target.value)}
+                    required 
+                  />
+                </div>
                 
                 {/* Supplier Suggestions */}
                 <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
