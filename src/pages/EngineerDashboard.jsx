@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
 import { 
@@ -54,6 +54,137 @@ import {
   ChevronRight
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import EXIF from "exif-js";
+
+// Helper to read and parse EXIF GPS data and timestamps from images
+const readPhotoMetadata = (file) => {
+  return new Promise((resolve) => {
+    if (!file) {
+      resolve({ hasGps: false });
+      return;
+    }
+    
+    EXIF.getData(file, function() {
+      const lat = EXIF.getTag(this, "GPSLatitude");
+      const lon = EXIF.getTag(this, "GPSLongitude");
+      const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+      const lonRef = EXIF.getTag(this, "GPSLongitudeRef");
+      const dateTimeStr = EXIF.getTag(this, "DateTimeOriginal") || EXIF.getTag(this, "DateTime");
+
+      if (!lat || !lon) {
+        resolve({ hasGps: false });
+        return;
+      }
+
+      // Convert DMS to DD
+      const getVal = (val) => {
+        if (typeof val === 'number') return val;
+        if (val && typeof val === 'object') {
+          if (val.numerator !== undefined && val.denominator !== undefined) {
+            return val.denominator !== 0 ? val.numerator / val.denominator : 0;
+          }
+        }
+        return parseFloat(val) || 0;
+      };
+
+      const convertDMSToDD = (dms, ref) => {
+        if (!dms || dms.length < 3) return null;
+        const d = getVal(dms[0]);
+        const m = getVal(dms[1]);
+        const s = getVal(dms[2]);
+        let dd = d + m / 60 + s / 3600;
+        if (ref === "S" || ref === "W") {
+          dd = -dd;
+        }
+        return dd;
+      };
+
+      const decimalLat = convertDMSToDD(lat, latRef);
+      const decimalLng = convertDMSToDD(lon, lonRef);
+      
+      let photoTime = null;
+      if (dateTimeStr) {
+        // Format YYYY:MM:DD HH:MM:SS
+        const parts = dateTimeStr.split(" ");
+        if (parts.length === 2) {
+          const dateParts = parts[0].split(":");
+          const timeParts = parts[1].split(":");
+          if (dateParts.length === 3 && timeParts.length === 3) {
+            photoTime = new Date(
+              parseInt(dateParts[0], 10),
+              parseInt(dateParts[1], 10) - 1,
+              parseInt(dateParts[2], 10),
+              parseInt(timeParts[0], 10),
+              parseInt(timeParts[1], 10),
+              parseInt(timeParts[2], 10)
+            );
+          }
+        }
+      }
+
+      resolve({
+        hasGps: true,
+        lat: decimalLat,
+        lng: decimalLng,
+        timestamp: photoTime
+      });
+    });
+  });
+};
+
+// Fallback reverse geocoding address generator
+function getMockAddress(lat, lng, site) {
+  if (site) {
+    const R = 6371e3; // Earth's radius in meters
+    const lat1 = Number(site.latitude || 28.5355);
+    const lon1 = Number(site.longitude || 77.3910);
+    const lat2 = Number(lat);
+    const lon2 = Number(lng);
+    const phi1 = (lat1 * Math.PI) / 180;
+    const phi2 = (lat2 * Math.PI) / 180;
+    const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
+    const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
+      Math.cos(phi1) * Math.cos(phi2) *
+      Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const dist = R * c;
+
+    if (dist <= Number(site.radius || 100)) {
+      return `${site.location} (Matched Boundary)`;
+    }
+  }
+  return `Sector ${Math.floor(Math.abs(lat) % 100)}, Near Plaza, City Circle (Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)})`;
+}
+
+// Reverse geocode via free public API with mock fallback
+async function getReverseGeocode(lat, lng, site) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+      headers: {
+        'Accept-Language': 'en'
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.display_name) {
+        return data.display_name;
+      }
+    }
+  } catch (e) {
+    console.warn("Reverse geocode failed, using mock address:", e);
+  }
+  return getMockAddress(lat, lng, site);
+}
+
+const categorySuggestions = {
+  Cement: ["OPC 53 Grade Cement", "PPC Cement", "White Cement", "Sulphate Resistant Cement"],
+  Steel: ["TMT Rebars 12mm", "TMT Rebars 16mm", "Binding Wire", "Structural Steel Section"],
+  Sand: ["River Sand (Fine)", "M-Sand (Manufactured)", "Coarse Sand (Plastering)"],
+  Bricks: ["Red Clay Bricks", "Fly Ash Bricks", "AAC Light Blocks", "Solid Concrete Blocks"],
+  Other: ["Pipes & Fittings", "Painting Primer", "Waterproofing Chemical", "Electrical PVC Conduit"]
+};
 
 export default function EngineerDashboard({ tab = "dashboard" }) {
   const { userProfile } = useAuth();
@@ -95,6 +226,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [uploadedAttendancePhotoUrl, setUploadedAttendancePhotoUrl] = useState("");
   const [attendancePhotoLat, setAttendancePhotoLat] = useState(null);
   const [attendancePhotoLng, setAttendancePhotoLng] = useState(null);
+  const [verificationStatus, setVerificationStatus] = useState(null); // null, "pending", "success", "failed"
+  const [verificationDetails, setVerificationDetails] = useState(null);
+  const [photoGpsLat, setPhotoGpsLat] = useState(null);
+  const [photoGpsLng, setPhotoGpsLng] = useState(null);
+  const [photoTimestamp, setPhotoTimestamp] = useState(null);
+  const [photoAddress, setPhotoAddress] = useState("");
+  const [mockCase, setMockCase] = useState("valid"); // "valid", "different", "nogps", "nopermission", "old"
+  const [locationCheckStatus, setLocationCheckStatus] = useState("unchecked"); // "unchecked", "checking", "warning", "granted"
+  const [deviceCoords, setDeviceCoords] = useState(null); // { latitude, longitude }
+  const [locationError, setLocationError] = useState("");
 
   // 2. Daily Labour Counts
   const [labourDate, setLabourDate] = useState(new Date().toISOString().split("T")[0]);
@@ -262,15 +403,141 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // 1. Staff check-in verification photo
-  const handleUploadAttendancePhoto = async (e) => {
-    e.preventDefault();
+  const fileInputRef = useRef(null);
+
+  const getDeviceLocation = () => {
+    return new Promise((resolve, reject) => {
+      if (!navigator.geolocation) {
+        reject(new Error("Geolocation not supported by browser."));
+        return;
+      }
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude
+          });
+        },
+        (error) => {
+          let msg = "Unable to detect current location. Please enable GPS and try again.";
+          if (error.code === error.PERMISSION_DENIED) {
+            msg = "Location permission denied.";
+          }
+          const err = new Error(msg);
+          err.code = error.code;
+          reject(err);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+    });
+  };
+
+  const handlePreCaptureCheck = async () => {
+    setLocationError("");
+    setLocationCheckStatus("checking");
+
+    try {
+      if (mockLocation) {
+        if (mockCase === "nopermission") {
+          throw { code: 1, message: "Location permission denied." };
+        } else if (mockCase === "gps_off") {
+          throw { code: 2, message: "Unable to detect current location. Please enable GPS and try again." };
+        }
+        
+        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
+        const siteLat = Number(site?.latitude || 28.5355);
+        const siteLng = Number(site?.longitude || 77.3910);
+        
+        const coords = mockCase === "different" 
+          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05 } 
+          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001 };
+          
+        setDeviceCoords(coords);
+        setLocationCheckStatus("granted");
+        
+        // Trigger file input click programmatically after UI state update
+        setTimeout(() => {
+          if (fileInputRef.current) {
+            fileInputRef.current.click();
+          }
+        }, 150);
+        return;
+      }
+
+      const coords = await getDeviceLocation();
+      setDeviceCoords(coords);
+      setLocationCheckStatus("granted");
+      
+      setTimeout(() => {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+      }, 150);
+
+    } catch (err) {
+      console.warn("Location check failed:", err);
+      setLocationCheckStatus("warning");
+      setLocationError(err.message || "Location access is required to verify your site attendance.");
+    }
+  };
+
+  const handleEnableLocation = async () => {
+    setLocationError("");
+    try {
+      if (mockLocation) {
+        if (mockCase === "nopermission") {
+          setLocationError("Location permission denied. Please select a valid test case to proceed.");
+          return;
+        } else if (mockCase === "gps_off") {
+          setLocationError("Unable to detect current location. Please enable GPS and try again.");
+          return;
+        }
+        
+        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
+        const siteLat = Number(site?.latitude || 28.5355);
+        const siteLng = Number(site?.longitude || 77.3910);
+        const coords = mockCase === "different" 
+          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05 } 
+          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001 };
+
+        setDeviceCoords(coords);
+        setLocationCheckStatus("granted");
+        setTimeout(() => {
+          if (fileInputRef.current) {
+            fileInputRef.current.click();
+          }
+        }, 150);
+        return;
+      }
+
+      const coords = await getDeviceLocation();
+      setDeviceCoords(coords);
+      setLocationCheckStatus("granted");
+      
+      setTimeout(() => {
+        if (fileInputRef.current) {
+          fileInputRef.current.click();
+        }
+      }, 150);
+    } catch (err) {
+      console.warn("Location enable query failed:", err);
+      setLocationError(err.message || "Unable to detect current location. Please enable GPS and try again.");
+    }
+  };
+
+  const handleCancelLocationPrecheck = () => {
+    setLocationCheckStatus("unchecked");
+    setLocationError("");
+    setDeviceCoords(null);
+  };
+
+  // 1. Staff check-in verification photo upload & validation flow
+  const handleAttendancePhotoChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
     if (!activeSiteId) {
       showToast("Please select your active site first.", "error");
-      return;
-    }
-    if (!attendancePhotoPreview) {
-      showToast("Please capture or choose verification photo.", "error");
       return;
     }
 
@@ -280,61 +547,158 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    const siteLat = Number(site.latitude || 28.5355);
-    const siteLng = Number(site.longitude || 77.3910);
-    const siteRadius = Number(site.radius || 500);
+    setAttendancePhotoFile(file);
+    
+    // Create preview
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setAttendancePhotoPreview(reader.result);
+    };
+    reader.readAsDataURL(file);
 
+    // Start verification
     setAttendancePhotoUploading(true);
+    setVerificationStatus("pending");
+    setVerificationDetails(null);
+
     try {
-      const engineerId = userProfile.uid || userProfile.id || "";
-      let userLat = siteLat;
-      let userLng = siteLng;
+      let metadata = null;
 
-      if (!mockLocation) {
-        const position = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000
-          });
+      if (mockLocation) {
+        // Mocked verification path based on mockCase
+        if (mockCase === "nogps") {
+          metadata = { hasGps: false };
+        } else if (mockCase === "old") {
+          metadata = {
+            hasGps: true,
+            lat: Number(site.latitude || 28.5355),
+            lng: Number(site.longitude || 77.3910),
+            timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000) // 2 hours old
+          };
+        } else if (mockCase === "different") {
+          metadata = {
+            hasGps: true,
+            lat: Number(site.latitude || 28.5355) + 0.05, // ~15km away
+            lng: Number(site.longitude || 77.3910) + 0.05,
+            timestamp: new Date()
+          };
+        } else {
+          // valid
+          metadata = {
+            hasGps: true,
+            lat: Number(site.latitude || 28.5355) + 0.0001, // very close
+            lng: Number(site.longitude || 77.3910) + 0.0001,
+            timestamp: new Date()
+          };
+        }
+      } else {
+        // Real EXIF reading path
+        metadata = await readPhotoMetadata(file);
+      }
+
+      if (!metadata || !metadata.hasGps) {
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Invalid photo",
+          isNoGps: true
         });
-        userLat = position.coords.latitude;
-        userLng = position.coords.longitude;
+        return;
       }
 
-      // Geofence checking
-      const distance = calculateDistanceMeters(siteLat, siteLng, userLat, userLng);
-      if (distance > siteRadius) {
-        throw new Error(
-          `Geofence Error: You are ${Math.round(distance)}m away from ${site.siteName}. ` +
-          `Allowed radius is ${siteRadius}m. Enable 'Mock Location' to bypass.`
-        );
+      // Check timestamp
+      const now = new Date();
+      const photoTime = metadata.timestamp || now;
+      const ageMs = Math.abs(now.getTime() - photoTime.getTime());
+      const isOld = ageMs > 5 * 60 * 1000; // 5 minutes threshold
+
+      if (isOld) {
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Old photo detected",
+          isOld: true
+        });
+        return;
       }
 
-      // Upload verification image
-      await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, userLat, userLng);
+      // Geofence check using both live coordinates and photo GPS coordinates
+      const siteLat = Number(site.latitude || 28.5355);
+      const siteLng = Number(site.longitude || 77.3910);
+      const siteRadius = Number(site.radius || 100);
+      
+      const userLat = deviceCoords ? deviceCoords.latitude : siteLat;
+      const userLng = deviceCoords ? deviceCoords.longitude : siteLng;
+      
+      const liveDistance = calculateDistanceMeters(siteLat, siteLng, userLat, userLng);
+      const photoDistance = calculateDistanceMeters(siteLat, siteLng, metadata.lat, metadata.lng);
+      
+      // Get Location Address of live device location
+      const capturedAddress = await getReverseGeocode(userLat, userLng, site);
 
-      setUploadedAttendancePhotoUrl(attendancePhotoPreview);
-      setAttendancePhotoLat(userLat);
-      setAttendancePhotoLng(userLng);
-      setAttendancePhotoUploaded(true);
-      showToast("Check-in photo uploaded successfully!", "success");
+      // Set locations to display
+      setPhotoGpsLat(metadata.lat);
+      setPhotoGpsLng(metadata.lng);
+      setPhotoTimestamp(photoTime);
+      setPhotoAddress(capturedAddress);
+
+      const isLiveValid = liveDistance <= siteRadius;
+      const isPhotoValid = photoDistance <= siteRadius;
+
+      if (!isLiveValid || !isPhotoValid) {
+        const largerDist = Math.max(Math.round(liveDistance), Math.round(photoDistance));
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Location mismatch",
+          expectedSiteName: site.siteName,
+          expectedAddress: site.location,
+          capturedAddress: capturedAddress,
+          distance: largerDist,
+          liveDistance: Math.round(liveDistance),
+          photoDistance: Math.round(photoDistance)
+        });
+      } else {
+        setVerificationStatus("success");
+        setVerificationDetails({
+          message: "Site Verified Successfully",
+          expectedSiteName: site.siteName,
+          expectedAddress: site.location,
+          capturedAddress: capturedAddress,
+          distance: Math.round(liveDistance)
+        });
+      }
+
     } catch (err) {
-      console.error("Verification upload error:", err);
-      showToast(err.message || "Failed to upload verification photo.", "error");
+      console.error("Photo verification error:", err);
+      setVerificationStatus("failed");
+      setVerificationDetails({
+        message: err.message || "Failed to read location information."
+      });
     } finally {
       setAttendancePhotoUploading(false);
     }
   };
 
-  // 2. Execute Staff Check-In Attendance
+  const handleResetVerification = () => {
+    setAttendancePhotoFile(null);
+    setAttendancePhotoPreview(null);
+    setVerificationStatus(null);
+    setVerificationDetails(null);
+    setPhotoGpsLat(null);
+    setPhotoGpsLng(null);
+    setPhotoTimestamp(null);
+    setPhotoAddress("");
+    setLocationCheckStatus("unchecked");
+    setDeviceCoords(null);
+  };
+
+  // 2. Execute Staff Check-In Attendance after successful verification
   const handleMarkAttendance = async (e) => {
-    e.preventDefault();
+    if (e) e.preventDefault();
     if (!activeSiteId) {
       showToast("Please select your active site.", "error");
       return;
     }
-    if (!attendancePhotoUploaded || !uploadedAttendancePhotoUrl) {
-      showToast("Please upload and verify check-in photo first.", "error");
+    if (verificationStatus !== "success" || !attendancePhotoPreview) {
+      showToast("Verification is required before marking attendance.", "error");
       return;
     }
 
@@ -348,18 +712,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setAttendanceSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
-      const lat = attendancePhotoLat !== null ? attendancePhotoLat : Number(site.latitude || 28.5355);
-      const lng = attendancePhotoLng !== null ? attendancePhotoLng : Number(site.longitude || 77.3910);
+      const lat = deviceCoords ? deviceCoords.latitude : Number(site.latitude || 28.5355);
+      const lng = deviceCoords ? deviceCoords.longitude : Number(site.longitude || 77.3910);
+      const photoGpsLocation = { latitude: lat, longitude: lng };
 
-      await markAttendance(engineerId, activeSiteId, todayStr, lat, lng, uploadedAttendancePhotoUrl);
+      // Save progressive log photo to the site inspection feed
+      await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
+
+      // Save present attendance log
+      await markAttendance(
+        engineerId, 
+        activeSiteId, 
+        todayStr, 
+        lat, 
+        lng, 
+        attendancePhotoPreview, 
+        photoGpsLocation, 
+        "verified"
+      );
 
       showToast(`Checked in present at ${site.siteName}!`, "success");
-      setAttendancePhotoFile(null);
-      setAttendancePhotoPreview(null);
-      setAttendancePhotoUploaded(false);
-      setUploadedAttendancePhotoUrl("");
-      setAttendancePhotoLat(null);
-      setAttendancePhotoLng(null);
+      handleResetVerification();
 
       await loadDashboardData();
     } catch (err) {
@@ -430,6 +803,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
     if (!labourDate) {
       showToast("Please choose daily record date.", "error");
+      return;
+    }
+    if (!confirm(`Are you sure you want to save the daily labour attendance counts for ${labourDate}?`)) {
       return;
     }
 
@@ -824,6 +1200,43 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             />
             <span>Bypass GPS Geofence (Mocking)</span>
           </label>
+
+          {mockLocation && (
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              fontSize: "12px",
+              backgroundColor: "#fef3c7",
+              border: "1px solid #fcd34d",
+              padding: "6px 12px",
+              borderRadius: "var(--radius-sm)"
+            }}>
+              <span style={{ fontWeight: "700", color: "#b45309" }}>Simulate Test Case:</span>
+              <select
+                value={mockCase}
+                onChange={(e) => setMockCase(e.target.value)}
+                style={{
+                  padding: "2px 6px",
+                  borderRadius: "4px",
+                  border: "1px solid #d97706",
+                  backgroundColor: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "#b45309",
+                  cursor: "pointer",
+                  outline: "none"
+                }}
+              >
+                <option value="valid">1. Correct Site Photo (Match)</option>
+                <option value="different">2. Different Location Photo (Mismatch)</option>
+                <option value="nogps">3. Gallery Image without GPS (No GPS)</option>
+                <option value="nopermission">4. No Location Permission (Warning)</option>
+                <option value="gps_off">5. GPS Off / Unavailable (Warning)</option>
+                <option value="old">6. Old Photo (Timestamp Mismatch)</option>
+              </select>
+            </div>
+          )}
         </div>
       </div>
 
@@ -928,60 +1341,254 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "var(--danger-50)", padding: "10px", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--danger-500)" }}>
-                    <AlertCircle size={16} style={{ color: "var(--danger-500)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "12px", color: "var(--danger-700)", fontWeight: "600" }}>
-                      Staff check-in is pending for today.
-                    </span>
-                  </div>
+                  {/* Stage 1: Location pre-check or warning */}
+                  {locationCheckStatus === "unchecked" && (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", backgroundColor: "var(--danger-50)", padding: "10px", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--danger-500)" }}>
+                        <AlertCircle size={16} style={{ color: "var(--danger-500)", flexShrink: 0 }} />
+                        <span style={{ fontSize: "12px", color: "var(--danger-700)", fontWeight: "600" }}>
+                          Staff check-in is pending for today.
+                        </span>
+                      </div>
 
-                  <div style={{ border: "1px dashed var(--border-color)", padding: "12px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)" }}>
-                    {/* Selfie check-in form in place */}
-                    {!attendancePhotoUploaded ? (
-                      <form onSubmit={handleUploadAttendancePhoto} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <label style={{ 
-                          display: "flex", 
-                          flexDirection: "column", 
-                          alignItems: "center", 
-                          gap: "4px", 
-                          padding: "12px", 
-                          border: "1px dashed var(--border-color)", 
-                          borderRadius: "var(--radius-sm)", 
-                          cursor: "pointer", 
-                          backgroundColor: "#ffffff",
-                          fontSize: "11px"
-                        }}>
-                          <Camera size={20} style={{ color: "var(--text-muted)" }} />
-                          <span style={{ fontWeight: "700", color: "var(--primary-800)" }}>Selfie at Site Location</span>
-                          <input 
-                            type="file" 
-                            accept="image/*" 
-                            capture="environment" 
-                            style={{ display: "none" }} 
-                            onChange={(e) => handleFileChange(e, setAttendancePhotoFile, setAttendancePhotoPreview)} 
-                          />
-                        </label>
-                        {attendancePhotoPreview && (
-                          <div style={{ position: "relative", width: "100%", height: "90px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)" }}>
-                            <img src={attendancePhotoPreview} alt="Selfie preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                            <button type="button" onClick={() => { setAttendancePhotoFile(null); setAttendancePhotoPreview(null); }} style={{ position: "absolute", top: "4px", right: "4px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} /></button>
-                          </div>
-                        )}
-                        <Button type="submit" isLoading={attendancePhotoUploading} icon={Upload} disabled={!attendancePhotoPreview} style={{ padding: "6px 12px", fontSize: "12px" }}>
-                          Upload Verification Photo
+                      <div style={{ border: "1px dashed var(--border-color)", padding: "12px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)", textAlign: "center" }}>
+                        <p style={{ fontSize: "12px", color: "var(--text-muted)", marginBottom: "12px" }}>
+                          GPS verification is required before capturing your site selfie.
+                        </p>
+                        <Button 
+                          type="button" 
+                          onClick={handlePreCaptureCheck} 
+                          icon={Camera} 
+                          style={{ padding: "10px 20px", fontSize: "13px", fontWeight: "700" }}
+                        >
+                          Capture Site Photo
                         </Button>
-                      </form>
-                    ) : (
-                      <form onSubmit={handleMarkAttendance} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--success-700)", fontSize: "12px", fontWeight: "700" }}>
-                          <CheckCircle2 size={14} /> Photo Verified
+                      </div>
+                    </>
+                  )}
+
+                  {locationCheckStatus === "checking" && (
+                    <div style={{ border: "1px solid var(--border-color)", padding: "20px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)", textAlign: "center" }}>
+                      <div className="spinner-small" style={{ border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid var(--primary-600)", borderRadius: "50%", width: "24px", height: "24px", animation: "spin 1s linear infinite", margin: "0 auto 12px auto" }} />
+                      <span style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: "600" }}>Checking device GPS and permissions...</span>
+                    </div>
+                  )}
+
+                  {locationCheckStatus === "warning" && (
+                    <div style={{ 
+                      padding: "20px", 
+                      border: "1px solid var(--danger-200)", 
+                      borderRadius: "var(--radius-sm)", 
+                      backgroundColor: "var(--danger-50)", 
+                      borderLeft: "4px solid var(--danger-500)",
+                      display: "flex", 
+                      flexDirection: "column", 
+                      gap: "14px"
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <AlertTriangle size={24} style={{ color: "var(--danger-500)" }} />
+                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--danger-800)" }}>
+                          Location Access Required
+                        </h4>
+                      </div>
+                      
+                      <p style={{ margin: 0, fontSize: "13px", color: "var(--danger-700)", lineHeight: "1.5" }}>
+                        Location access is required to verify your site attendance.
+                      </p>
+
+                      {locationError && (
+                        <div style={{ fontSize: "12px", color: "var(--danger-600)", fontWeight: "600", backgroundColor: "rgba(239, 68, 68, 0.08)", padding: "8px", borderRadius: "4px" }}>
+                          {locationError}
                         </div>
-                        <Button type="submit" isLoading={attendanceSubmitting} icon={ClipboardCheck} style={{ padding: "6px 12px", fontSize: "12px" }}>
-                          Mark Present Check-In
+                      )}
+
+                      <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                        <Button 
+                          type="button" 
+                          onClick={handleEnableLocation}
+                          style={{ 
+                            flex: 1, 
+                            backgroundColor: "var(--danger-600)", 
+                            color: "#ffffff",
+                            fontSize: "12px",
+                            padding: "8px 12px"
+                          }}
+                        >
+                          Enable Location
                         </Button>
-                      </form>
-                    )}
-                  </div>
+                        <Button 
+                          type="button" 
+                          onClick={handleCancelLocationPrecheck}
+                          variant="outline"
+                          style={{ 
+                            flex: 1,
+                            fontSize: "12px",
+                            padding: "8px 12px"
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Stage 2: Camera Capture (once coordinates are received and permission is granted) */}
+                  {locationCheckStatus === "granted" && (
+                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                      {!attendancePhotoPreview ? (
+                        <div style={{ border: "1px dashed var(--border-color)", padding: "16px", borderRadius: "var(--radius-sm)", backgroundColor: "var(--success-50)", textAlign: "center" }}>
+                          <p style={{ fontSize: "12px", color: "var(--success-700)", fontWeight: "700", marginBottom: "12px" }}>
+                            ✓ Live Location Obtained Successfully!
+                          </p>
+                          <label style={{ 
+                            display: "inline-flex", 
+                            alignItems: "center", 
+                            gap: "8px", 
+                            padding: "10px 20px", 
+                            border: "1px solid var(--success-200)", 
+                            borderRadius: "var(--radius-sm)", 
+                            cursor: "pointer", 
+                            backgroundColor: "#ffffff",
+                            fontSize: "13px",
+                            fontWeight: "700",
+                            color: "var(--success-800)",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                          }}>
+                            <Camera size={18} style={{ color: "var(--success-600)" }} />
+                            <span>Capture Selfie Now</span>
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              capture="environment" 
+                              style={{ display: "none" }} 
+                              ref={fileInputRef}
+                              onChange={handleAttendancePhotoChange} 
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                          {/* Photo Preview */}
+                          <div style={{ position: "relative", width: "100%", height: "180px", borderRadius: "var(--radius-md)", overflow: "hidden", border: "1px solid var(--border-color)", backgroundColor: "#000" }}>
+                            <img src={attendancePhotoPreview} alt="Selfie preview" style={{ width: "100%", height: "100%", objectFit: "contain" }} />
+                            <button 
+                              type="button" 
+                              onClick={handleResetVerification} 
+                              style={{ position: "absolute", top: "8px", right: "8px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+
+                          {/* Loader during EXIF processing */}
+                          {attendancePhotoUploading && (
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", backgroundColor: "var(--primary-50)" }}>
+                              <div className="spinner-small" style={{ border: "2px solid rgba(0,0,0,0.1)", borderTop: "2px solid var(--primary-600)", borderRadius: "50%", width: "16px", height: "16px", animation: "spin 1s linear infinite" }} />
+                              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Verifying live GPS location & photo EXIF...</span>
+                            </div>
+                          )}
+
+                          {/* Verification: SUCCESS CARD */}
+                          {verificationStatus === "success" && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", backgroundColor: "var(--success-50)", border: "1px solid var(--success-200)", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--success-500)" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--success-700)", fontWeight: "800", fontSize: "14px" }}>
+                                <CheckCircle2 size={18} />
+                                <span>Site Verified Successfully</span>
+                              </div>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", color: "var(--success-800)" }}>
+                                <div style={{ fontWeight: "600" }}>✓ Site Name: {currentSite.siteName}</div>
+                                <div>✓ Address matched: {photoAddress}</div>
+                                <div>✓ Distance from site: {verificationDetails.distance === 0 ? "On Site" : `${verificationDetails.distance} meters`}</div>
+                              </div>
+                              
+                              <Button 
+                                type="button" 
+                                onClick={handleMarkAttendance} 
+                                isLoading={attendanceSubmitting} 
+                                icon={ClipboardCheck} 
+                                style={{ 
+                                  marginTop: "6px",
+                                  backgroundColor: "var(--success-600)",
+                                  color: "#ffffff"
+                                }}
+                              >
+                                Continue Attendance Entry
+                              </Button>
+                            </div>
+                          )}
+
+                          {/* Verification: FAILURE CARD */}
+                          {verificationStatus === "failed" && (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px", backgroundColor: "var(--danger-50)", border: "1px solid var(--danger-200)", borderRadius: "var(--radius-sm)", borderLeft: "4px solid var(--danger-500)" }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--danger-700)", fontWeight: "800", fontSize: "14px" }}>
+                                <AlertCircle size={18} />
+                                <span>
+                                  {verificationDetails.isNoPermission ? "Location Permission Blocked" : 
+                                   verificationDetails.isNoGps ? "Invalid Photo" : 
+                                   verificationDetails.isOld ? "Old Photo Detected" : "Location Mismatch"}
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: "12px", color: "var(--danger-800)", display: "flex", flexDirection: "column", gap: "6px" }}>
+                                {verificationDetails.isNoPermission && (
+                                  <span>Please enable location services and grant permission to allow geo-tagged captures.</span>
+                                )}
+                                
+                                {verificationDetails.isNoGps && (
+                                  <span>No GPS coordinates found in image metadata. Please capture a new geo-tagged photo using your camera.</span>
+                                )}
+
+                                {verificationDetails.isOld && (
+                                  <span>Photo timestamp is too old. Please capture a new live site photo.</span>
+                                )}
+
+                                {!verificationDetails.isNoPermission && !verificationDetails.isNoGps && !verificationDetails.isOld && (
+                                  <>
+                                    <div><strong>Expected Site:</strong> {verificationDetails.expectedSiteName} ({verificationDetails.expectedAddress})</div>
+                                    <div><strong>Captured Location:</strong> {verificationDetails.capturedAddress}</div>
+                                    <div><strong>Device Distance:</strong> {verificationDetails.liveDistance} meters away</div>
+                                    <div><strong>Photo GPS Distance:</strong> {verificationDetails.photoDistance} meters away</div>
+                                    <div style={{ color: "var(--danger-700)", fontWeight: "600", marginTop: "4px" }}>
+                                      Please capture photo from assigned site location.
+                                    </div>
+                                  </>
+                                )}
+                              </div>
+                              
+                              <label style={{ 
+                                display: "inline-flex", 
+                                alignItems: "center", 
+                                justifyContent: "center",
+                                gap: "8px", 
+                                padding: "8px 16px", 
+                                border: "1px solid var(--danger-300)", 
+                                borderRadius: "var(--radius-sm)", 
+                                cursor: "pointer", 
+                                backgroundColor: "#ffffff",
+                                fontSize: "12px",
+                                fontWeight: "700",
+                                color: "var(--danger-700)",
+                                textAlign: "center",
+                                boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                                marginTop: "6px"
+                              }}>
+                                <Camera size={14} />
+                                <span>Retake Photo</span>
+                                <input 
+                                  type="file" 
+                                  accept="image/*" 
+                                  capture="environment" 
+                                  style={{ display: "none" }} 
+                                  ref={fileInputRef}
+                                  onChange={handleAttendancePhotoChange} 
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
             </Card>
@@ -1229,102 +1836,133 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
 
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Categories Present</span>
-                {categories.map(cat => {
-                  const currentVal = countsMap[cat] || 0;
-                  return (
-                    <div key={cat} style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "8px 12px",
-                      backgroundColor: "var(--primary-50)",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "8px"
-                    }}>
-                      <span style={{ fontWeight: "700", color: "var(--primary-900)", fontSize: "13px" }}>{cat}</span>
-                      
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
-                          style={{
-                            width: "36px",
-                            height: "36px",
-                            borderRadius: "50%",
-                            border: "1px solid var(--border-color)",
-                            backgroundColor: "#ffffff",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            fontWeight: "800",
-                            color: "var(--danger-600)",
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-                          }}
-                        >
-                          <Minus size={16} />
-                        </button>
+                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Today's Workers</span>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "16px", marginTop: "4px" }}>
+                  {categories.map(cat => {
+                    const currentVal = countsMap[cat] || 0;
+                    const emojis = {
+                      Mason: "👷",
+                      Helper: "🧱",
+                      Electrician: "🔧",
+                      Plumber: "🚰",
+                      Painter: "🖌️",
+                      Other: "📋"
+                    };
+                    const emoji = emojis[cat] || "🔨";
+                    return (
+                      <div key={cat} style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        justifyContent: "space-between",
+                        gap: "12px",
+                        padding: "16px",
+                        backgroundColor: "#ffffff",
+                        border: "1px solid var(--border-color)",
+                        borderRadius: "12px",
+                        boxShadow: "0 2px 4px rgba(0,0,0,0.02)"
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <span style={{ fontSize: "24px" }}>{emoji}</span>
+                          <div>
+                            <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px", display: "block" }}>{cat}</span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Worker Category</span>
+                          </div>
+                        </div>
                         
-                        <input
-                          type="number"
-                          value={currentVal}
-                          min="0"
-                          onChange={(e) => {
-                            const val = Math.max(0, parseInt(e.target.value) || 0);
-                            setCountsMap(prev => ({ ...prev, [cat]: val }));
-                          }}
-                          style={{
-                            width: "60px",
-                            height: "36px",
-                            textAlign: "center",
-                            fontWeight: "700",
-                            fontSize: "14px",
-                            borderRadius: "var(--radius-sm)",
-                            border: "1px solid var(--border-color)",
-                            margin: 0
-                          }}
-                        />
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", backgroundColor: "var(--primary-50)", padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--primary-100)" }}>
+                          <button
+                            type="button"
+                            onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "50%",
+                              border: "1px solid var(--border-color)",
+                              backgroundColor: "#ffffff",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              fontWeight: "800",
+                              color: "var(--danger-600)",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                              fontSize: "16px"
+                            }}
+                          >
+                            <Minus size={14} />
+                          </button>
+                          
+                          <input
+                            type="number"
+                            value={currentVal}
+                            min="0"
+                            onChange={(e) => {
+                              const val = Math.max(0, parseInt(e.target.value) || 0);
+                              setCountsMap(prev => ({ ...prev, [cat]: val }));
+                            }}
+                            style={{
+                              width: "70px",
+                              height: "32px",
+                              textAlign: "center",
+                              fontWeight: "800",
+                              fontSize: "15px",
+                              border: "none",
+                              background: "transparent",
+                              margin: 0,
+                              outline: "none",
+                              color: "var(--primary-950)"
+                            }}
+                          />
 
-                        <button
-                          type="button"
-                          onClick={() => setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }))}
-                          style={{
-                            width: "36px",
-                            height: "36px",
-                            borderRadius: "50%",
-                            border: "1px solid var(--border-color)",
-                            backgroundColor: "#ffffff",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            cursor: "pointer",
-                            fontWeight: "800",
-                            color: "var(--success-600)",
-                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
-                          }}
-                        >
-                          <Plus size={16} />
-                        </button>
+                          <button
+                            type="button"
+                            onClick={() => setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }))}
+                            style={{
+                              width: "32px",
+                              height: "32px",
+                              borderRadius: "50%",
+                              border: "1px solid var(--border-color)",
+                              backgroundColor: "#ffffff",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              cursor: "pointer",
+                              fontWeight: "800",
+                              color: "var(--success-600)",
+                              boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                              fontSize: "16px"
+                            }}
+                          >
+                            <Plus size={14} />
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
 
               {/* Autocalculate Summary Box */}
               <div style={{
-                padding: "12px",
-                backgroundColor: "var(--primary-100)",
-                borderRadius: "8px",
+                padding: "16px",
+                backgroundColor: "var(--primary-900)",
+                color: "#ffffff",
+                borderRadius: "12px",
                 display: "flex",
                 justifyContent: "space-between",
                 alignItems: "center",
-                border: "1px solid var(--primary-200)",
-                marginTop: "4px"
+                boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
+                marginTop: "16px",
+                border: "1px solid var(--primary-950)"
               }}>
-                <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>Total Labour Present:</span>
-                <strong style={{ fontSize: "16px", color: "var(--primary-950)" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <Users size={20} style={{ color: "var(--accent-400)" }} />
+                  <div>
+                    <span style={{ fontSize: "14px", fontWeight: "700", display: "block" }}>Total Workers Present</span>
+                    <span style={{ fontSize: "11px", opacity: 0.8 }}>Sum of all categories</span>
+                  </div>
+                </div>
+                <strong style={{ fontSize: "20px", color: "var(--accent-400)" }}>
                   {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
                 </strong>
               </div>
@@ -1479,26 +2117,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <Card title="Log Material Received" icon={Plus} style={{ borderLeft: "5px solid var(--accent-500)" }}>
             <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
               
-              <div className="form-group">
-                <label htmlFor="material-name">Material Name</label>
-                <input 
-                  type="text" 
-                  id="material-name"
-                  placeholder="E.g., OPC Cement 53 Grade"
-                  value={materialName}
-                  onChange={(e) => setMaterialName(e.target.value)}
-                  required 
-                />
-              </div>
-
               <div style={{ display: "flex", gap: "12px" }}>
                 <div className="form-group" style={{ flex: 1 }}>
-                  <label htmlFor="material-category">Category</label>
+                  <label htmlFor="material-category">Material Category</label>
                   <select
                     id="material-category"
                     value={materialCategory}
-                    onChange={(e) => setMaterialCategory(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
+                    onChange={(e) => {
+                      setMaterialCategory(e.target.value);
+                      setMaterialName(""); // reset material name when category changes
+                    }}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
                   >
                     <option value="Cement">Cement</option>
                     <option value="Steel">Steel</option>
@@ -1514,7 +2143,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     id="material-unit"
                     value={materialUnit}
                     onChange={(e) => setMaterialUnit(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
+                    style={{ width: "100%", padding: "10px 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontWeight: 600 }}
                   >
                     <option value="Bag">Bag</option>
                     <option value="Kg">Kg</option>
@@ -1525,22 +2154,101 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
               </div>
 
-              <div style={{ display: "flex", gap: "12px" }}>
-                <div className="form-group" style={{ flex: 1 }}>
+              <div className="form-group">
+                <label htmlFor="material-name">Material Name</label>
+                <input 
+                  type="text" 
+                  id="material-name"
+                  placeholder="Select Suggestion below or enter custom name..."
+                  value={materialName}
+                  onChange={(e) => setMaterialName(e.target.value)}
+                  required 
+                />
+                
+                {/* Suggestions list for Material Name */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+                  {(categorySuggestions[materialCategory] || []).map(sug => (
+                    <button
+                      type="button"
+                      key={sug}
+                      onClick={() => setMaterialName(sug)}
+                      style={{
+                        padding: "4px 10px",
+                        borderRadius: "16px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: materialName === sug ? "var(--primary-100)" : "#ffffff",
+                        color: materialName === sug ? "var(--primary-800)" : "var(--text-muted)",
+                        fontSize: "11px",
+                        fontWeight: "600",
+                        cursor: "pointer",
+                        transition: "all 0.2s"
+                      }}
+                    >
+                      {sug}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "12px", alignItems: "flex-end" }}>
+                <div className="form-group" style={{ flex: 1, margin: 0 }}>
                   <label htmlFor="material-quantity">Quantity</label>
-                  <input 
-                    type="number" 
-                    id="material-quantity"
-                    placeholder="Quantity"
-                    min="0.01"
-                    step="any"
-                    value={materialQuantity}
-                    onChange={(e) => setMaterialQuantity(e.target.value)}
-                    required 
-                  />
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "#ffffff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontWeight: "800",
+                        color: "var(--danger-600)",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                      }}
+                    >
+                      -10
+                    </button>
+                    <input 
+                      type="number" 
+                      id="material-quantity"
+                      placeholder="Qty"
+                      min="0.01"
+                      step="any"
+                      value={materialQuantity}
+                      onChange={(e) => setMaterialQuantity(e.target.value)}
+                      required 
+                      style={{ textAlign: "center", flex: 1, margin: 0, height: "36px" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
+                      style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "8px",
+                        border: "1px solid var(--border-color)",
+                        backgroundColor: "#ffffff",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        fontWeight: "800",
+                        color: "var(--success-600)",
+                        boxShadow: "0 1px 2px rgba(0,0,0,0.05)"
+                      }}
+                    >
+                      +10
+                    </button>
+                  </div>
                 </div>
 
-                <div className="form-group" style={{ flex: 1 }}>
+                <div className="form-group" style={{ flex: 1, margin: 0 }}>
                   <label htmlFor="material-date">Receipt Date</label>
                   <input 
                     type="date" 
@@ -1548,6 +2256,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     value={materialPurchaseDate}
                     onChange={(e) => setMaterialPurchaseDate(e.target.value)}
                     required 
+                    style={{ height: "36px" }}
                   />
                 </div>
               </div>
@@ -1557,11 +2266,39 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <input 
                   type="text" 
                   id="material-supplier"
-                  placeholder="Supplier Company Details"
+                  placeholder="Select suggestion or type..."
                   value={materialSupplier}
                   onChange={(e) => setMaterialSupplier(e.target.value)}
                   required 
                 />
+                
+                {/* Supplier Suggestions */}
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+                  {(() => {
+                    const uniqueSuppliers = Array.from(new Set(materials.map(m => m.supplierName).filter(Boolean)));
+                    const defaultSuppliers = ["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."];
+                    const list = Array.from(new Set([...uniqueSuppliers.slice(0, 2), ...defaultSuppliers])).slice(0, 4);
+                    return list.map(sug => (
+                      <button
+                        type="button"
+                        key={sug}
+                        onClick={() => setMaterialSupplier(sug)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: "16px",
+                          border: "1px solid var(--border-color)",
+                          backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
+                          color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {sug}
+                      </button>
+                    ));
+                  })()}
+                </div>
               </div>
 
               <div className="form-group">
@@ -1571,24 +2308,37 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   placeholder="Inspection notes, challan number, etc..."
                   value={materialNotes}
                   onChange={(e) => setMaterialNotes(e.target.value)}
-                  style={{ minHeight: "60px" }}
+                  style={{ minHeight: "50px" }}
                 />
               </div>
 
               <div className="form-group">
-                <label>Invoice/Bill Photo (Optional)</label>
-                <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
-                  <label style={{ cursor: "pointer", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px dashed var(--border-color)", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--primary-50)", fontSize: "11px", fontWeight: 700 }}>
-                    <Camera size={14} />
-                    <span>Choose Photo</span>
+                <label>Upload Material Photo</label>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                  <label style={{ 
+                    display: "flex", 
+                    flexDirection: "column", 
+                    alignItems: "center", 
+                    gap: "6px", 
+                    padding: "20px 16px", 
+                    border: "2px dashed var(--border-color)", 
+                    borderRadius: "8px", 
+                    cursor: "pointer", 
+                    backgroundColor: "var(--primary-50)",
+                    textAlign: "center"
+                  }}>
+                    <Camera size={24} style={{ color: "var(--primary-600)" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Challan Photo</span>
                     <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
                   </label>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "160px" }}>
-                    {materialInvoiceFile ? materialInvoiceFile.name : "No file chosen"}
-                  </span>
+                  {materialInvoiceFile && (
+                    <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--success-600)", textAlign: "center" }}>
+                      Selected: {materialInvoiceFile.name}
+                    </span>
+                  )}
                 </div>
                 {materialInvoicePreview && (
-                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
                     <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} /></button>
                   </div>
@@ -1606,7 +2356,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             
             {/* Searching Filters */}
             <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "16px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "4px 10px", borderRadius: "var(--radius-sm)", backgroundColor: "#ffffff" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "4px 10px", borderRadius: "8px", backgroundColor: "#ffffff" }}>
                 <Search size={16} style={{ color: "var(--text-muted)" }} />
                 <input 
                   type="text" 
@@ -1682,39 +2432,67 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       if (!materialDateFilter) return true;
                       return m.purchaseDate === materialDateFilter;
                     })
-                    .map(m => (
-                      <div key={m.id} style={{
-                        padding: "12px",
-                        border: "1px solid var(--border-color)",
-                        borderRadius: "8px",
-                        backgroundColor: "#ffffff",
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.02)"
-                      }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "6px" }}>
-                          <div>
-                            <strong style={{ display: "block", fontSize: "13px", color: "var(--primary-950)" }}>{m.materialName}</strong>
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Category: {m.category}</span>
+                    .map(m => {
+                      const getRelativeDateStr = (dateStr) => {
+                        const today = new Date().toISOString().split("T")[0];
+                        const yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+                        if (dateStr === today) return "Today";
+                        if (dateStr === yesterday) return "Yesterday";
+                        return dateStr;
+                      };
+                      return (
+                        <div key={m.id} style={{
+                          padding: "16px",
+                          border: "1px solid var(--border-color)",
+                          borderRadius: "12px",
+                          backgroundColor: "#ffffff",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.02)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px"
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div>
+                              <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                                {m.category}
+                              </span>
+                              <strong style={{ display: "block", fontSize: "14px", color: "var(--primary-950)", marginTop: "2px" }}>
+                                {m.materialName}
+                              </strong>
+                            </div>
+                            <Badge status="success" style={{ padding: "6px 12px", borderRadius: "20px", fontWeight: "800", fontSize: "13px" }}>
+                              {m.quantity} {m.unit}s
+                            </Badge>
                           </div>
-                          <Badge status="success">{m.quantity} {m.unit}</Badge>
-                        </div>
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", fontSize: "11px", color: "var(--text-dark)", marginTop: "4px" }}>
-                          <span>Supplier: <strong>{m.supplierName}</strong></span>
-                          <span>Challan Date: <strong className="font-mono">{m.purchaseDate}</strong></span>
-                        </div>
-                        {m.notes && (
-                          <p style={{ margin: "6px 0 0 0", fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                            Remarks: {m.notes}
-                          </p>
-                        )}
-                        {m.invoiceUrl && (
-                          <div style={{ marginTop: "8px" }}>
-                            <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "700", textDecoration: "underline" }}>
-                              Open Bill Image
-                            </a>
+
+                          <hr style={{ border: 0, borderTop: "1px solid var(--border-color)", margin: 0 }} />
+
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px" }}>
+                            <span style={{ color: "var(--text-muted)" }}>
+                              Supplier: <strong style={{ color: "var(--primary-900)" }}>{m.supplierName}</strong>
+                            </span>
+                            <span style={{ fontWeight: "700", color: "var(--accent-600)" }}>
+                              {getRelativeDateStr(m.purchaseDate)}
+                            </span>
                           </div>
-                        )}
-                      </div>
-                    ))
+
+                          {m.notes && (
+                            <div style={{ fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "8px", borderRadius: "6px", fontStyle: "italic" }}>
+                              "{m.notes}"
+                            </div>
+                          )}
+
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "10px", color: "var(--text-muted)" }}>
+                            <span>Added by {m.engineerName || "Site Engineer"}</span>
+                            {m.invoiceUrl && (
+                              <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
+                                View Bill Photo
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
                 )}
             </div>
           </Card>

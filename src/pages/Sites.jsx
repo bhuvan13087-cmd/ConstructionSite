@@ -40,6 +40,9 @@ export default function Sites() {
   const [formStartDate, setFormStartDate] = useState("");
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
+  const [formLatitude, setFormLatitude] = useState("");
+  const [formLongitude, setFormLongitude] = useState("");
+  const [formRadius, setFormRadius] = useState("100");
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -86,6 +89,9 @@ export default function Sites() {
     setFormStartDate("");
     setFormExpectedEndDate("");
     setFormStatus("Planning");
+    setFormLatitude("");
+    setFormLongitude("");
+    setFormRadius("100");
     setShowFormModal(true);
   };
 
@@ -98,6 +104,9 @@ export default function Sites() {
     setFormStartDate(site.startDate || "");
     setFormExpectedEndDate(site.expectedEndDate || "");
     setFormStatus(site.status || "Planning");
+    setFormLatitude(site.latitude !== undefined ? String(site.latitude) : "");
+    setFormLongitude(site.longitude !== undefined ? String(site.longitude) : "");
+    setFormRadius(site.radius !== undefined ? String(site.radius) : "100");
     setShowFormModal(true);
   };
 
@@ -114,7 +123,19 @@ export default function Sites() {
       return;
     }
     if (!formLocation.trim()) {
-      showToast("Location is required.", "error");
+      showToast("Site Address is required.", "error");
+      return;
+    }
+    if (!formLatitude.trim()) {
+      showToast("Latitude is required.", "error");
+      return;
+    }
+    if (!formLongitude.trim()) {
+      showToast("Longitude is required.", "error");
+      return;
+    }
+    if (!formRadius.trim()) {
+      showToast("Allowed Radius is required.", "error");
       return;
     }
     if (!formStartDate) {
@@ -130,6 +151,23 @@ export default function Sites() {
       return;
     }
 
+    const lat = Number(formLatitude);
+    const lng = Number(formLongitude);
+    const rad = Number(formRadius);
+
+    if (isNaN(lat) || lat < -90 || lat > 90) {
+      showToast("Latitude must be a valid number between -90 and 90.", "error");
+      return;
+    }
+    if (isNaN(lng) || lng < -180 || lng > 180) {
+      showToast("Longitude must be a valid number between -180 and 180.", "error");
+      return;
+    }
+    if (isNaN(rad) || rad <= 0) {
+      showToast("Allowed Radius must be a positive number.", "error");
+      return;
+    }
+
     setLoading(true);
     try {
       if (formMode === "add") {
@@ -139,7 +177,10 @@ export default function Sites() {
           formLocation.trim(), 
           formStartDate, 
           formExpectedEndDate, 
-          formStatus
+          formStatus,
+          lat,
+          lng,
+          rad
         );
         showToast("Construction Site added successfully.", "success");
       } else {
@@ -150,7 +191,10 @@ export default function Sites() {
           formLocation.trim(),
           formStartDate,
           formExpectedEndDate,
-          formStatus
+          formStatus,
+          lat,
+          lng,
+          rad
         );
         showToast("Construction Site updated successfully.", "success");
       }
@@ -249,9 +293,14 @@ export default function Sites() {
                     <td style={{ fontWeight: 700 }}>{site.siteName}</td>
                     <td>{site.clientName || "--"}</td>
                     <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)" }} />
-                        <span>{site.location}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)" }} />
+                          <span>{site.location}</span>
+                        </div>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "20px" }}>
+                          GPS: {site.latitude !== undefined ? Number(site.latitude).toFixed(4) : "0.0000"}, {site.longitude !== undefined ? Number(site.longitude).toFixed(4) : "0.0000"} (Radius: {site.radius || 100}m)
+                        </div>
                       </div>
                     </td>
                     <td className="font-mono">{site.startDate || "--"}</td>
@@ -315,7 +364,7 @@ export default function Sites() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="site-location">Location</label>
+            <label htmlFor="site-location">Site Address</label>
             <div className="input-wrapper">
               <MapPin className="input-icon" size={16} />
               <input 
@@ -326,6 +375,50 @@ export default function Sites() {
                 onChange={(e) => setFormLocation(e.target.value)}
                 required 
               />
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="site-latitude">Latitude</label>
+              <div className="input-wrapper">
+                <input 
+                  type="text" 
+                  id="site-latitude" 
+                  placeholder="E.g., 28.5355" 
+                  value={formLatitude}
+                  onChange={(e) => setFormLatitude(e.target.value)}
+                  required 
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-longitude">Longitude</label>
+              <div className="input-wrapper">
+                <input 
+                  type="text" 
+                  id="site-longitude" 
+                  placeholder="E.g., 77.3910" 
+                  value={formLongitude}
+                  onChange={(e) => setFormLongitude(e.target.value)}
+                  required 
+                />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="site-radius">Allowed Radius (m)</label>
+              <div className="input-wrapper">
+                <input 
+                  type="number" 
+                  id="site-radius" 
+                  placeholder="E.g., 100" 
+                  value={formRadius}
+                  onChange={(e) => setFormRadius(e.target.value)}
+                  required 
+                />
+              </div>
             </div>
           </div>
 

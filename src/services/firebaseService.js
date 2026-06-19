@@ -306,7 +306,7 @@ export async function getTodayAttendance(engineerId, dateStr) {
 }
 
 // Mark attendance
-export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, photoUrl = "") {
+export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, photoUrl = "", photoGpsLocation = null, verificationStatus = "verified") {
   const db = getDb();
   const existing = await getTodayAttendance(engineerId, dateStr);
   if (existing) {
@@ -322,6 +322,8 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
     latitude,
     longitude,
     photoUrl,
+    photoGpsLocation,
+    verificationStatus,
     status: "present"
   });
 }
