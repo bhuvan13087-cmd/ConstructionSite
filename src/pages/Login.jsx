@@ -126,8 +126,6 @@ export default function Login() {
   }, [user, userProfile, authLoading, navigate]);
 
   const openLoginModal = () => {
-    setEmail("");
-    setPassword("");
     setError("");
     setIsLoginModalOpen(true);
   };
@@ -477,53 +475,97 @@ export default function Login() {
         </div>
       </footer>
 
-      {/* Professional Login Modal Popup */}
       <Modal
         isOpen={isLoginModalOpen}
         onClose={() => setIsLoginModalOpen(false)}
-        title="Sign in to Construction Management"
-        maxWidth="420px"
+        closeOnOverlayClick={false}
+        title="Apex Console Login"
+        maxWidth="440px"
       >
-        <div style={{ padding: "8px 0" }}>
-          <p style={{ fontSize: "13px", color: "var(--text-muted)", marginBottom: "20px", textAlign: "center" }}>
-            Enter your email and security password to access your field representative dashboard.
-          </p>
+        <div style={{ padding: "10px 0 0 0" }}>
+          {/* Saas-style construction header */}
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              width: "48px",
+              height: "48px",
+              borderRadius: "12px",
+              backgroundColor: "rgba(249, 115, 22, 0.1)",
+              border: "1px solid rgba(249, 115, 22, 0.2)"
+            }}>
+              <HardHat size={26} style={{ color: "#f97316" }} />
+            </div>
+            <h3 style={{ margin: "4px 0 0 0", fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>Welcome to Apex Console</h3>
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", textAlign: "center" }}>
+              Provide your credentials to manage or verify construction site operations.
+            </p>
+          </div>
 
           {error && (
-            <div className="info-alert" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)", padding: "12px", borderRadius: "var(--radius-sm)", marginBottom: "20px" }}>
-              <div className="info-text" style={{ color: "var(--danger-600)", display: "flex", alignItems: "center", gap: "8px" }}>
-                <Info size={16} style={{ flexShrink: 0 }} />
-                <span><strong>Error:</strong> {error}</span>
+            <div style={{ 
+              display: "flex", 
+              alignItems: "start", 
+              gap: "10px", 
+              backgroundColor: "#fef2f2", 
+              borderLeft: "4px solid #dc2626", 
+              borderRadius: "4px", 
+              padding: "12px 14px", 
+              marginBottom: "20px" 
+            }}>
+              <Info size={16} style={{ color: "#dc2626", flexShrink: 0, marginTop: "2px" }} />
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <span style={{ fontSize: "13px", color: "#b91c1c", fontWeight: "700" }}>Authorization Error</span>
+                <span style={{ fontSize: "12px", color: "#991b1b" }}>{error}</span>
               </div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="login-form">
-            <div className="form-group">
-              <label htmlFor="modal-email">Email Address</label>
-              <div className="input-wrapper">
-                <Mail className="input-icon" size={16} />
+          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="modal-email" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>Corporate Email Address</label>
+              <div className="input-wrapper" style={{ position: "relative" }}>
+                <Mail className="input-icon" size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
                 <input
                   type="email"
                   id="modal-email"
                   placeholder="admin@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px 10px 38px",
+                    border: "1.5px solid var(--border-color)",
+                    borderRadius: "var(--radius-md)",
+                    fontSize: "14px",
+                    outline: "none",
+                    transition: "all var(--transition-fast)"
+                  }}
                   required
                 />
               </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="modal-password">Security Password</label>
-              <div className="input-wrapper">
-                <Lock className="input-icon" size={16} />
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="modal-password" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>Security Password</label>
+              <div className="input-wrapper" style={{ position: "relative" }}>
+                <Lock className="input-icon" size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
                 <input
                   type="password"
                   id="modal-password"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px 10px 38px",
+                    border: "1.5px solid var(--border-color)",
+                    borderRadius: "var(--radius-md)",
+                    fontSize: "14px",
+                    outline: "none",
+                    transition: "all var(--transition-fast)"
+                  }}
                   required
                 />
               </div>
@@ -534,9 +576,9 @@ export default function Login() {
               id="btn-login-submit" 
               icon={KeyRound} 
               isLoading={loading}
-              style={{ width: "100%", marginTop: "12px", backgroundColor: "#f97316" }}
+              style={{ width: "100%", marginTop: "8px", backgroundColor: "#f97316", color: "#ffffff", padding: "12px", height: "46px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", border: "none", borderRadius: "var(--radius-md)" }}
             >
-              Authorize & Enter
+              {loading ? "Authenticating Credentials..." : "Authorize & Sign In"}
             </Button>
           </form>
         </div>

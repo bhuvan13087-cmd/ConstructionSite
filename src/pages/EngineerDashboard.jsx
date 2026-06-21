@@ -18,12 +18,17 @@ import {
   getEngineerAttendanceAndLeaveStats,
   logEngineerLeave,
   getEngineerLeaves,
-  deleteEngineerLeave
+  deleteEngineerLeave,
+  deleteMaterial,
+  deleteLabourDailyCounts,
+  deleteDailyProgressReport,
+  deleteSitePhoto
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
+import SelectWithOthers from "../components/common/SelectWithOthers";
 import { 
   MapPin, 
   FileText, 
@@ -192,6 +197,7 @@ const categorySuggestions = {
 export default function EngineerDashboard({ tab = "dashboard" }) {
   const { userProfile, logout } = useAuth();
   const navigate = useNavigate();
+  const currentEngineerId = userProfile?.uid || userProfile?.id || "";
   
   // Loader & Toast states
   const [loading, setLoading] = useState(false);
@@ -240,6 +246,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [deviceCoords, setDeviceCoords] = useState(null); // { latitude, longitude }
   const [locationError, setLocationError] = useState("");
 
+  // Camera WebRTC States
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraFacingMode, setCameraFacingMode] = useState("user"); // "user" or "environment"
+  const [cameraStream, setCameraStream] = useState(null);
+  const [cameraError, setCameraError] = useState("");
+  const videoRef = useRef(null);
+
   // 2. Daily Labour Counts
   const [labourDate, setLabourDate] = useState(new Date().toISOString().split("T")[0]);
   const [countsMap, setCountsMap] = useState({
@@ -253,10 +266,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [labourHistory, setLabourHistory] = useState([]);
   const [labourHistoryLoading, setLabourHistoryLoading] = useState(false);
   const [labourSaving, setLabourSaving] = useState(false);
+  const [showLabourSpecifyModal, setShowLabourSpecifyModal] = useState(false);
+  const [labourSpecifyText, setLabourSpecifyText] = useState("");
+  const [pendingLabourCount, setPendingLabourCount] = useState(1);
 
   // 3. Material Received fields
   const [materialName, setMaterialName] = useState("");
   const [materialCategory, setMaterialCategory] = useState("Cement");
+  const [customMaterialCategory, setCustomMaterialCategory] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materialUnit, setMaterialUnit] = useState("Bag");
   const [materialSupplier, setMaterialSupplier] = useState("");
@@ -437,19 +454,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  const fileInputRef = useRef(null);
-
   const getDeviceLocation = () => {
     return new Promise((resolve, reject) => {
       if (!navigator.geolocation) {
-        reject(new Error("Geolocation not supported by browser."));
+        reject(new Error("Geolocation is not supported by your browser."));
         return;
       }
       navigator.geolocation.getCurrentPosition(
         (position) => {
           resolve({
             latitude: position.coords.latitude,
-            longitude: position.coords.longitude
+            longitude: position.coords.longitude,
+            accuracy: position.coords.accuracy
           });
         },
         (error) => {
@@ -472,6 +488,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     try {
       if (mockLocation) {
+        // Simulate real GPS sensor retrieval time
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
         if (mockCase === "nopermission") {
           throw { code: 1, message: "Location permission denied." };
         } else if (mockCase === "gps_off") {
@@ -483,235 +502,115 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const siteLng = Number(site?.longitude || 77.3910);
         
         const coords = mockCase === "different" 
-          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05 } 
-          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001 };
+          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05, accuracy: 15 } 
+          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001, accuracy: 5 };
           
         setDeviceCoords(coords);
-        setLocationCheckStatus("granted");
-        
-        // Trigger file input click programmatically after UI state update
-        setTimeout(() => {
-          if (fileInputRef.current) {
-            fileInputRef.current.click();
-          }
-        }, 150);
+        verifySiteLocation(coords, site);
         return;
+      }
+
+      if (navigator.permissions && navigator.permissions.query) {
+        try {
+          const permission = await navigator.permissions.query({ name: 'geolocation' });
+          if (permission.state === 'denied') {
+            throw { code: 1, message: "Location permission denied." };
+          }
+        } catch (e) {
+          console.warn("navigator.permissions.query for geolocation not supported:", e);
+        }
       }
 
       const coords = await getDeviceLocation();
       setDeviceCoords(coords);
-      setLocationCheckStatus("granted");
       
-      setTimeout(() => {
-        if (fileInputRef.current) {
-          fileInputRef.current.click();
-        }
-      }, 150);
+      const site = assignedSites.find(s => s.id === activeSiteId);
+      verifySiteLocation(coords, site);
 
     } catch (err) {
       console.warn("Location check failed:", err);
       setLocationCheckStatus("warning");
-      setLocationError(err.message || "Location access is required to verify your site attendance.");
+      if (err.code === 1) {
+        setLocationError("Location permission denied. Please allow location access in your browser settings.");
+      } else {
+        setLocationError(err.message || "Location access is required to verify your site attendance.");
+      }
     }
   };
 
   const handleEnableLocation = async () => {
-    setLocationError("");
-    try {
-      if (mockLocation) {
-        if (mockCase === "nopermission") {
-          setLocationError("Location permission denied. Please select a valid test case to proceed.");
-          return;
-        } else if (mockCase === "gps_off") {
-          setLocationError("Unable to detect current location. Please enable GPS and try again.");
-          return;
-        }
-        
-        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
-        const siteLat = Number(site?.latitude || 28.5355);
-        const siteLng = Number(site?.longitude || 77.3910);
-        const coords = mockCase === "different" 
-          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05 } 
-          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001 };
-
-        setDeviceCoords(coords);
-        setLocationCheckStatus("granted");
-        setTimeout(() => {
-          if (fileInputRef.current) {
-            fileInputRef.current.click();
-          }
-        }, 150);
-        return;
-      }
-
-      const coords = await getDeviceLocation();
-      setDeviceCoords(coords);
-      setLocationCheckStatus("granted");
-      
-      setTimeout(() => {
-        if (fileInputRef.current) {
-          fileInputRef.current.click();
-        }
-      }, 150);
-    } catch (err) {
-      console.warn("Location enable query failed:", err);
-      setLocationError(err.message || "Unable to detect current location. Please enable GPS and try again.");
-    }
+    await handlePreCaptureCheck();
   };
 
-  const handleCancelLocationPrecheck = () => {
-    setLocationCheckStatus("unchecked");
-    setLocationError("");
-    setDeviceCoords(null);
-  };
-
-  // 1. Staff check-in verification photo upload & validation flow
-  const handleAttendancePhotoChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (!activeSiteId) {
-      showToast("Please select your active site first.", "error");
-      return;
-    }
-
-    const site = assignedSites.find(s => s.id === activeSiteId);
+  const verifySiteLocation = (coords, site) => {
     if (!site) {
-      showToast("Target site check failed.", "error");
+      setVerificationStatus("failed");
+      setVerificationDetails({
+        message: "No assigned site selected"
+      });
+      setLocationCheckStatus("granted");
       return;
     }
 
-    setAttendancePhotoFile(file);
+    const siteLat = Number(site.latitude || 28.5355);
+    const siteLng = Number(site.longitude || 77.3910);
+    const siteRadius = Number(site.radius || 100);
+
+    const distance = calculateDistanceMeters(siteLat, siteLng, coords.latitude, coords.longitude);
     
-    // Create preview
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setAttendancePhotoPreview(reader.result);
-    };
-    reader.readAsDataURL(file);
-
-    // Start verification
-    setAttendancePhotoUploading(true);
-    setVerificationStatus("pending");
-    setVerificationDetails(null);
-
-    try {
-      let metadata = null;
-
-      if (mockLocation) {
-        // Mocked verification path based on mockCase
-        if (mockCase === "nogps") {
-          metadata = { hasGps: false };
-        } else if (mockCase === "old") {
-          metadata = {
-            hasGps: true,
-            lat: Number(site.latitude || 28.5355),
-            lng: Number(site.longitude || 77.3910),
-            timestamp: new Date(Date.now() - 2 * 60 * 60 * 1000) // 2 hours old
-          };
-        } else if (mockCase === "different") {
-          metadata = {
-            hasGps: true,
-            lat: Number(site.latitude || 28.5355) + 0.05, // ~15km away
-            lng: Number(site.longitude || 77.3910) + 0.05,
-            timestamp: new Date()
-          };
-        } else {
-          // valid
-          metadata = {
-            hasGps: true,
-            lat: Number(site.latitude || 28.5355) + 0.0001, // very close
-            lng: Number(site.longitude || 77.3910) + 0.0001,
-            timestamp: new Date()
-          };
-        }
-      } else {
-        // Real EXIF reading path
-        metadata = await readPhotoMetadata(file);
-      }
-
-      if (!metadata || !metadata.hasGps) {
-        setVerificationStatus("failed");
-        setVerificationDetails({
-          message: "Invalid photo",
-          isNoGps: true
-        });
-        return;
-      }
-
-      // Check timestamp
-      const now = new Date();
-      const photoTime = metadata.timestamp || now;
-      const ageMs = Math.abs(now.getTime() - photoTime.getTime());
-      const isOld = ageMs > 5 * 60 * 1000; // 5 minutes threshold
-
-      if (isOld) {
-        setVerificationStatus("failed");
-        setVerificationDetails({
-          message: "Old photo detected",
-          isOld: true
-        });
-        return;
-      }
-
-      // Geofence check using both live coordinates and photo GPS coordinates
-      const siteLat = Number(site.latitude || 28.5355);
-      const siteLng = Number(site.longitude || 77.3910);
-      const siteRadius = Number(site.radius || 100);
+    getReverseGeocode(coords.latitude, coords.longitude, site).then(capturedAddress => {
+      const isWithinRadius = distance <= siteRadius;
       
-      const userLat = deviceCoords ? deviceCoords.latitude : siteLat;
-      const userLng = deviceCoords ? deviceCoords.longitude : siteLng;
-      
-      const liveDistance = calculateDistanceMeters(siteLat, siteLng, userLat, userLng);
-      const photoDistance = calculateDistanceMeters(siteLat, siteLng, metadata.lat, metadata.lng);
-      
-      // Get Location Address of live device location
-      const capturedAddress = await getReverseGeocode(userLat, userLng, site);
-
-      // Set locations to display
-      setPhotoGpsLat(metadata.lat);
-      setPhotoGpsLng(metadata.lng);
-      setPhotoTimestamp(photoTime);
-      setPhotoAddress(capturedAddress);
-
-      const isLiveValid = liveDistance <= siteRadius;
-      const isPhotoValid = photoDistance <= siteRadius;
-
-      if (!isLiveValid || !isPhotoValid) {
-        const largerDist = Math.max(Math.round(liveDistance), Math.round(photoDistance));
-        setVerificationStatus("failed");
-        setVerificationDetails({
-          message: "Location mismatch",
-          expectedSiteName: site.siteName,
-          expectedAddress: site.location,
-          capturedAddress: capturedAddress,
-          distance: largerDist,
-          liveDistance: Math.round(liveDistance),
-          photoDistance: Math.round(photoDistance)
-        });
-      } else {
+      if (isWithinRadius) {
         setVerificationStatus("success");
         setVerificationDetails({
           message: "Site Verified Successfully",
           expectedSiteName: site.siteName,
           expectedAddress: site.location,
           capturedAddress: capturedAddress,
-          distance: Math.round(liveDistance)
+          distance: Math.round(distance)
+        });
+      } else {
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Location mismatch",
+          expectedSiteName: site.siteName,
+          expectedAddress: site.location,
+          capturedAddress: capturedAddress,
+          distance: Math.round(distance),
+          allowedRadius: siteRadius
         });
       }
-
-    } catch (err) {
-      console.error("Photo verification error:", err);
-      setVerificationStatus("failed");
-      setVerificationDetails({
-        message: err.message || "Failed to read location information."
-      });
-    } finally {
-      setAttendancePhotoUploading(false);
-    }
+      setLocationCheckStatus("granted");
+    }).catch(err => {
+      console.error("Reverse geocoding error:", err);
+      const isWithinRadius = distance <= siteRadius;
+      if (isWithinRadius) {
+        setVerificationStatus("success");
+        setVerificationDetails({
+          message: "Site Verified Successfully",
+          expectedSiteName: site.siteName,
+          expectedAddress: site.location,
+          capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
+          distance: Math.round(distance)
+        });
+      } else {
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Location mismatch",
+          expectedSiteName: site.siteName,
+          expectedAddress: site.location,
+          capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
+          distance: Math.round(distance),
+          allowedRadius: siteRadius
+        });
+      }
+      setLocationCheckStatus("granted");
+    });
   };
 
   const handleResetVerification = () => {
+    stopWebRTCCamera();
     setAttendancePhotoFile(null);
     setAttendancePhotoPreview(null);
     setVerificationStatus(null);
@@ -724,7 +623,74 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setDeviceCoords(null);
   };
 
-  // 2. Execute Staff Check-In Attendance after successful verification
+  const startWebRTCCamera = async (facingMode) => {
+    setCameraError("");
+    setCameraActive(true);
+    setCameraFacingMode(facingMode);
+
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+    }
+
+    try {
+      const constraints = {
+        video: {
+          facingMode: facingMode === "user" ? "user" : "environment",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      };
+      
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      setCameraStream(stream);
+      
+      setTimeout(() => {
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+        }
+      }, 100);
+    } catch (err) {
+      console.error("WebRTC camera stream access failed:", err);
+      setCameraError("Failed to access camera stream. Please check camera permissions in browser settings.");
+    }
+  };
+
+  const toggleCameraFacingMode = () => {
+    const newFacingMode = cameraFacingMode === "user" ? "environment" : "user";
+    startWebRTCCamera(newFacingMode);
+  };
+
+  const stopWebRTCCamera = () => {
+    if (cameraStream) {
+      cameraStream.getTracks().forEach(track => track.stop());
+      setCameraStream(null);
+    }
+    setCameraActive(false);
+    setCameraError("");
+  };
+
+  const capturePhotoFromStream = () => {
+    if (!videoRef.current) return;
+    const video = videoRef.current;
+    
+    const canvas = document.createElement("canvas");
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+    const ctx = canvas.getContext("2d");
+    
+    if (cameraFacingMode === "user") {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
+    
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const compressedBase64 = canvas.toDataURL("image/jpeg", 0.7);
+    
+    setAttendancePhotoPreview(compressedBase64);
+    stopWebRTCCamera();
+  };
+
   const handleMarkAttendance = async (e) => {
     if (e) e.preventDefault();
     if (!activeSiteId) {
@@ -750,10 +716,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const lng = deviceCoords ? deviceCoords.longitude : Number(site.longitude || 77.3910);
       const photoGpsLocation = { latitude: lat, longitude: lng };
 
-      // Save progressive log photo to the site inspection feed
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
-      // Save present attendance log
       await markAttendance(
         engineerId, 
         activeSiteId, 
@@ -816,14 +780,96 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Cancel / Delete Leave Handler
   const handleDeleteLeave = async (leaveId) => {
-    if (confirm("Are you sure you want to cancel this leave record?")) {
+    if (window.confirm("Delete this entry?")) {
       try {
         await deleteEngineerLeave(leaveId);
-        showToast("Leave record removed successfully.", "success");
+        showToast("Deleted successfully", "success");
         await loadDashboardData();
       } catch (err) {
         console.error("Failed to cancel leave:", err);
         showToast("Failed to cancel leave: " + err.message, "error");
+      }
+    }
+  };
+
+  // Delete Material Entry Handler
+  const handleDeleteMaterial = async (materialId) => {
+    const mObj = materials.find(m => m.id === materialId);
+    if (!mObj) return;
+    if (mObj.engineerId !== currentEngineerId) {
+      showToast("Security error: You can only delete your own records.", "error");
+      return;
+    }
+    if (window.confirm("Delete this entry?")) {
+      try {
+        await deleteMaterial(materialId);
+        showToast("Deleted successfully", "success");
+        await loadDashboardData();
+      } catch (err) {
+        console.error("Failed to delete material:", err);
+        showToast("Failed to delete: " + err.message, "error");
+      }
+    }
+  };
+
+  // Delete Labour Counts Log Handler
+  const handleDeleteLabourLog = async (dateStr) => {
+    const historyRow = labourHistory.find(h => h.date === dateStr);
+    if (!historyRow) return;
+    if (historyRow.engineerId && historyRow.engineerId !== currentEngineerId) {
+      showToast("Security error: You can only delete your own records.", "error");
+      return;
+    }
+    if (window.confirm("Delete this entry?")) {
+      try {
+        await deleteLabourDailyCounts(activeSiteId, dateStr);
+        showToast("Deleted successfully", "success");
+        const hist = await getLabourDailyCountsHistory(activeSiteId);
+        setLabourHistory(hist);
+        await loadDashboardData();
+      } catch (err) {
+        console.error("Failed to delete labour counts:", err);
+        showToast("Failed to delete: " + err.message, "error");
+      }
+    }
+  };
+
+  // Delete Progress DPR Log Handler
+  const handleDeleteProgressLog = async (reportId) => {
+    const report = dailyUpdates.find(r => r.id === reportId);
+    if (!report) return;
+    if (report.engineerId !== currentEngineerId) {
+      showToast("Security error: You can only delete your own records.", "error");
+      return;
+    }
+    if (window.confirm("Delete this entry?")) {
+      try {
+        await deleteDailyProgressReport(reportId);
+        showToast("Deleted successfully", "success");
+        await loadDashboardData();
+      } catch (err) {
+        console.error("Failed to delete progress report:", err);
+        showToast("Failed to delete: " + err.message, "error");
+      }
+    }
+  };
+
+  // Delete Site Inspection Photo Handler
+  const handleDeleteSitePhoto = async (photoId) => {
+    const photo = sitePhotos.find(p => p.id === photoId);
+    if (!photo) return;
+    if (photo.engineerId !== currentEngineerId) {
+      showToast("Security error: You can only delete your own records.", "error");
+      return;
+    }
+    if (window.confirm("Delete this entry?")) {
+      try {
+        await deleteSitePhoto(photoId);
+        showToast("Deleted successfully", "success");
+        await loadDashboardData();
+      } catch (err) {
+        console.error("Failed to delete photo:", err);
+        showToast("Failed to delete: " + err.message, "error");
       }
     }
   };
@@ -916,6 +962,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
+  const handleOtherLabourInteract = (intendedCount) => {
+    setLabourSpecifyText("");
+    setPendingLabourCount(intendedCount);
+    setShowLabourSpecifyModal(true);
+  };
+
   // 4. Save Material Receipt
   const handleMaterialSubmit = async (e) => {
     e.preventDefault();
@@ -925,6 +977,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
     if (!materialName.trim()) {
       showToast("Material Name is required.", "error");
+      return;
+    }
+    if (materialCategory === "Other" && !customMaterialCategory.trim()) {
+      showToast("Please specify the custom material category.", "error");
       return;
     }
     if (!materialQuantity || isNaN(Number(materialQuantity)) || Number(materialQuantity) <= 0) {
@@ -939,11 +995,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setMaterialSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
+      const categoryToSave = materialCategory === "Other" ? customMaterialCategory.trim() : materialCategory;
       await addMaterial({
         siteId: activeSiteId,
         engineerId,
         materialName: materialName.trim(),
-        category: materialCategory,
+        category: categoryToSave,
         quantity: Number(materialQuantity),
         unit: materialUnit,
         supplierName: materialSupplier.trim(),
@@ -957,6 +1014,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       // Reset forms
       setMaterialName("");
       setMaterialCategory("Cement");
+      setCustomMaterialCategory("");
       setMaterialQuantity("");
       setMaterialUnit("Bag");
       setMaterialSupplier("");
@@ -1399,7 +1457,45 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {locationCheckStatus !== "granted" && (
+            {locationCheckStatus === "unchecked" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", justifyContent: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
+                <div style={{
+                  width: "64px",
+                  height: "64px",
+                  borderRadius: "50%",
+                  backgroundColor: "var(--accent-50)",
+                  color: "var(--accent-600)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: "8px"
+                }}>
+                  <ClipboardCheck size={36} />
+                </div>
+                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Worksite Attendance</h4>
+                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", textAlign: "center", maxWidth: "280px" }}>
+                  Verify your location and take a photo to check in for today's shift.
+                </p>
+                <button
+                  type="button"
+                  className="mobile-btn-large"
+                  onClick={handlePreCaptureCheck}
+                  style={{ marginTop: "12px", width: "100%" }}
+                >
+                  Mark Attendance
+                </button>
+              </div>
+            )}
+
+            {locationCheckStatus === "checking" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", justifyContent: "center", padding: "48px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
+                <div className="loader" style={{ borderTopColor: "var(--accent-600)" }} />
+                <span style={{ fontSize: "14px", fontWeight: "700", color: "var(--primary-800)" }}>Checking your site location...</span>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center" }}>Please hold on while we retrieve high accuracy GPS coordinates.</span>
+              </div>
+            )}
+
+            {locationCheckStatus === "warning" && (
               <div style={{
                 backgroundColor: "#ffffff",
                 borderRadius: "var(--radius-md)",
@@ -1416,175 +1512,276 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   width: "56px",
                   height: "56px",
                   borderRadius: "50%",
-                  backgroundColor: "var(--accent-50)",
-                  color: "var(--accent-600)",
+                  backgroundColor: "var(--danger-50)",
+                  color: "var(--danger-600)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center"
                 }}>
-                  <MapPin size={32} />
+                  <AlertTriangle size={32} />
                 </div>
                 <div>
-                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>GPS Verification Required</h4>
-                  <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>To record your attendance, the system must verify that you are physically present within the site radius.</p>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Location Access Required</h4>
+                  <p style={{ margin: "6px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+                    Location access is required to verify your site attendance.
+                  </p>
                 </div>
-                
-                {locationCheckStatus === "checking" && (
-                  <div style={{ fontSize: "13px", color: "var(--accent-600)", fontWeight: "600" }}>Detecting location coordinates...</div>
-                )}
                 
                 {locationError && (
                   <div style={{
                     backgroundColor: "var(--danger-50)",
                     color: "var(--danger-600)",
-                    padding: "10px 14px",
+                    padding: "12px 14px",
                     borderRadius: "var(--radius-sm)",
                     border: "1px solid var(--danger-100)",
                     fontSize: "12px",
                     textAlign: "left",
-                    width: "100%"
+                    width: "100%",
+                    lineHeight: "1.4"
                   }}>
-                    <strong>Error:</strong> {locationError}
+                    <strong>Status:</strong> {locationError}
+                    <div style={{ marginTop: "8px", fontSize: "11px", opacity: 0.9 }}>
+                      💡 <strong>How to enable:</strong> Make sure your device GPS/Location switch is turned ON. If permission is blocked, go to browser settings, reset location permissions for this site, and refresh.
+                    </div>
                   </div>
                 )}
 
                 <button
                   type="button"
-                  onClick={handlePreCaptureCheck}
-                  disabled={locationCheckStatus === "checking"}
+                  onClick={handleEnableLocation}
                   className="mobile-btn-large"
+                  style={{ width: "100%" }}
                 >
-                  <Camera size={18} />
-                  <span>Verify & Open Camera</span>
+                  <MapPin size={18} />
+                  <span>Enable Location</span>
                 </button>
               </div>
             )}
 
-            <input
-              type="file"
-              accept="image/*"
-              capture="environment"
-              ref={fileInputRef}
-              onChange={handleAttendancePhotoChange}
-              style={{ display: "none" }}
-            />
+            {locationCheckStatus === "granted" && verificationStatus === "success" && (
+              <>
+                {!attendancePhotoPreview ? (
+                  <div style={{
+                    backgroundColor: "#ffffff",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border-color)",
+                    padding: "24px 16px",
+                    boxShadow: "var(--shadow-sm)",
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    gap: "16px"
+                  }}>
+                    <div style={{
+                      width: "56px",
+                      height: "56px",
+                      borderRadius: "50%",
+                      backgroundColor: "var(--success-50)",
+                      color: "var(--success-600)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center"
+                    }}>
+                      <CheckCircle2 size={32} />
+                    </div>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>Site Verified Successfully</h4>
+                      <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+                        You are physically present within the allowed boundary of this worksite.
+                      </p>
+                    </div>
 
-            {locationCheckStatus === "granted" && verificationStatus && (
+                    <div style={{
+                      width: "100%",
+                      backgroundColor: "var(--primary-50)",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)",
+                      padding: "12px",
+                      textAlign: "left",
+                      fontSize: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "6px"
+                    }}>
+                      <div><strong>Assigned Site:</strong> {verificationDetails?.expectedSiteName}</div>
+                      <div><strong>Address:</strong> {verificationDetails?.capturedAddress}</div>
+                      <div><strong>Distance:</strong> {verificationDetails?.distance} meters from center</div>
+                    </div>
+
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--text-muted)", textTransform: "uppercase" }}>Capture Attendance Photo</span>
+
+                    <div style={{ display: "flex", gap: "10px", width: "100%" }}>
+                      <button
+                        type="button"
+                        className="mobile-btn-large"
+                        style={{ flex: 1 }}
+                        onClick={() => startWebRTCCamera("user")}
+                      >
+                        <Camera size={18} />
+                        <span>Front Camera</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="mobile-btn-large"
+                        style={{ flex: 1 }}
+                        onClick={() => startWebRTCCamera("environment")}
+                      >
+                        <Camera size={18} />
+                        <span>Back Camera</span>
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{
+                    backgroundColor: "#ffffff",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border-color)",
+                    padding: "16px",
+                    boxShadow: "var(--shadow-sm)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "14px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "var(--text-muted)" }}>GPS Result</span>
+                      <Badge status="success">Location Verified</Badge>
+                    </div>
+
+                    <div style={{ width: "100%", height: "200px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)", position: "relative" }}>
+                      <img src={attendancePhotoPreview} alt="Captured Check-in" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <button
+                        type="button"
+                        onClick={() => setAttendancePhotoPreview(null)}
+                        style={{
+                          position: "absolute",
+                          top: "8px",
+                          right: "8px",
+                          backgroundColor: "rgba(0,0,0,0.6)",
+                          color: "#ffffff",
+                          border: "none",
+                          borderRadius: "50%",
+                          width: "28px",
+                          height: "28px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          cursor: "pointer"
+                        }}
+                      >
+                        <X size={16} />
+                      </button>
+                    </div>
+
+                    <div style={{
+                      backgroundColor: "var(--success-50)",
+                      borderRadius: "8px",
+                      border: "1.5px solid var(--success-100)",
+                      padding: "12px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px",
+                      fontSize: "12px",
+                      color: "var(--success-800)"
+                    }}>
+                      <div style={{ fontWeight: "700" }}>✓ Site Verified: {verificationDetails?.expectedSiteName}</div>
+                      <div><strong>Location:</strong> {verificationDetails?.capturedAddress}</div>
+                      <div><strong>Distance:</strong> {verificationDetails?.distance} meters from center</div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: "10px" }}>
+                      <button
+                        type="button"
+                        className="mobile-btn-large"
+                        style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
+                        onClick={() => setAttendancePhotoPreview(null)}
+                      >
+                        Retake
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleMarkAttendance}
+                        disabled={attendanceSubmitting}
+                        className="mobile-btn-large success"
+                        style={{ flex: 1.5 }}
+                      >
+                        {attendanceSubmitting ? "Submitting..." : "Submit Present"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {locationCheckStatus === "granted" && verificationStatus === "failed" && (
               <div style={{
                 backgroundColor: "#ffffff",
                 borderRadius: "var(--radius-md)",
                 border: "1px solid var(--border-color)",
-                padding: "16px",
+                padding: "24px 16px",
                 boxShadow: "var(--shadow-sm)",
+                textAlign: "center",
                 display: "flex",
                 flexDirection: "column",
-                gap: "14px"
+                alignItems: "center",
+                gap: "16px"
               }}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <span style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "var(--text-muted)" }}>GPS Result</span>
-                  {attendancePhotoUploading ? (
-                    <Badge status="pending">Processing EXIF...</Badge>
-                  ) : (
-                    <Badge status={verificationStatus === "success" ? "success" : "danger"}>
-                      {verificationStatus === "success" ? "Location Verified" : "Verification Failed"}
-                    </Badge>
-                  )}
+                <div style={{
+                  width: "56px",
+                  height: "56px",
+                  borderRadius: "50%",
+                  backgroundColor: "var(--danger-50)",
+                  color: "var(--danger-600)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}>
+                  <AlertCircle size={32} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--danger-600)" }}>Location mismatch</h4>
+                  <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+                    Your detected coordinates do not match the assigned worksite location boundary.
+                  </p>
                 </div>
 
-                {attendancePhotoPreview && (
-                  <div style={{ width: "100%", height: "180px", borderRadius: "var(--radius-sm)", overflow: "hidden", border: "1px solid var(--border-color)", position: "relative" }}>
-                    <img src={attendancePhotoPreview} alt="Captured Check-in" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button
-                      type="button"
-                      onClick={handleResetVerification}
-                      style={{
-                        position: "absolute",
-                        top: "8px",
-                        right: "8px",
-                        backgroundColor: "rgba(0,0,0,0.6)",
-                        color: "#ffffff",
-                        border: "none",
-                        borderRadius: "50%",
-                        width: "28px",
-                        height: "28px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer"
-                      }}
-                    >
-                      <X size={16} />
-                    </button>
-                  </div>
-                )}
+                <div style={{
+                  width: "100%",
+                  backgroundColor: "var(--danger-50)",
+                  borderRadius: "8px",
+                  border: "1px solid var(--danger-100)",
+                  padding: "14px 12px",
+                  textAlign: "left",
+                  fontSize: "12px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "8px",
+                  color: "var(--danger-700)",
+                  lineHeight: "1.4"
+                }}>
+                  <div><strong>Assigned Site:</strong> {verificationDetails?.expectedSiteName || "N/A"}</div>
+                  <div><strong>Current Location:</strong> {verificationDetails?.capturedAddress || "N/A"}</div>
+                  <div><strong>Distance difference:</strong> {verificationDetails?.distance} meters away (Allowed: {verificationDetails?.allowedRadius || 100}m)</div>
+                </div>
 
-                {verificationDetails && (
-                  <div style={{
-                    backgroundColor: verificationStatus === "success" ? "var(--success-50)" : "var(--danger-50)",
-                    borderRadius: "8px",
-                    border: `1.5px solid ${verificationStatus === "success" ? "var(--success-100)" : "var(--danger-100)"}`,
-                    padding: "12px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "8px",
-                    fontSize: "12px",
-                    color: verificationStatus === "success" ? "var(--success-800)" : "var(--danger-700)"
-                  }}>
-                    {verificationStatus === "success" ? (
-                      <>
-                        <div style={{ fontWeight: "700" }}>✓ Site Verified: {verificationDetails.expectedSiteName}</div>
-                        <div><strong>Location:</strong> {verificationDetails.capturedAddress}</div>
-                        <div><strong>Distance offset:</strong> {verificationDetails.distance} meters</div>
-                      </>
-                    ) : (
-                      <>
-                        <div style={{ fontWeight: "700" }}>✗ {verificationDetails.message}</div>
-                        {verificationDetails.isNoGps && (
-                          <div>The captured photo does not contain geocoded GPS tags. Please capture photo using the device camera with location enabled.</div>
-                        )}
-                        {verificationDetails.isOld && (
-                          <div>Old photo timestamp detected. You must take a fresh photo inside the browser camera session.</div>
-                        )}
-                        {verificationDetails.distance !== undefined && (
-                          <>
-                            <div>Expected: {verificationDetails.expectedSiteName} ({verificationDetails.expectedAddress})</div>
-                            <div>Captured: {verificationDetails.capturedAddress}</div>
-                            <div>Offset: {verificationDetails.distance} meters (Allowed Radius: {currentSite?.radius || 100}m)</div>
-                          </>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleResetVerification}
-                          style={{
-                            marginTop: "6px",
-                            padding: "6px 12px",
-                            backgroundColor: "var(--danger-600)",
-                            color: "#ffffff",
-                            border: "none",
-                            borderRadius: "4px",
-                            fontWeight: "700",
-                            cursor: "pointer",
-                            alignSelf: "flex-start"
-                          }}
-                        >
-                          Try Again
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                {verificationStatus === "success" && (
+                <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
                   <button
                     type="button"
-                    onClick={handleMarkAttendance}
-                    disabled={attendanceSubmitting}
-                    className="mobile-btn-large success"
+                    onClick={handleResetVerification}
+                    className="mobile-btn-large"
+                    style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
                   >
-                    <Save size={18} />
-                    <span>Submit Present Check-In</span>
+                    Cancel
                   </button>
-                )}
+                  <button
+                    type="button"
+                    onClick={handleEnableLocation}
+                    className="mobile-btn-large"
+                    style={{ backgroundColor: "var(--danger-600)", color: "#ffffff", flex: 1.5 }}
+                  >
+                    Try Again
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -1688,7 +1885,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     value={currentVal}
                     onChange={(e) => {
                       const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      setCountsMap(prev => ({ ...prev, [cat]: val }));
+                      if (cat === "Other" && val > 0) {
+                        handleOtherLabourInteract(val);
+                      } else {
+                        setCountsMap(prev => ({ ...prev, [cat]: val }));
+                      }
                     }}
                     className="counter-value"
                     style={{
@@ -1707,7 +1908,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   <button
                     type="button"
                     className="counter-btn"
-                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }))}
+                    onClick={() => {
+                      if (cat === "Other") {
+                        handleOtherLabourInteract(currentVal + 1);
+                      } else {
+                        setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }));
+                      }
+                    }}
                   >
                     <Plus size={14} />
                   </button>
@@ -1810,11 +2017,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                     <span className="font-mono" style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "13px" }}>{row.date}</span>
-                    <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
+                      {row.engineerId === currentEngineerId && (
+                        <button 
+                          type="button" 
+                          onClick={() => handleDeleteLabourLog(row.date)}
+                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                          title="Delete Labour Log"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
                     {Object.entries(row).map(([k, v]) => {
-                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt"].includes(k)) return null;
+                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt", "engineerId"].includes(k)) return null;
                       return <span key={k}>{k}: {v}</span>;
                     }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
                   </div>
@@ -1902,9 +2121,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
                       <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
                     </div>
-                    <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
-                      {m.quantity} {m.unit}s
-                    </span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
+                        {m.quantity} {m.unit}s
+                      </span>
+                      {m.engineerId === currentEngineerId && (
+                        <button 
+                          type="button" 
+                          onClick={() => handleDeleteMaterial(m.id)}
+                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                          title="Delete Material Log"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
                   </div>
                   
                   <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
@@ -2018,6 +2249,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             <div>
               <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
             </div>
+
+            {materialCategory === "Other" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Specify Material Category <span style={{ color: "var(--danger-500)" }}>*</span></span>
+                <input
+                  type="text"
+                  placeholder="E.g. Glass, Wood, Tiles"
+                  value={customMaterialCategory}
+                  onChange={(e) => setCustomMaterialCategory(e.target.value)}
+                  required
+                  style={{
+                    height: "42px",
+                    padding: "10px 12px",
+                    border: "1.5px solid var(--accent-500)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "14px",
+                    outline: "none",
+                    backgroundColor: "#ffffff"
+                  }}
+                />
+              </div>
+            )}
 
             <div style={{ position: "relative" }} ref={comboboxRef}>
               <span className="mobile-form-label">Material Name</span>
@@ -2472,10 +2725,36 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             ) : (
               <div className="mobile-photo-grid">
                 {sitePhotos.filter(p => p.siteId === activeSiteId).map(photo => (
-                  <div key={photo.id} className="mobile-photo-card">
+                  <div key={photo.id} className="mobile-photo-card" style={{ position: "relative" }}>
                     <a href={photo.imageUrl} target="_blank" rel="noopener noreferrer">
                       <img src={photo.imageUrl} alt="Progress inspection" className="mobile-photo-img" />
                     </a>
+                    {photo.engineerId === currentEngineerId && (
+                      <button 
+                        type="button" 
+                        onClick={() => handleDeleteSitePhoto(photo.id)}
+                        style={{
+                          position: "absolute",
+                          top: "8px",
+                          right: "8px",
+                          border: "none",
+                          backgroundColor: "rgba(255, 255, 255, 0.8)",
+                          color: "var(--danger-600)",
+                          borderRadius: "50%",
+                          width: "28px",
+                          height: "28px",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
+                          zIndex: 2
+                        }}
+                        title="Delete Photo"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
                     <div className="mobile-photo-info">
                       <span className="mobile-photo-time">
                         {photo.capturedAt?.seconds 
@@ -2622,7 +2901,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             ? new Date(row.createdAt.seconds * 1000).toLocaleDateString()
                             : new Date(row.createdAt).toLocaleDateString()}
                         </span>
-                        <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.progress}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.progress}</span>
+                          {row.engineerId === currentEngineerId && (
+                            <button 
+                              type="button" 
+                              onClick={() => handleDeleteProgressLog(row.id)}
+                              style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                              title="Delete Progress Log"
+                            >
+                              <Trash2 size={16} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                       
                       <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--primary-950)" }}>
@@ -2718,16 +3009,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
                 <div>
                   <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Reason</label>
-                  <select 
+                  <SelectWithOthers
+                    options={[
+                      { value: "Personal Leave", label: "Personal" },
+                      { value: "Sick Leave", label: "Sick Leave" },
+                      { value: "Vacation", label: "Vacation" }
+                    ]}
                     value={leaveReason}
-                    onChange={(e) => setLeaveReason(e.target.value)}
-                    style={{ padding: "6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff" }}
-                  >
-                    <option value="Personal Leave">Personal</option>
-                    <option value="Sick Leave">Sick Leave</option>
-                    <option value="Vacation">Vacation</option>
-                    <option value="Other">Other</option>
-                  </select>
+                    onChange={setLeaveReason}
+                    othersValue="Other"
+                    placeholder="E.g. Family Function Leave..."
+                    label="Specify Leave Type"
+                    required={true}
+                    selectStyle={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff", height: "30px" }}
+                    inputStyle={{ padding: "6px", fontSize: "12px", borderRadius: "4px", border: "1.5px solid var(--accent-500)" }}
+                  />
                 </div>
               </div>
               <button type="submit" disabled={leaveSubmitting} className="mobile-btn-large" style={{ padding: "10px", fontSize: "12px" }}>
@@ -2777,6 +3073,226 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       )}
 
       <div className="mobile-app-frame">
+        {/* Specify Labour Category Modal */}
+        {showLabourSpecifyModal && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            zIndex: 1100,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px"
+          }}>
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "var(--radius-md)",
+              padding: "20px",
+              width: "100%",
+              maxWidth: "320px",
+              boxShadow: "var(--shadow-lg)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px"
+            }}>
+              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Specify Labour Category</h4>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                Please enter the trade or type for this worker headcount (e.g. Welder, Carpenter).
+              </p>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
+                <input
+                  type="text"
+                  placeholder="E.g. Welder, Carpenter"
+                  value={labourSpecifyText}
+                  onChange={(e) => setLabourSpecifyText(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    padding: "10px 12px",
+                    border: "1.5px solid var(--accent-500)",
+                    borderRadius: "var(--radius-sm)",
+                    fontSize: "14px",
+                    outline: "none",
+                    backgroundColor: "#ffffff"
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  className="mobile-btn-large"
+                  style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, padding: "10px", fontSize: "12px", boxShadow: "none" }}
+                  onClick={() => setShowLabourSpecifyModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="mobile-btn-large success"
+                  style={{ flex: 1.5, padding: "10px", fontSize: "12px" }}
+                  onClick={() => {
+                    const cleanName = labourSpecifyText.trim();
+                    if (!cleanName) {
+                      showToast("Please specify the labour type.", "error");
+                      return;
+                    }
+                    const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+                    
+                    // Update categories
+                    setCategories(prev => {
+                      const updated = prev.includes(formattedName) ? prev : [...prev, formattedName];
+                      // Save to local storage for persistence
+                      localStorage.setItem("labour_categories", JSON.stringify(updated));
+                      return updated;
+                    });
+
+                    // Update countsMap
+                    setCountsMap(prev => ({
+                      ...prev,
+                      [formattedName]: (prev[formattedName] || 0) + pendingLabourCount,
+                      Other: 0
+                    }));
+
+                    setShowLabourSpecifyModal(false);
+                    showToast(`Added custom labour category: ${formattedName} with count ${pendingLabourCount}`, "success");
+                  }}
+                >
+                  Save Trade
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Full Viewport WebRTC Camera Overlay */}
+        {cameraActive && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "#000000",
+            zIndex: 1000,
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "space-between",
+            padding: "20px"
+          }}>
+            {/* Camera Header */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", color: "#ffffff" }}>
+              <span style={{ fontSize: "14px", fontWeight: "700" }}>
+                {cameraFacingMode === "user" ? "Front Camera (Selfie)" : "Back Camera (Site)"}
+              </span>
+              <button 
+                type="button" 
+                onClick={stopWebRTCCamera}
+                style={{ background: "none", border: "none", color: "#ffffff", padding: "8px", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            {/* Video Preview */}
+            <div style={{
+              flex: 1,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
+              borderRadius: "12px",
+              backgroundColor: "#111827",
+              margin: "20px 0",
+              position: "relative"
+            }}>
+              {cameraError ? (
+                <div style={{ color: "var(--danger-400)", padding: "20px", textAlign: "center" }}>
+                  <AlertTriangle size={36} style={{ margin: "0 auto 12px" }} />
+                  <p style={{ margin: 0, fontSize: "13px" }}>{cameraError}</p>
+                </div>
+              ) : (
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  style={{
+                    width: "100%",
+                    height: "100%",
+                    objectFit: "cover",
+                    transform: cameraFacingMode === "user" ? "scaleX(-1)" : "none"
+                  }}
+                />
+              )}
+            </div>
+
+            {/* Controls */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-around",
+              alignItems: "center",
+              paddingBottom: "10px"
+            }}>
+              {/* Toggle camera facing mode */}
+              <button
+                type="button"
+                onClick={toggleCameraFacingMode}
+                disabled={!!cameraError}
+                style={{
+                  background: "rgba(255,255,255,0.2)",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "48px",
+                  height: "48px",
+                  color: "#ffffff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer"
+                }}
+              >
+                <Sliders size={20} />
+              </button>
+
+              {/* Capture trigger */}
+              <button
+                type="button"
+                onClick={capturePhotoFromStream}
+                disabled={!!cameraError}
+                style={{
+                  background: "#ffffff",
+                  border: "none",
+                  borderRadius: "50%",
+                  width: "72px",
+                  height: "72px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  boxShadow: "0 0 15px rgba(255,255,255,0.4)"
+                }}
+              >
+                <div style={{
+                  width: "58px",
+                  height: "58px",
+                  borderRadius: "50%",
+                  border: "2px solid #000000",
+                  backgroundColor: "#ffffff"
+                }} />
+              </button>
+
+              {/* Spacer */}
+              <div style={{ width: "48px" }} />
+            </div>
+          </div>
+        )}
         {/* Top Header */}
         <header className="mobile-app-header">
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>

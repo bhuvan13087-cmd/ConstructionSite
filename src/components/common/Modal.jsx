@@ -8,6 +8,7 @@ export const Modal = ({
   children,
   footer,
   maxWidth = '600px',
+  closeOnOverlayClick = true,
   ...props
 }) => {
   // Prevent background body scrolling when modal is open
@@ -25,7 +26,7 @@ export const Modal = ({
   if (!isOpen) return null;
 
   const handleOverlayClick = (e) => {
-    if (e.target.classList.contains('modal-overlay')) {
+    if (closeOnOverlayClick && e.target.classList.contains('modal-overlay')) {
       onClose();
     }
   };

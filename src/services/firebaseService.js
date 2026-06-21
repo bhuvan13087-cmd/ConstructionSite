@@ -12,7 +12,8 @@ import {
   arrayUnion,
   arrayRemove
 } from "firebase/firestore";
-import { getFirebaseDb } from "../firebase/config";
+import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
+import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
 
 // Lazy getter for the Firestore database instance
 function getDb() {
@@ -815,7 +816,7 @@ export async function getLabourDailyCountsHistory(siteId) {
     const data = d.data();
     const date = data.date;
     if (!historyMap[date]) {
-      historyMap[date] = { date, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0 };
+      historyMap[date] = { date, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0, engineerId: data.engineerId || "" };
     }
     const categoryKey = data.category === "Mason" ? "Masons" :
                         data.category === "Helper" ? "Helpers" :
@@ -963,6 +964,93 @@ export async function deleteEngineerLeave(leaveId) {
   const leaveDocRef = doc(db, "leaves", leaveId);
   const batch = writeBatch(db);
   batch.delete(leaveDocRef);
+  await batch.commit();
+}
+
+// Delete Site Engineer completely from database (Admin command)
+export async function deleteSiteEngineer(engineerId, email = null, password = null) {
+  const db = getDb();
+  const batch = writeBatch(db);
+
+  // 1. Delete engineer profile document
+  const userDocRef = doc(db, "users", engineerId);
+  batch.delete(userDocRef);
+
+  // 2. Query and delete all site assignments for this engineer
+  const assignmentsColl = collection(db, "siteAssignments");
+  const qAssignments = query(assignmentsColl, where("engineerId", "==", engineerId));
+  const assignmentsSnap = await getDocs(qAssignments);
+  assignmentsSnap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
+  // 3. Update sites to remove this engineer from assignedEngineers array
+  const sitesColl = collection(db, "sites");
+  const qSites = query(sitesColl, where("assignedEngineers", "array-contains", engineerId));
+  const sitesSnap = await getDocs(qSites);
+  sitesSnap.forEach(docSnap => {
+    batch.update(docSnap.ref, {
+      assignedEngineers: arrayRemove(engineerId)
+    });
+  });
+
+  // Commit firestore operations
+  await batch.commit();
+
+  // 4. Try to delete the secondary auth user if credentials are provided
+  if (email && password) {
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+      await deleteUser(userCredential.user);
+      await signOut(secondaryAuth);
+    } catch (authErr) {
+      console.warn("Secondary auth user deletion failed (may already be deleted or password changed):", authErr);
+    }
+  }
+}
+
+// Delete a material receipt log
+export async function deleteMaterial(materialId) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  const batch = writeBatch(db);
+  batch.delete(docRef);
+  await batch.commit();
+}
+
+// Delete daily labour counts for a site and date
+export async function deleteLabourDailyCounts(siteId, dateStr) {
+  const db = getDb();
+  const countsColl = collection(db, "labourDailyCount");
+  const q = query(
+    countsColl,
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+  await batch.commit();
+}
+
+// Delete daily progress report
+export async function deleteDailyProgressReport(reportId) {
+  const db = getDb();
+  const docRef = doc(db, "dailyUpdates", reportId);
+  const batch = writeBatch(db);
+  batch.delete(docRef);
+  await batch.commit();
+}
+
+// Delete site inspection photo
+export async function deleteSitePhoto(photoId) {
+  const db = getDb();
+  const docRef = doc(db, "sitePhotos", photoId);
+  const batch = writeBatch(db);
+  batch.delete(docRef);
   await batch.commit();
 }
 

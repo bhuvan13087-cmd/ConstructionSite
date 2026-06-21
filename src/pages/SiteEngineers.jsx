@@ -7,7 +7,8 @@ import {
   getSites,
   getEngineerAttendanceAndLeaveStats,
   getEngineerLeaves,
-  updateEngineerPasswordInDb
+  updateEngineerPasswordInDb,
+  deleteSiteEngineer
 } from "../services/firebaseService";
 import { 
   registerEngineerAuth, 
@@ -32,7 +33,8 @@ import {
   LockKeyhole,
   KeyRound,
   ShieldCheck,
-  Phone 
+  Phone,
+  Trash2
 } from "lucide-react";
 
 
@@ -125,6 +127,23 @@ export default function SiteEngineers() {
       showToast(`Failed to update status: ${err.message}`, "error");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // Delete Site Engineer completely from Database
+  const handleDeleteEngineer = async (eng) => {
+    if (window.confirm("Delete this entry?")) {
+      setLoading(true);
+      try {
+        await deleteSiteEngineer(eng.id, eng.email, eng.password);
+        showToast("Deleted successfully", "success");
+        await loadData();
+      } catch (err) {
+        console.error("Error deleting engineer:", err);
+        showToast(`Failed to delete: ${err.message}`, "error");
+      } finally {
+        setLoading(false);
+      }
     }
   };
 
@@ -417,6 +436,9 @@ export default function SiteEngineers() {
                         </button>
                         <button onClick={() => handleOpenSecurityModal(eng)} className="btn-icon btn-security-action" title="Verify & Manage Password">
                           <LockKeyhole size={16} />
+                        </button>
+                        <button onClick={() => handleDeleteEngineer(eng)} className="btn-icon btn-delete-action" title="Delete Engineer" style={{ color: "var(--danger-500)" }}>
+                          <Trash2 size={16} />
                         </button>
                         <label className="switch-control" title={eng.status === 'active' ? 'Deactivate' : 'Activate'}>
                           <input 
