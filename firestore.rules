@@ -61,8 +61,12 @@ service cloud.firestore {
       // Allow read access to construction sites only for active users (admins or engineers)
       allow read: if isActiveUser();
       
-      // Allow write/modify access to construction sites only for active admins
-      allow write: if isAdmin();
+      // Allow write/modify access to construction sites for active admins, and updates for assigned engineers
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        isActiveUser() && 
+        siteId in getUserData().assignedSites
+      );
     }
 
     match /dailyUpdates/{updateId} {
@@ -142,6 +146,15 @@ service cloud.firestore {
         request.resource.data.engineerId == request.auth.uid &&
         request.resource.data.siteId in getUserData().assignedSites
       );
+    }
+
+    match /leaves/{leaveId} {
+      allow read, write: if isActiveUser();
+    }
+
+    match /engineerLocations/{locationId} {
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && request.resource.data.engineerId == request.auth.uid;
     }
     
   }

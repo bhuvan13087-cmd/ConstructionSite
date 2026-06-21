@@ -136,7 +136,7 @@ export default function SiteEngineers() {
       setLoading(true);
       try {
         await deleteSiteEngineer(eng.id, eng.email, eng.password);
-        showToast("User removed successfully", "success");
+        showToast("User deleted successfully", "success");
         await loadData();
       } catch (err) {
         console.error("Error deleting engineer:", err);

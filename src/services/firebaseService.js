@@ -14,6 +14,7 @@ import {
 } from "firebase/firestore";
 import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
+import { getFunctions, httpsCallable } from "firebase/functions";
 
 // Lazy getter for the Firestore database instance
 function getDb() {
@@ -308,14 +309,24 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 }
 
 // Get the engineer's attendance record for a specific date
-export async function getTodayAttendance(engineerId, dateStr) {
+export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  const q = query(
-    attendanceColl,
-    where("engineerId", "==", engineerId),
-    where("date", "==", dateStr)
-  );
+  let q;
+  if (siteId) {
+    q = query(
+      attendanceColl,
+      where("engineerId", "==", engineerId),
+      where("date", "==", dateStr),
+      where("siteId", "==", siteId)
+    );
+  } else {
+    q = query(
+      attendanceColl,
+      where("engineerId", "==", engineerId),
+      where("date", "==", dateStr)
+    );
+  }
   const snap = await getDocs(q);
   if (snap.empty) return null;
   
@@ -991,18 +1002,45 @@ export async function deleteEngineerLeave(leaveId) {
 export async function deleteSiteEngineer(engineerId, email = null, password = null) {
   const db = getDb();
 
-  // 1. Try to delete the secondary auth user first to maintain consistency
-  if (email && password) {
+  // 1. Try to delete the user authentication account securely
+  let authDeleted = false;
+
+  // Try calling the secure backend/admin Cloud Function first
+  try {
+    const functions = getFunctions();
+    const deleteUserAuth = httpsCallable(functions, "deleteUserAuth");
+    await deleteUserAuth({ uid: engineerId });
+    authDeleted = true;
+  } catch (funcErr) {
+    console.warn("Backend/admin delete operation failed, trying local emulator admin API:", funcErr);
+
+    // Try calling local Firebase Auth Emulator admin REST API if active
     try {
-      const secondaryAuth = getSecondaryAuth();
-      const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
-      await deleteUser(userCredential.user);
-      await signOut(secondaryAuth);
-    } catch (authErr) {
-      console.warn("Secondary auth user deletion failed/ignored:", authErr);
-      // If user does not exist in Auth, we can safely proceed. Otherwise throw error.
-      if (authErr.code !== "auth/user-not-found" && authErr.code !== "auth/invalid-credential" && authErr.code !== "auth/wrong-password") {
-        throw new Error(`Failed to delete security account: ${authErr.message}`);
+      const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/studio-7044154747-fb0fa/users/${engineerId}`, {
+        method: "DELETE"
+      });
+      if (response.ok) {
+        authDeleted = true;
+      } else {
+        throw new Error("Emulator delete returned non-ok status");
+      }
+    } catch (emuErr) {
+      console.warn("Emulator API delete failed, trying secondary client auth delete:", emuErr);
+
+      // Fallback: Delete client-side by signing in as them on the secondary app instance
+      if (email && password) {
+        try {
+          const secondaryAuth = getSecondaryAuth();
+          const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+          await deleteUser(userCredential.user);
+          await signOut(secondaryAuth);
+          authDeleted = true;
+        } catch (authErr) {
+          console.warn("Secondary auth user deletion failed:", authErr);
+          if (authErr.code !== "auth/user-not-found" && authErr.code !== "auth/invalid-credential" && authErr.code !== "auth/wrong-password") {
+            throw new Error(`Failed to delete security account: ${authErr.message}`);
+          }
+        }
       }
     }
   }
@@ -1047,8 +1085,51 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
     batch.delete(docSnap.ref);
   });
 
+  // 7. Delete engineer's site photos
+  const sitePhotosColl = collection(db, "sitePhotos");
+  const qPhotos = query(sitePhotosColl, where("engineerId", "==", engineerId));
+  const photosSnap = await getDocs(qPhotos);
+  photosSnap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
+  // 8. Delete engineer's custom site location records
+  const engineerLocationsColl = collection(db, "engineerLocations");
+  const qLocations = query(engineerLocationsColl, where("engineerId", "==", engineerId));
+  const locationsSnap = await getDocs(qLocations);
+  locationsSnap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
   // Commit firestore operations
   await batch.commit();
+}
+
+// Fetch saved site location for an engineer
+export async function getSavedLocationForEngineer(engineerId, siteId) {
+  const db = getDb();
+  const docRef = doc(db, "engineerLocations", `${engineerId}_${siteId}`);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    return docSnap.data();
+  }
+  return null;
+}
+
+// Save site location for an engineer
+export async function saveSavedLocationForEngineer(engineerId, siteId, latitude, longitude, address, accuracy) {
+  const db = getDb();
+  const docRef = doc(db, "engineerLocations", `${engineerId}_${siteId}`);
+  await setDoc(docRef, {
+    engineerId,
+    siteId,
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    address: address || "",
+    accuracy: Number(accuracy) || 0,
+    timestamp: new Date().toISOString(),
+    createdAt: serverTimestamp()
+  });
 }
 
 // Delete a material receipt log

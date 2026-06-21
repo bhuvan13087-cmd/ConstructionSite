@@ -22,7 +22,9 @@ import {
   deleteMaterial,
   deleteLabourDailyCounts,
   deleteDailyProgressReport,
-  deleteSitePhoto
+  deleteSitePhoto,
+  getSavedLocationForEngineer,
+  saveSavedLocationForEngineer
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -210,6 +212,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [dailyUpdates, setDailyUpdates] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [activeSiteId, setActiveSiteId] = useState("");
+  const [savedSiteLocation, setSavedSiteLocation] = useState(null);
+  const [showEngineerLocationSetupModal, setShowEngineerLocationSetupModal] = useState(false);
+  const [engineerLocationSubmitting, setEngineerLocationSubmitting] = useState(false);
+  const [engineerLocationError, setEngineerLocationError] = useState("");
 
   // Personal stats & leaves states
   const [personalStats, setPersonalStats] = useState(null);
@@ -338,12 +344,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
 
       if (filteredSites.length > 0) {
-        // Fallback or default active site
-        const defaultSiteId = activeSiteId || filteredSites[0].id;
-        setActiveSiteId(defaultSiteId);
-        
+        let currentActiveId = activeSiteId;
+        if (filteredSites.length === 1) {
+          currentActiveId = filteredSites[0].id;
+          setActiveSiteId(currentActiveId);
+        } else if (!activeSiteId) {
+          // If multiple sites and none selected yet, leave activeSiteId empty
+          setActiveSiteId("");
+          setTodayAttendance(null);
+          setSitePhotos([]);
+          setDailyUpdates([]);
+          setMaterials([]);
+          setLoading(false);
+          return;
+        }
+
         // Fetch today's check-in attendance
-        const attendance = await getTodayAttendance(engineerId, todayStr);
+        const attendance = await getTodayAttendance(engineerId, todayStr, currentActiveId);
         setTodayAttendance(attendance);
         
         // Fetch site photos
@@ -370,10 +387,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Sync data on component mount and profile changes
+  // Sync data on component mount, profile changes, and active site switches
   useEffect(() => {
     loadDashboardData();
-  }, [userProfile]);
+  }, [userProfile, activeSiteId]);
+
+  // Load saved location for active site
+  useEffect(() => {
+    if (assignedSites && assignedSites.length > 0) {
+      const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
+      if (site && site.latitude !== undefined && site.latitude !== null && site.longitude !== undefined && site.longitude !== null) {
+        setSavedSiteLocation({
+          latitude: site.latitude,
+          longitude: site.longitude,
+          address: site.location,
+          accuracy: site.locationAccuracy || 0
+        });
+      } else {
+        setSavedSiteLocation(null);
+      }
+    } else {
+      setSavedSiteLocation(null);
+    }
+  }, [assignedSites, activeSiteId]);
 
   // Close combobox suggestions when clicking outside
   useEffect(() => {
@@ -482,6 +518,90 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     });
   };
 
+  const handleSetSiteLocationClick = async () => {
+    setEngineerLocationError("");
+    setEngineerLocationSubmitting(true);
+    
+    try {
+      if (mockLocation) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        if (mockCase === "nopermission" || mockCase === "gps_off") {
+          setEngineerLocationError("Please enable location access");
+          setEngineerLocationSubmitting(false);
+          return;
+        }
+
+        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
+        const lat = Number(site.latitude || 28.5355);
+        const lng = Number(site.longitude || 77.3910);
+        
+        const capturedAddress = await getReverseGeocode(lat, lng, site);
+        
+        await updateSiteLocation(
+          activeSiteId,
+          lat,
+          lng,
+          capturedAddress,
+          5
+        );
+        
+        await loadDashboardData();
+        showToast("Site Location Successfully Set", "success");
+        setShowEngineerLocationSetupModal(false);
+        setEngineerLocationSubmitting(false);
+        return;
+      }
+
+      if (!navigator.geolocation) {
+        setEngineerLocationError("Please enable location access");
+        setEngineerLocationSubmitting(false);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+          const accuracy = position.coords.accuracy || 10;
+          
+          try {
+            const site = assignedSites.find(s => s.id === activeSiteId);
+            const capturedAddress = await getReverseGeocode(lat, lng, site);
+            
+            await updateSiteLocation(
+              activeSiteId,
+              lat,
+              lng,
+              capturedAddress,
+              accuracy
+            );
+            
+            await loadDashboardData();
+            showToast("Site Location Successfully Set", "success");
+            setShowEngineerLocationSetupModal(false);
+          } catch (err) {
+            console.error("Save location error:", err);
+            showToast("Failed to save location: " + err.message, "error");
+          } finally {
+            setEngineerLocationSubmitting(false);
+          }
+        },
+        (error) => {
+          console.error("Geolocation capture error:", error);
+          setEngineerLocationError("Please enable location access");
+          setEngineerLocationSubmitting(false);
+        },
+        { enableHighAccuracy: true, timeout: 8000 }
+      );
+
+    } catch (err) {
+      console.error(err);
+      setEngineerLocationError("Please enable location access");
+      setEngineerLocationSubmitting(false);
+    }
+  };
+
   const handlePreCaptureCheck = async () => {
     setLocationError("");
     setLocationCheckStatus("checking");
@@ -491,27 +611,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         // Simulate real GPS sensor retrieval time
         await new Promise(resolve => setTimeout(resolve, 1500));
 
-        if (mockCase === "nopermission") {
-          throw { code: 1, message: "Location permission denied." };
-        } else if (mockCase === "gps_off") {
-          throw { code: 2, message: "Unable to detect current location. Please enable GPS and try again." };
+        if (mockCase === "nopermission" || mockCase === "gps_off") {
+          throw { code: 1, message: "Please enable location access" };
         }
         
         const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
         
-        if (!site || site.latitude === undefined || site.latitude === null || site.latitude === "" ||
-            site.longitude === undefined || site.longitude === null || site.locationStatus === "Not Set") {
+        if (!savedSiteLocation) {
           setDeviceCoords(null);
           verifySiteLocation(null, site);
           return;
         }
 
-        const siteLat = Number(site.latitude);
-        const siteLng = Number(site.longitude);
+        const savedLat = Number(savedSiteLocation.latitude);
+        const savedLng = Number(savedSiteLocation.longitude);
         
         const coords = mockCase === "different" 
-          ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05, accuracy: 15 } 
-          : { latitude: siteLat + 0.0001, longitude: siteLng + 0.0001, accuracy: 5 };
+          ? { latitude: savedLat + 0.05, longitude: savedLng + 0.05, accuracy: 15 } 
+          : { latitude: savedLat + 0.0001, longitude: savedLng + 0.0001, accuracy: 5 };
           
         setDeviceCoords(coords);
         verifySiteLocation(coords, site);
@@ -522,7 +639,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         try {
           const permission = await navigator.permissions.query({ name: 'geolocation' });
           if (permission.state === 'denied') {
-            throw { code: 1, message: "Location permission denied." };
+            throw { code: 1, message: "Please enable location access" };
           }
         } catch (e) {
           console.warn("navigator.permissions.query for geolocation not supported:", e);
@@ -538,11 +655,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     } catch (err) {
       console.warn("Location check failed:", err);
       setLocationCheckStatus("warning");
-      if (err.code === 1) {
-        setLocationError("Location permission denied. Please allow location access in your browser settings.");
-      } else {
-        setLocationError(err.message || "Location access is required to verify your site attendance.");
-      }
+      setLocationError("Please enable location access");
     }
   };
 
@@ -561,13 +674,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    // 1. Check if assigned site has saved coordinates
-    if (site.latitude === undefined || site.latitude === null || site.latitude === "" ||
-        site.longitude === undefined || site.longitude === null || site.longitude === "" ||
-        site.locationStatus === "Not Set") {
+    // 1. Check if site assignment has saved location
+    if (!savedSiteLocation) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "Site location is not configured. Contact admin.",
+        message: "Please set site location first.",
         isLocationConfigError: true
       });
       setLocationCheckStatus("granted");
@@ -579,18 +690,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         coords.longitude === undefined || coords.longitude === null) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "Unable to detect current location. Please enable GPS and try again.",
+        message: "Please enable location access",
         isLocationConfigError: false
       });
-      setLocationCheckStatus("granted");
+      setLocationError("Please enable location access");
+      setLocationCheckStatus("warning");
       return;
     }
 
-    const siteLat = Number(site.latitude);
-    const siteLng = Number(site.longitude);
+    const savedLat = Number(savedSiteLocation.latitude);
+    const savedLng = Number(savedSiteLocation.longitude);
     const siteRadius = Number(site.radius || 100);
 
-    const distance = calculateDistanceMeters(siteLat, siteLng, coords.latitude, coords.longitude);
+    const distance = calculateDistanceMeters(savedLat, savedLng, coords.latitude, coords.longitude);
     
     getReverseGeocode(coords.latitude, coords.longitude, site).then(capturedAddress => {
       const isWithinRadius = distance <= siteRadius;
@@ -600,16 +712,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setVerificationDetails({
           message: "Site Verified Successfully",
           expectedSiteName: site.siteName,
-          expectedAddress: site.location,
+          expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: capturedAddress,
           distance: Math.round(distance)
         });
       } else {
         setVerificationStatus("failed");
         setVerificationDetails({
-          message: "Location mismatch",
+          message: "You are not at the assigned site location",
           expectedSiteName: site.siteName,
-          expectedAddress: site.location,
+          expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: capturedAddress,
           distance: Math.round(distance),
           allowedRadius: siteRadius
@@ -624,16 +736,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setVerificationDetails({
           message: "Site Verified Successfully",
           expectedSiteName: site.siteName,
-          expectedAddress: site.location,
+          expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
           distance: Math.round(distance)
         });
       } else {
         setVerificationStatus("failed");
         setVerificationDetails({
-          message: "Location mismatch",
+          message: "You are not at the assigned site location",
           expectedSiteName: site.siteName,
-          expectedAddress: site.location,
+          expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
           distance: Math.round(distance),
           allowedRadius: siteRadius
@@ -746,8 +858,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setAttendanceSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
-      const lat = deviceCoords ? deviceCoords.latitude : Number(site.latitude || 28.5355);
-      const lng = deviceCoords ? deviceCoords.longitude : Number(site.longitude || 77.3910);
+      if (!deviceCoords || deviceCoords.latitude === undefined || deviceCoords.latitude === null) {
+        showToast("Please enable location access", "error");
+        setAttendanceSubmitting(false);
+        return;
+      }
+      const lat = deviceCoords.latitude;
+      const lng = deviceCoords.longitude;
       const photoGpsLocation = { latitude: lat, longitude: lng };
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
@@ -1262,6 +1379,85 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     );
   }
 
+  // Select Site Screen if multiple sites and none selected yet
+  if (!activeSiteId && assignedSites.length > 1 && !loading) {
+    return (
+      <div className="mobile-app-container">
+        {toast.show && (
+          <div id="toast-container" className="toast-container">
+            <div className={`toast toast-${toast.type}`}>
+              <span className="toast-message">{toast.message}</span>
+            </div>
+          </div>
+        )}
+        <div className="mobile-app-frame">
+          <header className="mobile-app-header" style={{ justifyContent: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <HardHat size={22} style={{ color: "var(--accent-600)" }} />
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Apex Build</h3>
+            </div>
+          </header>
+          <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "20px", padding: "24px 16px" }}>
+            <div style={{ textAlign: "center", marginTop: "10px" }}>
+              <h4 style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", margin: "0 0 6px 0" }}>My Assigned Sites</h4>
+              <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0 }}>Select a construction worksite to open your dashboard.</p>
+            </div>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "auto", flex: 1, paddingBottom: "20px" }}>
+              {assignedSites.map(site => (
+                <div 
+                  key={site.id} 
+                  onClick={() => setActiveSiteId(site.id)}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    borderRadius: "var(--radius-md)",
+                    border: "1px solid var(--border-color)",
+                    padding: "16px",
+                    boxShadow: "var(--shadow-sm)",
+                    cursor: "pointer",
+                    transition: "all 0.2s ease",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = "var(--accent-500)";
+                    e.currentTarget.style.boxShadow = "var(--shadow-md)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = "var(--border-color)";
+                    e.currentTarget.style.boxShadow = "var(--shadow-sm)";
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--primary-900)" }}>{site.siteName}</span>
+                    <Badge status={site.locationStatus === "Verified" ? "success" : "pending"}>
+                      {site.locationStatus === "Verified" ? "Active GPS" : "Setup Required"}
+                    </Badge>
+                  </div>
+                  <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <MapPin size={12} style={{ color: "var(--accent-600)" }} /> {site.location || "No Address Set"}
+                  </p>
+                </div>
+              ))}
+            </div>
+
+            <button
+              type="button"
+              className="mobile-btn-large"
+              onClick={() => logout()}
+              style={{ backgroundColor: "var(--danger-500)", color: "#ffffff", marginTop: "auto" }}
+            >
+              <LogOut size={16} />
+              <span>Logout Account</span>
+            </button>
+          </div>
+        </div>
+        <Loading show={loading} text="Synchronizing Worksite Database..." />
+      </div>
+    );
+  }
+
   // Active site variables
   const currentSite = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
 
@@ -1322,7 +1518,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </span>
             )}
           </div>
-          {!todayAttendance && (
+          {!todayAttendance && savedSiteLocation && (
             <button 
               type="button" 
               onClick={() => navigate("/engineer/attendance")} 
@@ -1332,6 +1528,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </button>
           )}
         </div>
+
+        {!savedSiteLocation && (
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #f97316", backgroundColor: "rgba(249, 115, 22, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <MapPin size={18} style={{ color: "#f97316" }} />
+                <span style={{ fontWeight: "700", color: "var(--primary-900)", fontSize: "13px" }}>Set Site Location</span>
+              </div>
+              <Badge status="pending">Mandatory</Badge>
+            </div>
+            <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              Setup your coordinate location for this site first before checking in.
+            </p>
+            <button 
+              type="button" 
+              onClick={() => setShowEngineerLocationSetupModal(true)} 
+              className="mobile-btn-large"
+              style={{ backgroundColor: "#f97316", color: "#ffffff", border: "none", fontSize: "12px", padding: "8px" }}
+            >
+              Set Site Location
+            </button>
+          </div>
+        )}
 
         {/* Developer options */}
         <div style={{
@@ -1774,12 +1993,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
                 <div>
                   <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--danger-600)" }}>
-                    {verificationDetails?.isLocationConfigError ? "Configuration Error" : "Location mismatch"}
+                    {verificationDetails?.message === "Please set site location first." ? "Location Missing" : (verificationDetails?.isLocationConfigError ? "Configuration Error" : "Location mismatch")}
                   </h4>
                   <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
-                    {verificationDetails?.isLocationConfigError 
+                    {verificationDetails?.message || (verificationDetails?.isLocationConfigError 
                       ? "Site location is not configured. Contact admin." 
-                      : "Your detected coordinates do not match the assigned worksite location boundary."}
+                      : "Your detected coordinates do not match the assigned worksite location boundary.")}
                   </p>
                 </div>
 
@@ -3113,6 +3332,75 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       )}
 
       <div className="mobile-app-frame">
+        {/* Set Site Location Modal */}
+        {showEngineerLocationSetupModal && (
+          <div style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: "rgba(0,0,0,0.5)",
+            zIndex: 1100,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "16px"
+          }}>
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "var(--radius-md)",
+              padding: "20px",
+              width: "100%",
+              maxWidth: "320px",
+              boxShadow: "var(--shadow-lg)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "14px"
+            }}>
+              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Set Site Location</h4>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                Establish the physical check-in location from your device GPS sensor.
+              </p>
+              
+              {engineerLocationError && (
+                <div style={{
+                  backgroundColor: "var(--danger-50)",
+                  color: "var(--danger-600)",
+                  padding: "10px 12px",
+                  borderRadius: "var(--radius-sm)",
+                  border: "1px solid var(--danger-100)",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  textAlign: "center"
+                }}>
+                  {engineerLocationError}
+                </div>
+              )}
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+                <button
+                  type="button"
+                  className="mobile-btn-large"
+                  style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, padding: "10px", fontSize: "12px", boxShadow: "none" }}
+                  onClick={() => setShowEngineerLocationSetupModal(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={engineerLocationSubmitting}
+                  className="mobile-btn-large success"
+                  style={{ flex: 1.5, padding: "10px", fontSize: "12px" }}
+                  onClick={handleSetSiteLocationClick}
+                >
+                  {engineerLocationSubmitting ? "Capturing..." : "Capture & Save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Specify Labour Category Modal */}
         {showLabourSpecifyModal && (
           <div style={{
@@ -3169,7 +3457,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   type="button"
                   className="mobile-btn-large"
                   style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, padding: "10px", fontSize: "12px", boxShadow: "none" }}
-                  onClick={() => setShowLabourSpecifyModal(false)}
+                  onClick={() => {
+                    if (labourSpecifyText.trim()) {
+                      if (window.confirm("Discard entered data?")) {
+                        setLabourSpecifyText("");
+                        setShowLabourSpecifyModal(false);
+                      }
+                    } else {
+                      setShowLabourSpecifyModal(false);
+                    }
+                  }}
                 >
                   Cancel
                 </button>
@@ -3334,23 +3631,51 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         )}
         {/* Top Header */}
-        <header className="mobile-app-header">
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <HardHat size={22} style={{ color: "var(--accent-600)" }} />
-            <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>
+        <header className="mobile-app-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", height: "auto", flexWrap: "wrap", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <HardHat size={20} style={{ color: "var(--accent-600)" }} />
+            <h3 style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>
               {tab === "attendance" ? "Attendance" : 
                tab === "material" ? "Materials" : 
                tab === "labour" ? "Workforce" : 
                ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Apex Build"}
             </h3>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+
+          {assignedSites.length > 1 && (
+            <div style={{ display: "flex", alignItems: "center", backgroundColor: "var(--accent-50)", padding: "4px 8px", borderRadius: "6px", border: "1px solid var(--accent-100)", position: "relative" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--accent-800)", marginRight: "4px" }}>Current Site:</span>
+              <select
+                value={activeSiteId}
+                onChange={(e) => setActiveSiteId(e.target.value)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  fontSize: "11px",
+                  fontWeight: "800",
+                  color: "var(--accent-900)",
+                  paddingRight: "14px",
+                  cursor: "pointer",
+                  appearance: "none",
+                  outline: "none",
+                  fontFamily: "inherit"
+                }}
+              >
+                {assignedSites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+              <span style={{ position: "absolute", right: "6px", pointerEvents: "none", fontSize: "8px", color: "var(--accent-700)" }}>▼</span>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600" }} className="font-mono">
               {new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
             </span>
             <div style={{
-              width: "28px",
-              height: "28px",
+              width: "26px",
+              height: "26px",
               borderRadius: "50%",
               backgroundColor: "var(--accent-50)",
               color: "var(--accent-700)",
@@ -3358,7 +3683,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               alignItems: "center",
               justifyContent: "center",
               fontWeight: "800",
-              fontSize: "12px"
+              fontSize: "11px"
             }}>
               {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
             </div>

@@ -200,34 +200,35 @@ export default function Sites() {
     let rad = 100;
 
     if (formMode === "edit") {
-      if (!formLatitude.trim()) {
-        showToast("Latitude is required.", "error");
-        return;
-      }
-      if (!formLongitude.trim()) {
-        showToast("Longitude is required.", "error");
-        return;
-      }
-      if (!formRadius.trim()) {
-        showToast("Allowed Radius is required.", "error");
-        return;
+      if (formLatitude.trim() || formLongitude.trim()) {
+        if (!formLatitude.trim()) {
+          showToast("Latitude is required if coordinates are specified.", "error");
+          return;
+        }
+        if (!formLongitude.trim()) {
+          showToast("Longitude is required if coordinates are specified.", "error");
+          return;
+        }
+
+        lat = Number(formLatitude);
+        lng = Number(formLongitude);
+
+        if (isNaN(lat) || lat < -90 || lat > 90) {
+          showToast("Latitude must be a valid number between -90 and 90.", "error");
+          return;
+        }
+        if (isNaN(lng) || lng < -180 || lng > 180) {
+          showToast("Longitude must be a valid number between -180 and 180.", "error");
+          return;
+        }
       }
 
-      lat = Number(formLatitude);
-      lng = Number(formLongitude);
-      rad = Number(formRadius);
-
-      if (isNaN(lat) || lat < -90 || lat > 90) {
-        showToast("Latitude must be a valid number between -90 and 90.", "error");
-        return;
-      }
-      if (isNaN(lng) || lng < -180 || lng > 180) {
-        showToast("Longitude must be a valid number between -180 and 180.", "error");
-        return;
-      }
-      if (isNaN(rad) || rad <= 0) {
-        showToast("Allowed Radius must be a positive number.", "error");
-        return;
+      if (formRadius.trim()) {
+        rad = Number(formRadius);
+        if (isNaN(rad) || rad <= 0) {
+          showToast("Allowed Radius must be a positive number.", "error");
+          return;
+        }
       }
     }
 
@@ -248,18 +249,6 @@ export default function Sites() {
         showToast("Construction Site added successfully.", "success");
         setShowFormModal(false);
         await loadData();
-
-        // Immediately trigger location setup modal (mandatory)
-        const fetchedSites = await getSites();
-        const newSite = fetchedSites.find(s => s.id === newSiteId);
-        if (newSite) {
-          setLocationSite(newSite);
-          setSelectedLat(null);
-          setSelectedLng(null);
-          setSelectedAddress(newSite.location || "");
-          setSelectedAccuracy(null);
-          setShowLocationModal(true);
-        }
       } else {
         await updateSite(
           formId,
