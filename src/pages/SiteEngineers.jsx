@@ -132,11 +132,11 @@ export default function SiteEngineers() {
 
   // Delete Site Engineer completely from Database
   const handleDeleteEngineer = async (eng) => {
-    if (window.confirm("Delete this entry?")) {
+    if (window.confirm("Delete user permanently?")) {
       setLoading(true);
       try {
         await deleteSiteEngineer(eng.id, eng.email, eng.password);
-        showToast("Deleted successfully", "success");
+        showToast("User removed successfully", "success");
         await loadData();
       } catch (err) {
         console.error("Error deleting engineer:", err);

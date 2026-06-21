@@ -136,11 +136,13 @@ export default function Login() {
     setError("");
 
     try {
+      sessionStorage.setItem("is_session_active", "true");
       await signIn(email.trim(), password);
     } catch (err) {
       // If sign-in fails, check if we need to auto-create the default admin account
       if (email.trim() === "admin@gmail.com" && password === "123456") {
         try {
+          sessionStorage.setItem("is_session_active", "true");
           const userCredential = await signUp(email.trim(), password);
           const user = userCredential.user;
 
@@ -155,6 +157,7 @@ export default function Login() {
           });
           return;
         } catch (createErr) {
+          sessionStorage.removeItem("is_session_active");
           console.error("Auto-provisioning failed:", createErr);
           if (createErr.code === "auth/email-already-in-use") {
             setError("Incorrect password");
@@ -166,6 +169,7 @@ export default function Login() {
         }
       }
 
+      sessionStorage.removeItem("is_session_active");
       console.error("Login Error:", err);
       let userFriendlyMsg = "Login failed. Please try again.";
       if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {

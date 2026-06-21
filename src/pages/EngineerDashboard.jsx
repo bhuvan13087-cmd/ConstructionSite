@@ -498,8 +498,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         }
         
         const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
-        const siteLat = Number(site?.latitude || 28.5355);
-        const siteLng = Number(site?.longitude || 77.3910);
+        
+        if (!site || site.latitude === undefined || site.latitude === null || site.latitude === "" ||
+            site.longitude === undefined || site.longitude === null || site.locationStatus === "Not Set") {
+          setDeviceCoords(null);
+          verifySiteLocation(null, site);
+          return;
+        }
+
+        const siteLat = Number(site.latitude);
+        const siteLng = Number(site.longitude);
         
         const coords = mockCase === "different" 
           ? { latitude: siteLat + 0.05, longitude: siteLng + 0.05, accuracy: 15 } 
@@ -546,14 +554,40 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (!site) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "No assigned site selected"
+        message: "No assigned site selected",
+        isLocationConfigError: false
       });
       setLocationCheckStatus("granted");
       return;
     }
 
-    const siteLat = Number(site.latitude || 28.5355);
-    const siteLng = Number(site.longitude || 77.3910);
+    // 1. Check if assigned site has saved coordinates
+    if (site.latitude === undefined || site.latitude === null || site.latitude === "" ||
+        site.longitude === undefined || site.longitude === null || site.longitude === "" ||
+        site.locationStatus === "Not Set") {
+      setVerificationStatus("failed");
+      setVerificationDetails({
+        message: "Site location is not configured. Contact admin.",
+        isLocationConfigError: true
+      });
+      setLocationCheckStatus("granted");
+      return;
+    }
+
+    // 2. Check if device location is available
+    if (!coords || coords.latitude === undefined || coords.latitude === null ||
+        coords.longitude === undefined || coords.longitude === null) {
+      setVerificationStatus("failed");
+      setVerificationDetails({
+        message: "Unable to detect current location. Please enable GPS and try again.",
+        isLocationConfigError: false
+      });
+      setLocationCheckStatus("granted");
+      return;
+    }
+
+    const siteLat = Number(site.latitude);
+    const siteLng = Number(site.longitude);
     const siteRadius = Number(site.radius || 100);
 
     const distance = calculateDistanceMeters(siteLat, siteLng, coords.latitude, coords.longitude);
@@ -1739,30 +1773,36 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   <AlertCircle size={32} />
                 </div>
                 <div>
-                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--danger-600)" }}>Location mismatch</h4>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--danger-600)" }}>
+                    {verificationDetails?.isLocationConfigError ? "Configuration Error" : "Location mismatch"}
+                  </h4>
                   <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
-                    Your detected coordinates do not match the assigned worksite location boundary.
+                    {verificationDetails?.isLocationConfigError 
+                      ? "Site location is not configured. Contact admin." 
+                      : "Your detected coordinates do not match the assigned worksite location boundary."}
                   </p>
                 </div>
 
-                <div style={{
-                  width: "100%",
-                  backgroundColor: "var(--danger-50)",
-                  borderRadius: "8px",
-                  border: "1px solid var(--danger-100)",
-                  padding: "14px 12px",
-                  textAlign: "left",
-                  fontSize: "12px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "8px",
-                  color: "var(--danger-700)",
-                  lineHeight: "1.4"
-                }}>
-                  <div><strong>Assigned Site:</strong> {verificationDetails?.expectedSiteName || "N/A"}</div>
-                  <div><strong>Current Location:</strong> {verificationDetails?.capturedAddress || "N/A"}</div>
-                  <div><strong>Distance difference:</strong> {verificationDetails?.distance} meters away (Allowed: {verificationDetails?.allowedRadius || 100}m)</div>
-                </div>
+                {!verificationDetails?.isLocationConfigError && (
+                  <div style={{
+                    width: "100%",
+                    backgroundColor: "var(--danger-50)",
+                    borderRadius: "8px",
+                    border: "1px solid var(--danger-100)",
+                    padding: "14px 12px",
+                    textAlign: "left",
+                    fontSize: "12px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "8px",
+                    color: "var(--danger-700)",
+                    lineHeight: "1.4"
+                  }}>
+                    <div><strong>Assigned Site:</strong> {verificationDetails?.expectedSiteName || "N/A"}</div>
+                    <div><strong>Current Location:</strong> {verificationDetails?.capturedAddress || "N/A"}</div>
+                    <div><strong>Distance difference:</strong> {verificationDetails?.distance} meters away (Allowed: {verificationDetails?.allowedRadius || 100}m)</div>
+                  </div>
+                )}
 
                 <div style={{ display: "flex", gap: "10px", width: "100%", marginTop: "8px" }}>
                   <button

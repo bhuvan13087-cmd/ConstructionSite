@@ -171,7 +171,7 @@ export async function getSites() {
 }
 
 // Create a new construction site document
-export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = 28.5355, longitude = 77.3910, radius = 500) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100) {
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
@@ -182,18 +182,22 @@ export async function createSite(siteName, clientName, location, startDate, expe
     startDate,
     expectedEndDate,
     status,
-    latitude,
-    longitude,
-    radius,
+    latitude: latitude !== null && latitude !== "" ? Number(latitude) : null,
+    longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
+    radius: Number(radius) || 100,
+    locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
+  return newSiteRef.id;
 }
 
 // Update site details
-export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, latitude = 28.5355, longitude = 77.3910, radius = 500) {
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
+
+  const hasCoords = latitude !== null && latitude !== undefined && latitude !== "" && longitude !== null && longitude !== undefined && longitude !== "";
 
   await updateDoc(siteDocRef, {
     siteName,
@@ -202,9 +206,25 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     startDate,
     expectedEndDate,
     status,
-    latitude,
-    longitude,
-    radius,
+    latitude: hasCoords ? Number(latitude) : null,
+    longitude: hasCoords ? Number(longitude) : null,
+    radius: Number(radius) || 100,
+    locationStatus: hasCoords ? "Verified" : "Not Set",
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Update site location details (from Map Picker)
+export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, locationCreatedDate = new Date().toISOString()) {
+  const db = getDb();
+  const siteDocRef = doc(db, "sites", siteId);
+  await updateDoc(siteDocRef, {
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    location: address,
+    locationAccuracy: Number(locationAccuracy) || 5,
+    locationStatus: "Verified",
+    locationCreatedDate,
     updatedAt: serverTimestamp()
   });
 }
@@ -970,13 +990,30 @@ export async function deleteEngineerLeave(leaveId) {
 // Delete Site Engineer completely from database (Admin command)
 export async function deleteSiteEngineer(engineerId, email = null, password = null) {
   const db = getDb();
+
+  // 1. Try to delete the secondary auth user first to maintain consistency
+  if (email && password) {
+    try {
+      const secondaryAuth = getSecondaryAuth();
+      const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
+      await deleteUser(userCredential.user);
+      await signOut(secondaryAuth);
+    } catch (authErr) {
+      console.warn("Secondary auth user deletion failed/ignored:", authErr);
+      // If user does not exist in Auth, we can safely proceed. Otherwise throw error.
+      if (authErr.code !== "auth/user-not-found" && authErr.code !== "auth/invalid-credential" && authErr.code !== "auth/wrong-password") {
+        throw new Error(`Failed to delete security account: ${authErr.message}`);
+      }
+    }
+  }
+
   const batch = writeBatch(db);
 
-  // 1. Delete engineer profile document
+  // 2. Delete engineer profile document
   const userDocRef = doc(db, "users", engineerId);
   batch.delete(userDocRef);
 
-  // 2. Query and delete all site assignments for this engineer
+  // 3. Query and delete all site assignments for this engineer
   const assignmentsColl = collection(db, "siteAssignments");
   const qAssignments = query(assignmentsColl, where("engineerId", "==", engineerId));
   const assignmentsSnap = await getDocs(qAssignments);
@@ -984,7 +1021,7 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
     batch.delete(docSnap.ref);
   });
 
-  // 3. Update sites to remove this engineer from assignedEngineers array
+  // 4. Update sites to remove this engineer from assignedEngineers array
   const sitesColl = collection(db, "sites");
   const qSites = query(sitesColl, where("assignedEngineers", "array-contains", engineerId));
   const sitesSnap = await getDocs(qSites);
@@ -994,20 +1031,24 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
     });
   });
 
+  // 5. Delete engineer's personal attendance records
+  const attendanceColl = collection(db, "attendance");
+  const qAttendance = query(attendanceColl, where("engineerId", "==", engineerId));
+  const attendanceSnap = await getDocs(qAttendance);
+  attendanceSnap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
+  // 6. Delete engineer's leaves records
+  const leavesColl = collection(db, "leaves");
+  const qLeaves = query(leavesColl, where("engineerId", "==", engineerId));
+  const leavesSnap = await getDocs(qLeaves);
+  leavesSnap.forEach(docSnap => {
+    batch.delete(docSnap.ref);
+  });
+
   // Commit firestore operations
   await batch.commit();
-
-  // 4. Try to delete the secondary auth user if credentials are provided
-  if (email && password) {
-    try {
-      const secondaryAuth = getSecondaryAuth();
-      const userCredential = await signInWithEmailAndPassword(secondaryAuth, email, password);
-      await deleteUser(userCredential.user);
-      await signOut(secondaryAuth);
-    } catch (authErr) {
-      console.warn("Secondary auth user deletion failed (may already be deleted or password changed):", authErr);
-    }
-  }
 }
 
 // Delete a material receipt log
