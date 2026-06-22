@@ -5,7 +5,7 @@ import {
   createSite, 
   updateSite, 
   deleteSite,
-  updateSiteLocation
+  getSiteEngineers
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -64,6 +64,7 @@ const fetchReverseGeocode = async (lat, lng) => {
 
 export default function Sites() {
   const [sites, setSites] = useState([]);
+  const [engineers, setEngineers] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -111,6 +112,8 @@ export default function Sites() {
       setLoading(true);
       const fetchedSites = await getSites();
       setSites(fetchedSites);
+      const fetchedEngineers = await getSiteEngineers();
+      setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading sites page data:", err);
       if (err.code === "permission-denied") {
@@ -195,34 +198,9 @@ export default function Sites() {
       return;
     }
 
-    let lat = null;
-    let lng = null;
     let rad = 100;
 
     if (formMode === "edit") {
-      if (formLatitude.trim() || formLongitude.trim()) {
-        if (!formLatitude.trim()) {
-          showToast("Latitude is required if coordinates are specified.", "error");
-          return;
-        }
-        if (!formLongitude.trim()) {
-          showToast("Longitude is required if coordinates are specified.", "error");
-          return;
-        }
-
-        lat = Number(formLatitude);
-        lng = Number(formLongitude);
-
-        if (isNaN(lat) || lat < -90 || lat > 90) {
-          showToast("Latitude must be a valid number between -90 and 90.", "error");
-          return;
-        }
-        if (isNaN(lng) || lng < -180 || lng > 180) {
-          showToast("Longitude must be a valid number between -180 and 180.", "error");
-          return;
-        }
-      }
-
       if (formRadius.trim()) {
         rad = Number(formRadius);
         if (isNaN(rad) || rad <= 0) {
@@ -258,8 +236,6 @@ export default function Sites() {
           formStartDate,
           formExpectedEndDate,
           formStatus,
-          lat,
-          lng,
           rad
         );
         showToast("Construction Site updated successfully.", "success");
@@ -280,7 +256,7 @@ export default function Sites() {
     }
   };
 
-  // Map effects and triggers
+  // Map effects and triggers (read-only for Admin to view captured location)
   useEffect(() => {
     if (!showLocationModal || !locationSite) return;
 
@@ -294,10 +270,10 @@ export default function Sites() {
       const hasCoords = locationSite.latitude !== undefined && locationSite.latitude !== null &&
                         locationSite.longitude !== undefined && locationSite.longitude !== null;
 
-      const initLat = hasCoords ? Number(locationSite.latitude) : 28.5355;
-      const initLng = hasCoords ? Number(locationSite.longitude) : 77.3910;
+      const initLat = hasCoords ? Number(locationSite.latitude) : 11.1271; // Default to Tamil Nadu coordinates
+      const initLng = hasCoords ? Number(locationSite.longitude) : 78.6569;
       
-      map = L.map("leaflet-location-map").setView([initLat, initLng], 13);
+      map = L.map("leaflet-location-map").setView([initLat, initLng], 15);
       mapRef.current = map;
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -314,48 +290,13 @@ export default function Sites() {
       });
 
       if (hasCoords) {
-        marker = L.marker([initLat, initLng], { icon: customIcon, draggable: true }).addTo(map);
+        marker = L.marker([initLat, initLng], { icon: customIcon, draggable: false }).addTo(map);
         markerRef.current = marker;
         setSelectedLat(initLat);
         setSelectedLng(initLng);
         setSelectedAddress(locationSite.location || "");
         setSelectedAccuracy(locationSite.locationAccuracy || 5);
-
-        marker.on("dragend", async () => {
-          const pos = marker.getLatLng();
-          setSelectedLat(pos.lat);
-          setSelectedLng(pos.lng);
-          const addr = await fetchReverseGeocode(pos.lat, pos.lng);
-          setSelectedAddress(addr);
-          setSelectedAccuracy(5);
-        });
       }
-
-      map.on("click", async (e) => {
-        const { lat, lng } = e.latlng;
-        setSelectedLat(lat);
-        setSelectedLng(lng);
-        setSelectedAccuracy(5);
-
-        if (marker) {
-          marker.setLatLng([lat, lng]);
-        } else {
-          marker = L.marker([lat, lng], { icon: customIcon, draggable: true }).addTo(map);
-          markerRef.current = marker;
-          
-          marker.on("dragend", async () => {
-            const pos = marker.getLatLng();
-            setSelectedLat(pos.lat);
-            setSelectedLng(pos.lng);
-            const addr = await fetchReverseGeocode(pos.lat, pos.lng);
-            setSelectedAddress(addr);
-            setSelectedAccuracy(5);
-          });
-        }
-
-        const addr = await fetchReverseGeocode(lat, lng);
-        setSelectedAddress(addr);
-      });
     });
 
     return () => {
@@ -620,34 +561,40 @@ export default function Sites() {
                           </Badge>
                         </div>
                         <div style={{ marginLeft: "20px", marginTop: "6px" }}>
-                          <button
-                            type="button"
-                            className="btn-location-setup"
-                            onClick={() => {
-                              setLocationSite(site);
-                              setSelectedLat(site.latitude !== undefined ? site.latitude : null);
-                              setSelectedLng(site.longitude !== undefined ? site.longitude : null);
-                              setSelectedAddress(site.location || "");
-                              setSelectedAccuracy(site.locationAccuracy || null);
-                              setShowLocationModal(true);
-                            }}
-                            style={{
-                              padding: "4px 8px",
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              borderRadius: "4px",
-                              border: site.locationStatus === "Verified" ? "1px solid var(--border-color)" : "1px solid #f97316",
-                              backgroundColor: site.locationStatus === "Verified" ? "#ffffff" : "#f97316",
-                              color: site.locationStatus === "Verified" ? "var(--text-muted)" : "#ffffff",
-                              cursor: "pointer",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "4px"
-                            }}
-                          >
-                            <MapPin size={12} />
-                            <span>{site.locationStatus === "Verified" ? "Update Location" : "Set Site Location"}</span>
-                          </button>
+                          {site.locationStatus === "Verified" ? (
+                            <button
+                              type="button"
+                              className="btn-location-setup"
+                              onClick={() => {
+                                setLocationSite(site);
+                                setSelectedLat(site.latitude !== undefined ? site.latitude : null);
+                                setSelectedLng(site.longitude !== undefined ? site.longitude : null);
+                                setSelectedAddress(site.location || "");
+                                setSelectedAccuracy(site.locationAccuracy || null);
+                                setShowLocationModal(true);
+                              }}
+                              style={{
+                                padding: "4px 8px",
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                borderRadius: "4px",
+                                border: "1px solid var(--border-color)",
+                                backgroundColor: "var(--primary-100)",
+                                color: "var(--primary-800)",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "4px"
+                              }}
+                            >
+                              <MapPin size={12} />
+                              <span>View Site Location</span>
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: "11px", color: "#f97316", fontWeight: "700", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                              ⚠ Setup Required by Site Engineer
+                            </span>
+                          )}
                         </div>
                       </div>
                     </td>
@@ -727,35 +674,7 @@ export default function Sites() {
           </div>
 
           {formMode === "edit" && (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1.2fr", gap: "16px" }}>
-              <div className="form-group">
-                <label htmlFor="site-latitude">Latitude</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="text" 
-                    id="site-latitude" 
-                    placeholder="E.g., 28.5355" 
-                    value={formLatitude}
-                    onChange={(e) => setFormLatitude(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
-              <div className="form-group">
-                <label htmlFor="site-longitude">Longitude</label>
-                <div className="input-wrapper">
-                  <input 
-                    type="text" 
-                    id="site-longitude" 
-                    placeholder="E.g., 77.3910" 
-                    value={formLongitude}
-                    onChange={(e) => setFormLongitude(e.target.value)}
-                    required 
-                  />
-                </div>
-              </div>
-
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px", marginBottom: "16px" }}>
               <div className="form-group">
                 <label htmlFor="site-radius">Allowed Radius (m)</label>
                 <div className="input-wrapper">
@@ -769,6 +688,33 @@ export default function Sites() {
                   />
                 </div>
               </div>
+              
+              {formLatitude && formLongitude ? (
+                <div style={{
+                  padding: "12px",
+                  borderRadius: "6px",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "var(--primary-50)",
+                  fontSize: "12px",
+                  lineHeight: "1.5"
+                }}>
+                  <div style={{ fontWeight: "700", color: "var(--primary-900)", marginBottom: "4px" }}>Engineer Captured GPS Coordinates</div>
+                  <div>Latitude: {formLatitude}</div>
+                  <div>Longitude: {formLongitude}</div>
+                </div>
+              ) : (
+                <div style={{
+                  padding: "12px",
+                  borderRadius: "6px",
+                  border: "1px dashed #f97316",
+                  backgroundColor: "rgba(249, 115, 22, 0.05)",
+                  fontSize: "12px",
+                  color: "#ea580c",
+                  fontWeight: "600"
+                }}>
+                  ⚠ Site location coordinates are not set yet. Will be established on site engineer's first visit.
+                </div>
+              )}
             </div>
           )}
 
@@ -836,82 +782,25 @@ export default function Sites() {
         </form>
       </Modal>
 
-      {/* MODAL: SET SITE LOCATION MAP PICKER */}
+      {/* MODAL: VIEW SITE LOCATION MAP */}
       <Modal
         isOpen={showLocationModal}
-        onClose={() => {
-          if (locationSite?.locationStatus === "Not Set") {
-            showToast("Site location setup is mandatory for new sites.", "error");
-            return;
-          }
-          setShowLocationModal(false);
-        }}
-        title={`Set Site Location: ${locationSite?.siteName || ""}`}
-        closeOnOverlayClick={locationSite?.locationStatus !== "Not Set"}
+        onClose={() => setShowLocationModal(false)}
+        title={`View Site Location: ${locationSite?.siteName || ""}`}
         maxWidth="680px"
       >
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           {/* Status and Hint */}
           <div style={{
             padding: "12px 14px",
-            backgroundColor: locationSite?.locationStatus === "Verified" ? "var(--success-50)" : "rgba(249, 115, 22, 0.1)",
-            borderLeft: locationSite?.locationStatus === "Verified" ? "4px solid var(--success-500)" : "4px solid #f97316",
+            backgroundColor: "var(--success-50)",
+            borderLeft: "4px solid var(--success-500)",
             borderRadius: "4px",
             fontSize: "13px",
             lineHeight: "1.5"
           }}>
-            <strong>Site Location Setup:</strong> Choose the physical center coordinates for the check-in boundary. You can search, drag the marker, click directly on the map, or capture your current GPS location.
+            <strong>Site Location Details:</strong> Below is the verified physical check-in center established by the assigned site engineer on-site.
           </div>
-
-          {/* Search box */}
-          <form onSubmit={handleMapSearch} style={{ display: "flex", gap: "8px", margin: 0 }}>
-            <div className="input-wrapper" style={{ flex: 1, position: "relative" }}>
-              <Search className="input-icon" size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
-              <input
-                type="text"
-                placeholder="Search address or area (e.g. Noida Sector 62)..."
-                value={mapSearchQuery}
-                onChange={(e) => setMapSearchQuery(e.target.value)}
-                style={{ width: "100%", padding: "10px 12px 10px 38px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-md)", fontSize: "14px", outline: "none" }}
-              />
-            </div>
-            <Button type="submit" isLoading={isSearching} style={{ backgroundColor: "#f97316", border: "none" }}>Search</Button>
-          </form>
-
-          {/* Search Results */}
-          {searchResults.length > 0 && (
-            <div style={{
-              maxHeight: "150px",
-              overflowY: "auto",
-              border: "1px solid var(--border-color)",
-              borderRadius: "var(--radius-sm)",
-              backgroundColor: "#ffffff",
-              display: "flex",
-              flexDirection: "column"
-            }}>
-              {searchResults.map((res, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => handleSelectSearchResult(res)}
-                  style={{
-                    padding: "10px 12px",
-                    textAlign: "left",
-                    fontSize: "12px",
-                    border: "none",
-                    borderBottom: i < searchResults.length - 1 ? "1px solid var(--border-color)" : "none",
-                    backgroundColor: "transparent",
-                    cursor: "pointer",
-                    transition: "background var(--transition-fast)"
-                  }}
-                  onMouseOver={(e) => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
-                  onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-                >
-                  {res.display_name}
-                </button>
-              ))}
-            </div>
-          )}
 
           {/* Map Area */}
           <div style={{ position: "relative", width: "100%" }}>
@@ -929,8 +818,8 @@ export default function Sites() {
             ></div>
           </div>
 
-          {/* Details & Actions */}
-          <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: "16px", alignItems: "start" }}>
+          {/* Details */}
+          <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "16px", alignItems: "start" }}>
             <div style={{ fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "var(--primary-50)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
               <div><strong>Latitude:</strong> {selectedLat !== null ? selectedLat.toFixed(6) : "--"}</div>
               <div><strong>Longitude:</strong> {selectedLng !== null ? selectedLng.toFixed(6) : "--"}</div>
@@ -938,37 +827,27 @@ export default function Sites() {
               <div style={{ wordBreak: "break-word" }}><strong>Resolved Address:</strong> {selectedAddress || "--"}</div>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={handleCaptureCurrentGps}
-                isLoading={isCapturingGps}
-                style={{ width: "100%", borderColor: "var(--border-color)" }}
-              >
-                Capture Current GPS
-              </Button>
-              <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
-                {locationSite?.locationStatus !== "Not Set" && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setShowLocationModal(false)}
-                    style={{ flex: 1 }}
-                  >
-                    Cancel
-                  </Button>
-                )}
-                <Button
-                  type="button"
-                  onClick={handleSaveLocation}
-                  disabled={selectedLat === null || selectedLng === null}
-                  style={{ flex: 2, backgroundColor: "#f97316", color: "#ffffff", border: "none" }}
-                >
-                  Save Location
-                </Button>
+            <div style={{ fontSize: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "var(--primary-50)", padding: "12px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <div><strong>Captured On:</strong> {locationSite?.locationCreatedDate ? new Date(locationSite.locationCreatedDate).toLocaleString() : "--"}</div>
+              <div>
+                <strong>Captured By:</strong> {
+                  locationSite?.locationCapturedBy 
+                    ? (engineers.find(e => e.id === locationSite.locationCapturedBy)?.fullName || `Engineer (ID: ${locationSite.locationCapturedBy.substring(0, 6)}...)`) 
+                    : "--"
+                }
               </div>
+              <div style={{ wordBreak: "break-word" }}><strong>Device Details:</strong> {locationSite?.locationDeviceDetails || "--"}</div>
             </div>
+          </div>
+
+          <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+            <Button
+              type="button"
+              onClick={() => setShowLocationModal(false)}
+              style={{ padding: "8px 24px" }}
+            >
+              Close
+            </Button>
           </div>
         </div>
       </Modal>

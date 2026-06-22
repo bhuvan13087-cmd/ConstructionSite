@@ -193,12 +193,10 @@ export async function createSite(siteName, clientName, location, startDate, expe
   return newSiteRef.id;
 }
 
-// Update site details
-export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100) {
+// Update site details (without modifying captured coordinates)
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 100) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
-
-  const hasCoords = latitude !== null && latitude !== undefined && latitude !== "" && longitude !== null && longitude !== undefined && longitude !== "";
 
   await updateDoc(siteDocRef, {
     siteName,
@@ -207,16 +205,13 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     startDate,
     expectedEndDate,
     status,
-    latitude: hasCoords ? Number(latitude) : null,
-    longitude: hasCoords ? Number(longitude) : null,
     radius: Number(radius) || 100,
-    locationStatus: hasCoords ? "Verified" : "Not Set",
     updatedAt: serverTimestamp()
   });
 }
 
-// Update site location details (from Map Picker)
-export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, locationCreatedDate = new Date().toISOString()) {
+// Update site location details (from Engineer first-time setup only)
+export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, engineerId, deviceDetails, locationCreatedDate = new Date().toISOString()) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
   await updateDoc(siteDocRef, {
@@ -226,8 +221,41 @@ export async function updateSiteLocation(siteId, latitude, longitude, address, l
     locationAccuracy: Number(locationAccuracy) || 5,
     locationStatus: "Verified",
     locationCreatedDate,
+    locationCapturedBy: engineerId || null,
+    locationDeviceDetails: deviceDetails || null,
     updatedAt: serverTimestamp()
   });
+}
+
+// Reverse geocode helper via Nominatim OSM API
+export async function reverseGeocodeLatLng(lat, lng) {
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0 (contact@apexbuild.com)'
+      }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.address) {
+        return {
+          fullAddress: data.display_name || "",
+          district: data.address.state_district || data.address.county || data.address.district || data.address.city || data.address.subdistrict || "",
+          state: data.address.state || "",
+          country: data.address.country || ""
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Reverse geocode request failed:", e);
+  }
+  return {
+    fullAddress: `Lat: ${Number(lat).toFixed(6)}, Lng: ${Number(lng).toFixed(6)}`,
+    district: "",
+    state: "",
+    country: ""
+  };
 }
 
 // Delete site document
@@ -338,23 +366,25 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
 }
 
 // Mark attendance
-export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, photoUrl = "", photoGpsLocation = null, verificationStatus = "verified") {
+export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, address, photoUrl = "", verificationStatus = "verified") {
   const db = getDb();
-  const existing = await getTodayAttendance(engineerId, dateStr);
+  const existing = await getTodayAttendance(engineerId, dateStr, siteId);
   if (existing) {
     throw new Error("Attendance already marked for today.");
   }
   
   const newAttendanceRef = doc(collection(db, "attendance"));
   await setDoc(newAttendanceRef, {
-    engineerId,
+    userId: engineerId,
+    engineerId: engineerId, // compatibility
     siteId,
     date: dateStr,
-    checkInTime: serverTimestamp(),
-    latitude,
-    longitude,
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    address: address || "",
+    timestamp: serverTimestamp(),
+    checkInTime: serverTimestamp(), // compatibility
     photoUrl,
-    photoGpsLocation,
     verificationStatus,
     status: "present"
   });
@@ -374,11 +404,20 @@ export async function saveSitePhoto(engineerId, siteId, imageUrl, latitude, long
   });
 }
 
-// Get photos captured by the engineer
-export async function getSitePhotos(engineerId) {
+// Get photos captured by the engineer (optionally filtered by siteId)
+export async function getSitePhotos(engineerId, siteId = null) {
   const db = getDb();
   const photosColl = collection(db, "sitePhotos");
-  const q = query(photosColl, where("engineerId", "==", engineerId));
+  let q;
+  if (siteId) {
+    q = query(
+      photosColl,
+      where("engineerId", "==", engineerId),
+      where("siteId", "==", siteId)
+    );
+  } else {
+    q = query(photosColl, where("engineerId", "==", engineerId));
+  }
   const snap = await getDocs(q);
   
   const photos = [];
@@ -406,11 +445,20 @@ export async function saveDailyProgressReport(engineerId, siteId, description, p
   });
 }
 
-// Get daily updates for an engineer
-export async function getDailyUpdatesForEngineer(engineerId) {
+// Get daily updates for an engineer (optionally filtered by siteId)
+export async function getDailyUpdatesForEngineer(engineerId, siteId = null) {
   const db = getDb();
   const updatesColl = collection(db, "dailyUpdates");
-  const q = query(updatesColl, where("engineerId", "==", engineerId));
+  let q;
+  if (siteId) {
+    q = query(
+      updatesColl,
+      where("engineerId", "==", engineerId),
+      where("siteId", "==", siteId)
+    );
+  } else {
+    q = query(updatesColl, where("engineerId", "==", engineerId));
+  }
   const snap = await getDocs(q);
   
   const updates = [];
@@ -1174,6 +1222,19 @@ export async function deleteSitePhoto(photoId) {
   const batch = writeBatch(db);
   batch.delete(docRef);
   await batch.commit();
+}
+
+// Get all attendance records for an engineer across all sites
+export async function getEngineerAttendanceHistory(engineerId) {
+  const db = getDb();
+  const attendanceColl = collection(db, "attendance");
+  const q = query(attendanceColl, where("engineerId", "==", engineerId));
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(docSnap => {
+    records.push({ id: docSnap.id, ...docSnap.data() });
+  });
+  return records;
 }
 
 

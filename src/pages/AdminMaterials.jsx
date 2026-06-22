@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { getSites, getMaterialsDetailed } from "../services/firebaseService";
-import { Package, ExternalLink, MapPin } from "lucide-react";
+import { Package, ExternalLink, MapPin, Search } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
@@ -10,6 +10,7 @@ export default function AdminMaterials() {
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState("");
   const [materials, setMaterials] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [materialsLoading, setMaterialsLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -57,6 +58,19 @@ export default function AdminMaterials() {
     fetchMaterials();
   }, [selectedSiteId]);
 
+  const filteredMaterials = materials.filter(mat => {
+    if (!searchQuery.trim()) return true;
+    const query = searchQuery.toLowerCase().trim();
+    return (
+      mat.materialName?.toLowerCase().includes(query) ||
+      mat.supplierName?.toLowerCase().includes(query) ||
+      mat.category?.toLowerCase().includes(query) ||
+      mat.notes?.toLowerCase().includes(query) ||
+      mat.engineerName?.toLowerCase().includes(query) ||
+      mat.siteName?.toLowerCase().includes(query)
+    );
+  });
+
   return (
     <Layout 
       title="Material Tracking & Audits" 
@@ -71,38 +85,63 @@ export default function AdminMaterials() {
       )}
 
       <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-        {/* Controls Card */}
-        <Card title="Audit Filter" subtitle="Select a construction site to view logged material shipments">
-          <div className="form-group" style={{ maxWidth: "400px", margin: 0 }}>
-            <label htmlFor="site-select">Select Construction Site</label>
-            <div className="input-wrapper" style={{ marginTop: "4px" }}>
-              <MapPin className="input-icon" size={16} />
-              <select
-                id="site-select"
-                value={selectedSiteId}
-                onChange={(e) => setSelectedSiteId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "12px 14px 12px 40px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  outline: "none"
-                }}
-              >
-                {sites.length === 0 ? (
-                  <option value="">No sites available</option>
-                ) : (
-                  sites.map(site => (
-                    <option key={site.id} value={site.id}>{site.siteName} ({site.location})</option>
-                  ))
-                )}
-              </select>
+        {/* Controls Cards */}
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
+          <Card title="Audit Filter" subtitle="Select a construction site to view logged material shipments" style={{ flex: 1, minWidth: "300px" }}>
+            <div className="form-group" style={{ maxWidth: "400px", margin: 0 }}>
+              <label htmlFor="site-select">Select Construction Site</label>
+              <div className="input-wrapper" style={{ marginTop: "4px" }}>
+                <MapPin className="input-icon" size={16} />
+                <select
+                  id="site-select"
+                  value={selectedSiteId}
+                  onChange={(e) => setSelectedSiteId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px 12px 40px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--border-color)",
+                    backgroundColor: "#ffffff",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    outline: "none"
+                  }}
+                >
+                  {sites.length === 0 ? (
+                    <option value="">No sites available</option>
+                  ) : (
+                    sites.map(site => (
+                      <option key={site.id} value={site.id}>{site.siteName} ({site.location})</option>
+                    ))
+                  )}
+                </select>
+              </div>
             </div>
-          </div>
-        </Card>
+          </Card>
+
+          <Card title="Search Logs" subtitle="Search entries by name, supplier, or engineer" style={{ flex: 1, minWidth: "300px" }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="mat-search">Realtime Search</label>
+              <div className="input-wrapper" style={{ marginTop: "4px" }}>
+                <Search className="input-icon" size={16} />
+                <input
+                  id="mat-search"
+                  type="text"
+                  placeholder="Search material, supplier, engineer..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "12px 14px 12px 40px",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--border-color)",
+                    outline: "none"
+                  }}
+                />
+              </div>
+            </div>
+          </Card>
+        </div>
 
         {/* Logs Table Card */}
         <Card 
@@ -112,7 +151,7 @@ export default function AdminMaterials() {
             materialsLoading ? (
               <Badge status="pending">Syncing...</Badge>
             ) : (
-              <Badge status="success">{materials.length} Entries Logged</Badge>
+              <Badge status="success">{filteredMaterials.length} Entries Logged</Badge>
             )
           }
         >
@@ -129,14 +168,14 @@ export default function AdminMaterials() {
               </tr>
             </thead>
             <tbody>
-              {materials.length === 0 ? (
+              {filteredMaterials.length === 0 ? (
                 <tr>
                   <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    {materialsLoading ? "Synchronizing material records..." : "No material receipts recorded for this site."}
+                    {searchQuery.trim() ? "No results found" : (materialsLoading ? "Synchronizing material records..." : "No material receipts recorded for this site.")}
                   </td>
                 </tr>
               ) : (
-                materials.map((mat) => (
+                filteredMaterials.map((mat) => (
                   <tr key={mat.id}>
                     <td style={{ fontWeight: 700 }}>
                       <div>

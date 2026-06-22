@@ -2846,6 +2846,332 @@ body:has(.landing-page-container) {
   color: var(--primary-800);
 }
 
+/* ==========================================================================
+   PREMIUM LANDING PAGE & SITE SELECTION MOBILE REDESIGN SYSTEM
+   ========================================================================== */
+
+/* Premium Color Variables Overrides */
+:root {
+  --construction-orange: #f97316;
+  --construction-orange-dark: #ea580c;
+  --glass-bg: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(226, 232, 240, 0.8);
+  --android-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.08), 0 2px 8px -1px rgba(15, 23, 42, 0.04);
+  --premium-gradient: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  --accent-gradient: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+}
+
+/* Typography Enhancements */
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+/* Redesign Landing Container */
+.landing-page-container {
+  background-color: #f8fafc;
+  font-family: 'Inter', sans-serif;
+}
+
+.landing-navbar {
+  background-color: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
+  border-bottom: 1px solid #e2e8f0;
+  box-shadow: 0 1px 10px rgba(15, 23, 42, 0.03);
+}
+
+.landing-brand span {
+  font-family: 'Outfit', sans-serif;
+  color: #0f172a;
+  font-weight: 800;
+}
+
+.landing-nav-link {
+  font-family: 'Inter', sans-serif;
+  color: #334155;
+  transition: all 0.2s ease;
+}
+
+.landing-nav-link:hover {
+  color: var(--construction-orange);
+  transform: translateY(-1px);
+}
+
+/* Premium Hero styling */
+.landing-hero {
+  background-image: 
+    radial-gradient(circle at 5% 10%, rgba(14, 165, 233, 0.05) 0%, transparent 40%),
+    radial-gradient(circle at 95% 90%, rgba(249, 115, 22, 0.05) 0%, transparent 40%),
+    linear-gradient(to right, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.05) 1px, transparent 1px);
+}
+
+.landing-hero-tag {
+  font-family: 'Montserrat', sans-serif;
+  background-color: rgba(249, 115, 22, 0.08);
+  border: 1.5px solid rgba(249, 115, 22, 0.25);
+  color: var(--construction-orange-dark);
+}
+
+.landing-hero-title {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.landing-hero-subtitle {
+  color: #475569;
+}
+
+/* Premium Feature Cards */
+.landing-feature-card {
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  box-shadow: var(--android-shadow);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.landing-feature-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 12px 30px -4px rgba(15, 23, 42, 0.1), 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+  border-color: rgba(249, 115, 22, 0.4);
+}
+
+.landing-feature-icon {
+  background-color: #fff7ed;
+  border: 1px solid #ffedd5;
+}
+
+/* Input Fields Redesign (Android / Modern Native) */
+.input-wrapper input, .form-group input, .form-group textarea, .input-wrapper select, .form-group select {
+  border: 1.5px solid #cbd5e1;
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
+  font-weight: 500;
+  color: #0f172a;
+  background-color: #f8fafc;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.input-wrapper input:focus, .form-group input:focus, .form-group textarea:focus, .input-wrapper select:focus, .form-group select:focus {
+  background-color: #ffffff;
+  border-color: var(--construction-orange);
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12);
+}
+
+/* Modal / Popup Redesign */
+.modal-overlay {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+  backdrop-filter: blur(8px) !important;
+  transition: all 0.3s ease;
+}
+
+.modal-content-wrapper {
+  border-radius: 20px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 25px 50px -12px rgba(15, 23, 42, 0.25) !important;
+  overflow: hidden !important;
+  animation: modalScaleUp 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+@keyframes modalScaleUp {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+/* ==========================================================================
+   ANDROID SITE SELECTION LAYOUT FOR ENGINEER (MULTIPLE SITES)
+   ========================================================================== */
+
+.site-selection-container {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 16px;
+  background-color: #f8fafc;
+  min-height: 100%;
+}
+
+.site-selection-header-block {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.site-selection-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.site-selection-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.site-selection-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Site Selection Cards Style */
+.site-card-premium {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-md);
+  padding: 20px;
+  box-shadow: var(--android-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.site-card-premium:active {
+  transform: scale(0.98);
+  background-color: #f8fafc;
+}
+
+.site-card-premium-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.site-card-premium-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  margin: 0;
+}
+
+.site-badge-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.site-badge-pill {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 50px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.site-badge-pill.active {
+  background-color: #ecfdf5;
+  color: #059669;
+  border: 1px solid #a7f3d0;
+}
+
+.site-badge-pill.planning {
+  background-color: #eff6ff;
+  color: #2563eb;
+  border: 1px solid #bfdbfe;
+}
+
+.site-badge-pill.completed {
+  background-color: #f1f5f9;
+  color: #475569;
+  border: 1px solid #cbd5e1;
+}
+
+.site-badge-pill.verified {
+  background-color: #f0fdf4;
+  color: #16a34a;
+  border: 1px solid #bbf7d0;
+}
+
+.site-badge-pill.not-set {
+  background-color: #fff7ed;
+  color: #ea580c;
+  border: 1px solid #ffedd5;
+}
+
+.site-card-premium-details {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  background-color: #f8fafc;
+  border-radius: var(--radius-sm);
+  border: 1px solid #e2e8f0;
+}
+
+.site-card-detail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: #475569;
+}
+
+.site-card-detail-item strong {
+  color: #0f172a;
+}
+
+.site-card-detail-icon {
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+.site-card-btn-open {
+  background: var(--accent-gradient);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px;
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  font-size: 13.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2);
+  transition: all 0.2s ease;
+}
+
+.site-card-btn-open:active {
+  box-shadow: none;
+  transform: translateY(1px);
+}
+
+/* Premium Android style bottom nav */
+.mobile-bottom-nav {
+  box-shadow: 0 -4px 16px rgba(15, 23, 42, 0.06);
+  border-top: 1px solid #e2e8f0;
+}
+
+.mobile-nav-btn {
+  font-family: 'Inter', sans-serif;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.mobile-nav-btn.active {
+  color: var(--construction-orange-dark) !important;
+}
+
+.mobile-nav-btn.active .mobile-nav-indicator {
+  background-color: rgba(249, 115, 22, 0.1) !important;
+  color: var(--construction-orange-dark) !important;
+}
+
+
 
 
 

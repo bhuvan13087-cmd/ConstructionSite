@@ -23,8 +23,9 @@ import {
   deleteLabourDailyCounts,
   deleteDailyProgressReport,
   deleteSitePhoto,
-  getSavedLocationForEngineer,
-  saveSavedLocationForEngineer
+  updateSiteLocation,
+  reverseGeocodeLatLng,
+  getEngineerAttendanceHistory
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -142,51 +143,7 @@ const readPhotoMetadata = (file) => {
   });
 };
 
-// Fallback reverse geocoding address generator
-function getMockAddress(lat, lng, site) {
-  if (site) {
-    const R = 6371e3; // Earth's radius in meters
-    const lat1 = Number(site.latitude || 28.5355);
-    const lon1 = Number(site.longitude || 77.3910);
-    const lat2 = Number(lat);
-    const lon2 = Number(lng);
-    const phi1 = (lat1 * Math.PI) / 180;
-    const phi2 = (lat2 * Math.PI) / 180;
-    const deltaPhi = ((lat2 - lat1) * Math.PI) / 180;
-    const deltaLambda = ((lon2 - lon1) * Math.PI) / 180;
-    const a =
-      Math.sin(deltaPhi / 2) * Math.sin(deltaPhi / 2) +
-      Math.cos(phi1) * Math.cos(phi2) *
-      Math.sin(deltaLambda / 2) * Math.sin(deltaLambda / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    const dist = R * c;
-
-    if (dist <= Number(site.radius || 100)) {
-      return `${site.location} (Matched Boundary)`;
-    }
-  }
-  return `Sector ${Math.floor(Math.abs(lat) % 100)}, Near Plaza, City Circle (Lat: ${Number(lat).toFixed(4)}, Lng: ${Number(lng).toFixed(4)})`;
-}
-
-// Reverse geocode via free public API with mock fallback
-async function getReverseGeocode(lat, lng, site) {
-  try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
-      headers: {
-        'Accept-Language': 'en'
-      }
-    });
-    if (res.ok) {
-      const data = await res.json();
-      if (data && data.display_name) {
-        return data.display_name;
-      }
-    }
-  } catch (e) {
-    console.warn("Reverse geocode failed, using mock address:", e);
-  }
-  return getMockAddress(lat, lng, site);
-}
+// Geocode and Address System utilities moved to firebaseService.js
 
 const categorySuggestions = {
   Cement: ["UltraTech Cement", "ACC Cement", "OPC 53 Grade Cement", "PPC Cement", "White Cement", "Sulphate Resistant Cement"],
@@ -213,6 +170,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [materials, setMaterials] = useState([]);
   const [activeSiteId, setActiveSiteId] = useState("");
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
+  const [allSitesAttendance, setAllSitesAttendance] = useState([]);
   const [showEngineerLocationSetupModal, setShowEngineerLocationSetupModal] = useState(false);
   const [engineerLocationSubmitting, setEngineerLocationSubmitting] = useState(false);
   const [engineerLocationError, setEngineerLocationError] = useState("");
@@ -224,8 +182,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [leaveReason, setLeaveReason] = useState("Personal Leave");
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
   
-  // Geolocation mock control (highly useful for remote developer testing)
-  const [mockLocation, setMockLocation] = useState(true);
+  // Mock GPS controls removed for production
 
   // Dynamic Labour Categories
   const [categories, setCategories] = useState(["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"]);
@@ -247,7 +204,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [photoGpsLng, setPhotoGpsLng] = useState(null);
   const [photoTimestamp, setPhotoTimestamp] = useState(null);
   const [photoAddress, setPhotoAddress] = useState("");
-  const [mockCase, setMockCase] = useState("valid"); // "valid", "different", "nogps", "nopermission", "old"
   const [locationCheckStatus, setLocationCheckStatus] = useState("unchecked"); // "unchecked", "checking", "warning", "granted"
   const [deviceCoords, setDeviceCoords] = useState(null); // { latitude, longitude }
   const [locationError, setLocationError] = useState("");
@@ -333,14 +289,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const filteredSites = await getAssignedSitesForEngineer(engineerId);
       setAssignedSites(filteredSites);
 
-      // Fetch personal stats and leaves
+      // Fetch personal stats, leaves, and attendance history
       try {
         const stats = await getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24);
         setPersonalStats(stats);
         const leaves = await getEngineerLeaves(engineerId);
         setLoggedLeaves(leaves);
+        const history = await getEngineerAttendanceHistory(engineerId);
+        setAllSitesAttendance(history);
       } catch (err) {
-        console.error("Failed to load personal attendance/leave stats:", err);
+        console.error("Failed to load personal stats/leaves/history:", err);
       }
 
       if (filteredSites.length > 0) {
@@ -363,21 +321,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const attendance = await getTodayAttendance(engineerId, todayStr, currentActiveId);
         setTodayAttendance(attendance);
         
-        // Fetch site photos
-        const photos = await getSitePhotos(engineerId);
+        // Fetch site photos (site-segregated)
+        const photos = await getSitePhotos(engineerId, currentActiveId);
         setSitePhotos(photos);
         
-        // Fetch daily updates
-        const updates = await getDailyUpdatesForEngineer(engineerId);
+        // Fetch daily updates (site-segregated)
+        const updates = await getDailyUpdatesForEngineer(engineerId, currentActiveId);
         setDailyUpdates(updates);
 
-        // Fetch material receipts
-        const fetchedMaterials = [];
-        for (const site of filteredSites) {
-          const siteMats = await getMaterialsDetailed(site.id);
-          fetchedMaterials.push(...siteMats);
-        }
-        setMaterials(fetchedMaterials);
+        // Fetch material receipts (site-segregated)
+        const siteMats = await getMaterialsDetailed(currentActiveId);
+        setMaterials(siteMats);
       }
     } catch (err) {
       console.error("Dashboard data load error:", err);
@@ -522,152 +476,112 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setEngineerLocationError("");
     setEngineerLocationSubmitting(true);
     
-    try {
-      if (mockLocation) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        if (mockCase === "nopermission" || mockCase === "gps_off") {
-          setEngineerLocationError("Please enable location access");
-          setEngineerLocationSubmitting(false);
-          return;
-        }
-
-        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
-        const lat = Number(site.latitude || 28.5355);
-        const lng = Number(site.longitude || 77.3910);
-        
-        const capturedAddress = await getReverseGeocode(lat, lng, site);
-        
-        await updateSiteLocation(
-          activeSiteId,
-          lat,
-          lng,
-          capturedAddress,
-          5
-        );
-        
-        await loadDashboardData();
-        showToast("Site Location Successfully Set", "success");
-        setShowEngineerLocationSetupModal(false);
-        setEngineerLocationSubmitting(false);
-        return;
-      }
-
-      if (!navigator.geolocation) {
-        setEngineerLocationError("Please enable location access");
-        setEngineerLocationSubmitting(false);
-        return;
-      }
-
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const lat = position.coords.latitude;
-          const lng = position.coords.longitude;
-          const accuracy = position.coords.accuracy || 10;
-          
-          try {
-            const site = assignedSites.find(s => s.id === activeSiteId);
-            const capturedAddress = await getReverseGeocode(lat, lng, site);
-            
-            await updateSiteLocation(
-              activeSiteId,
-              lat,
-              lng,
-              capturedAddress,
-              accuracy
-            );
-            
-            await loadDashboardData();
-            showToast("Site Location Successfully Set", "success");
-            setShowEngineerLocationSetupModal(false);
-          } catch (err) {
-            console.error("Save location error:", err);
-            showToast("Failed to save location: " + err.message, "error");
-          } finally {
-            setEngineerLocationSubmitting(false);
-          }
-        },
-        (error) => {
-          console.error("Geolocation capture error:", error);
-          setEngineerLocationError("Please enable location access");
-          setEngineerLocationSubmitting(false);
-        },
-        { enableHighAccuracy: true, timeout: 8000 }
-      );
-
-    } catch (err) {
-      console.error(err);
-      setEngineerLocationError("Please enable location access");
+    if (!navigator.geolocation) {
+      setEngineerLocationError("Location Permission Denied");
       setEngineerLocationSubmitting(false);
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy || 10;
+        const engineerId = userProfile.uid || userProfile.id || "";
+        const deviceDetails = navigator.userAgent || "Unknown Device";
+        
+        try {
+          const geocode = await reverseGeocodeLatLng(lat, lng);
+          const stateStr = (geocode.state || "").toLowerCase();
+          const countryStr = (geocode.country || "").toLowerCase();
+          const isTamilNadu = stateStr.includes("tamil") && (stateStr.includes("nadu") || stateStr.includes("nādū"));
+          const isIndia = countryStr.includes("india");
+          const isCoordinateInTN = lat >= 8.08 && lat <= 13.9 && lng >= 76.15 && lng <= 80.3;
+          
+          if (!((isTamilNadu && isIndia) || (geocode.fullAddress.startsWith("Lat:") && isCoordinateInTN))) {
+            setEngineerLocationError("Attendance allowed only inside Tamil Nadu location");
+            setEngineerLocationSubmitting(false);
+            return;
+          }
+
+          await updateSiteLocation(
+            activeSiteId,
+            lat,
+            lng,
+            geocode.fullAddress,
+            accuracy,
+            engineerId,
+            deviceDetails
+          );
+          
+          await loadDashboardData();
+          showToast("Site Location Successfully Set", "success");
+          setShowEngineerLocationSetupModal(false);
+        } catch (err) {
+          console.error("Save location error:", err);
+          setEngineerLocationError("Site Verification Failed");
+        } finally {
+          setEngineerLocationSubmitting(false);
+        }
+      },
+      (error) => {
+        console.error("Geolocation capture error:", error);
+        if (error.code === error.PERMISSION_DENIED) {
+          setEngineerLocationError("Location Permission Denied");
+        } else {
+          setEngineerLocationError("GPS Disabled");
+        }
+        setEngineerLocationSubmitting(false);
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   };
 
   const handlePreCaptureCheck = async () => {
     setLocationError("");
     setLocationCheckStatus("checking");
 
-    try {
-      if (mockLocation) {
-        // Simulate real GPS sensor retrieval time
-        await new Promise(resolve => setTimeout(resolve, 1500));
-
-        if (mockCase === "nopermission" || mockCase === "gps_off") {
-          throw { code: 1, message: "Please enable location access" };
-        }
-        
-        const site = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
-        
-        if (!savedSiteLocation) {
-          setDeviceCoords(null);
-          verifySiteLocation(null, site);
-          return;
-        }
-
-        const savedLat = Number(savedSiteLocation.latitude);
-        const savedLng = Number(savedSiteLocation.longitude);
-        
-        const coords = mockCase === "different" 
-          ? { latitude: savedLat + 0.05, longitude: savedLng + 0.05, accuracy: 15 } 
-          : { latitude: savedLat + 0.0001, longitude: savedLng + 0.0001, accuracy: 5 };
-          
-        setDeviceCoords(coords);
-        verifySiteLocation(coords, site);
-        return;
-      }
-
-      if (navigator.permissions && navigator.permissions.query) {
-        try {
-          const permission = await navigator.permissions.query({ name: 'geolocation' });
-          if (permission.state === 'denied') {
-            throw { code: 1, message: "Please enable location access" };
-          }
-        } catch (e) {
-          console.warn("navigator.permissions.query for geolocation not supported:", e);
-        }
-      }
-
-      const coords = await getDeviceLocation();
-      setDeviceCoords(coords);
-      
-      const site = assignedSites.find(s => s.id === activeSiteId);
-      verifySiteLocation(coords, site);
-
-    } catch (err) {
-      console.warn("Location check failed:", err);
+    if (!navigator.geolocation) {
       setLocationCheckStatus("warning");
-      setLocationError("Please enable location access");
+      setLocationError("Location Permission Denied");
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        const accuracy = position.coords.accuracy || 10;
+        
+        const coords = { latitude: lat, longitude: lng, accuracy };
+        setDeviceCoords(coords);
+        
+        const site = assignedSites.find(s => s.id === activeSiteId);
+        verifySiteLocation(coords, site);
+      },
+      (error) => {
+        console.warn("Location check failed:", error);
+        setLocationCheckStatus("warning");
+        if (error.code === error.PERMISSION_DENIED) {
+          setLocationError("Location Permission Denied");
+        } else {
+          setLocationError("GPS Disabled");
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
   };
 
   const handleEnableLocation = async () => {
     await handlePreCaptureCheck();
   };
 
-  const verifySiteLocation = (coords, site) => {
+  const verifySiteLocation = async (coords, site) => {
     if (!site) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "No assigned site selected",
+        message: "Site Verification Failed",
+        details: "No assigned site selected",
         isLocationConfigError: false
       });
       setLocationCheckStatus("granted");
@@ -678,7 +592,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (!savedSiteLocation) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "Please set site location first.",
+        message: "Location Not Set",
+        details: "Site location is not configured. Setup required.",
         isLocationConfigError: true
       });
       setLocationCheckStatus("granted");
@@ -686,73 +601,81 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     // 2. Check if device location is available
-    if (!coords || coords.latitude === undefined || coords.latitude === null ||
-        coords.longitude === undefined || coords.longitude === null) {
+    if (!coords || coords.latitude === undefined || coords.latitude === null) {
       setVerificationStatus("failed");
       setVerificationDetails({
-        message: "Please enable location access",
+        message: "GPS Disabled",
+        details: "Please turn ON device location",
         isLocationConfigError: false
       });
-      setLocationError("Please enable location access");
+      setLocationError("GPS Disabled");
       setLocationCheckStatus("warning");
       return;
     }
 
-    const savedLat = Number(savedSiteLocation.latitude);
-    const savedLng = Number(savedSiteLocation.longitude);
-    const siteRadius = Number(site.radius || 100);
+    const lat = coords.latitude;
+    const lng = coords.longitude;
 
-    const distance = calculateDistanceMeters(savedLat, savedLng, coords.latitude, coords.longitude);
-    
-    getReverseGeocode(coords.latitude, coords.longitude, site).then(capturedAddress => {
+    try {
+      // 3. State Validation (Tamil Nadu, India)
+      const geocode = await reverseGeocodeLatLng(lat, lng);
+      const stateStr = (geocode.state || "").toLowerCase();
+      const countryStr = (geocode.country || "").toLowerCase();
+      const isTamilNadu = stateStr.includes("tamil") && (stateStr.includes("nadu") || stateStr.includes("nādū"));
+      const isIndia = countryStr.includes("india");
+      const isCoordinateInTN = lat >= 8.08 && lat <= 13.9 && lng >= 76.15 && lng <= 80.3;
+
+      if (!((isTamilNadu && isIndia) || (geocode.fullAddress.startsWith("Lat:") && isCoordinateInTN))) {
+        setVerificationStatus("failed");
+        setVerificationDetails({
+          message: "Outside Tamil Nadu",
+          details: "Attendance allowed only inside Tamil Nadu location",
+          isLocationConfigError: false
+        });
+        setLocationCheckStatus("granted");
+        return;
+      }
+
+      // 4. Geofence Validation
+      const savedLat = Number(savedSiteLocation.latitude);
+      const savedLng = Number(savedSiteLocation.longitude);
+      const siteRadius = Number(site.radius || 100);
+
+      const distance = calculateDistanceMeters(savedLat, savedLng, lat, lng);
       const isWithinRadius = distance <= siteRadius;
-      
+
       if (isWithinRadius) {
         setVerificationStatus("success");
         setVerificationDetails({
           message: "Site Verified Successfully",
           expectedSiteName: site.siteName,
           expectedAddress: savedSiteLocation.address || site.location,
-          capturedAddress: capturedAddress,
+          capturedAddress: geocode.fullAddress,
           distance: Math.round(distance)
         });
       } else {
         setVerificationStatus("failed");
         setVerificationDetails({
-          message: "You are not at the assigned site location",
+          message: "Outside Site Radius",
+          details: "You are outside the assigned site location",
           expectedSiteName: site.siteName,
           expectedAddress: savedSiteLocation.address || site.location,
-          capturedAddress: capturedAddress,
+          capturedAddress: geocode.fullAddress,
           distance: Math.round(distance),
           allowedRadius: siteRadius
         });
       }
       setLocationCheckStatus("granted");
-    }).catch(err => {
-      console.error("Reverse geocoding error:", err);
-      const isWithinRadius = distance <= siteRadius;
-      if (isWithinRadius) {
-        setVerificationStatus("success");
-        setVerificationDetails({
-          message: "Site Verified Successfully",
-          expectedSiteName: site.siteName,
-          expectedAddress: savedSiteLocation.address || site.location,
-          capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
-          distance: Math.round(distance)
-        });
-      } else {
-        setVerificationStatus("failed");
-        setVerificationDetails({
-          message: "You are not at the assigned site location",
-          expectedSiteName: site.siteName,
-          expectedAddress: savedSiteLocation.address || site.location,
-          capturedAddress: `Lat: ${Number(coords.latitude).toFixed(4)}, Lng: ${Number(coords.longitude).toFixed(4)}`,
-          distance: Math.round(distance),
-          allowedRadius: siteRadius
-        });
-      }
+    } catch (err) {
+      console.error("Verification logic exception:", err);
+      setVerificationStatus("failed");
+      setVerificationDetails({
+        message: "Site Verification Failed",
+        details: "An error occurred during verification",
+        isLocationConfigError: false
+      });
       setLocationCheckStatus("granted");
-    });
+    }
   };
 
   const handleResetVerification = () => {
@@ -798,7 +721,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }, 100);
     } catch (err) {
       console.error("WebRTC camera stream access failed:", err);
-      setCameraError("Failed to access camera stream. Please check camera permissions in browser settings.");
+      setCameraError("Camera Permission Required");
     }
   };
 
@@ -865,7 +788,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
       const lat = deviceCoords.latitude;
       const lng = deviceCoords.longitude;
-      const photoGpsLocation = { latitude: lat, longitude: lng };
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
@@ -875,8 +797,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         todayStr, 
         lat, 
         lng, 
+        verificationDetails?.capturedAddress || "",
         attendancePhotoPreview, 
-        photoGpsLocation, 
         "verified"
       );
 
@@ -1210,26 +1132,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setPhotoSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
-      let userLat = siteLat;
-      let userLng = siteLng;
-
-      if (!mockLocation) {
-        const position = await new Promise((resolve, reject) => {
-          navigator.geolocation.getCurrentPosition(resolve, reject, {
-            enableHighAccuracy: true,
-            timeout: 10000
-          });
+      
+      const position = await new Promise((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject, {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0
         });
-        userLat = position.coords.latitude;
-        userLng = position.coords.longitude;
-      }
+      });
+      const userLat = position.coords.latitude;
+      const userLng = position.coords.longitude;
 
       // Check distance
       const distance = calculateDistanceMeters(siteLat, siteLng, userLat, userLng);
       if (distance > siteRadius) {
         throw new Error(
           `Location Verification Error: You are ${Math.round(distance)}m away from ${site.siteName}. ` +
-          `Allowed radius is ${siteRadius}m. Enable 'Mock Location' to bypass.`
+          `Allowed radius is ${siteRadius}m.`
         );
       }
 
@@ -1530,76 +1449,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {!savedSiteLocation && (
-          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #f97316", backgroundColor: "rgba(249, 115, 22, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <MapPin size={18} style={{ color: "#f97316" }} />
-                <span style={{ fontWeight: "700", color: "var(--primary-900)", fontSize: "13px" }}>Set Site Location</span>
+                <MapPin size={18} style={{ color: "#ea580c" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
               </div>
               <Badge status="pending">Mandatory</Badge>
             </div>
-            <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-              Setup your coordinate location for this site first before checking in.
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
             </p>
             <button 
               type="button" 
               onClick={() => setShowEngineerLocationSetupModal(true)} 
               className="mobile-btn-large"
-              style={{ backgroundColor: "#f97316", color: "#ffffff", border: "none", fontSize: "12px", padding: "8px" }}
+              style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
             >
-              Set Site Location
+              Set Current Site Location
             </button>
           </div>
         )}
 
-        {/* Developer options */}
-        <div style={{
-          backgroundColor: "#ffffff",
-          borderRadius: "var(--radius-md)",
-          border: "1px solid var(--border-color)",
-          padding: "14px",
-          fontSize: "12px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "10px",
-          boxShadow: "var(--shadow-sm)"
-        }}>
-          <label style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "700", color: "var(--accent-700)", cursor: "pointer", margin: 0 }}>
-            <input 
-              type="checkbox" 
-              checked={mockLocation} 
-              onChange={(e) => setMockLocation(e.target.checked)} 
-              style={{ margin: 0 }}
-            />
-            <span>Bypass GPS Geofence (Mocking)</span>
-          </label>
-          {mockLocation && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontWeight: "700", color: "#b45309" }}>Simulate Test Case:</span>
-              <select
-                value={mockCase}
-                onChange={(e) => setMockCase(e.target.value)}
-                style={{
-                  padding: "6px",
-                  borderRadius: "4px",
-                  border: "1px solid #d97706",
-                  backgroundColor: "#ffffff",
-                  fontWeight: "600",
-                  color: "#b45309",
-                  cursor: "pointer",
-                  outline: "none"
-                }}
-              >
-                <option value="valid">1. Correct Site Photo (Match)</option>
-                <option value="different">2. Different Location Photo (Mismatch)</option>
-                <option value="nogps">3. Gallery Image without GPS (No GPS)</option>
-                <option value="nopermission">4. No Location Permission (Warning)</option>
-                <option value="gps_off">5. GPS Off / Unavailable (Warning)</option>
-                <option value="old">6. Old Photo (Timestamp Mismatch)</option>
-              </select>
-            </div>
-          )}
-        </div>
+        {/* Mock controls completely removed for production */}
 
         {/* Quick Actions Grid */}
         <div style={{ marginTop: "8px" }}>
@@ -1993,16 +1865,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
                 <div>
                   <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--danger-600)" }}>
-                    {verificationDetails?.message === "Please set site location first." ? "Location Missing" : (verificationDetails?.isLocationConfigError ? "Configuration Error" : "Location mismatch")}
+                    {verificationDetails?.message || "Site Verification Failed"}
                   </h4>
                   <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
-                    {verificationDetails?.message || (verificationDetails?.isLocationConfigError 
-                      ? "Site location is not configured. Contact admin." 
-                      : "Your detected coordinates do not match the assigned worksite location boundary.")}
+                    {verificationDetails?.details || "Site verification failed. Please try again."}
                   </p>
                 </div>
 
-                {!verificationDetails?.isLocationConfigError && (
+                {!verificationDetails?.isLocationConfigError && verificationDetails?.distance !== undefined && (
                   <div style={{
                     width: "100%",
                     backgroundColor: "var(--danger-50)",
@@ -3358,9 +3228,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               flexDirection: "column",
               gap: "14px"
             }}>
-              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Set Site Location</h4>
+              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Set Current Site Location</h4>
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                Establish the physical check-in location from your device GPS sensor.
+                Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
               </p>
               
               {engineerLocationError && (
