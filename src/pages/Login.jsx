@@ -537,15 +537,6 @@ export default function Login() {
                   placeholder="admin@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px 10px 38px",
-                    border: "1.5px solid var(--border-color)",
-                    borderRadius: "var(--radius-md)",
-                    fontSize: "14px",
-                    outline: "none",
-                    transition: "all var(--transition-fast)"
-                  }}
                   required
                 />
               </div>
@@ -561,15 +552,6 @@ export default function Login() {
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px 10px 38px",
-                    border: "1.5px solid var(--border-color)",
-                    borderRadius: "var(--radius-md)",
-                    fontSize: "14px",
-                    outline: "none",
-                    transition: "all var(--transition-fast)"
-                  }}
                   required
                 />
               </div>
@@ -580,7 +562,8 @@ export default function Login() {
               id="btn-login-submit" 
               icon={KeyRound} 
               isLoading={loading}
-              style={{ width: "100%", marginTop: "8px", backgroundColor: "#f97316", color: "#ffffff", padding: "12px", height: "46px", display: "flex", alignItems: "center", justifyContent: "center", gap: "8px", border: "none", borderRadius: "var(--radius-md)" }}
+              className="mobile-btn-large"
+              style={{ marginTop: "8px", background: "var(--accent-gradient)" }}
             >
               {loading ? "Authenticating Credentials..." : "Authorize & Sign In"}
             </Button>

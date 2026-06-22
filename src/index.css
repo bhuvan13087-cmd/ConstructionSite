@@ -2,6 +2,8 @@
    CONSTRUCTION SITE ADMIN PANEL - STYLESYSTEM (VANILLA CSS)
    ========================================================================== */
 
+@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
 /* --- CSS Variables & Design System --- */
 :root {
   /* Color Palette (HSL & Hex) - Professional Sky Blue / Slate theme */
@@ -2862,7 +2864,6 @@ body:has(.landing-page-container) {
 }
 
 /* Typography Enhancements */
-@import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600;700;800&family=Outfit:wght@400;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
 
 /* Redesign Landing Container */
 .landing-page-container {

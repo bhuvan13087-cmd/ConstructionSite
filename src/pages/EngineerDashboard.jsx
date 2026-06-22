@@ -171,6 +171,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [activeSiteId, setActiveSiteId] = useState("");
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
   const [allSitesAttendance, setAllSitesAttendance] = useState([]);
+  
+  const getLastAttendanceForSite = (siteId) => {
+    if (!allSitesAttendance || allSitesAttendance.length === 0) {
+      return "No attendance recorded";
+    }
+    const siteAtt = allSitesAttendance.filter(record => record.siteId === siteId);
+    if (siteAtt.length === 0) {
+      return "No attendance recorded";
+    }
+    // Sort by date (YYYY-MM-DD) descending
+    siteAtt.sort((a, b) => b.date.localeCompare(a.date));
+    const last = siteAtt[0];
+    try {
+      const dateObj = new Date(last.date);
+      const formattedDate = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+      return `Last checked in: ${formattedDate}`;
+    } catch (e) {
+      return `Last checked in: ${last.date}`;
+    }
+  };
+
   const [showEngineerLocationSetupModal, setShowEngineerLocationSetupModal] = useState(false);
   const [engineerLocationSubmitting, setEngineerLocationSubmitting] = useState(false);
   const [engineerLocationError, setEngineerLocationError] = useState("");
@@ -1310,62 +1331,136 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         )}
         <div className="mobile-app-frame">
-          <header className="mobile-app-header" style={{ justifyContent: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <HardHat size={22} style={{ color: "var(--accent-600)" }} />
-              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Apex Build</h3>
+          <header className="mobile-app-header" style={{ justifyContent: "space-between", height: "64px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <HardHat size={22} style={{ color: "var(--construction-orange)" }} />
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>Apex Build</h3>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{
+                width: "28px",
+                height: "28px",
+                borderRadius: "50%",
+                backgroundColor: "var(--primary-100)",
+                color: "var(--primary-800)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "800",
+                fontSize: "12px"
+              }}>
+                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+              </div>
             </div>
           </header>
-          <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "20px", padding: "24px 16px" }}>
-            <div style={{ textAlign: "center", marginTop: "10px" }}>
-              <h4 style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", margin: "0 0 6px 0" }}>My Assigned Sites</h4>
+          <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "16px" }}>
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              backgroundColor: "#ffffff",
+              padding: "16px",
+              borderRadius: "var(--radius-md)",
+              border: "1px solid var(--border-color)",
+              boxShadow: "var(--shadow-sm)",
+              marginBottom: "4px"
+            }}>
+              <div style={{
+                width: "44px",
+                height: "44px",
+                borderRadius: "50%",
+                backgroundColor: "rgba(249, 115, 22, 0.1)",
+                color: "var(--construction-orange)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontWeight: "800",
+                fontSize: "18px",
+                border: "1px solid rgba(249, 115, 22, 0.2)"
+              }}>
+                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                  {userProfile?.fullName || "Site Engineer"}
+                </h4>
+                <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)" }}>
+                  {userProfile?.email || "engineer@apex.com"}
+                </p>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: "4px" }}>
+              <h4 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-950)", margin: "0 0 4px 0" }}>My Assigned Sites</h4>
               <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0 }}>Select a construction worksite to open your dashboard.</p>
             </div>
             
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px", overflowY: "auto", flex: 1, paddingBottom: "20px" }}>
-              {assignedSites.map(site => (
-                <div 
-                  key={site.id} 
-                  onClick={() => setActiveSiteId(site.id)}
-                  style={{
-                    backgroundColor: "#ffffff",
-                    borderRadius: "var(--radius-md)",
-                    border: "1px solid var(--border-color)",
-                    padding: "16px",
-                    boxShadow: "var(--shadow-sm)",
-                    cursor: "pointer",
-                    transition: "all 0.2s ease",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "6px"
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.borderColor = "var(--accent-500)";
-                    e.currentTarget.style.boxShadow = "var(--shadow-md)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.borderColor = "var(--border-color)";
-                    e.currentTarget.style.boxShadow = "var(--shadow-sm)";
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontWeight: "800", fontSize: "14px", color: "var(--primary-900)" }}>{site.siteName}</span>
-                    <Badge status={site.locationStatus === "Verified" ? "success" : "pending"}>
-                      {site.locationStatus === "Verified" ? "Active GPS" : "Setup Required"}
-                    </Badge>
+            <div className="site-selection-list" style={{ overflowY: "auto", flex: 1, paddingBottom: "20px" }}>
+              {assignedSites.map(site => {
+                const lastAtt = getLastAttendanceForSite(site.id);
+                return (
+                  <div 
+                    key={site.id} 
+                    className="site-card-premium"
+                    onClick={() => setActiveSiteId(site.id)}
+                  >
+                    <div className="site-card-premium-header">
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                        <h4 className="site-card-premium-name">{site.siteName}</h4>
+                        <div className="site-badge-group">
+                          <span className={`site-badge-pill ${(site.status || 'Active').toLowerCase()}`}>
+                            {site.status || "Active"}
+                          </span>
+                          <span className={`site-badge-pill ${site.locationStatus === "Verified" ? "verified" : "not-set"}`}>
+                            {site.locationStatus === "Verified" ? "Location Verified" : "Location Not Set"}
+                          </span>
+                        </div>
+                      </div>
+                      <div style={{
+                        width: "40px",
+                        height: "40px",
+                        borderRadius: "10px",
+                        backgroundColor: "rgba(249, 115, 22, 0.08)",
+                        color: "var(--construction-orange)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: "1px solid rgba(249, 115, 22, 0.15)",
+                        flexShrink: 0
+                      }}>
+                        <HardHat size={22} />
+                      </div>
+                    </div>
+
+                    <div className="site-card-premium-details">
+                      <div className="site-card-detail-item" style={{ display: "flex", alignItems: "start", gap: "8px", fontSize: "12.5px" }}>
+                        <MapPin size={14} className="site-card-detail-icon" style={{ marginTop: "2px" }} />
+                        <span style={{ lineHeight: "1.4" }}>Location: <strong>{site.location || "No Address Set"}</strong></span>
+                      </div>
+                      <div className="site-card-detail-item" style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12.5px" }}>
+                        <Calendar size={14} className="site-card-detail-icon" />
+                        <span><strong>{lastAtt}</strong></span>
+                      </div>
+                    </div>
+
+                    <button 
+                      type="button" 
+                      className="site-card-btn-open"
+                      style={{ width: "100%", textTransform: "none", letterSpacing: "normal" }}
+                    >
+                      <span>Open Site</span>
+                      <ChevronRight size={16} />
+                    </button>
                   </div>
-                  <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <MapPin size={12} style={{ color: "var(--accent-600)" }} /> {site.location || "No Address Set"}
-                  </p>
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <button
               type="button"
               className="mobile-btn-large"
               onClick={() => logout()}
-              style={{ backgroundColor: "var(--danger-500)", color: "#ffffff", marginTop: "auto" }}
+              style={{ backgroundColor: "var(--danger-500)", color: "#ffffff", marginTop: "auto", display: "flex", alignItems: "center", gap: "8px", padding: "14px" }}
             >
               <LogOut size={16} />
               <span>Logout Account</span>
@@ -3210,7 +3305,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.5)",
+            backgroundColor: "rgba(15, 23, 42, 0.65)",
+            backdropFilter: "blur(8px)",
             zIndex: 1100,
             display: "flex",
             alignItems: "center",
@@ -3219,17 +3315,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }}>
             <div style={{
               backgroundColor: "#ffffff",
-              borderRadius: "var(--radius-md)",
-              padding: "20px",
+              borderRadius: "20px",
+              padding: "24px 20px 20px 20px",
               width: "100%",
-              maxWidth: "320px",
-              boxShadow: "var(--shadow-lg)",
+              maxWidth: "340px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              border: "1px solid #e2e8f0",
               display: "flex",
               flexDirection: "column",
-              gap: "14px"
+              gap: "16px",
+              position: "relative"
             }}>
-              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Set Current Site Location</h4>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>Set Current Site Location</h4>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  onClick={() => setShowEngineerLocationSetupModal(false)}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
                 Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
               </p>
               
@@ -3252,7 +3360,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <button
                   type="button"
                   className="mobile-btn-large"
-                  style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, padding: "10px", fontSize: "12px", boxShadow: "none" }}
+                  style={{ backgroundColor: "#f1f5f9", color: "#475569", flex: 1, padding: "12px 10px", fontSize: "13px", boxShadow: "none" }}
                   onClick={() => setShowEngineerLocationSetupModal(false)}
                 >
                   Cancel
@@ -3260,8 +3368,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <button
                   type="button"
                   disabled={engineerLocationSubmitting}
-                  className="mobile-btn-large success"
-                  style={{ flex: 1.5, padding: "10px", fontSize: "12px" }}
+                  className="mobile-btn-large"
+                  style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px", background: "var(--accent-gradient)" }}
                   onClick={handleSetSiteLocationClick}
                 >
                   {engineerLocationSubmitting ? "Capturing..." : "Capture & Save"}
@@ -3279,7 +3387,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             left: 0,
             right: 0,
             bottom: 0,
-            backgroundColor: "rgba(0,0,0,0.5)",
+            backgroundColor: "rgba(15, 23, 42, 0.65)",
+            backdropFilter: "blur(8px)",
             zIndex: 1100,
             display: "flex",
             alignItems: "center",
@@ -3288,22 +3397,43 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }}>
             <div style={{
               backgroundColor: "#ffffff",
-              borderRadius: "var(--radius-md)",
-              padding: "20px",
+              borderRadius: "20px",
+              padding: "24px 20px 20px 20px",
               width: "100%",
-              maxWidth: "320px",
-              boxShadow: "var(--shadow-lg)",
+              maxWidth: "340px",
+              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+              border: "1px solid #e2e8f0",
               display: "flex",
               flexDirection: "column",
-              gap: "14px"
+              gap: "16px",
+              position: "relative"
             }}>
-              <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Specify Labour Category</h4>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>Specify Labour Category</h4>
+                <button
+                  type="button"
+                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  onClick={() => {
+                    if (labourSpecifyText.trim()) {
+                      if (window.confirm("Discard entered data?")) {
+                        setLabourSpecifyText("");
+                        setShowLabourSpecifyModal(false);
+                      }
+                    } else {
+                      setShowLabourSpecifyModal(false);
+                    }
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
                 Please enter the trade or type for this worker headcount (e.g. Welder, Carpenter).
               </p>
               
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span className="mobile-form-label" style={{ marginBottom: 0 }}>Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
                 <input
                   type="text"
                   placeholder="E.g. Welder, Carpenter"
@@ -3312,12 +3442,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   required
                   style={{
                     width: "100%",
-                    padding: "10px 12px",
-                    border: "1.5px solid var(--accent-500)",
-                    borderRadius: "var(--radius-sm)",
+                    padding: "12px 14px",
+                    border: "1.5px solid var(--construction-orange)",
+                    borderRadius: "var(--radius-md)",
                     fontSize: "14px",
                     outline: "none",
-                    backgroundColor: "#ffffff"
+                    backgroundColor: "#f8fafc"
                   }}
                 />
               </div>
@@ -3326,7 +3456,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <button
                   type="button"
                   className="mobile-btn-large"
-                  style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, padding: "10px", fontSize: "12px", boxShadow: "none" }}
+                  style={{ backgroundColor: "#f1f5f9", color: "#475569", flex: 1, padding: "12px 10px", fontSize: "13px", boxShadow: "none" }}
                   onClick={() => {
                     if (labourSpecifyText.trim()) {
                       if (window.confirm("Discard entered data?")) {
@@ -3342,8 +3472,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </button>
                 <button
                   type="button"
-                  className="mobile-btn-large success"
-                  style={{ flex: 1.5, padding: "10px", fontSize: "12px" }}
+                  className="mobile-btn-large"
+                  style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px", background: "var(--accent-gradient)" }}
                   onClick={() => {
                     const cleanName = labourSpecifyText.trim();
                     if (!cleanName) {
