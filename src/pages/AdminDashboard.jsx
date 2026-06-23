@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
 import { getDashboardMetrics, getSites, getSiteEngineers } from "../services/firebaseService";
-import { MapPin, Users, ClipboardCheck, Package } from "lucide-react";
+import { MapPin, Users, ClipboardCheck, Package, Building2 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
@@ -91,71 +91,53 @@ export default function AdminDashboard() {
       )}
 
       {/* Metrics Section */}
-      <div className="metrics-grid">
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Total Construction Sites</span>
-            <div className="metric-icon-wrapper info">
-              <MapPin size={20} />
+      <div className="metrics-hero-grid">
+        <div className="metric-hero-card projects">
+          <div className="metric-hero-header">
+            <span className="metric-hero-title">Active Projects & Assignments</span>
+            <div className="metric-hero-icon">
+              <Building2 size={24} />
             </div>
           </div>
-          <div className="metric-value">{metrics.totalSites}</div>
-          <p className="metric-subtext">Active construction projects</p>
+          <div className="metric-hero-main">
+            <span className="metric-hero-value">{metrics.totalSites}</span>
+            <span className="metric-hero-label">Total Sites</span>
+          </div>
+          <div className="metric-hero-footer">
+            <div className="metric-hero-sub">
+              <span className="metric-hero-sub-val">{totalAssignedProjects}</span>
+              <span className="metric-hero-sub-label">Assigned Sites</span>
+            </div>
+            <div className="metric-hero-divider"></div>
+            <div className="metric-hero-sub">
+              <span className="metric-hero-sub-val">{metrics.activeEngineers}</span>
+              <span className="metric-hero-sub-label">Active Engineers</span>
+            </div>
+          </div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Active Site Engineers</span>
-            <div className="metric-icon-wrapper success">
-              <Users size={20} />
+        <div className="metric-hero-card operations">
+          <div className="metric-hero-header">
+            <span className="metric-hero-title">Operations & Workforce</span>
+            <div className="metric-hero-icon">
+              <ClipboardCheck size={24} />
             </div>
           </div>
-          <div className="metric-value">{metrics.activeEngineers}</div>
-          <p className="metric-subtext">Engineers active on field</p>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Total Assigned Projects</span>
-            <div className="metric-icon-wrapper primary">
-              <ClipboardCheck size={20} />
+          <div className="metric-hero-main">
+            <span className="metric-hero-value">{metrics.attendanceToday}</span>
+            <span className="metric-hero-label">Today's Attendance</span>
+          </div>
+          <div className="metric-hero-footer">
+            <div className="metric-hero-sub">
+              <span className="metric-hero-sub-val">{metrics.activeWorkers}</span>
+              <span className="metric-hero-sub-label">Active Workers</span>
+            </div>
+            <div className="metric-hero-divider"></div>
+            <div className="metric-hero-sub">
+              <span className="metric-hero-sub-val">{metrics.totalMaterials}</span>
+              <span className="metric-hero-sub-label">Materials Logged</span>
             </div>
           </div>
-          <div className="metric-value">{totalAssignedProjects}</div>
-          <p className="metric-subtext">Sites with allocated managers</p>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Today's Attendance Summary</span>
-            <div className="metric-icon-wrapper warning">
-              <ClipboardCheck size={20} />
-            </div>
-          </div>
-          <div className="metric-value">{metrics.attendanceToday}</div>
-          <p className="metric-subtext">Present site representatives</p>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Total Materials Logged</span>
-            <div className="metric-icon-wrapper danger">
-              <Package size={20} />
-            </div>
-          </div>
-          <div className="metric-value">{metrics.totalMaterials}</div>
-          <p className="metric-subtext">Total inventory ledger receipts</p>
-        </div>
-
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Active Workers Count</span>
-            <div className="metric-icon-wrapper success" style={{ backgroundColor: "var(--success-50)", color: "var(--success-600)" }}>
-              <Users size={20} />
-            </div>
-          </div>
-          <div className="metric-value">{metrics.activeWorkers}</div>
-          <p className="metric-subtext">Labor personnel at sites</p>
         </div>
       </div>
 
