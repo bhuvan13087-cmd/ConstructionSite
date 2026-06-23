@@ -24,7 +24,9 @@ import {
   CheckCircle2,
   Shield,
   HelpCircle,
-  Info
+  Info,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Button from "../components/common/Button";
@@ -95,6 +97,7 @@ const HeroVisual = () => (
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
@@ -127,6 +130,7 @@ export default function Login() {
 
   const openLoginModal = () => {
     setError("");
+    setShowPassword(false);
     setIsLoginModalOpen(true);
   };
 
@@ -136,13 +140,13 @@ export default function Login() {
     setError("");
 
     try {
-      sessionStorage.setItem("is_session_active", "true");
+      localStorage.setItem("is_session_active", "true");
       await signIn(email.trim(), password);
     } catch (err) {
       // If sign-in fails, check if we need to auto-create the default admin account
       if (email.trim() === "admin@gmail.com" && password === "123456") {
         try {
-          sessionStorage.setItem("is_session_active", "true");
+          localStorage.setItem("is_session_active", "true");
           const userCredential = await signUp(email.trim(), password);
           const user = userCredential.user;
 
@@ -157,7 +161,7 @@ export default function Login() {
           });
           return;
         } catch (createErr) {
-          sessionStorage.removeItem("is_session_active");
+          localStorage.removeItem("is_session_active");
           console.error("Auto-provisioning failed:", createErr);
           if (createErr.code === "auth/email-already-in-use") {
             setError("Incorrect password");
@@ -169,7 +173,7 @@ export default function Login() {
         }
       }
 
-      sessionStorage.removeItem("is_session_active");
+      localStorage.removeItem("is_session_active");
       console.error("Login Error:", err);
       let userFriendlyMsg = "Login failed. Please try again.";
       if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
@@ -273,7 +277,7 @@ export default function Login() {
             size="sm" 
             onClick={openLoginModal}
             id="nav-login-btn"
-            style={{ border: "1.5px solid #f97316", color: "#f97316", fontWeight: "700" }}
+            className="landing-nav-login-btn"
           >
             Login
           </Button>
@@ -291,10 +295,10 @@ export default function Login() {
             Manage sites, workforce, materials, attendance and daily progress from one powerful, secure civil engineering command system.
           </p>
           <div className="landing-hero-buttons">
-            <Button variant="primary" size="lg" onClick={openLoginModal} id="hero-login-btn" style={{ backgroundColor: "#f97316" }}>
+            <Button variant="primary" size="lg" onClick={openLoginModal} id="hero-login-btn" className="landing-hero-login-btn">
                Login to Console
             </Button>
-            <Button variant="outline" size="lg" onClick={(e) => handleSmoothScroll(e, "features")} id="hero-explore-btn" style={{ color: "var(--primary-800)", borderColor: "var(--border-color)" }}>
+            <Button variant="outline" size="lg" onClick={(e) => handleSmoothScroll(e, "features")} id="hero-explore-btn" className="landing-hero-explore-btn">
                Explore Features
             </Button>
           </div>
@@ -418,19 +422,19 @@ export default function Login() {
           </div>
 
           <form className="landing-contact-form" onSubmit={(e) => { e.preventDefault(); alert("Enterprise contact query simulated. Thank you!"); }}>
-            <div className="form-group" style={{ marginBottom: "0" }}>
-              <label htmlFor="contact-name">Full Name</label>
-              <input type="text" id="contact-name" placeholder="John Doe" required className="input-wrapper" style={{ paddingLeft: "14px" }} />
+            <div className="landing-contact-form-group">
+              <label htmlFor="contact-name" className="landing-contact-label">Full Name</label>
+              <input type="text" id="contact-name" placeholder="John Doe" required className="landing-contact-input" />
             </div>
-            <div className="form-group" style={{ marginBottom: "0" }}>
-              <label htmlFor="contact-email">Corporate Email</label>
-              <input type="email" id="contact-email" placeholder="j.doe@apex.com" required className="input-wrapper" style={{ paddingLeft: "14px" }} />
+            <div className="landing-contact-form-group">
+              <label htmlFor="contact-email" className="landing-contact-label">Corporate Email</label>
+              <input type="email" id="contact-email" placeholder="j.doe@apex.com" required className="landing-contact-input" />
             </div>
-            <div className="form-group" style={{ marginBottom: "0" }}>
-              <label htmlFor="contact-message">Message Details</label>
-              <textarea id="contact-message" placeholder="Describe your inquiry..." rows={4} required style={{ border: "1px solid var(--border-color)", padding: "12px", outline: "none", borderRadius: "var(--radius-sm)" }}></textarea>
+            <div className="landing-contact-form-group">
+              <label htmlFor="contact-message" className="landing-contact-label">Message Details</label>
+              <textarea id="contact-message" placeholder="Describe your inquiry..." rows={4} required className="landing-contact-textarea"></textarea>
             </div>
-            <Button variant="primary" type="submit" style={{ backgroundColor: "#f97316" }}>
+            <Button variant="primary" type="submit" className="landing-contact-submit-btn">
               Send Inquiry
             </Button>
           </form>
@@ -481,79 +485,77 @@ export default function Login() {
 
       <Modal
         isOpen={isLoginModalOpen}
-        onClose={() => setIsLoginModalOpen(false)}
+        onClose={() => {
+          setIsLoginModalOpen(false);
+          setShowPassword(false);
+        }}
         closeOnOverlayClick={false}
         title="Apex Console Login"
         maxWidth="440px"
+        className="modal-overlay login-modal-overlay"
       >
-        <div style={{ padding: "10px 0 0 0" }}>
+        <div className="login-modal-container">
           {/* Saas-style construction header */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "8px", marginBottom: "20px" }}>
-            <div style={{
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              width: "48px",
-              height: "48px",
-              borderRadius: "12px",
-              backgroundColor: "rgba(249, 115, 22, 0.1)",
-              border: "1px solid rgba(249, 115, 22, 0.2)"
-            }}>
-              <HardHat size={26} style={{ color: "#f97316" }} />
+          <div className="login-header">
+            <div className="login-logo-badge">
+              <HardHat size={28} className="login-logo-icon" />
             </div>
-            <h3 style={{ margin: "4px 0 0 0", fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>Welcome to Apex Console</h3>
-            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", textAlign: "center" }}>
+            <h3 className="login-title">Welcome to Apex Console</h3>
+            <p className="login-subtitle">
               Provide your credentials to manage or verify construction site operations.
             </p>
           </div>
 
           {error && (
-            <div style={{ 
-              display: "flex", 
-              alignItems: "start", 
-              gap: "10px", 
-              backgroundColor: "#fef2f2", 
-              borderLeft: "4px solid #dc2626", 
-              borderRadius: "4px", 
-              padding: "12px 14px", 
-              marginBottom: "20px" 
-            }}>
-              <Info size={16} style={{ color: "#dc2626", flexShrink: 0, marginTop: "2px" }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                <span style={{ fontSize: "13px", color: "#b91c1c", fontWeight: "700" }}>Authorization Error</span>
-                <span style={{ fontSize: "12px", color: "#991b1b" }}>{error}</span>
+            <div className="login-error-alert">
+              <Info size={18} className="login-error-icon" />
+              <div className="login-error-content">
+                <span className="login-error-title">Authorization Failed</span>
+                <span className="login-error-message">{error}</span>
               </div>
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div className="form-group" style={{ margin: 0 }}>
-              <label htmlFor="modal-email" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>Corporate Email Address</label>
-              <div className="input-wrapper" style={{ position: "relative" }}>
-                <Mail className="input-icon" size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+          <form onSubmit={handleSubmit} className="login-form-content">
+            <div className="login-form-group">
+              <label htmlFor="modal-email" className="login-field-label">Corporate Email Address</label>
+              <div className="login-input-wrapper">
+                <Mail className="login-input-icon" size={18} />
                 <input
                   type="email"
                   id="modal-email"
+                  className="login-input-field"
                   placeholder="admin@gmail.com"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   required
+                  autoComplete="email"
                 />
               </div>
             </div>
 
-            <div className="form-group" style={{ margin: 0 }}>
-              <label htmlFor="modal-password" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>Security Password</label>
-              <div className="input-wrapper" style={{ position: "relative" }}>
-                <Lock className="input-icon" size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+            <div className="login-form-group">
+              <label htmlFor="modal-password" className="login-field-label">Security Password</label>
+              <div className="login-input-wrapper">
+                <Lock className="login-input-icon" size={18} />
                 <input
-                  type="password"
+                  type={showPassword ? "text" : "password"}
                   id="modal-password"
+                  className="login-input-field password-field"
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   required
+                  autoComplete="current-password"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="login-password-toggle-btn"
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                >
+                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                </button>
               </div>
             </div>
 
@@ -562,8 +564,7 @@ export default function Login() {
               id="btn-login-submit" 
               icon={KeyRound} 
               isLoading={loading}
-              className="mobile-btn-large"
-              style={{ marginTop: "8px", background: "var(--accent-gradient)" }}
+              className="login-submit-btn"
             >
               {loading ? "Authenticating Credentials..." : "Authorize & Sign In"}
             </Button>

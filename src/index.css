@@ -3172,6 +3172,896 @@ body:has(.landing-page-container) {
   color: var(--construction-orange-dark) !important;
 }
 
+/* ==========================================================================
+   PREMIUM REDESIGN OF LOGIN MODAL
+   ========================================================================== */
+
+/* Custom glassmorphic overlay for login modal */
+.login-modal-overlay {
+  background-color: rgba(15, 23, 42, 0.65) !important;
+  backdrop-filter: blur(12px) !important;
+  transition: all 0.3s ease;
+  z-index: 3000 !important;
+}
+
+/* Glassmorphic card design */
+.login-modal-overlay .modal-card {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border: 1px solid rgba(226, 232, 240, 0.8) !important;
+  box-shadow: 
+    0 20px 25px -5px rgba(0, 0, 0, 0.1),
+    0 10px 10px -5px rgba(0, 0, 0, 0.04),
+    0 0 0 1px rgba(255, 255, 255, 0.6) inset !important;
+  border-radius: 24px !important;
+  animation: modalSlideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+  overflow: hidden !important;
+  max-width: 440px !important;
+}
+
+@keyframes modalSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* Bottom sheet style for Android mobile screens */
+@media (max-width: 576px) {
+  .login-modal-overlay {
+    align-items: flex-end !important;
+    padding: 0 !important;
+  }
+
+  .login-modal-overlay .modal-card {
+    border-radius: 28px 28px 0 0 !important;
+    max-height: 85vh !important;
+    animation: bottomSheetUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards !important;
+    width: 100% !important;
+    margin: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+  }
+
+  .login-modal-overlay .modal-card::before {
+    content: '';
+    display: block;
+    width: 44px;
+    height: 5px;
+    background-color: #cbd5e1;
+    border-radius: 3px;
+    margin: 12px auto 4px;
+    flex-shrink: 0;
+  }
+
+  .login-modal-overlay .modal-body {
+    padding: 20px 24px 32px !important;
+  }
+}
+
+@keyframes bottomSheetUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+/* Close button on modal header */
+.login-modal-overlay .btn-close-modal {
+  background-color: #f1f5f9 !important;
+  color: #64748b !important;
+  transition: all var(--transition-fast) !important;
+  border-radius: 50% !important;
+  width: 32px !important;
+  height: 32px !important;
+}
+
+.login-modal-overlay .btn-close-modal:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+  transform: rotate(90deg) !important;
+}
+
+/* Login Modal Container padding reset */
+.login-modal-container {
+  padding: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* Header layout */
+.login-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 12px;
+}
+
+/* Glowing Logo Badge */
+.login-logo-badge {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background-color: rgba(249, 115, 22, 0.1);
+  border: 1.5px solid rgba(249, 115, 22, 0.35);
+  color: #f97316;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.08);
+  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+  cursor: pointer;
+}
+
+.login-logo-badge:hover {
+  transform: translateY(-2px) scale(1.05);
+  box-shadow: 0 8px 20px rgba(249, 115, 22, 0.18);
+  border-color: rgba(249, 115, 22, 0.6);
+  background-color: rgba(249, 115, 22, 0.15);
+}
+
+.login-logo-icon {
+  z-index: 2;
+  transition: transform 0.4s ease;
+}
+
+.login-logo-badge:hover .login-logo-icon {
+  transform: rotate(-10deg);
+}
+
+/* Typography styles */
+.login-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.login-subtitle {
+  font-size: 13px;
+  color: #64748b;
+  line-height: 1.5;
+  max-width: 320px;
+  margin: 0;
+}
+
+/* Authorization error design */
+.login-error-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: #fef2f2;
+  border: 1px solid #fee2e2;
+  border-left: 4px solid #ef4444;
+  border-radius: 12px;
+  padding: 14px 16px;
+  animation: errorSlideIn 0.3s ease;
+}
+
+@keyframes errorSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.login-error-icon {
+  color: #ef4444;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.login-error-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.login-error-title {
+  font-size: 13px;
+  color: #991b1b;
+  font-weight: 700;
+}
+
+.login-error-message {
+  font-size: 12.5px;
+  color: #b91c1c;
+  line-height: 1.4;
+}
+
+/* Form Styles */
+.login-form-content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.login-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.login-field-label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  letter-spacing: 0.02em;
+  display: inline-block;
+  text-transform: none !important;
+}
+
+.login-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.login-input-icon {
+  position: absolute;
+  left: 14px;
+  color: #94a3b8;
+  pointer-events: none;
+  transition: color 0.2s ease;
+}
+
+.login-input-field {
+  width: 100% !important;
+  padding: 13px 14px 13px 44px !important;
+  border: 1.5px solid #cbd5e1 !important;
+  border-radius: 12px !important;
+  background-color: #f8fafc !important;
+  font-size: 14.5px !important;
+  font-weight: 500 !important;
+  color: #0f172a !important;
+  outline: none !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  box-shadow: none !important;
+}
+
+.login-input-field.password-field {
+  padding-right: 44px !important; /* Space for the password eye icon toggle */
+}
+
+/* Input active states */
+.login-input-field:focus {
+  background-color: #ffffff !important;
+  border-color: #f97316 !important;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12) !important;
+}
+
+/* Mail/Lock icons color change when focused */
+.login-input-wrapper:focus-within .login-input-icon {
+  color: #f97316;
+}
+
+/* Show/hide password button inside the input field */
+.login-password-toggle-btn {
+  position: absolute;
+  right: 14px;
+  height: 32px;
+  width: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0;
+  transition: all 0.2s ease;
+  z-index: 10;
+}
+
+.login-password-toggle-btn:hover {
+  color: #475569;
+  background-color: #f1f5f9;
+}
+
+.login-password-toggle-btn:active {
+  transform: scale(0.95);
+}
+
+/* Login submit button customization */
+.login-submit-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 20px !important;
+  border-radius: 12px !important;
+  font-weight: 700 !important;
+  font-size: 14px !important;
+  letter-spacing: 0.02em !important;
+  background: var(--accent-gradient) !important;
+  color: #ffffff !important;
+  border: none !important;
+  cursor: pointer !important;
+  width: 100% !important;
+  margin-top: 4px !important;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.2) !important;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  text-transform: none !important;
+}
+
+.login-submit-btn:hover {
+  box-shadow: 0 6px 16px rgba(249, 115, 22, 0.3) !important;
+  transform: translateY(-1px) !important;
+}
+
+.login-submit-btn:active {
+  transform: translateY(1px) !important;
+  box-shadow: 0 2px 6px rgba(249, 115, 22, 0.15) !important;
+}
+
+/* Support responsive touch sizing for larger devices */
+@media (hover: hover) {
+  .login-input-field:hover {
+    border-color: #94a3b8 !important;
+  }
+  .login-input-field:focus:hover {
+    border-color: #f97316 !important;
+  }
+}
+
+/* ==========================================================================
+   LANDING PAGE LAYOUT & BUTTON OVERRIDES
+   ========================================================================== */
+
+/* Navbar Login Button */
+.landing-nav-login-btn {
+  border: 1.5px solid #f97316 !important;
+  color: #f97316 !important;
+  font-weight: 700 !important;
+  background-color: transparent !important;
+  transition: all var(--transition-fast) !important;
+  border-radius: 8px !important;
+  padding: 6px 16px !important;
+  font-size: 13px !important;
+  text-transform: uppercase !important;
+}
+
+.landing-nav-login-btn:hover {
+  background-color: rgba(249, 115, 22, 0.08) !important;
+  color: #ea580c !important;
+  border-color: #ea580c !important;
+}
+
+/* Hero primary button */
+.landing-hero-login-btn {
+  background: var(--accent-gradient) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  box-shadow: 0 4px 14px rgba(249, 115, 22, 0.3) !important;
+  transition: all var(--transition-fast) !important;
+  border-radius: 10px !important;
+  text-transform: uppercase !important;
+}
+
+.landing-hero-login-btn:hover {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 6px 20px rgba(249, 115, 22, 0.4) !important;
+}
+
+.landing-hero-login-btn:active {
+  transform: translateY(0) !important;
+}
+
+/* Hero outline explore button */
+.landing-hero-explore-btn {
+  color: #475569 !important;
+  border-color: #cbd5e1 !important;
+  background-color: transparent !important;
+  transition: all var(--transition-fast) !important;
+  border-radius: 10px !important;
+  text-transform: uppercase !important;
+}
+
+.landing-hero-explore-btn:hover {
+  background-color: #f1f5f9 !important;
+  border-color: #94a3b8 !important;
+  color: #0f172a !important;
+}
+
+/* Contact form inputs and textareas */
+.landing-contact-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.landing-contact-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #334155;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.landing-contact-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  background-color: #f8fafc;
+  outline: none;
+  font-weight: 500;
+  font-size: 14px;
+  color: #0f172a;
+  transition: all 0.2s ease;
+}
+
+.landing-contact-input:focus {
+  background-color: #ffffff;
+  border-color: #f97316;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12);
+}
+
+.landing-contact-textarea {
+  width: 100%;
+  padding: 12px 16px;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  background-color: #f8fafc;
+  outline: none;
+  font-weight: 500;
+  font-size: 14px;
+  color: #0f172a;
+  resize: vertical;
+  transition: all 0.2s ease;
+}
+
+.landing-contact-textarea:focus {
+  background-color: #ffffff;
+  border-color: #f97316;
+  box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12);
+}
+
+.landing-contact-submit-btn {
+  background: var(--accent-gradient) !important;
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  border: none !important;
+  border-radius: 10px !important;
+  padding: 12px 20px !important;
+  cursor: pointer;
+  transition: all var(--transition-fast) !important;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.15) !important;
+  text-transform: uppercase !important;
+  font-size: 13px !important;
+  letter-spacing: 0.05em !important;
+}
+
+.landing-contact-submit-btn:hover {
+  box-shadow: 0 6px 16px rgba(249, 115, 22, 0.25) !important;
+  transform: translateY(-1px) !important;
+}
+
+.landing-contact-submit-btn:active {
+  transform: translateY(1px) !important;
+}
+
+/* ==========================================================================
+   SITE ENGINEER MORE VIEW REDESIGN (ANDROID DASHBOARD STYLE)
+   ========================================================================== */
+
+/* Clickable user profile container */
+.more-profile-card {
+  background-color: #ffffff !important;
+  border-radius: var(--radius-md) !important;
+  border: 1px solid var(--border-color) !important;
+  padding: 18px 20px !important;
+  box-shadow: var(--shadow-sm) !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 16px !important;
+  cursor: pointer !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  text-align: left !important;
+  width: 100% !important;
+  border-left: 4px solid var(--accent-500) !important; /* Safety accent color indicator */
+}
+
+.more-profile-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md) !important;
+  border-color: var(--accent-500) !important;
+  background-color: var(--accent-50) !important;
+}
+
+.more-profile-card:active {
+  transform: translateY(0);
+}
+
+.more-profile-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background-color: var(--accent-100);
+  color: var(--accent-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 18px;
+  box-shadow: inset 0 2px 4px rgba(0,0,0,0.06);
+  flex-shrink: 0;
+}
+
+.more-profile-info {
+  flex-grow: 1;
+}
+
+.more-profile-name {
+  margin: 0 0 2px 0;
+  font-family: 'Outfit', sans-serif;
+  font-size: 15px;
+  font-weight: 800;
+  color: var(--primary-950);
+}
+
+.more-profile-email {
+  margin: 0 0 4px 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.more-profile-tag {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-600);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* 2x2 Dashboard grid layout */
+.dashboard-grid {
+  display: grid !important;
+  grid-template-columns: repeat(2, 1fr) !important;
+  gap: 14px !important;
+  margin-top: 4px !important;
+}
+
+.dashboard-card {
+  background-color: #ffffff !important;
+  border: 1px solid var(--border-color) !important;
+  border-radius: var(--radius-md) !important;
+  padding: 20px 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 12px !important;
+  cursor: pointer !important;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+  text-align: center !important;
+  box-shadow: var(--shadow-sm) !important;
+  width: 100% !important;
+}
+
+.dashboard-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-md) !important;
+}
+
+.dashboard-card:active {
+  transform: scale(0.97);
+}
+
+.dashboard-card-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.3s ease;
+}
+
+.dashboard-card:hover .dashboard-card-icon-wrapper {
+  transform: scale(1.1);
+}
+
+/* Specific color schemes for the dashboard cards */
+.dashboard-card-icon-wrapper.photos {
+  background-color: #fff7ed;
+  color: #f97316;
+  border: 1.5px solid #ffedd5;
+}
+
+.dashboard-card:hover.photos {
+  border-color: #f97316 !important;
+}
+
+.dashboard-card-icon-wrapper.progress {
+  background-color: #f0fdf4;
+  color: #16a34a;
+  border: 1.5px solid #bbf7d0;
+}
+
+.dashboard-card:hover.progress {
+  border-color: #16a34a !important;
+}
+
+.dashboard-card-icon-wrapper.leaves {
+  background-color: #eff6ff;
+  color: #2563eb;
+  border: 1.5px solid #bfdbfe;
+}
+
+.dashboard-card:hover.leaves {
+  border-color: #2563eb !important;
+}
+
+.dashboard-card-icon-wrapper.logout {
+  background-color: #fef2f2;
+  color: #ef4444;
+  border: 1.5px solid #fee2e2;
+}
+
+.dashboard-card:hover.logout {
+  border-color: #ef4444 !important;
+}
+
+.dashboard-card-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--primary-900);
+  margin: 0;
+}
+
+.dashboard-card-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+  margin: 0;
+}
+
+/* Profile Details Modal Container */
+.profile-details-modal-content {
+  padding: 8px 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.profile-details-header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+}
+
+.profile-details-avatar {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background-color: var(--accent-50);
+  border: 1.5px solid var(--accent-200);
+  color: var(--accent-700);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Outfit', sans-serif;
+  font-size: 28px;
+  font-weight: 800;
+  box-shadow: 0 4px 10px rgba(14, 165, 233, 0.1);
+}
+
+.profile-details-name {
+  font-family: 'Outfit', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--primary-950);
+  margin: 0;
+}
+
+.profile-details-role {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--accent-600);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  background-color: var(--accent-50);
+  padding: 4px 12px;
+  border-radius: 50px;
+  border: 1px solid var(--accent-100);
+  margin: 0;
+}
+
+.profile-details-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  background-color: #f8fafc;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  padding: 20px;
+}
+
+.profile-detail-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  border-bottom: 1px solid #f1f5f9;
+  padding-bottom: 12px;
+}
+
+.profile-detail-item:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.profile-detail-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.profile-detail-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--primary-900);
+}
+
+.profile-detail-value.status-active {
+  color: #10b981;
+  font-weight: 800;
+}
+
+/* Sub-views Header Buttons & Titles */
+.more-subview-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.more-back-btn {
+  border: none !important;
+  background: #f1f5f9 !important;
+  color: var(--primary-800) !important;
+  padding: 8px 12px !important;
+  display: flex !important;
+  align-items: center !important;
+  gap: 4px !important;
+  cursor: pointer !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  border-radius: 8px !important;
+  transition: all var(--transition-fast) !important;
+}
+
+.more-back-btn:hover {
+  background-color: #e2e8f0 !important;
+  color: var(--primary-950) !important;
+}
+
+.more-subview-title {
+  font-family: 'Outfit', sans-serif;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--primary-950);
+  margin: 0;
+}
+
+/* Redesigned Sub-views Cards */
+.more-content-card {
+  background-color: #ffffff;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Leaves statistics tiles */
+.leaves-tiles-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.leaves-tile {
+  padding: 12px;
+  border-radius: 12px;
+  text-align: center;
+  border: 1.5px solid var(--border-color);
+  background-color: #f8fafc;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+}
+
+.leaves-tile.worked {
+  background-color: #f0fdf4;
+  border-color: #bbf7d0;
+}
+
+.leaves-tile.remaining {
+  background-color: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.leaves-tile.taken {
+  background-color: #fef2f2;
+  border-color: #fee2e2;
+}
+
+.leaves-tile-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.leaves-tile-value {
+  font-family: 'Outfit', sans-serif;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--primary-950);
+}
+
+.leaves-tile.worked .leaves-tile-value {
+  color: #16a34a;
+}
+
+.leaves-tile.remaining .leaves-tile-value {
+  color: #2563eb;
+}
+
+.leaves-tile.taken .leaves-tile-value {
+  color: #ef4444;
+}
+
+/* DPR Timeline Logs styling with status indicators */
+.dpr-timeline-log {
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background-color: #ffffff;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-left: 5px solid #cbd5e1; /* Default grey border */
+}
+
+.dpr-timeline-log.completed {
+  border-left-color: #10b981; /* Green border for completed percentage > 70 */
+}
+
+.dpr-timeline-log.warning-state {
+  border-left-color: #f59e0b; /* Orange border for logs with issues */
+}
+
+
+
 
 
 

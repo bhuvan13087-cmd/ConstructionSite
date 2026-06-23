@@ -17,8 +17,8 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    // Force sign out immediately if there is no active session flag in sessionStorage
-    const isSessionActive = sessionStorage.getItem("is_session_active") === "true";
+    // Force sign out immediately if there is no active session flag in localStorage
+    const isSessionActive = localStorage.getItem("is_session_active") === "true";
     
     const handleAuth = async () => {
       if (!isSessionActive) {
@@ -40,7 +40,7 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthChange(async (firebaseUser) => {
       setLoading(true);
       
-      const currentSessionActive = sessionStorage.getItem("is_session_active") === "true";
+      const currentSessionActive = localStorage.getItem("is_session_active") === "true";
       if (firebaseUser && currentSessionActive) {
         setUser(firebaseUser);
         try {
@@ -74,7 +74,7 @@ export function AuthProvider({ children }) {
   }, [configured]);
 
   const logout = async () => {
-    sessionStorage.removeItem("is_session_active");
+    localStorage.removeItem("is_session_active");
     localStorage.removeItem("is_logged_in");
     await signOutUser();
     setUser(null);

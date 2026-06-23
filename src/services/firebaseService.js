@@ -211,7 +211,7 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
 }
 
 // Update site location details (from Engineer first-time setup only)
-export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, engineerId, deviceDetails, locationCreatedDate = new Date().toISOString()) {
+export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, engineerId, deviceDetails, radius = 100, locationCreatedDate = new Date().toISOString()) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
   await updateDoc(siteDocRef, {
@@ -223,6 +223,7 @@ export async function updateSiteLocation(siteId, latitude, longitude, address, l
     locationCreatedDate,
     locationCapturedBy: engineerId || null,
     locationDeviceDetails: deviceDetails || null,
+    radius: Number(radius) || 100,
     updatedAt: serverTimestamp()
   });
 }

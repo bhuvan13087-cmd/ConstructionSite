@@ -6,6 +6,7 @@ import { MapPin, Users, ClipboardCheck, Package } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
+import { Link } from "react-router-dom";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -84,7 +85,7 @@ export default function AdminDashboard() {
       {sites.length === 0 && (
         <div className="info-alert" style={{ borderLeft: "4px solid var(--warning-500)", backgroundColor: "var(--warning-50)", margin: "0 0 24px 0", padding: "16px", borderRadius: "var(--radius-sm)" }}>
           <div className="info-text" style={{ color: "var(--warning-700)", fontWeight: "600" }}>
-            <strong>No sites created yet!</strong> Please navigate to the <a href="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Construction Sites</a> page to register your first construction site.
+            <strong>No sites created yet!</strong> Please navigate to the <Link to="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Construction Sites</Link> page to register your first construction site.
           </div>
         </div>
       )}

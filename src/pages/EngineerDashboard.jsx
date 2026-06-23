@@ -32,6 +32,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import SelectWithOthers from "../components/common/SelectWithOthers";
+import Modal from "../components/common/Modal";
 import { 
   MapPin, 
   FileText, 
@@ -195,6 +196,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [showEngineerLocationSetupModal, setShowEngineerLocationSetupModal] = useState(false);
   const [engineerLocationSubmitting, setEngineerLocationSubmitting] = useState(false);
   const [engineerLocationError, setEngineerLocationError] = useState("");
+  const [engineerRadius, setEngineerRadius] = useState("100");
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   // Personal stats & leaves states
   const [personalStats, setPersonalStats] = useState(null);
@@ -356,7 +359,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
     } catch (err) {
       console.error("Dashboard data load error:", err);
-      showToast(`Database synchronization failed: ${err.message}`, "error");
+      // Suppressed background database check warning to prevent false synchronization notifications.
     } finally {
       setLoading(false);
     }
@@ -532,7 +535,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             geocode.fullAddress,
             accuracy,
             engineerId,
-            deviceDetails
+            deviceDetails,
+            Number(engineerRadius) || 100
           );
           
           await loadDashboardData();
@@ -548,9 +552,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       (error) => {
         console.error("Geolocation capture error:", error);
         if (error.code === error.PERMISSION_DENIED) {
-          setEngineerLocationError("Location Permission Denied");
+          setEngineerLocationError("Location permission denied. Please allow location access in your browser/device settings.");
         } else {
-          setEngineerLocationError("GPS Disabled");
+          setEngineerLocationError("GPS is OFF or disabled. Please enable GPS/location services on your device and try again.");
         }
         setEngineerLocationSubmitting(false);
       },
@@ -1606,6 +1610,38 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderAttendanceView = () => {
+    if (!savedSiteLocation) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ textAlign: "center", marginBottom: "8px" }}>
+            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
+          </div>
+          
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <MapPin size={18} style={{ color: "#ea580c" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
+              </div>
+              <Badge status="pending">Mandatory</Badge>
+            </div>
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
+            </p>
+            <button 
+              type="button" 
+              onClick={() => setShowEngineerLocationSetupModal(true)} 
+              className="mobile-btn-large"
+              style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
+            >
+              Set Current Site Location
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
         <div style={{ textAlign: "center", marginBottom: "8px" }}>
@@ -2816,70 +2852,55 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (moreSubView === "menu") {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* User profile card */}
-          <div style={{
-            backgroundColor: "#ffffff",
-            borderRadius: "var(--radius-md)",
-            border: "1px solid var(--border-color)",
-            padding: "16px",
-            boxShadow: "var(--shadow-sm)",
-            display: "flex",
-            alignItems: "center",
-            gap: "16px"
-          }}>
-            <div style={{
-              width: "48px",
-              height: "48px",
-              borderRadius: "50%",
-              backgroundColor: "var(--accent-50)",
-              color: "var(--accent-700)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontWeight: "800",
-              fontSize: "16px"
-            }}>
+          {/* User profile card (Interactive) */}
+          <button 
+            type="button" 
+            className="more-profile-card"
+            onClick={() => setIsProfileModalOpen(true)}
+          >
+            <div className="more-profile-avatar">
               {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
             </div>
-            <div>
-              <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{userProfile?.fullName || "Site Engineer"}</h4>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>{userProfile?.email}</p>
-              <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--accent-600)", textTransform: "uppercase" }}>Civil Engineer Panel</span>
+            <div className="more-profile-info">
+              <h4 className="more-profile-name">{userProfile?.fullName || "Site Engineer"}</h4>
+              <p className="more-profile-email">{userProfile?.email}</p>
+              <span className="more-profile-tag">View Profile Details</span>
             </div>
-          </div>
+            <ChevronRight size={18} style={{ color: "var(--primary-600)", flexShrink: 0 }} />
+          </button>
 
-          {/* Menu stack */}
-          <div className="mobile-menu-list">
-            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/photos")}>
-              <div className="mobile-menu-left">
-                <Camera size={18} style={{ color: "var(--primary-600)" }} />
-                <span>Site Photos Gallery</span>
+          {/* Android dashboard card grid */}
+          <div className="dashboard-grid">
+            <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/photos")}>
+              <div className="dashboard-card-icon-wrapper photos">
+                <Camera size={22} />
               </div>
-              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+              <h4 className="dashboard-card-title">Site Photos</h4>
+              <p className="dashboard-card-desc">Capture and view georeferenced progress photo logs.</p>
             </button>
 
-            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/progress")}>
-              <div className="mobile-menu-left">
-                <FileText size={18} style={{ color: "var(--primary-600)" }} />
-                <span>Daily Progress DPR</span>
+            <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/progress")}>
+              <div className="dashboard-card-icon-wrapper progress">
+                <FileText size={22} />
               </div>
-              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+              <h4 className="dashboard-card-title">Daily DPR</h4>
+              <p className="dashboard-card-desc">Log structural progress logs and onsite blockers.</p>
             </button>
 
-            <button type="button" className="mobile-menu-item" onClick={() => navigate("/engineer/profile")}>
-              <div className="mobile-menu-left">
-                <Calendar size={18} style={{ color: "var(--primary-600)" }} />
-                <span>Profile & Leaves Log</span>
+            <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/profile")}>
+              <div className="dashboard-card-icon-wrapper leaves">
+                <Calendar size={22} />
               </div>
-              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
+              <h4 className="dashboard-card-title">Leaves Log</h4>
+              <p className="dashboard-card-desc">Log holiday requests and audit leaves summary stats.</p>
             </button>
 
-            <button type="button" className="mobile-menu-item danger" onClick={() => logout()}>
-              <div className="mobile-menu-left">
-                <LogOut size={18} style={{ color: "var(--danger-500)" }} />
-                <span>Logout Account</span>
+            <button type="button" className="dashboard-card" onClick={() => logout()}>
+              <div className="dashboard-card-icon-wrapper logout">
+                <LogOut size={22} />
               </div>
-              <ChevronRight size={16} style={{ color: "var(--danger-500)" }} />
+              <h4 className="dashboard-card-title">Logout</h4>
+              <p className="dashboard-card-desc">Securely exit the site management console terminal.</p>
             </button>
           </div>
         </div>
@@ -2889,50 +2910,49 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (moreSubView === "photos") {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <div className="more-subview-header">
             <button 
               type="button" 
               onClick={() => navigate("/engineer/more")}
-              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+              className="more-back-btn"
             >
               ← Back
             </button>
-            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Site Inspection Photos</h4>
+            <h4 className="more-subview-title">Site Inspection Photos</h4>
           </div>
 
           {/* Photo form */}
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
+          <div className="more-content-card">
             <span className="mobile-form-label">Upload Geotagged Progress Photo</span>
-            <form onSubmit={handlePhotoUpload} style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "8px" }}>
+            <form onSubmit={handlePhotoUpload} style={{ display: "flex", flexDirection: "column", gap: "12px", marginTop: "4px" }}>
               <label style={{ 
                 display: "flex", 
                 flexDirection: "column", 
                 alignItems: "center", 
-                gap: "6px", 
-                padding: "20px 16px", 
+                gap: "8px", 
+                padding: "24px 16px", 
                 border: "2px dashed var(--border-color)", 
-                borderRadius: "8px", 
+                borderRadius: "12px", 
                 cursor: "pointer", 
                 backgroundColor: "var(--primary-50)",
                 textAlign: "center"
               }}>
-                <Camera size={28} style={{ color: "var(--primary-600)" }} />
-                <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
+                <Camera size={32} style={{ color: "var(--primary-600)" }} />
+                <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
                 <input type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setSitePhotoFile, setSitePhotoPreview)} />
               </label>
               
               {sitePhotoPreview && (
-                <div style={{ position: "relative", width: "100%", height: "160px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                <div style={{ position: "relative", width: "100%", height: "180px", borderRadius: "10px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
                   <img src={sitePhotoPreview} alt="Preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                  <button type="button" onClick={() => { setSitePhotoFile(null); setSitePhotoPreview(null); }} style={{ position: "absolute", top: "6px", right: "6px", backgroundColor: "rgba(0,0,0,0.6)", color: "#fff", border: "none", borderRadius: "50%", width: "22px", height: "22px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={12} /></button>
+                  <button type="button" onClick={() => { setSitePhotoFile(null); setSitePhotoPreview(null); }} style={{ position: "absolute", top: "8px", right: "8px", backgroundColor: "rgba(15, 23, 42, 0.75)", color: "#fff", border: "none", borderRadius: "50%", width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={14} /></button>
                 </div>
               )}
 
               <button
                 type="submit"
-                className="mobile-btn-large"
+                className="login-submit-btn"
                 disabled={photoSubmitting || !sitePhotoPreview}
-                style={{ padding: "12px" }}
               >
                 {photoSubmitting ? "Uploading..." : "Upload Photo"}
               </button>
@@ -2941,17 +2961,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
           {/* Photo gallery */}
           <div>
-            <span className="mobile-form-label">Inspection Photo Gallery</span>
+            <span className="mobile-form-label" style={{ marginBottom: "8px", display: "block" }}>Inspection Photo Gallery</span>
             {sitePhotos.filter(p => p.siteId === activeSiteId).length === 0 ? (
-              <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No photos uploaded for this site yet.</p>
+              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No photos uploaded for this site yet.</p>
               </div>
             ) : (
               <div className="mobile-photo-grid">
                 {sitePhotos.filter(p => p.siteId === activeSiteId).map(photo => (
-                  <div key={photo.id} className="mobile-photo-card" style={{ position: "relative" }}>
+                  <div key={photo.id} className="mobile-photo-card" style={{ position: "relative", borderRadius: "10px", overflow: "hidden" }}>
                     <a href={photo.imageUrl} target="_blank" rel="noopener noreferrer">
-                      <img src={photo.imageUrl} alt="Progress inspection" className="mobile-photo-img" />
+                      <img src={photo.imageUrl} alt="Progress inspection" className="mobile-photo-img" style={{ height: "120px" }} />
                     </a>
                     {photo.engineerId === currentEngineerId && (
                       <button 
@@ -2962,7 +2982,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           top: "8px",
                           right: "8px",
                           border: "none",
-                          backgroundColor: "rgba(255, 255, 255, 0.8)",
+                          backgroundColor: "rgba(255, 255, 255, 0.9)",
                           color: "var(--danger-600)",
                           borderRadius: "50%",
                           width: "28px",
@@ -2979,13 +2999,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         <Trash2 size={14} />
                       </button>
                     )}
-                    <div className="mobile-photo-info">
+                    <div className="mobile-photo-info" style={{ padding: "10px" }}>
                       <span className="mobile-photo-time">
                         {photo.capturedAt?.seconds 
                           ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
                           : new Date(photo.capturedAt).toLocaleDateString()}
                       </span>
-                      <div className="mobile-photo-loc">GPS: {Number(photo.latitude).toFixed(4)}, {Number(photo.longitude).toFixed(4)}</div>
+                      <div className="mobile-photo-loc" style={{ fontSize: "11px", fontWeight: "700" }}>GPS: {Number(photo.latitude).toFixed(4)}, {Number(photo.longitude).toFixed(4)}</div>
                     </div>
                   </div>
                 ))}
@@ -2999,39 +3019,39 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (moreSubView === "progress") {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <div className="more-subview-header">
             <button 
               type="button" 
               onClick={() => navigate("/engineer/more")}
-              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+              className="more-back-btn"
             >
               ← Back
             </button>
-            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Daily Progress DPR Log</h4>
+            <h4 className="more-subview-title">Daily Progress DPR Log</h4>
           </div>
 
           {/* Progress updates Form */}
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
-            <form onSubmit={handleProgressSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          <div className="more-content-card">
+            <form onSubmit={handleProgressSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
               
               <div>
                 <span className="mobile-form-label">Estimated Progress Completed ({progressPercent}%)</span>
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", marginTop: "4px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "6px" }}>
                   <input 
                     type="range" 
                     min="0" 
                     max="100" 
                     value={progressPercent}
                     onChange={(e) => setProgressPercent(Number(e.target.value))}
-                    style={{ flexGrow: 1, accentColor: "var(--accent-50)", cursor: "pointer", height: "6px" }}
+                    style={{ flexGrow: 1, accentColor: "#f97316", cursor: "pointer", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "3px" }}
                   />
-                  <span className="badge badge-success" style={{ fontWeight: 800, fontSize: "12px", minWidth: "46px", textAlign: "center", border: "none" }}>
+                  <span className="badge badge-success" style={{ fontWeight: 800, fontSize: "12px", minWidth: "46px", textAlign: "center", border: "none", backgroundColor: "var(--success-50)", color: "var(--success-700)" }}>
                     {progressPercent}%
                   </span>
                 </div>
               </div>
 
-              <div>
+              <div className="login-form-group">
                 <span className="mobile-form-label">Work Completed Today</span>
                 <textarea 
                   className="mobile-textarea"
@@ -3039,57 +3059,56 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   value={workDescription}
                   onChange={(e) => setWorkDescription(e.target.value)}
                   required 
-                  style={{ minHeight: "60px" }}
+                  style={{ minHeight: "80px", borderRadius: "10px", padding: "12px" }}
                 />
               </div>
 
-              <div>
+              <div className="login-form-group">
                 <span className="mobile-form-label">Issues / Delay Obstacles</span>
                 <input 
                   type="text" 
                   placeholder="E.g. Delay due to cement delivery lag..."
                   value={issuesText}
                   onChange={(e) => setIssuesText(e.target.value)}
-                  style={{ padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "13px", width: "100%", margin: 0 }}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
                 />
               </div>
 
-              <div>
+              <div className="login-form-group">
                 <span className="mobile-form-label">Notes / Instructions</span>
                 <input 
                   type="text" 
                   placeholder="E.g. Inspector checked reinforcement today..."
                   value={notesText}
                   onChange={(e) => setNotesText(e.target.value)}
-                  style={{ padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "13px", width: "100%", margin: 0 }}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
                 />
               </div>
 
               <div>
                 <span className="mobile-form-label">Attach Progress Photo (Optional)</span>
-                <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "4px" }}>
-                  <label style={{ cursor: "pointer", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px dashed var(--border-color)", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--primary-50)", fontSize: "11px", fontWeight: 700 }}>
+                <div style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "6px" }}>
+                  <label style={{ cursor: "pointer", padding: "8px 14px", borderRadius: "8px", border: "1px dashed var(--border-color)", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--primary-50)", fontSize: "12px", fontWeight: 700 }}>
                     <Camera size={14} />
                     <span>Choose Photo</span>
                     <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setProgressPhotoFile, setProgressPhotoPreview)} />
                   </label>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "160px" }}>
                     {progressPhotoFile ? progressPhotoFile.name : "No photo chosen"}
                   </span>
                 </div>
                 {progressPhotoPreview && (
-                  <div style={{ marginTop: "8px", position: "relative", width: "100px", height: "70px", borderRadius: "4px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
+                  <div style={{ marginTop: "10px", position: "relative", width: "100px", height: "70px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
                     <img src={progressPhotoPreview} alt="Work preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button type="button" onClick={() => { setProgressPhotoFile(null); setProgressPhotoPreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
+                    <button type="button" onClick={() => { setProgressPhotoFile(null); setProgressPhotoPreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(15, 23, 42, 0.75)", color: "#fff", border: "none", borderRadius: "50%", width: "18px", height: "18px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}><X size={10} /></button>
                   </div>
                 )}
               </div>
 
               <button
                 type="submit"
-                className="mobile-btn-large"
+                className="login-submit-btn"
                 disabled={progressSubmitting}
-                style={{ padding: "12px" }}
               >
                 {progressSubmitting ? "Submitting..." : "Submit Progress Log"}
               </button>
@@ -3098,11 +3117,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
           {/* DPR timeline */}
           <div>
-            <span className="mobile-form-label">DPR Reports History</span>
+            <span className="mobile-form-label" style={{ marginBottom: "10px", display: "block" }}>DPR Reports History</span>
             <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
               {dailyUpdates.filter(u => u.siteId === activeSiteId).length === 0 ? (
-                <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                  <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No daily reports submitted yet.</p>
+                <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No daily reports submitted yet.</p>
                 </div>
               ) : (
                 dailyUpdates.filter(u => u.siteId === activeSiteId).map(row => {
@@ -3110,15 +3129,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   const workLine = lines[0]?.replace("Work Completed: ", "") || row.description;
                   const issuesLine = lines[1]?.replace("Issues/Blockers: ", "");
                   const notesLine = lines[2]?.replace("Notes/Remarks: ", "");
+                  const progressValue = parseInt(row.progress) || 0;
+                  const isCompleted = progressValue >= 70;
+                  const hasIssues = issuesLine && issuesLine !== "None" && issuesLine !== "";
                   
                   return (
-                    <div key={row.id} style={{
-                      padding: "12px 16px",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "var(--radius-md)",
-                      backgroundColor: "#ffffff",
-                      boxShadow: "var(--shadow-sm)"
-                    }}>
+                    <div 
+                      key={row.id} 
+                      className={`dpr-timeline-log ${isCompleted ? "completed" : ""} ${hasIssues ? "warning-state" : ""}`}
+                    >
                       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                         <span className="font-mono" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-800)" }}>
                           {row.createdAt?.seconds 
@@ -3126,7 +3145,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             : new Date(row.createdAt).toLocaleDateString()}
                         </span>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.progress}</span>
+                          <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: isCompleted ? "var(--success-50)" : "var(--primary-50)", color: isCompleted ? "var(--success-700)" : "var(--primary-800)", border: "none" }}>{row.progress}</span>
                           {row.engineerId === currentEngineerId && (
                             <button 
                               type="button" 
@@ -3140,16 +3159,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </div>
                       </div>
                       
-                      <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--primary-950)" }}>
+                      <p style={{ margin: "4px 0", fontSize: "13px", color: "var(--primary-950)", lineHeight: "1.4" }}>
                         <strong>Work:</strong> {workLine}
                       </p>
-                      {issuesLine && issuesLine !== "None" && (
-                        <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--danger-600)" }}>
+                      {hasIssues && (
+                        <p style={{ margin: "4px 0", fontSize: "13px", color: "var(--danger-600)", lineHeight: "1.4" }}>
                           <strong>Issues:</strong> {issuesLine}
                         </p>
                       )}
                       {notesLine && notesLine !== "None" && (
-                        <p style={{ margin: "4px 0", fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                        <p style={{ margin: "4px 0", fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic", lineHeight: "1.4" }}>
                           <strong>Notes:</strong> {notesLine}
                         </p>
                       )}
@@ -3166,73 +3185,64 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (moreSubView === "profile") {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+          <div className="more-subview-header">
             <button 
               type="button" 
               onClick={() => navigate("/engineer/more")}
-              style={{ border: "none", background: "none", color: "var(--primary-800)", padding: 0, display: "flex", alignItems: "center", cursor: "pointer", fontSize: "14px", fontWeight: "700" }}
+              className="more-back-btn"
             >
               ← Back
             </button>
-            <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>Profile & Leaves Summary</h4>
+            <h4 className="more-subview-title">Profile & Leaves Summary</h4>
           </div>
 
           {/* Leaves stats widget */}
-          <div style={{
-            backgroundColor: "#ffffff",
-            borderRadius: "var(--radius-md)",
-            border: "1px solid var(--border-color)",
-            padding: "16px",
-            boxShadow: "var(--shadow-sm)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "12px"
-          }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-              <div style={{ backgroundColor: "var(--primary-50)", padding: "10px", borderRadius: "6px", textAlign: "center" }}>
-                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Remaining Holidays</span>
-                <strong style={{ fontSize: "18px", color: "var(--primary-950)", display: "block", marginTop: "2px" }}>
+          <div className="more-content-card">
+            <div className="leaves-tiles-grid">
+              <div className="leaves-tile remaining">
+                <span className="leaves-tile-label">Remaining Holidays</span>
+                <strong className="leaves-tile-value">
                   {personalStats ? personalStats.remainingHolidays : "--"}
                 </strong>
-                <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>of {userProfile?.holidayAllowance || 24} annual days</span>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "600" }}>of {userProfile?.holidayAllowance || 24} annual days</span>
               </div>
-              <div style={{ backgroundColor: "var(--success-50)", padding: "10px", borderRadius: "6px", textAlign: "center" }}>
-                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Days Worked (Month)</span>
-                <strong style={{ fontSize: "18px", color: "var(--success-700)", display: "block", marginTop: "2px" }}>
+              <div className="leaves-tile worked">
+                <span className="leaves-tile-label">Days Worked (Month)</span>
+                <strong className="leaves-tile-value">
                   {personalStats ? personalStats.weekdaysWorkedThisMonth : "--"}
                 </strong>
-                <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>checked present</span>
+                <span style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: "600" }}>checked present</span>
               </div>
             </div>
             
-            <div style={{ backgroundColor: "var(--danger-50)", padding: "10px 12px", borderRadius: "6px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div className="leaves-tile taken" style={{ flexDirection: "row", justifyContent: "space-between", alignItems: "center", padding: "14px 18px", textAlign: "left" }}>
               <div>
-                <span style={{ fontSize: "9px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Leaves Taken (Month / Year)</span>
-                <strong style={{ fontSize: "14px", color: "var(--danger-600)" }}>
+                <span className="leaves-tile-label">Leaves Taken (Month / Year)</span>
+                <strong style={{ fontSize: "16px", color: "var(--danger-700)", fontFamily: "'Outfit', sans-serif", fontWeight: "800", display: "block", marginTop: "2px" }}>
                   {personalStats ? `${personalStats.leavesThisMonth} / ${personalStats.leavesThisYear}` : "-- / --"}
                 </strong>
               </div>
-              <span style={{ fontSize: "10px", color: "var(--danger-700)", fontWeight: "700" }}>Leave days</span>
+              <span className="badge badge-danger" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "#fecaca", color: "#b91c1c", border: "none" }}>Leave days</span>
             </div>
           </div>
 
           {/* Log Leave Form */}
-          <div style={{ backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", padding: "16px", boxShadow: "var(--shadow-sm)" }}>
+          <div className="more-content-card">
             <span className="mobile-form-label">Request / Log Leave Day</span>
-            <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "8px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "8px" }}>
-                <div>
-                  <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Date</label>
+            <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "4px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: "10px" }}>
+                <div className="login-form-group">
+                  <label style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>Leave Date</label>
                   <input 
                     type="date" 
                     value={leaveDate}
                     onChange={(e) => setLeaveDate(e.target.value)}
                     required
-                    style={{ padding: "6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)" }}
+                    style={{ padding: "10px", fontSize: "13px", width: "100%", borderRadius: "8px", border: "1.5px solid #cbd5e1", outline: "none", backgroundColor: "#f8fafc" }}
                   />
                 </div>
-                <div>
-                  <label style={{ fontSize: "10px", color: "var(--text-muted)", fontWeight: "600", display: "block", marginBottom: "2px" }}>Reason</label>
+                <div className="login-form-group">
+                  <label style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>Leave Reason</label>
                   <SelectWithOthers
                     options={[
                       { value: "Personal Leave", label: "Personal" },
@@ -3245,12 +3255,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     placeholder="E.g. Family Function Leave..."
                     label="Specify Leave Type"
                     required={true}
-                    selectStyle={{ padding: "4px 6px", fontSize: "12px", width: "100%", borderRadius: "4px", border: "1px solid var(--border-color)", backgroundColor: "#fff", height: "30px" }}
-                    inputStyle={{ padding: "6px", fontSize: "12px", borderRadius: "4px", border: "1.5px solid var(--accent-500)" }}
+                    selectStyle={{ padding: "8px 10px", fontSize: "13px", width: "100%", borderRadius: "8px", border: "1.5px solid #cbd5e1", backgroundColor: "#f8fafc", height: "41px", outline: "none" }}
+                    inputStyle={{ padding: "10px 12px", fontSize: "13px", borderRadius: "8px", border: "1.5px solid #cbd5e1", outline: "none" }}
                   />
                 </div>
               </div>
-              <button type="submit" disabled={leaveSubmitting} className="mobile-btn-large" style={{ padding: "10px", fontSize: "12px" }}>
+              <button type="submit" disabled={leaveSubmitting} className="login-submit-btn">
                 {leaveSubmitting ? "Submitting..." : "Log Leave Day"}
               </button>
             </form>
@@ -3259,20 +3269,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           {/* Logged Leaves history */}
           {loggedLeaves.length > 0 && (
             <div>
-              <span className="mobile-form-label">Logged Leaves History</span>
+              <span className="mobile-form-label" style={{ marginBottom: "8px", display: "block" }}>Logged Leaves History</span>
               <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                 {loggedLeaves.map(leave => (
-                  <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)" }}>
+                  <div key={leave.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "10px", boxShadow: "var(--shadow-sm)" }}>
                     <div>
-                      <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-900)" }}>{leave.date}</span>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>{leave.reason}</span>
+                      <span style={{ fontSize: "13px", fontWeight: "800", color: "var(--primary-900)" }}>{leave.date}</span>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "2px" }}>{leave.reason}</span>
                     </div>
                     <button 
                       type="button" 
                       onClick={() => handleDeleteLeave(leave.id)}
                       style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
                     >
-                      <Trash2 size={14} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 ))}
@@ -3340,6 +3350,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
                 Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
               </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Geofence Radius (meters)</label>
+                <input
+                  type="number"
+                  value={engineerRadius}
+                  onChange={(e) => setEngineerRadius(e.target.value)}
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    outline: "none",
+                    fontWeight: 500,
+                    width: "100%",
+                    boxSizing: "border-box"
+                  }}
+                  placeholder="E.g., 100"
+                />
+              </div>
               
               {engineerLocationError && (
                 <div style={{
@@ -3756,6 +3786,45 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             <span>More</span>
           </button>
         </nav>
+        {/* User Profile Details Modal */}
+        <Modal
+          isOpen={isProfileModalOpen}
+          onClose={() => setIsProfileModalOpen(false)}
+          title="Engineer Profile Details"
+          maxWidth="380px"
+          className="modal-overlay login-modal-overlay"
+        >
+          <div className="profile-details-modal-content">
+            <div className="profile-details-header">
+              <div className="profile-details-avatar">
+                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+              </div>
+              <h3 className="profile-details-name">{userProfile?.fullName || "Site Engineer"}</h3>
+              <span className="profile-details-role">
+                {userProfile?.role === "site_engineer" || userProfile?.role === "engineer" ? "Site Engineer" : userProfile?.role || "Engineer"}
+              </span>
+            </div>
+            
+            <div className="profile-details-grid">
+              <div className="profile-detail-item">
+                <span className="profile-detail-label">Corporate Email</span>
+                <span className="profile-detail-value">{userProfile?.email || "engineer@gmail.com"}</span>
+              </div>
+              <div className="profile-detail-item">
+                <span className="profile-detail-label">Username</span>
+                <span className="profile-detail-value">@{userProfile?.username || "engineer"}</span>
+              </div>
+              <div className="profile-detail-item">
+                <span className="profile-detail-label">Account Status</span>
+                <span className="profile-detail-value status-active" style={{ textTransform: "capitalize" }}>{userProfile?.status || "active"}</span>
+              </div>
+              <div className="profile-detail-item">
+                <span className="profile-detail-label">Annual Holiday Allowance</span>
+                <span className="profile-detail-value">{userProfile?.holidayAllowance || 24} Days</span>
+              </div>
+            </div>
+          </div>
+        </Modal>
       </div>
 
       <Loading show={loading} text="Synchronizing Worksite Database..." />
