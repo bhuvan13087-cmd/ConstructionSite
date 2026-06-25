@@ -207,6 +207,19 @@ export async function getUserByEmail(email) {
   return null;
 }
 
+// Fetch user profile by phone number
+export async function getUserByPhone(phone) {
+  const db = getDb();
+  const usersCollection = collection(db, "users");
+  const q = query(usersCollection, where("phoneNumber", "==", phone.trim()));
+  const querySnapshot = await getDocs(q);
+  if (!querySnapshot.empty) {
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, uid: doc.id, ...doc.data() };
+  }
+  return null;
+}
+
 // Reset password in Firebase Auth Emulator securely via PATCH
 export async function resetUserPasswordInAuthEmulator(uid, newPassword) {
   const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/studio-7044154747-fb0fa/users/${uid}`, {

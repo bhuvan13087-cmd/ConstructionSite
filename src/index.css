@@ -4935,3 +4935,107 @@ body:has(.landing-page-container) {
   opacity: 1;
   transform: scale(1);
 }
+
+/* ==========================================================================
+   POPUP MODAL FORM INPUTS STANDARD ALIGNMENT & SPACING FIX
+   ========================================================================== */
+.modal-body .form-group {
+  margin-bottom: 16px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 6px !important;
+}
+
+.modal-body .form-group label {
+  display: block !important;
+  margin-bottom: 6px !important;
+  font-family: var(--font-family-title) !important;
+  font-size: 12px !important;
+  font-weight: 700 !important;
+  color: var(--primary-700) !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.05em !important;
+}
+
+.modal-body input,
+.modal-body select,
+.modal-body textarea {
+  font-family: var(--font-family-body) !important;
+  font-size: 14px !important;
+  line-height: 1.5 !important;
+  height: 48px !important;
+  width: 100% !important;
+  box-sizing: border-box !important;
+  border-radius: var(--radius-md) !important;
+  border: 1.5px solid #cbd5e1 !important;
+  background-color: #f8fafc !important;
+  color: #0f172a !important;
+  font-weight: 500 !important;
+  padding: 12px 16px !important;
+  transition: all var(--transition-fast) ease !important;
+  -webkit-font-smoothing: antialiased !important;
+}
+
+.modal-body textarea {
+  height: auto !important;
+  min-height: 100px !important;
+}
+
+.modal-body input:focus,
+.modal-body select:focus,
+.modal-body textarea:focus {
+  background-color: #ffffff !important;
+  border-color: var(--accent-500) !important;
+  box-shadow: 0 0 0 4px var(--accent-100) !important;
+  outline: none !important;
+}
+
+.modal-body input:disabled,
+.modal-body select:disabled,
+.modal-body textarea:disabled {
+  background-color: var(--primary-50) !important;
+  color: var(--text-muted) !important;
+  cursor: not-allowed !important;
+  border-color: var(--border-color) !important;
+}
+
+.modal-body .input-wrapper {
+  position: relative !important;
+  display: flex !important;
+  align-items: center !important;
+  width: 100% !important;
+}
+
+.modal-body .input-wrapper .input-icon {
+  position: absolute !important;
+  left: 16px !important;
+  top: 50% !important;
+  transform: translateY(-50%) !important;
+  color: var(--text-muted) !important;
+  pointer-events: none !important;
+  z-index: 10 !important;
+  width: 18px !important;
+  height: 18px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: color var(--transition-fast) ease !important;
+}
+
+.modal-body .input-wrapper:focus-within .input-icon {
+  color: var(--accent-600) !important;
+}
+
+.modal-body .input-wrapper .input-icon + input,
+.modal-body .input-wrapper .input-icon + select,
+.modal-body .input-wrapper .input-icon + div input {
+  padding-left: 46px !important;
+}
+
+.modal-body input::placeholder,
+.modal-body textarea::placeholder {
+  color: #94a3b8 !important;
+  font-weight: 400 !important;
+  opacity: 1 !important;
+}
+

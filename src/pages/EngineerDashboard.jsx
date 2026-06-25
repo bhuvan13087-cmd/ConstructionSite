@@ -65,7 +65,10 @@ import {
   ChevronRight,
   LayoutDashboard,
   LogOut,
-  HardHat
+  HardHat,
+  Lock,
+  Eye,
+  EyeOff
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -157,7 +160,7 @@ const categorySuggestions = {
 };
 
 export default function EngineerDashboard({ tab = "dashboard" }) {
-  const { userProfile, logout } = useAuth();
+  const { userProfile, logout, loading: authLoading } = useAuth();
   const navigate = useNavigate();
   const currentEngineerId = userProfile?.uid || userProfile?.id || "";
   
@@ -3904,34 +3907,45 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           className="modal-overlay login-modal-overlay"
         >
           <div className="profile-details-modal-content">
-            {profileModalView === "details" ? (
+            {authLoading ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", gap: "12px" }}>
+                <div className="loader-spinner" style={{ width: "32px", height: "32px", border: "3px solid var(--border-color)", borderTopColor: "var(--construction-orange)", borderRadius: "50%", animation: "spin 1s linear infinite" }}></div>
+                <span style={{ fontSize: "13px", color: "var(--text-muted)", fontWeight: "600" }}>Synchronizing Profile...</span>
+              </div>
+            ) : !userProfile ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 20px", gap: "12px", textAlign: "center" }}>
+                <AlertCircle size={36} style={{ color: "var(--danger-500)" }} />
+                <h4 style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", margin: 0 }}>Profile Load Error</h4>
+                <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0 }}>Could not fetch engineer profile from the database. Please verify internet access and log in again.</p>
+              </div>
+            ) : profileModalView === "details" ? (
               <>
                 <div className="profile-details-header">
                   <div className="profile-details-avatar">
-                    {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+                    {userProfile.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
                   </div>
-                  <h3 className="profile-details-name">{userProfile?.fullName || "Site Engineer"}</h3>
+                  <h3 className="profile-details-name">{userProfile.fullName || "Site Engineer"}</h3>
                   <span className="profile-details-role">
-                    {userProfile?.role === "site_engineer" || userProfile?.role === "engineer" ? "Site Engineer" : userProfile?.role || "Engineer"}
+                    {userProfile.role === "site_engineer" || userProfile.role === "engineer" ? "Site Engineer" : userProfile.role || "Engineer"}
                   </span>
                 </div>
                 
                 <div className="profile-details-grid">
                   <div className="profile-detail-item">
                     <span className="profile-detail-label">Corporate Email</span>
-                    <span className="profile-detail-value">{userProfile?.email || "engineer@gmail.com"}</span>
+                    <span className="profile-detail-value">{userProfile.email || "engineer@gmail.com"}</span>
                   </div>
                   <div className="profile-detail-item">
                     <span className="profile-detail-label">Username</span>
-                    <span className="profile-detail-value">@{userProfile?.username || "engineer"}</span>
+                    <span className="profile-detail-value">@{userProfile.username || "engineer"}</span>
                   </div>
                   <div className="profile-detail-item">
                     <span className="profile-detail-label">Account Status</span>
-                    <span className="profile-detail-value status-active" style={{ textTransform: "capitalize" }}>{userProfile?.status || "active"}</span>
+                    <span className="profile-detail-value status-active" style={{ textTransform: "capitalize" }}>{userProfile.status || "active"}</span>
                   </div>
                   <div className="profile-detail-item">
                     <span className="profile-detail-label">Annual Holiday Allowance</span>
-                    <span className="profile-detail-value">{userProfile?.holidayAllowance || 24} Days</span>
+                    <span className="profile-detail-value">{userProfile.holidayAllowance || 24} Days</span>
                   </div>
                 </div>
 

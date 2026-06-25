@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn, signUp } from "../firebase/auth";
-import { createUserProfile, getUserByEmail, resetUserPasswordInAuthEmulator } from "../services/firebaseService";
+import { createUserProfile, getUserByEmail, getUserByPhone, resetUserPasswordInAuthEmulator } from "../services/firebaseService";
 import { useAuth } from "../context/AuthContext";
 import { 
   ShieldCheck, 
@@ -223,11 +223,20 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const emailVal = forgotEmail.trim();
-      const profile = await getUserByEmail(emailVal);
-      if (!profile) {
-        throw new Error("No engineer profile found with this corporate email address.");
+      const inputVal = forgotEmail.trim();
+      let profile = null;
+      if (inputVal.includes("@")) {
+        profile = await getUserByEmail(inputVal);
+        if (!profile) {
+          throw new Error("No engineer profile found with this corporate email address.");
+        }
+      } else {
+        profile = await getUserByPhone(inputVal);
+        if (!profile) {
+          throw new Error("No engineer profile found with this registered phone number.");
+        }
       }
+      
       if (profile.role !== "site_engineer" && profile.role !== "engineer") {
         throw new Error("Only site engineer accounts can perform password self-reset.");
       }
@@ -728,14 +737,14 @@ export default function Login() {
           {loginView === "forgotPassword" && (
             <form onSubmit={handleForgotPasswordSubmit} className="login-form-content">
               <div className="login-form-group">
-                <label htmlFor="forgot-email" className="login-field-label">Corporate Email Address</label>
+                <label htmlFor="forgot-email" className="login-field-label">Corporate Email or Phone Number</label>
                 <div className="login-input-wrapper">
                   <Mail className="login-input-icon" size={18} />
                   <input
-                    type="email"
+                    type="text"
                     id="forgot-email"
                     className="login-input-field"
-                    placeholder="engineer@gmail.com"
+                    placeholder="engineer@example.com or +91 9876543210"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
                     required
