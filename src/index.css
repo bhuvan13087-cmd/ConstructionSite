@@ -4957,9 +4957,9 @@ body:has(.landing-page-container) {
   letter-spacing: 0.05em !important;
 }
 
-.modal-body input,
-.modal-body select,
-.modal-body textarea {
+.modal-body input:not(.login-input-field),
+.modal-body select:not(.login-input-field),
+.modal-body textarea:not(.login-input-field) {
   font-family: var(--font-family-body) !important;
   font-size: 14px !important;
   line-height: 1.5 !important;
@@ -4976,23 +4976,23 @@ body:has(.landing-page-container) {
   -webkit-font-smoothing: antialiased !important;
 }
 
-.modal-body textarea {
+.modal-body textarea:not(.login-input-field) {
   height: auto !important;
   min-height: 100px !important;
 }
 
-.modal-body input:focus,
-.modal-body select:focus,
-.modal-body textarea:focus {
+.modal-body input:not(.login-input-field):focus,
+.modal-body select:not(.login-input-field):focus,
+.modal-body textarea:not(.login-input-field):focus {
   background-color: #ffffff !important;
   border-color: var(--accent-500) !important;
   box-shadow: 0 0 0 4px var(--accent-100) !important;
   outline: none !important;
 }
 
-.modal-body input:disabled,
-.modal-body select:disabled,
-.modal-body textarea:disabled {
+.modal-body input:not(.login-input-field):disabled,
+.modal-body select:not(.login-input-field):disabled,
+.modal-body textarea:not(.login-input-field):disabled {
   background-color: var(--primary-50) !important;
   color: var(--text-muted) !important;
   cursor: not-allowed !important;
@@ -5026,14 +5026,14 @@ body:has(.landing-page-container) {
   color: var(--accent-600) !important;
 }
 
-.modal-body .input-wrapper .input-icon + input,
-.modal-body .input-wrapper .input-icon + select,
-.modal-body .input-wrapper .input-icon + div input {
+.modal-body .input-wrapper .input-icon + input:not(.login-input-field),
+.modal-body .input-wrapper .input-icon + select:not(.login-input-field),
+.modal-body .input-wrapper .input-icon + div input:not(.login-input-field) {
   padding-left: 46px !important;
 }
 
-.modal-body input::placeholder,
-.modal-body textarea::placeholder {
+.modal-body input:not(.login-input-field)::placeholder,
+.modal-body textarea:not(.login-input-field)::placeholder {
   color: #94a3b8 !important;
   font-weight: 400 !important;
   opacity: 1 !important;
