@@ -25,8 +25,10 @@ import {
   deleteSitePhoto,
   updateSiteLocation,
   reverseGeocodeLatLng,
-  getEngineerAttendanceHistory
+  getEngineerAttendanceHistory,
+  updateEngineerPasswordInDb
 } from "../services/firebaseService";
+import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
@@ -198,6 +200,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [engineerLocationError, setEngineerLocationError] = useState("");
   const [engineerRadius, setEngineerRadius] = useState("100");
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  const [profileModalView, setProfileModalView] = useState("details"); // "details" or "changePassword"
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [passwordChangeLoading, setPasswordChangeLoading] = useState(false);
+  const [passwordChangeError, setPasswordChangeError] = useState("");
+  const [passwordChangeSuccess, setPasswordChangeSuccess] = useState("");
 
   // Personal stats & leaves states
   const [personalStats, setPersonalStats] = useState(null);
@@ -205,6 +217,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [leaveDate, setLeaveDate] = useState(new Date().toISOString().split("T")[0]);
   const [leaveReason, setLeaveReason] = useState("Personal Leave");
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
+  
+  const handleCloseLeaveModal = () => {
+    setLeaveDate(new Date().toISOString().split("T")[0]);
+    setLeaveReason("Personal Leave");
+    setShowLeaveModal(false);
+  };
+
+  const handleCloseMaterialModal = () => {
+    setMaterialName("");
+    setMaterialCategory("Cement");
+    setCustomMaterialCategory("");
+    setMaterialQuantity("");
+    setMaterialUnit("Bag");
+    setMaterialSupplier("");
+    setMaterialPurchaseDate(new Date().toISOString().split("T")[0]);
+    setMaterialNotes("");
+    setMaterialInvoiceFile(null);
+    setMaterialInvoicePreview(null);
+    setMaterialFlow("list");
+    setMaterialStep(1);
+  };
   
   // Mock GPS controls removed for production
 
@@ -536,11 +570,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             accuracy,
             engineerId,
             deviceDetails,
-            Number(engineerRadius) || 100
+            Number(engineerRadius) || 100,
+            new Date().toISOString(),
+            geocode.area || "",
+            geocode.street || ""
           );
           
           await loadDashboardData();
-          showToast("Site Location Successfully Set", "success");
+          showToast("Location submitted for Admin approval", "success");
           setShowEngineerLocationSetupModal(false);
         } catch (err) {
           console.error("Save location error:", err);
@@ -863,11 +900,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     try {
       await logEngineerLeave(engineerId, leaveDate, leaveReason.trim());
       showToast(`Leave registered successfully for ${leaveDate}!`, "success");
-      setLeaveDate(new Date().toISOString().split("T")[0]);
-      setLeaveReason("Personal Leave");
       
       // Refresh statistics and leaves
       await loadDashboardData();
+      handleCloseLeaveModal();
     } catch (err) {
       console.error("Leave logging failed:", err);
       showToast(err.message || "Failed to log leave.", "error");
@@ -887,6 +923,62 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         console.error("Failed to cancel leave:", err);
         showToast("Failed to cancel leave: " + err.message, "error");
       }
+    }
+  };
+
+  // Change Password Handler for Site Engineer
+  const handlePasswordChange = async (e) => {
+    e.preventDefault();
+    setPasswordChangeError("");
+    setPasswordChangeSuccess("");
+
+    if (!currentPassword) {
+      setPasswordChangeError("Current password is required.");
+      return;
+    }
+    if (newPassword.length < 6) {
+      setPasswordChangeError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setPasswordChangeError("New passwords do not match.");
+      return;
+    }
+
+    setPasswordChangeLoading(true);
+    try {
+      const email = userProfile.email;
+      const uid = userProfile.uid || userProfile.id;
+
+      // 1. Verify current password and update in Auth
+      await updateEngineerPasswordAuth(email, currentPassword, newPassword);
+
+      // 2. Clear any plaintext passwords in Firestore profile (and update timestamp)
+      await updateEngineerPasswordInDb(uid, newPassword);
+
+      setPasswordChangeSuccess("Password changed successfully!");
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      showToast("Password updated successfully.", "success");
+      
+      // Auto return to profile details after 2 seconds
+      setTimeout(() => {
+        setProfileModalView("details");
+        setPasswordChangeSuccess("");
+      }, 2000);
+
+    } catch (err) {
+      console.error("Password change failed:", err);
+      let errMsg = "Failed to change password. Please check your current password.";
+      if (err.code === "auth/wrong-password" || err.code === "auth/invalid-credential") {
+        errMsg = "Incorrect current password.";
+      } else if (err.message) {
+        errMsg = err.message;
+      }
+      setPasswordChangeError(errMsg);
+    } finally {
+      setPasswordChangeLoading(false);
     }
   };
 
@@ -1109,19 +1201,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       showToast("Material receipt logged successfully!", "success");
       
-      // Reset forms
-      setMaterialName("");
-      setMaterialCategory("Cement");
-      setCustomMaterialCategory("");
-      setMaterialQuantity("");
-      setMaterialUnit("Bag");
-      setMaterialSupplier("");
-      setMaterialPurchaseDate(new Date().toISOString().split("T")[0]);
-      setMaterialNotes("");
-      setMaterialInvoiceFile(null);
-      setMaterialInvoicePreview(null);
-      setMaterialFlow("list");
-      setMaterialStep(1);
+      // Reset forms and close modal
+      handleCloseMaterialModal();
 
       await loadDashboardData();
     } catch (err) {
@@ -1548,26 +1629,62 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {!savedSiteLocation && (
-          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <MapPin size={18} style={{ color: "#ea580c" }} />
-                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
+          currentSite?.locationStatus === "Pending Approval" ? (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--warning-500)", backgroundColor: "var(--warning-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "var(--warning-600)" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Pending Approval</span>
+                </div>
+                <Badge status="pending">Under Review</Badge>
               </div>
-              <Badge status="pending">Mandatory</Badge>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
+              </p>
             </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-              The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
-            </p>
-            <button 
-              type="button" 
-              onClick={() => setShowEngineerLocationSetupModal(true)} 
-              className="mobile-btn-large"
-              style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-            >
-              Set Current Site Location
-            </button>
-          </div>
+          ) : currentSite?.locationStatus === "Rejected" ? (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "var(--danger-600)" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Rejected</span>
+                </div>
+                <Badge status="inactive">Rejected</Badge>
+              </div>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
+              </p>
+              <button 
+                type="button" 
+                onClick={() => setShowEngineerLocationSetupModal(true)} 
+                className="mobile-btn-large"
+                style={{ backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
+              >
+                Resubmit Site Location
+              </button>
+            </div>
+          ) : (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "#ea580c" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
+                </div>
+                <Badge status="pending">Mandatory</Badge>
+              </div>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
+              </p>
+              <button 
+                type="button" 
+                onClick={() => setShowEngineerLocationSetupModal(true)} 
+                className="mobile-btn-large"
+                style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
+              >
+                Set Current Site Location
+              </button>
+            </div>
+          )
         )}
 
         {/* Mock controls completely removed for production */}
@@ -1611,6 +1728,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const renderAttendanceView = () => {
     if (!savedSiteLocation) {
+      const isPending = currentSite?.locationStatus === "Pending Approval";
+      const isRejected = currentSite?.locationStatus === "Rejected";
+
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
@@ -1618,26 +1738,62 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
           </div>
           
-          <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <MapPin size={18} style={{ color: "#ea580c" }} />
-                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
+          {isPending ? (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--warning-500)", backgroundColor: "var(--warning-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "var(--warning-600)" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Pending Approval</span>
+                </div>
+                <Badge status="pending">Under Review</Badge>
               </div>
-              <Badge status="pending">Mandatory</Badge>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
+              </p>
             </div>
-            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-              The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
-            </p>
-            <button 
-              type="button" 
-              onClick={() => setShowEngineerLocationSetupModal(true)} 
-              className="mobile-btn-large"
-              style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-            >
-              Set Current Site Location
-            </button>
-          </div>
+          ) : isRejected ? (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "var(--danger-600)" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Rejected</span>
+                </div>
+                <Badge status="inactive">Rejected</Badge>
+              </div>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
+              </p>
+              <button 
+                type="button" 
+                onClick={() => setShowEngineerLocationSetupModal(true)} 
+                className="mobile-btn-large"
+                style={{ backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
+              >
+                Resubmit Site Location
+              </button>
+            </div>
+          ) : (
+            <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <MapPin size={18} style={{ color: "#ea580c" }} />
+                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
+                </div>
+                <Badge status="pending">Mandatory</Badge>
+              </div>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
+              </p>
+              <button 
+                type="button" 
+                onClick={() => setShowEngineerLocationSetupModal(true)} 
+                className="mobile-btn-large"
+                style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
+              >
+                Set Current Site Location
+              </button>
+            </div>
+          )}
         </div>
       );
     }
@@ -2307,543 +2463,532 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderMaterialView = () => {
-    if (materialFlow === "list") {
-      const activeMaterials = materials
-        .filter(m => m.siteId === activeSiteId)
-        .filter(m => {
-          const query = materialSearch.toLowerCase().trim();
-          if (!query) return true;
-          return (
-            m.materialName.toLowerCase().includes(query) ||
-            m.category.toLowerCase().includes(query) ||
-            m.supplierName.toLowerCase().includes(query)
-          );
-        })
-        .filter(m => {
-          if (!materialDateFilter) return true;
-          return m.purchaseDate === materialDateFilter;
-        });
+    const activeMaterials = materials
+      .filter(m => m.siteId === activeSiteId)
+      .filter(m => {
+        const query = materialSearch.toLowerCase().trim();
+        if (!query) return true;
+        return (
+          m.materialName.toLowerCase().includes(query) ||
+          m.category.toLowerCase().includes(query) ||
+          m.supplierName.toLowerCase().includes(query)
+        );
+      })
+      .filter(m => {
+        if (!materialDateFilter) return true;
+        return m.purchaseDate === materialDateFilter;
+      });
 
-      return (
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {/* Search bar & filter */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
-              <Search size={16} style={{ color: "var(--text-muted)" }} />
-              <input 
-                type="text" 
-                placeholder="Search materials, suppliers..."
-                value={materialSearch}
-                onChange={(e) => setMaterialSearch(e.target.value)}
-                style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
-              />
-            </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <div style={{ flex: 1 }}>
-                <input 
-                  type="date" 
-                  value={materialDateFilter} 
-                  onChange={(e) => setMaterialDateFilter(e.target.value)} 
-                  style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
-                />
-              </div>
-              {materialDateFilter && (
-                <button 
-                  type="button" 
-                  onClick={() => setMaterialDateFilter("")}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--danger-600)",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                    textDecoration: "underline"
-                  }}
-                >
-                  Clear Date
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* List display */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {activeMaterials.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
-              </div>
-            ) : (
-              activeMaterials.map(m => (
-                <div key={m.id} className="mobile-material-card">
-                  <div className="mobile-material-header">
-                    <div>
-                      <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
-                      <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
-                        {m.quantity} {m.unit}s
-                      </span>
-                      {m.engineerId === currentEngineerId && (
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteMaterial(m.id)}
-                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                          title="Delete Material Log"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  
-                  <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
-                    <div className="mobile-material-detail-item">
-                      <span className="mobile-material-detail-label">Supplier</span>
-                      <span className="mobile-material-detail-value">{m.supplierName}</span>
-                    </div>
-                    <div className="mobile-material-detail-item" style={{ textAlign: "right" }}>
-                      <span className="mobile-material-detail-label">Delivery Date</span>
-                      <span className="mobile-material-detail-value">{m.purchaseDate}</span>
-                    </div>
-                  </div>
-
-                  {m.notes && (
-                    <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "6px 10px", borderRadius: "4px", fontStyle: "italic" }}>
-                      "{m.notes}"
-                    </p>
-                  )}
-
-                  {m.invoiceUrl && (
-                    <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
-                      <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
-                        View Challan Photo
-                      </a>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-
-          <button
-            type="button"
-            className="mobile-btn-large"
-            onClick={() => {
-              setMaterialFlow("add");
-              setMaterialStep(1);
-            }}
-            style={{ position: "sticky", bottom: "16px", zIndex: 10, boxShadow: "0 4px 10px rgba(14, 165, 233, 0.3)" }}
-          >
-            <Plus size={18} />
-            <span>Log New Material</span>
-          </button>
-        </div>
-      );
-    }
-
-    // Material receipt wizard flow
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div className="mobile-steps-header">
-          <div className="mobile-step-indicator">
-            <span>Step {materialStep} of 3</span>
-            <div style={{ display: "flex", gap: "6px" }}>
-              <div className={`mobile-step-dot ${materialStep >= 1 ? 'active' : ''}`} />
-              <div className={`mobile-step-dot ${materialStep >= 2 ? 'active' : ''}`} />
-              <div className={`mobile-step-dot ${materialStep >= 3 ? 'active' : ''}`} />
-            </div>
+        {/* Search bar & filter */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
+            <Search size={16} style={{ color: "var(--text-muted)" }} />
+            <input 
+              type="text" 
+              placeholder="Search materials, suppliers..."
+              value={materialSearch}
+              onChange={(e) => setMaterialSearch(e.target.value)}
+              style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
+            />
           </div>
-          <button 
-            type="button" 
-            onClick={() => {
-              setMaterialFlow("list");
-              setMaterialStep(1);
-            }}
-            style={{ background: "none", border: "none", color: "var(--danger-500)", fontSize: "12px", fontWeight: "700", cursor: "pointer" }}
-          >
-            Cancel
-          </button>
-        </div>
-
-        {/* Step 1: Category selection */}
-        {materialStep === 1 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <span className="mobile-form-label">Choose Material Category</span>
-            <div className="mobile-category-list">
-              {["Cement", "Steel", "Sand", "Bricks", "Other"].map(cat => {
-                const emojis = {
-                  Cement: "🧱",
-                  Steel: "🧬",
-                  Sand: "⏳",
-                  Bricks: "🧱",
-                  Other: "📦"
-                };
-                const emoji = emojis[cat] || "📦";
-                return (
-                  <div 
-                    key={cat} 
-                    className={`mobile-category-item ${materialCategory === cat ? 'active' : ''}`}
-                    onClick={() => {
-                      setMaterialCategory(cat);
-                      setMaterialName(""); 
-                      setMaterialStep(2);
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      <span style={{ fontSize: "20px" }}>{emoji}</span>
-                      <span>{cat}</span>
-                    </div>
-                    <ChevronRight size={18} />
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Step 2: Name Input */}
-        {materialStep === 2 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div>
-              <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
-            </div>
-
-            {materialCategory === "Other" && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Specify Material Category <span style={{ color: "var(--danger-500)" }}>*</span></span>
-                <input
-                  type="text"
-                  placeholder="E.g. Glass, Wood, Tiles"
-                  value={customMaterialCategory}
-                  onChange={(e) => setCustomMaterialCategory(e.target.value)}
-                  required
-                  style={{
-                    height: "42px",
-                    padding: "10px 12px",
-                    border: "1.5px solid var(--accent-500)",
-                    borderRadius: "var(--radius-sm)",
-                    fontSize: "14px",
-                    outline: "none",
-                    backgroundColor: "#ffffff"
-                  }}
-                />
-              </div>
-            )}
-
-            <div style={{ position: "relative" }} ref={comboboxRef}>
-              <span className="mobile-form-label">Material Name</span>
-              <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                <Package size={18} className="input-icon" />
-                <input 
-                  type="text" 
-                  placeholder={materialCategory === "Other" ? "Enter custom material name..." : "Search or type material name..."}
-                  value={materialName}
-                  onChange={(e) => {
-                    setMaterialName(e.target.value);
-                    setIsSuggestionsOpen(true);
-                  }}
-                  onFocus={() => setIsSuggestionsOpen(true)}
-                  required 
-                  autoComplete="off"
-                  style={{ height: "42px", paddingLeft: "40px" }}
-                />
-              </div>
-              
-              {isSuggestionsOpen && materialCategory !== "Other" && (
-                <div style={{
-                  position: "absolute",
-                  top: "100%",
-                  left: 0,
-                  right: 0,
-                  zIndex: 50,
-                  backgroundColor: "#ffffff",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "var(--radius-sm)",
-                  boxShadow: "var(--shadow-md)",
-                  maxHeight: "180px",
-                  overflowY: "auto",
-                  marginTop: "4px"
-                }}>
-                  {filteredSuggestions.length > 0 ? (
-                    filteredSuggestions.map(sug => {
-                      const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
-                      return (
-                        <button
-                          type="button"
-                          key={sug}
-                          onClick={() => {
-                            setMaterialName(sug);
-                            setIsSuggestionsOpen(false);
-                          }}
-                          style={{
-                            display: "block",
-                            width: "100%",
-                            padding: "10px 14px",
-                            textAlign: "left",
-                            backgroundColor: isSelected ? "var(--accent-50)" : "#ffffff",
-                            color: isSelected ? "var(--accent-700)" : "var(--primary-800)",
-                            border: "none",
-                            borderBottom: "1px solid #f1f5f9",
-                            fontWeight: isSelected ? "700" : "500",
-                            fontSize: "13px",
-                            cursor: "pointer"
-                          }}
-                        >
-                          {sug}
-                        </button>
-                      );
-                    })
-                  ) : (
-                    <div style={{ padding: "10px 14px", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
-                      Using custom name: "{materialName}"
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-              <button
-                type="button"
-                className="mobile-btn-large"
-                style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
-                onClick={() => setMaterialStep(1)}
-              >
-                Back
-              </button>
-              <button
-                type="button"
-                className="mobile-btn-large"
-                style={{ flex: 1 }}
-                disabled={!materialName.trim()}
-                onClick={() => setMaterialStep(3)}
-              >
-                Next Step
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 3: Logistics details */}
-        {materialStep === 3 && (
-          <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Category & Name:</span>
-              <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{materialCategory} • {materialName}</strong>
-            </div>
-
-            {/* Units selection */}
-            <div>
-              <span className="mobile-form-label">Unit Type</span>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
-                  <button
-                    type="button"
-                    key={unitOption}
-                    onClick={() => setMaterialUnit(unitOption)}
-                    style={{
-                      flex: "1 0 auto",
-                      padding: "8px 12px",
-                      borderRadius: "6px",
-                      border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                      backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
-                      color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
-                      fontWeight: "700",
-                      fontSize: "12px",
-                      cursor: "pointer"
-                    }}
-                  >
-                    {unitOption}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Counter */}
-            <div>
-              <span className="mobile-form-label">Quantity</span>
-              <div style={{
-                display: "flex",
-                alignItems: "stretch",
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--border-color)",
-                overflow: "hidden",
-                backgroundColor: "#ffffff",
-                height: "44px",
-                marginTop: "4px"
-              }}>
-                <button
-                  type="button"
-                  onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
-                  style={{
-                    padding: "0 14px",
-                    border: "none",
-                    background: "var(--primary-50)",
-                    color: "var(--danger-600)",
-                    cursor: "pointer",
-                    fontWeight: "800",
-                    fontSize: "14px",
-                    borderRight: "1px solid var(--border-color)"
-                  }}
-                >
-                  -10
-                </button>
-                <input 
-                  type="number" 
-                  placeholder="0.0"
-                  min="0.01"
-                  step="any"
-                  value={materialQuantity}
-                  onChange={(e) => setMaterialQuantity(e.target.value)}
-                  required 
-                  style={{
-                    border: "none",
-                    outline: "none",
-                    textAlign: "center",
-                    flex: 1,
-                    fontSize: "16px",
-                    fontWeight: "800",
-                    color: "var(--primary-950)",
-                    backgroundColor: "transparent",
-                    margin: 0,
-                    padding: 0
-                  }}
-                />
-                <button
-                  type="button"
-                  onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
-                  style={{
-                    padding: "0 14px",
-                    border: "none",
-                    background: "var(--primary-50)",
-                    color: "var(--success-600)",
-                    cursor: "pointer",
-                    fontWeight: "800",
-                    fontSize: "14px",
-                    borderLeft: "1px solid var(--border-color)"
-                  }}
-                >
-                  +10
-                </button>
-              </div>
-            </div>
-
-            {/* Supplier */}
-            <div>
-              <span className="mobile-form-label">Supplier Company</span>
-              <div className="input-wrapper">
-                <Briefcase size={18} className="input-icon" />
-                <input 
-                  type="text" 
-                  placeholder="Enter supplier name..."
-                  value={materialSupplier}
-                  onChange={(e) => setMaterialSupplier(e.target.value)}
-                  required 
-                  style={{ height: "42px", paddingLeft: "40px" }}
-                />
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
-                {["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."].map(sug => (
-                  <button
-                    type="button"
-                    key={sug}
-                    onClick={() => setMaterialSupplier(sug)}
-                    style={{
-                      padding: "4px 10px",
-                      borderRadius: "16px",
-                      border: "1px solid var(--border-color)",
-                      backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
-                      color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
-                      fontSize: "11px",
-                      fontWeight: "600",
-                      cursor: "pointer"
-                    }}
-                  >
-                    {sug}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Date */}
-            <div>
-              <span className="mobile-form-label">Receipt Date</span>
-              <div className="input-wrapper">
-                <Calendar size={18} className="input-icon" />
-                <input 
-                  type="date" 
-                  value={materialPurchaseDate}
-                  onChange={(e) => setMaterialPurchaseDate(e.target.value)}
-                  required 
-                  style={{ height: "42px", paddingLeft: "40px" }}
-                />
-              </div>
-            </div>
-
-            {/* Notes */}
-            <div>
-              <span className="mobile-form-label">Remarks / Notes</span>
-              <textarea 
-                className="mobile-textarea"
-                placeholder="Challan number, inspection info, etc..."
-                value={materialNotes}
-                onChange={(e) => setMaterialNotes(e.target.value)}
-                style={{ minHeight: "50px" }}
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div style={{ flex: 1 }}>
+              <input 
+                type="date" 
+                value={materialDateFilter} 
+                onChange={(e) => setMaterialDateFilter(e.target.value)} 
+                style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
               />
             </div>
+            {materialDateFilter && (
+              <button 
+                type="button" 
+                onClick={() => setMaterialDateFilter("")}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--danger-600)",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  textDecoration: "underline"
+                }}
+              >
+                Clear Date
+              </button>
+            )}
+          </div>
+        </div>
 
-            {/* Invoice Photo */}
-            <div>
-              <span className="mobile-form-label">Upload Challan Photo</span>
-              <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                <label style={{ 
-                  display: "flex", 
-                  flexDirection: "column", 
-                  alignItems: "center", 
-                  gap: "6px", 
-                  padding: "20px 16px", 
-                  border: "2px dashed var(--border-color)", 
-                  borderRadius: "8px", 
-                  cursor: "pointer", 
-                  backgroundColor: "var(--primary-50)",
-                  textAlign: "center"
-                }}>
-                  <Camera size={24} style={{ color: "var(--primary-600)" }} />
-                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
-                  <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
-                </label>
-                {materialInvoicePreview && (
-                  <div style={{ position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", alignSelf: "center" }}>
-                    <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
+        {/* List display */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {activeMaterials.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
+            </div>
+          ) : (
+            activeMaterials.map(m => (
+              <div key={m.id} className="mobile-material-card">
+                <div className="mobile-material-header">
+                  <div>
+                    <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
+                    <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
+                      {m.quantity} {m.unit}s
+                    </span>
+                    {m.engineerId === currentEngineerId && (
+                      <button 
+                        type="button" 
+                        onClick={() => handleDeleteMaterial(m.id)}
+                        style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                        title="Delete Material Log"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
+                  <div className="mobile-material-detail-item">
+                    <span className="mobile-material-detail-label">Supplier</span>
+                    <span className="mobile-material-detail-value">{m.supplierName}</span>
+                  </div>
+                  <div className="mobile-material-detail-item" style={{ textAlign: "right" }}>
+                    <span className="mobile-material-detail-label">Delivery Date</span>
+                    <span className="mobile-material-detail-value">{m.purchaseDate}</span>
+                  </div>
+                </div>
+
+                {m.notes && (
+                  <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "6px 10px", borderRadius: "4px", fontStyle: "italic" }}>
+                    "{m.notes}"
+                  </p>
+                )}
+
+                {m.invoiceUrl && (
+                  <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
+                    <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
+                      View Challan Photo
+                    </a>
                   </div>
                 )}
               </div>
+            ))
+          )}
+        </div>
+
+        <button
+          type="button"
+          className="mobile-btn-large"
+          onClick={() => {
+            setMaterialFlow("add");
+            setMaterialStep(1);
+          }}
+          style={{ position: "sticky", bottom: "16px", zIndex: 10, boxShadow: "0 4px 10px rgba(14, 165, 233, 0.3)" }}
+        >
+          <Plus size={18} />
+          <span>Log New Material</span>
+        </button>
+
+        {/* Modal for adding material */}
+        <Modal
+          isOpen={materialFlow === "add"}
+          onClose={handleCloseMaterialModal}
+          title="Log New Material"
+          maxWidth="460px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="mobile-step-indicator" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Step {materialStep} of 3</span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <div className={`mobile-step-dot ${materialStep >= 1 ? 'active' : ''}`} />
+                <div className={`mobile-step-dot ${materialStep >= 2 ? 'active' : ''}`} />
+                <div className={`mobile-step-dot ${materialStep >= 3 ? 'active' : ''}`} />
+              </div>
             </div>
 
-            {/* Form Actions */}
-            <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-              <button
-                type="button"
-                className="mobile-btn-large"
-                style={{ backgroundColor: "var(--primary-200)", color: "var(--primary-800)", flex: 1, boxShadow: "none" }}
-                onClick={() => setMaterialStep(2)}
-              >
-                Back
-              </button>
-              <button
-                type="submit"
-                className="mobile-btn-large"
-                style={{ flex: 1 }}
-                disabled={materialSubmitting}
-              >
-                {materialSubmitting ? "Saving..." : "Save Delivery"}
-              </button>
-            </div>
-          </form>
-        )}
+            {/* Step 1: Category selection */}
+            {materialStep === 1 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <span className="mobile-form-label">Choose Material Category</span>
+                <div className="mobile-category-list">
+                  {["Cement", "Steel", "Sand", "Bricks", "Other"].map(cat => {
+                    const emojis = {
+                      Cement: "🧱",
+                      Steel: "🧬",
+                      Sand: "⏳",
+                      Bricks: "🧱",
+                      Other: "📦"
+                    };
+                    const emoji = emojis[cat] || "📦";
+                    return (
+                      <div 
+                        key={cat} 
+                        className={`mobile-category-item ${materialCategory === cat ? 'active' : ''}`}
+                        onClick={() => {
+                          setMaterialCategory(cat);
+                          setMaterialName(""); 
+                          setMaterialStep(2);
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                          <span style={{ fontSize: "20px" }}>{emoji}</span>
+                          <span>{cat}</span>
+                        </div>
+                        <ChevronRight size={18} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Step 2: Name Input */}
+            {materialStep === 2 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div>
+                  <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
+                </div>
+
+                {materialCategory === "Other" && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <span className="mobile-form-label">Specify Material Category <span style={{ color: "var(--danger-500)" }}>*</span></span>
+                    <input
+                      type="text"
+                      placeholder="E.g. Glass, Wood, Tiles"
+                      value={customMaterialCategory}
+                      onChange={(e) => setCustomMaterialCategory(e.target.value)}
+                      required
+                      style={{
+                        height: "42px",
+                        padding: "10px 12px",
+                        border: "1.5px solid var(--accent-500)",
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "14px",
+                        outline: "none",
+                        backgroundColor: "#ffffff"
+                      }}
+                    />
+                  </div>
+                )}
+
+                <div style={{ position: "relative" }} ref={comboboxRef}>
+                  <span className="mobile-form-label">Material Name</span>
+                  <div className="input-wrapper" style={{ marginTop: "4px" }}>
+                    <Package size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      placeholder={materialCategory === "Other" ? "Enter custom material name..." : "Search or type material name..."}
+                      value={materialName}
+                      onChange={(e) => {
+                        setMaterialName(e.target.value);
+                        setIsSuggestionsOpen(true);
+                      }}
+                      onFocus={() => setIsSuggestionsOpen(true)}
+                      required 
+                      autoComplete="off"
+                      style={{ height: "42px", paddingLeft: "40px" }}
+                    />
+                  </div>
+                  
+                  {isSuggestionsOpen && materialCategory !== "Other" && (
+                    <div style={{
+                      position: "absolute",
+                      top: "100%",
+                      left: 0,
+                      right: 0,
+                      zIndex: 50,
+                      backgroundColor: "#ffffff",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "var(--radius-sm)",
+                      boxShadow: "var(--shadow-md)",
+                      maxHeight: "180px",
+                      overflowY: "auto",
+                      marginTop: "4px"
+                    }}>
+                      {filteredSuggestions.length > 0 ? (
+                        filteredSuggestions.map(sug => {
+                          const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
+                          return (
+                            <button
+                              type="button"
+                              key={sug}
+                              onClick={() => {
+                                setMaterialName(sug);
+                                setIsSuggestionsOpen(false);
+                              }}
+                              style={{
+                                display: "block",
+                                width: "100%",
+                                padding: "10px 14px",
+                                textAlign: "left",
+                                backgroundColor: isSelected ? "var(--accent-50)" : "#ffffff",
+                                color: isSelected ? "var(--accent-700)" : "var(--primary-800)",
+                                border: "none",
+                                borderBottom: "1px solid #f1f5f9",
+                                fontWeight: isSelected ? "700" : "500",
+                                fontSize: "13px",
+                                cursor: "pointer"
+                              }}
+                            >
+                              {sug}
+                            </button>
+                          );
+                        })
+                      ) : (
+                        <div style={{ padding: "10px 14px", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
+                          Using custom name: "{materialName}"
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    style={{ flex: 1 }}
+                    onClick={() => setMaterialStep(1)}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="button"
+                    style={{ flex: 1 }}
+                    disabled={!materialName.trim()}
+                    onClick={() => setMaterialStep(3)}
+                  >
+                    Next Step
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Step 3: Logistics details */}
+            {materialStep === 3 && (
+              <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Category & Name:</span>
+                  <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{materialCategory} • {materialName}</strong>
+                </div>
+
+                {/* Units selection */}
+                <div>
+                  <span className="mobile-form-label">Unit Type</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
+                    {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
+                      <button
+                        type="button"
+                        key={unitOption}
+                        onClick={() => setMaterialUnit(unitOption)}
+                        style={{
+                          flex: "1 0 auto",
+                          padding: "8px 12px",
+                          borderRadius: "6px",
+                          border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
+                          backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
+                          color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
+                          fontWeight: "700",
+                          fontSize: "12px",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {unitOption}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Counter */}
+                <div>
+                  <span className="mobile-form-label">Quantity</span>
+                  <div style={{
+                    display: "flex",
+                    alignItems: "stretch",
+                    borderRadius: "var(--radius-sm)",
+                    border: "1px solid var(--border-color)",
+                    overflow: "hidden",
+                    backgroundColor: "#ffffff",
+                    height: "44px",
+                    marginTop: "4px"
+                  }}>
+                    <button
+                      type="button"
+                      onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
+                      style={{
+                        padding: "0 14px",
+                        border: "none",
+                        background: "var(--primary-50)",
+                        color: "var(--danger-600)",
+                        cursor: "pointer",
+                        fontWeight: "800",
+                        fontSize: "14px",
+                        borderRight: "1px solid var(--border-color)"
+                      }}
+                    >
+                      -10
+                    </button>
+                    <input 
+                      type="number" 
+                      placeholder="0.0"
+                      min="0.01"
+                      step="any"
+                      value={materialQuantity}
+                      onChange={(e) => setMaterialQuantity(e.target.value)}
+                      required 
+                      style={{
+                        border: "none",
+                        outline: "none",
+                        textAlign: "center",
+                        flex: 1,
+                        fontSize: "16px",
+                        fontWeight: "800",
+                        color: "var(--primary-950)",
+                        backgroundColor: "transparent",
+                        margin: 0,
+                        padding: 0
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
+                      style={{
+                        padding: "0 14px",
+                        border: "none",
+                        background: "var(--primary-50)",
+                        color: "var(--success-600)",
+                        cursor: "pointer",
+                        fontWeight: "800",
+                        fontSize: "14px",
+                        borderLeft: "1px solid var(--border-color)"
+                      }}
+                    >
+                      +10
+                    </button>
+                  </div>
+                </div>
+
+                {/* Supplier */}
+                <div>
+                  <span className="mobile-form-label">Supplier Company</span>
+                  <div className="input-wrapper">
+                    <Briefcase size={18} className="input-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="Enter supplier name..."
+                      value={materialSupplier}
+                      onChange={(e) => setMaterialSupplier(e.target.value)}
+                      required 
+                      style={{ height: "42px", paddingLeft: "40px" }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
+                    {["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."].map(sug => (
+                      <button
+                        type="button"
+                        key={sug}
+                        onClick={() => setMaterialSupplier(sug)}
+                        style={{
+                          padding: "4px 10px",
+                          borderRadius: "16px",
+                          border: "1px solid var(--border-color)",
+                          backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
+                          color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
+                          fontSize: "11px",
+                          fontWeight: "600",
+                          cursor: "pointer"
+                        }}
+                      >
+                        {sug}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <span className="mobile-form-label">Receipt Date</span>
+                  <div className="input-wrapper">
+                    <Calendar size={18} className="input-icon" />
+                    <input 
+                      type="date" 
+                      value={materialPurchaseDate}
+                      onChange={(e) => setMaterialPurchaseDate(e.target.value)}
+                      required 
+                      style={{ height: "42px", paddingLeft: "40px" }}
+                    />
+                  </div>
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <span className="mobile-form-label">Remarks / Notes</span>
+                  <textarea 
+                    className="mobile-textarea"
+                    placeholder="Challan number, inspection info, etc..."
+                    value={materialNotes}
+                    onChange={(e) => setMaterialNotes(e.target.value)}
+                    style={{ minHeight: "50px" }}
+                  />
+                </div>
+
+                {/* Invoice Photo */}
+                <div>
+                  <span className="mobile-form-label">Upload Challan Photo</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
+                    <label style={{ 
+                      display: "flex", 
+                      flexDirection: "column", 
+                      alignItems: "center", 
+                      gap: "6px", 
+                      padding: "20px 16px", 
+                      border: "2px dashed var(--border-color)", 
+                      borderRadius: "8px", 
+                      cursor: "pointer", 
+                      backgroundColor: "var(--primary-50)",
+                      textAlign: "center"
+                    }}>
+                      <Camera size={24} style={{ color: "var(--primary-600)" }} />
+                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
+                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
+                    </label>
+                    {materialInvoicePreview && (
+                      <div style={{ position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", alignSelf: "center" }}>
+                        <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Form Actions */}
+                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    style={{ flex: 1 }}
+                    onClick={() => setMaterialStep(2)}
+                  >
+                    Back
+                  </Button>
+                  <Button
+                    type="submit"
+                    style={{ flex: 1 }}
+                    disabled={materialSubmitting}
+                  >
+                    {materialSubmitting ? "Saving..." : "Save Delivery"}
+                  </Button>
+                </div>
+              </form>
+            )}
+          </div>
+        </Modal>
       </div>
     );
   };
@@ -3226,11 +3371,30 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </div>
           </div>
 
-          {/* Log Leave Form */}
-          <div className="more-content-card">
-            <span className="mobile-form-label">Request / Log Leave Day</span>
-            <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "14px", marginTop: "4px" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: "10px" }}>
+          {/* Request Leave Trigger Button */}
+          <button
+            type="button"
+            className="mobile-btn-large"
+            onClick={() => setShowLeaveModal(true)}
+            style={{ marginBottom: "8px" }}
+          >
+            <Plus size={18} />
+            <span>Request Leave</span>
+          </button>
+
+          {/* Log Leave Form Modal */}
+          <Modal
+            isOpen={showLeaveModal}
+            onClose={handleCloseLeaveModal}
+            title="Request Leave Day"
+            maxWidth="400px"
+          >
+            <form onSubmit={handleLogLeave} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
+                Select the desired date and describe the reason for your leave request.
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                 <div className="login-form-group">
                   <label style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>Leave Date</label>
                   <input 
@@ -3260,11 +3424,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   />
                 </div>
               </div>
-              <button type="submit" disabled={leaveSubmitting} className="login-submit-btn">
-                {leaveSubmitting ? "Submitting..." : "Log Leave Day"}
-              </button>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  style={{ flex: 1 }}
+                  onClick={handleCloseLeaveModal}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={leaveSubmitting}
+                  style={{ flex: 1.5 }}
+                >
+                  {leaveSubmitting ? "Submitting..." : "Log Leave Day"}
+                </Button>
+              </div>
             </form>
-          </div>
+          </Modal>
 
           {/* Logged Leaves history */}
           {loggedLeaves.length > 0 && (
@@ -3308,235 +3487,154 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       <div className="mobile-app-frame">
         {/* Set Site Location Modal */}
-        {showEngineerLocationSetupModal && (
-          <div style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(15, 23, 42, 0.65)",
-            backdropFilter: "blur(8px)",
-            zIndex: 1100,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px"
-          }}>
-            <div style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "20px",
-              padding: "24px 20px 20px 20px",
-              width: "100%",
-              maxWidth: "340px",
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-              border: "1px solid #e2e8f0",
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
-              position: "relative"
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>Set Current Site Location</h4>
-                <button
-                  type="button"
-                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}
-                  onClick={() => setShowEngineerLocationSetupModal(false)}
-                >
-                  <X size={18} />
-                </button>
-              </div>
+        <Modal
+          isOpen={showEngineerLocationSetupModal}
+          onClose={() => setShowEngineerLocationSetupModal(false)}
+          title="Set Current Site Location"
+          maxWidth="360px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
+              Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
+            </p>
 
-              <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-                Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
-              </p>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Geofence Radius (meters)</label>
-                <input
-                  type="number"
-                  value={engineerRadius}
-                  onChange={(e) => setEngineerRadius(e.target.value)}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    border: "1px solid #cbd5e1",
-                    fontSize: "13px",
-                    outline: "none",
-                    fontWeight: 500,
-                    width: "100%",
-                    boxSizing: "border-box"
-                  }}
-                  placeholder="E.g., 100"
-                />
-              </div>
-              
-              {engineerLocationError && (
-                <div style={{
-                  backgroundColor: "var(--danger-50)",
-                  color: "var(--danger-600)",
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Geofence Radius (meters)</label>
+              <input
+                type="number"
+                value={engineerRadius}
+                onChange={(e) => setEngineerRadius(e.target.value)}
+                style={{
                   padding: "10px 12px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--danger-100)",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  textAlign: "center"
-                }}>
-                  {engineerLocationError}
-                </div>
-              )}
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-                <button
-                  type="button"
-                  className="mobile-btn-large"
-                  style={{ backgroundColor: "#f1f5f9", color: "#475569", flex: 1, padding: "12px 10px", fontSize: "13px", boxShadow: "none" }}
-                  onClick={() => setShowEngineerLocationSetupModal(false)}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  disabled={engineerLocationSubmitting}
-                  className="mobile-btn-large"
-                  style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px", background: "var(--accent-gradient)" }}
-                  onClick={handleSetSiteLocationClick}
-                >
-                  {engineerLocationSubmitting ? "Capturing..." : "Capture & Save"}
-                </button>
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "13px",
+                  outline: "none",
+                  fontWeight: 500,
+                  width: "100%",
+                  boxSizing: "border-box"
+                }}
+                placeholder="E.g., 100"
+              />
+            </div>
+            
+            {engineerLocationError && (
+              <div style={{
+                backgroundColor: "var(--danger-50)",
+                color: "var(--danger-600)",
+                padding: "10px 12px",
+                borderRadius: "var(--radius-sm)",
+                border: "1px solid var(--danger-100)",
+                fontSize: "12px",
+                fontWeight: "700",
+                textAlign: "center"
+              }}>
+                {engineerLocationError}
               </div>
+            )}
+
+            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+              <Button
+                type="button"
+                variant="outline"
+                style={{ flex: 1, padding: "12px 10px", fontSize: "13px" }}
+                onClick={() => setShowEngineerLocationSetupModal(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                disabled={engineerLocationSubmitting}
+                style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px" }}
+                onClick={handleSetSiteLocationClick}
+              >
+                {engineerLocationSubmitting ? "Capturing..." : "Capture & Save"}
+              </Button>
             </div>
           </div>
-        )}
+        </Modal>
 
         {/* Specify Labour Category Modal */}
-        {showLabourSpecifyModal && (
-          <div style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            backgroundColor: "rgba(15, 23, 42, 0.65)",
-            backdropFilter: "blur(8px)",
-            zIndex: 1100,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "16px"
-          }}>
-            <div style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "20px",
-              padding: "24px 20px 20px 20px",
-              width: "100%",
-              maxWidth: "340px",
-              boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
-              border: "1px solid #e2e8f0",
-              display: "flex",
-              flexDirection: "column",
-              gap: "16px",
-              position: "relative"
-            }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>Specify Labour Category</h4>
-                <button
-                  type="button"
-                  style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", justifyContent: "center" }}
-                  onClick={() => {
-                    if (labourSpecifyText.trim()) {
-                      if (window.confirm("Discard entered data?")) {
-                        setLabourSpecifyText("");
-                        setShowLabourSpecifyModal(false);
-                      }
-                    } else {
-                      setShowLabourSpecifyModal(false);
-                    }
-                  }}
-                >
-                  <X size={18} />
-                </button>
-              </div>
+        <Modal
+          isOpen={showLabourSpecifyModal}
+          onClose={() => {
+            setLabourSpecifyText("");
+            setShowLabourSpecifyModal(false);
+          }}
+          title="Specify Labour Category"
+          maxWidth="360px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
+              Please enter the trade or type for this worker headcount (e.g. Welder, Carpenter).
+            </p>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span className="mobile-form-label" style={{ marginBottom: 0 }}>Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
+              <input
+                type="text"
+                placeholder="E.g. Welder, Carpenter"
+                value={labourSpecifyText}
+                onChange={(e) => setLabourSpecifyText(e.target.value)}
+                required
+                style={{
+                  width: "100%",
+                  padding: "12px 14px",
+                  border: "1.5px solid var(--construction-orange)",
+                  borderRadius: "var(--radius-md)",
+                  fontSize: "14px",
+                  outline: "none",
+                  backgroundColor: "#f8fafc"
+                }}
+              />
+            </div>
 
-              <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-                Please enter the trade or type for this worker headcount (e.g. Welder, Carpenter).
-              </p>
-              
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <span className="mobile-form-label" style={{ marginBottom: 0 }}>Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
-                <input
-                  type="text"
-                  placeholder="E.g. Welder, Carpenter"
-                  value={labourSpecifyText}
-                  onChange={(e) => setLabourSpecifyText(e.target.value)}
-                  required
-                  style={{
-                    width: "100%",
-                    padding: "12px 14px",
-                    border: "1.5px solid var(--construction-orange)",
-                    borderRadius: "var(--radius-md)",
-                    fontSize: "14px",
-                    outline: "none",
-                    backgroundColor: "#f8fafc"
-                  }}
-                />
-              </div>
+            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
+              <Button
+                type="button"
+                variant="outline"
+                style={{ flex: 1, padding: "12px 10px", fontSize: "13px" }}
+                onClick={() => {
+                  setLabourSpecifyText("");
+                  setShowLabourSpecifyModal(false);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px" }}
+                onClick={() => {
+                  const cleanName = labourSpecifyText.trim();
+                  if (!cleanName) {
+                    showToast("Please specify the labour type.", "error");
+                    return;
+                  }
+                  const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+                  
+                  // Update categories
+                  setCategories(prev => {
+                    const updated = prev.includes(formattedName) ? prev : [...prev, formattedName];
+                    localStorage.setItem("labour_categories", JSON.stringify(updated));
+                    return updated;
+                  });
 
-              <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-                <button
-                  type="button"
-                  className="mobile-btn-large"
-                  style={{ backgroundColor: "#f1f5f9", color: "#475569", flex: 1, padding: "12px 10px", fontSize: "13px", boxShadow: "none" }}
-                  onClick={() => {
-                    if (labourSpecifyText.trim()) {
-                      if (window.confirm("Discard entered data?")) {
-                        setLabourSpecifyText("");
-                        setShowLabourSpecifyModal(false);
-                      }
-                    } else {
-                      setShowLabourSpecifyModal(false);
-                    }
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="button"
-                  className="mobile-btn-large"
-                  style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px", background: "var(--accent-gradient)" }}
-                  onClick={() => {
-                    const cleanName = labourSpecifyText.trim();
-                    if (!cleanName) {
-                      showToast("Please specify the labour type.", "error");
-                      return;
-                    }
-                    const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-                    
-                    // Update categories
-                    setCategories(prev => {
-                      const updated = prev.includes(formattedName) ? prev : [...prev, formattedName];
-                      // Save to local storage for persistence
-                      localStorage.setItem("labour_categories", JSON.stringify(updated));
-                      return updated;
-                    });
+                  // Update countsMap
+                  setCountsMap(prev => ({
+                    ...prev,
+                    [formattedName]: (prev[formattedName] || 0) + pendingLabourCount,
+                    Other: 0
+                  }));
 
-                    // Update countsMap
-                    setCountsMap(prev => ({
-                      ...prev,
-                      [formattedName]: (prev[formattedName] || 0) + pendingLabourCount,
-                      Other: 0
-                    }));
-
-                    setShowLabourSpecifyModal(false);
-                    showToast(`Added custom labour category: ${formattedName} with count ${pendingLabourCount}`, "success");
-                  }}
-                >
-                  Save Trade
-                </button>
-              </div>
+                  setShowLabourSpecifyModal(false);
+                  showToast(`Added custom labour category: ${formattedName} with count ${pendingLabourCount}`, "success");
+                }}
+              >
+                Save Trade
+              </Button>
             </div>
           </div>
-        )}
+        </Modal>
 
         {/* Full Viewport WebRTC Camera Overlay */}
         {cameraActive && (
@@ -3789,40 +3887,174 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         {/* User Profile Details Modal */}
         <Modal
           isOpen={isProfileModalOpen}
-          onClose={() => setIsProfileModalOpen(false)}
-          title="Engineer Profile Details"
+          onClose={() => {
+            setIsProfileModalOpen(false);
+            setProfileModalView("details");
+            setCurrentPassword("");
+            setNewPassword("");
+            setConfirmNewPassword("");
+            setShowCurrentPassword(false);
+            setShowNewPassword(false);
+            setShowConfirmNewPassword(false);
+            setPasswordChangeError("");
+            setPasswordChangeSuccess("");
+          }}
+          title={profileModalView === "details" ? "Engineer Profile Details" : "Change Security Password"}
           maxWidth="380px"
           className="modal-overlay login-modal-overlay"
         >
           <div className="profile-details-modal-content">
-            <div className="profile-details-header">
-              <div className="profile-details-avatar">
-                {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
-              </div>
-              <h3 className="profile-details-name">{userProfile?.fullName || "Site Engineer"}</h3>
-              <span className="profile-details-role">
-                {userProfile?.role === "site_engineer" || userProfile?.role === "engineer" ? "Site Engineer" : userProfile?.role || "Engineer"}
-              </span>
-            </div>
-            
-            <div className="profile-details-grid">
-              <div className="profile-detail-item">
-                <span className="profile-detail-label">Corporate Email</span>
-                <span className="profile-detail-value">{userProfile?.email || "engineer@gmail.com"}</span>
-              </div>
-              <div className="profile-detail-item">
-                <span className="profile-detail-label">Username</span>
-                <span className="profile-detail-value">@{userProfile?.username || "engineer"}</span>
-              </div>
-              <div className="profile-detail-item">
-                <span className="profile-detail-label">Account Status</span>
-                <span className="profile-detail-value status-active" style={{ textTransform: "capitalize" }}>{userProfile?.status || "active"}</span>
-              </div>
-              <div className="profile-detail-item">
-                <span className="profile-detail-label">Annual Holiday Allowance</span>
-                <span className="profile-detail-value">{userProfile?.holidayAllowance || 24} Days</span>
-              </div>
-            </div>
+            {profileModalView === "details" ? (
+              <>
+                <div className="profile-details-header">
+                  <div className="profile-details-avatar">
+                    {userProfile?.fullName ? userProfile.fullName.charAt(0).toUpperCase() : "E"}
+                  </div>
+                  <h3 className="profile-details-name">{userProfile?.fullName || "Site Engineer"}</h3>
+                  <span className="profile-details-role">
+                    {userProfile?.role === "site_engineer" || userProfile?.role === "engineer" ? "Site Engineer" : userProfile?.role || "Engineer"}
+                  </span>
+                </div>
+                
+                <div className="profile-details-grid">
+                  <div className="profile-detail-item">
+                    <span className="profile-detail-label">Corporate Email</span>
+                    <span className="profile-detail-value">{userProfile?.email || "engineer@gmail.com"}</span>
+                  </div>
+                  <div className="profile-detail-item">
+                    <span className="profile-detail-label">Username</span>
+                    <span className="profile-detail-value">@{userProfile?.username || "engineer"}</span>
+                  </div>
+                  <div className="profile-detail-item">
+                    <span className="profile-detail-label">Account Status</span>
+                    <span className="profile-detail-value status-active" style={{ textTransform: "capitalize" }}>{userProfile?.status || "active"}</span>
+                  </div>
+                  <div className="profile-detail-item">
+                    <span className="profile-detail-label">Annual Holiday Allowance</span>
+                    <span className="profile-detail-value">{userProfile?.holidayAllowance || 24} Days</span>
+                  </div>
+                </div>
+
+                <Button
+                  variant="outline"
+                  icon={Lock}
+                  onClick={() => setProfileModalView("changePassword")}
+                  style={{ width: "100%", marginTop: "20px" }}
+                >
+                  Change Password
+                </Button>
+              </>
+            ) : (
+              <form onSubmit={handlePasswordChange} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <button
+                  type="button"
+                  className="more-back-btn"
+                  onClick={() => {
+                    setProfileModalView("details");
+                    setPasswordChangeError("");
+                    setPasswordChangeSuccess("");
+                  }}
+                  style={{ alignSelf: "flex-start", marginBottom: "4px" }}
+                >
+                  ← Back to Profile
+                </button>
+
+                {passwordChangeError && (
+                  <div className="info-alert" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)", padding: "10px", borderRadius: "6px" }}>
+                    <span style={{ color: "var(--danger-600)", fontSize: "12px", fontWeight: "600" }}>{passwordChangeError}</span>
+                  </div>
+                )}
+
+                {passwordChangeSuccess && (
+                  <div className="info-alert" style={{ borderLeft: "4px solid var(--success-500)", backgroundColor: "var(--success-50)", padding: "10px", borderRadius: "6px" }}>
+                    <span style={{ color: "var(--success-600)", fontSize: "12px", fontWeight: "600" }}>{passwordChangeSuccess}</span>
+                  </div>
+                )}
+
+                <div className="login-form-group">
+                  <label htmlFor="current-password" style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>Current Password</label>
+                  <div className="login-input-wrapper">
+                    <Lock className="login-input-icon" size={16} />
+                    <input
+                      type={showCurrentPassword ? "text" : "password"}
+                      id="current-password"
+                      className="login-input-field"
+                      placeholder="••••••••"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="login-password-toggle-btn"
+                      aria-label={showCurrentPassword ? "Hide password" : "Show password"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      {showCurrentPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="login-form-group">
+                  <label htmlFor="new-password" style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>New Password (min 6 chars)</label>
+                  <div className="login-input-wrapper">
+                    <Lock className="login-input-icon" size={16} />
+                    <input
+                      type={showNewPassword ? "text" : "password"}
+                      id="new-password"
+                      className="login-input-field"
+                      placeholder="••••••••"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword(!showNewPassword)}
+                      className="login-password-toggle-btn"
+                      aria-label={showNewPassword ? "Hide password" : "Show password"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="login-form-group">
+                  <label htmlFor="confirm-new-password" style={{ fontSize: "11px", color: "#334155", fontWeight: "700", display: "block", marginBottom: "4px" }}>Confirm New Password</label>
+                  <div className="login-input-wrapper">
+                    <Lock className="login-input-icon" size={16} />
+                    <input
+                      type={showConfirmNewPassword ? "text" : "password"}
+                      id="confirm-new-password"
+                      className="login-input-field"
+                      placeholder="••••••••"
+                      value={confirmNewPassword}
+                      onChange={(e) => setConfirmNewPassword(e.target.value)}
+                      required
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                      className="login-password-toggle-btn"
+                      aria-label={showConfirmNewPassword ? "Hide password" : "Show password"}
+                      style={{ background: "none", border: "none", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                    >
+                      {showConfirmNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+
+                <Button
+                  type="submit"
+                  isLoading={passwordChangeLoading}
+                  style={{ width: "100%", marginTop: "8px" }}
+                >
+                  Update Password
+                </Button>
+              </form>
+            )}
           </div>
         </Modal>
       </div>

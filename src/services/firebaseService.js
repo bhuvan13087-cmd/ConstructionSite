@@ -10,7 +10,8 @@ import {
   serverTimestamp,
   writeBatch,
   arrayUnion,
-  arrayRemove
+  arrayRemove,
+  deleteField
 } from "firebase/firestore";
 import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
@@ -121,7 +122,6 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       status: "active",
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
-      password: password,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
@@ -138,14 +138,86 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
   await batch.commit();
 }
 
-// Update password field for an engineer in Firestore database
+// Update password field for an engineer in Firestore database (Clear plaintext password and update timestamp)
 export async function updateEngineerPasswordInDb(uid, newPassword) {
   const db = getDb();
   const userDocRef = doc(db, "users", uid);
   await updateDoc(userDocRef, {
-    password: newPassword,
+    password: deleteField(),
     updatedAt: serverTimestamp()
   });
+}
+
+// Approve location setup for a site
+export async function approveSiteLocation(siteId, proposedData) {
+  const db = getDb();
+  const siteDocRef = doc(db, "sites", siteId);
+  await updateDoc(siteDocRef, {
+    latitude: Number(proposedData.proposedLatitude),
+    longitude: Number(proposedData.proposedLongitude),
+    location: proposedData.proposedLocation,
+    locationAccuracy: Number(proposedData.proposedLocationAccuracy) || 5,
+    locationCapturedBy: proposedData.proposedLocationCapturedBy || null,
+    locationDeviceDetails: proposedData.proposedLocationDeviceDetails || null,
+    locationCreatedDate: proposedData.proposedLocationCreatedDate || new Date().toISOString(),
+    locationStatus: "Verified",
+    proposedLatitude: deleteField(),
+    proposedLongitude: deleteField(),
+    proposedLocation: deleteField(),
+    proposedLocationAccuracy: deleteField(),
+    proposedLocationCapturedBy: deleteField(),
+    proposedLocationDeviceDetails: deleteField(),
+    proposedLocationCreatedDate: deleteField(),
+    proposedArea: deleteField(),
+    proposedStreet: deleteField(),
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Reject location setup for a site
+export async function rejectSiteLocation(siteId) {
+  const db = getDb();
+  const siteDocRef = doc(db, "sites", siteId);
+  await updateDoc(siteDocRef, {
+    locationStatus: "Rejected",
+    proposedLatitude: deleteField(),
+    proposedLongitude: deleteField(),
+    proposedLocation: deleteField(),
+    proposedLocationAccuracy: deleteField(),
+    proposedLocationCapturedBy: deleteField(),
+    proposedLocationDeviceDetails: deleteField(),
+    proposedLocationCreatedDate: deleteField(),
+    proposedArea: deleteField(),
+    proposedStreet: deleteField(),
+    updatedAt: serverTimestamp()
+  });
+}
+
+
+// Fetch user profile by corporate email
+export async function getUserByEmail(email) {
+  const db = getDb();
+  const usersCollection = collection(db, "users");
+  const q = query(usersCollection, where("email", "==", email.trim()));
+  const querySnapshot = await getDocs(q);
+  if (!querySnapshot.empty) {
+    const doc = querySnapshot.docs[0];
+    return { id: doc.id, uid: doc.id, ...doc.data() };
+  }
+  return null;
+}
+
+// Reset password in Firebase Auth Emulator securely via PATCH
+export async function resetUserPasswordInAuthEmulator(uid, newPassword) {
+  const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/studio-7044154747-fb0fa/users/${uid}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ password: newPassword })
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update password in Auth emulator.");
+  }
+  return true;
 }
 
 
@@ -180,6 +252,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
     siteName,
     clientName,
     location,
+    assignedAddress: location,
     startDate,
     expectedEndDate,
     status,
@@ -202,6 +275,7 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     siteName,
     clientName,
     location,
+    assignedAddress: location,
     startDate,
     expectedEndDate,
     status,
@@ -210,19 +284,21 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
   });
 }
 
-// Update site location details (from Engineer first-time setup only)
-export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, engineerId, deviceDetails, radius = 100, locationCreatedDate = new Date().toISOString()) {
+// Update site location details (sets as pending location approval for Admin review)
+export async function updateSiteLocation(siteId, latitude, longitude, address, locationAccuracy, engineerId, deviceDetails, radius = 100, locationCreatedDate = new Date().toISOString(), area = "", street = "") {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
   await updateDoc(siteDocRef, {
-    latitude: Number(latitude),
-    longitude: Number(longitude),
-    location: address,
-    locationAccuracy: Number(locationAccuracy) || 5,
-    locationStatus: "Verified",
-    locationCreatedDate,
-    locationCapturedBy: engineerId || null,
-    locationDeviceDetails: deviceDetails || null,
+    proposedLatitude: Number(latitude),
+    proposedLongitude: Number(longitude),
+    proposedLocation: address,
+    proposedLocationAccuracy: Number(locationAccuracy) || 5,
+    proposedLocationCreatedDate: locationCreatedDate,
+    proposedLocationCapturedBy: engineerId || null,
+    proposedLocationDeviceDetails: deviceDetails || null,
+    proposedArea: area,
+    proposedStreet: street,
+    locationStatus: "Pending Approval",
     radius: Number(radius) || 100,
     updatedAt: serverTimestamp()
   });
@@ -240,11 +316,24 @@ export async function reverseGeocodeLatLng(lat, lng) {
     if (res.ok) {
       const data = await res.json();
       if (data && data.address) {
+        const street = data.address.road || data.address.pedestrian || data.address.path || "";
+        const colony = data.address.neighbourhood || "";
+        const suburb = data.address.suburb || data.address.village || data.address.residential || data.address.city_district || "";
+        
+        // Construct area combining suburb and colony to be extremely accurate
+        let areaParts = [];
+        if (suburb) areaParts.push(suburb);
+        if (colony) areaParts.push(colony);
+        const area = areaParts.join(", ") || "";
+        
         return {
           fullAddress: data.display_name || "",
           district: data.address.state_district || data.address.county || data.address.district || data.address.city || data.address.subdistrict || "",
           state: data.address.state || "",
-          country: data.address.country || ""
+          country: data.address.country || "",
+          area: area,
+          street: street,
+          colony: colony
         };
       }
     }
@@ -255,7 +344,10 @@ export async function reverseGeocodeLatLng(lat, lng) {
     fullAddress: `Lat: ${Number(lat).toFixed(6)}, Lng: ${Number(lng).toFixed(6)}`,
     district: "",
     state: "",
-    country: ""
+    country: "",
+    area: "",
+    street: "",
+    colony: ""
   };
 }
 

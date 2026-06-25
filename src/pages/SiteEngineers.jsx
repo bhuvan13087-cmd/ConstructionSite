@@ -34,7 +34,8 @@ import {
   KeyRound,
   ShieldCheck,
   Phone,
-  Trash2
+  Trash2,
+  Building2
 } from "lucide-react";
 
 
@@ -66,17 +67,7 @@ export default function SiteEngineers() {
   const [selectedEngineerLeaves, setSelectedEngineerLeaves] = useState([]);
   const [statsLoading, setStatsLoading] = useState(false);
 
-  // Security / Password Management Modal States
-  const [showSecurityModal, setShowSecurityModal] = useState(false);
-  const [securityEngineer, setSecurityEngineer] = useState(null);
-  const [otpSent, setOtpSent] = useState(false);
-  const [generatedOtp, setGeneratedOtp] = useState("");
-  const [enteredOtp, setEnteredOtp] = useState("");
-  const [otpVerified, setOtpVerified] = useState(false);
-  const [otpError, setOtpError] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [showPlaintextPassword, setShowPlaintextPassword] = useState(false);
-  const [securityLoading, setSecurityLoading] = useState(false);
+
 
 
   const showToast = (message, type = "info") => {
@@ -172,7 +163,8 @@ export default function SiteEngineers() {
     setFormId("");
     setFormName("");
     setFormEmail("");
-    setFormPassword("");
+    const tempPassword = `Apex@${Math.floor(100000 + Math.random() * 900000)}`;
+    setFormPassword(tempPassword);
     setFormPhone("");
     setFormHolidayAllowance(24);
     setFormSelectedSites([]);
@@ -193,107 +185,6 @@ export default function SiteEngineers() {
     setFormSelectedSites(assigned);
     setFormOldSites(assigned);
     setShowFormModal(true);
-  };
-
-  // Open Security Modal
-  const handleOpenSecurityModal = (eng) => {
-    setSecurityEngineer(eng);
-    setOtpSent(false);
-    setGeneratedOtp("");
-    setEnteredOtp("");
-    setOtpVerified(false);
-    setOtpError("");
-    setNewPassword("");
-    setShowPlaintextPassword(false);
-    setShowSecurityModal(true);
-  };
-
-  // Send Simulated OTP to Engineer
-  const handleSendOtp = () => {
-    if (!securityEngineer || !securityEngineer.phoneNumber) {
-      showToast("Engineer must have a valid phone number registered.", "error");
-      return;
-    }
-    setSecurityLoading(true);
-    setOtpError("");
-
-    setTimeout(() => {
-      const code = Math.floor(100000 + Math.random() * 900000).toString();
-      setGeneratedOtp(code);
-      setOtpSent(true);
-      setSecurityLoading(false);
-      
-      // Beautiful alert notification in toast of the simulated code
-      showToast(`[SMS GATEWAY] OTP code ${code} sent to ${securityEngineer.phoneNumber}`, "info");
-    }, 800);
-  };
-
-  // Verify entered OTP
-  const handleVerifyOtp = (e) => {
-    e.preventDefault();
-    if (enteredOtp.trim() === generatedOtp && generatedOtp !== "") {
-      setOtpVerified(true);
-      setOtpError("");
-      showToast("Identity verified successfully.", "success");
-    } else {
-      setOtpError("Incorrect verification code. Please try again.");
-    }
-  };
-
-  // Direct password update
-  const handleUpdatePassword = async (e) => {
-    e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
-      showToast("Password must be at least 6 characters.", "error");
-      return;
-    }
-    setSecurityLoading(true);
-    try {
-      // 1. Update in Firebase Auth (if password was stored, we log in and change it)
-      if (securityEngineer.password) {
-        await updateEngineerPasswordAuth(
-          securityEngineer.email,
-          securityEngineer.password,
-          newPassword
-        );
-      } else {
-        // Fallback or warning if password not stored
-        console.warn("Direct Auth update skipped: profile lacks recorded current password. Setting in DB only.");
-      }
-
-      // 2. Update in Firestore users profile
-      await updateEngineerPasswordInDb(securityEngineer.id, newPassword);
-
-      // 3. Update local state list so we have the password updated immediately
-      setEngineers(prev => prev.map(eng => 
-        eng.id === securityEngineer.id ? { ...eng, password: newPassword } : eng
-      ));
-
-      // 4. Update the selected security engineer object
-      setSecurityEngineer(prev => ({ ...prev, password: newPassword }));
-
-      showToast("Password updated successfully.", "success");
-      setNewPassword("");
-    } catch (err) {
-      console.error("Password update error:", err);
-      showToast(`Failed to update authentication credentials: ${err.message}`, "error");
-    } finally {
-      setSecurityLoading(false);
-    }
-  };
-
-  // Trigger password reset email via standard Firebase method
-  const handleSendResetEmail = async () => {
-    setSecurityLoading(true);
-    try {
-      await sendEngineerPasswordReset(securityEngineer.email);
-      showToast("Password reset email sent to engineer.", "success");
-    } catch (err) {
-      console.error("Reset email error:", err);
-      showToast(`Failed to send email: ${err.message}`, "error");
-    } finally {
-      setSecurityLoading(false);
-    }
   };
 
   // Handle Checkbox Selection
@@ -401,13 +292,12 @@ export default function SiteEngineers() {
               <th>Phone Number</th>
               <th>Status</th>
               <th>Assigned Sites</th>
-              <th className="text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredEngineers.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                   No site engineers found. Click "Add Engineer" to register one.
                 </td>
               </tr>
@@ -417,7 +307,46 @@ export default function SiteEngineers() {
 
                 return (
                   <tr key={eng.id}>
-                    <td style={{ fontWeight: 700 }}>{eng.fullName}</td>
+                    <td>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <div 
+                          onClick={() => handleOpenDetails(eng)} 
+                          className="user-avatar" 
+                          style={{ 
+                            width: "36px", 
+                            height: "36px", 
+                            borderRadius: "50%", 
+                            cursor: "pointer", 
+                            fontSize: "13px",
+                            boxShadow: "0 2px 5px rgba(0,0,0,0.05)",
+                            transition: "transform 0.15s ease",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "800",
+                            backgroundColor: "var(--accent-50)",
+                            color: "var(--accent-700)",
+                            border: "1px solid var(--accent-200)"
+                          }}
+                          onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.08)"}
+                          onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+                          title="Click to view details"
+                        >
+                          {eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE"}
+                        </div>
+                        <div>
+                          <span 
+                            onClick={() => handleOpenDetails(eng)} 
+                            style={{ cursor: "pointer", fontWeight: 700, color: "var(--primary-900)", transition: "color 0.15s ease" }}
+                            onMouseEnter={(e) => e.currentTarget.style.color = "var(--accent-600)"}
+                            onMouseLeave={(e) => e.currentTarget.style.color = "var(--primary-900)"}
+                            title="Click to view details"
+                          >
+                            {eng.fullName}
+                          </span>
+                        </div>
+                      </div>
+                    </td>
                     <td className="font-mono">{eng.email}</td>
                     <td>{eng.phoneNumber || "--"}</td>
                     <td>
@@ -425,31 +354,6 @@ export default function SiteEngineers() {
                     </td>
                     <td>
                       <Badge status="pending">{sitesCount} Sites</Badge>
-                    </td>
-                    <td>
-                      <div className="table-actions">
-                        <button onClick={() => handleOpenDetails(eng)} className="btn-icon btn-view-action" title="View Details">
-                          <Eye size={16} />
-                        </button>
-                        <button onClick={() => handleOpenEditModal(eng)} className="btn-icon btn-edit-action" title="Edit Profile">
-                          <Edit3 size={16} />
-                        </button>
-                        <button onClick={() => handleOpenSecurityModal(eng)} className="btn-icon btn-security-action" title="Verify & Manage Password">
-                          <LockKeyhole size={16} />
-                        </button>
-                        <button onClick={() => handleDeleteEngineer(eng)} className="btn-icon btn-delete-action" title="Delete Engineer" style={{ color: "var(--danger-500)" }}>
-                          <Trash2 size={16} />
-                        </button>
-                        <label className="switch-control" title={eng.status === 'active' ? 'Deactivate' : 'Activate'}>
-                          <input 
-                            type="checkbox" 
-                            className="toggle-status-action" 
-                            checked={eng.status === 'active'}
-                            onChange={() => handleToggleStatus(eng.id, eng.status)}
-                          />
-                          <span className="switch-slider"></span>
-                        </label>
-                      </div>
                     </td>
                   </tr>
                 );
@@ -464,105 +368,211 @@ export default function SiteEngineers() {
         isOpen={showFormModal} 
         onClose={() => setShowFormModal(false)} 
         title={formMode === "add" ? "Add Site Engineer" : "Edit Site Engineer"}
+        maxWidth="600px"
       >
         <form onSubmit={handleFormSubmit} style={{ margin: 0, padding: 0 }}>
-          <div className="form-group">
-            <label htmlFor="engineer-name">Full Name</label>
-            <div className="input-wrapper">
-              <User className="input-icon" size={16} />
-              <input 
-                type="text" 
-                id="engineer-name" 
-                placeholder="John Doe" 
-                value={formName}
-                onChange={(e) => setFormName(e.target.value)}
-                required 
-              />
-            </div>
+          {/* Offscreen dummy inputs to prevent browser autofill */}
+          <input 
+            type="text" 
+            style={{ position: 'absolute', top: '-1000px', left: '-1000px' }} 
+            aria-hidden="true" 
+            tabIndex="-1" 
+            name="prevent_autofill_email" 
+          />
+          <input 
+            type="password" 
+            style={{ position: 'absolute', top: '-1000px', left: '-1000px' }} 
+            aria-hidden="true" 
+            tabIndex="-1" 
+            name="prevent_autofill_password" 
+          />
+
+          <div style={{ marginBottom: "16px", borderBottom: "1px solid var(--border-color)", paddingBottom: "12px" }}>
+            <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0, textTransform: "none", fontWeight: 500, lineHeight: 1.4 }}>
+              {formMode === "add" 
+                ? "Register a new site engineer profile, configure credentials, and assign active project sites." 
+                : "Update the site engineer's contact information, holiday settings, and site allocations."}
+            </p>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="engineer-email">Email Address</label>
-            <div className="input-wrapper">
-              <Mail className="input-icon" size={16} />
-              <input 
-                type="email" 
-                id="engineer-email" 
-                placeholder="john.doe@example.com" 
-                value={formEmail}
-                onChange={(e) => setFormEmail(e.target.value)}
-                disabled={formMode === "edit"}
-                required 
-              />
+          <div className="popup-form-grid">
+            {/* Section 1: Profile Details */}
+            <div className="popup-section-divider">
+              <span>Profile Details</span>
             </div>
-          </div>
 
-          {formMode === "add" && (
-            <div className="form-group">
-              <label htmlFor="engineer-password">Password</label>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="engineer-name">Full Name</label>
               <div className="input-wrapper">
-                <Lock className="input-icon" size={16} />
+                <User className="input-icon" size={16} />
                 <input 
-                  type="password" 
-                  id="engineer-password" 
-                  placeholder="••••••••" 
-                  value={formPassword}
-                  onChange={(e) => setFormPassword(e.target.value)}
+                  type="text" 
+                  id="engineer-name" 
+                  placeholder="John Doe" 
+                  value={formName}
+                  onChange={(e) => setFormName(e.target.value)}
                   required 
+                  autoComplete="new-name"
                 />
               </div>
-              <p className="field-hint">Enter a security password (min 6 characters).</p>
             </div>
-          )}
 
-          <div className="form-group">
-            <label htmlFor="engineer-phone">Phone Number</label>
-            <div className="input-wrapper">
-              <Phone className="input-icon" size={16} />
-              <input 
-                type="tel" 
-                id="engineer-phone" 
-                placeholder="+91 9876543210" 
-                value={formPhone}
-                onChange={(e) => setFormPhone(e.target.value)}
-                required 
-              />
+            <div className="form-group" style={{ margin: 0 }}>
+              <label htmlFor="engineer-phone">Phone Number</label>
+              <div className="input-wrapper">
+                <Phone className="input-icon" size={16} />
+                <input 
+                  type="tel" 
+                  id="engineer-phone" 
+                  placeholder="+91 9876543210" 
+                  value={formPhone}
+                  onChange={(e) => setFormPhone(e.target.value)}
+                  required 
+                  autoComplete="new-phone"
+                />
+              </div>
             </div>
-          </div>
 
-          <div className="form-group">
-            <label htmlFor="engineer-holidays">Annual Holiday Allowance</label>
-            <div className="input-wrapper">
-              <input 
-                type="number" 
-                id="engineer-holidays" 
-                placeholder="24" 
-                min="0"
-                max="365"
-                value={formHolidayAllowance}
-                onChange={(e) => setFormHolidayAllowance(parseInt(e.target.value) || 0)}
-                required 
-              />
+            {/* Section 2: Account security & settings */}
+            <div className="popup-section-divider">
+              <span>Credentials & Settings</span>
             </div>
-            <p className="field-hint">Specify the number of paid/allowed leaves per year.</p>
-          </div>
 
-          <div className="form-group">
-            <label>Assign Construction Sites</label>
-            <div className="checkbox-grid">
-              {sites.map(site => (
-                <label key={site.id} className="checkbox-label">
-                  <input 
-                    type="checkbox" 
-                    value={site.id} 
-                    checked={formSelectedSites.includes(site.id)}
-                    onChange={() => handleCheckboxChange(site.id)}
-                  />
-                  <span> {site.siteName}</span>
-                </label>
-              ))}
+            {formMode === "add" ? (
+              <>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="engineer-email">Email Address</label>
+                  <div className="input-wrapper">
+                    <Mail className="input-icon" size={16} />
+                    <input 
+                      type="email" 
+                      id="engineer-email" 
+                      placeholder="john.doe@example.com" 
+                      value={formEmail}
+                      onChange={(e) => setFormEmail(e.target.value)}
+                      required 
+                      autoComplete="new-email"
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="engineer-password">Temporary Password</label>
+                  <div className="input-wrapper" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                    <div style={{ position: "relative", flexGrow: 1 }}>
+                      <Lock className="input-icon" size={16} />
+                      <input 
+                        type="text" 
+                        id="engineer-password" 
+                        value={formPassword}
+                        readOnly
+                        style={{ width: "100%", backgroundColor: "var(--primary-50)", cursor: "default", paddingLeft: "36px" }}
+                      />
+                    </div>
+                    <Button 
+                      type="button" 
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        navigator.clipboard.writeText(formPassword);
+                        showToast("Temporary password copied to clipboard!", "success");
+                      }}
+                      style={{ height: "42px", padding: "0 12px" }}
+                    >
+                      Copy
+                    </Button>
+                  </div>
+                  <p className="field-hint" style={{ color: "var(--danger-600)", fontWeight: "600", marginTop: "4px" }}>
+                    Share this temporary password with the engineer. It will not be stored in the database.
+                  </p>
+                </div>
+
+                <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>
+                  <label htmlFor="engineer-holidays">Annual Holiday Allowance</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="number" 
+                      id="engineer-holidays" 
+                      placeholder="24" 
+                      min="0"
+                      max="365"
+                      value={formHolidayAllowance}
+                      onChange={(e) => setFormHolidayAllowance(parseInt(e.target.value) || 0)}
+                      required 
+                    />
+                  </div>
+                  <p className="field-hint" style={{ margin: "4px 0 0 0" }}>Specify the number of paid/allowed leaves per year.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="engineer-email">Email Address</label>
+                  <div className="input-wrapper">
+                    <Mail className="input-icon" size={16} style={{ opacity: 0.6 }} />
+                    <input 
+                      type="email" 
+                      id="engineer-email" 
+                      placeholder="john.doe@example.com" 
+                      value={formEmail}
+                      disabled={true}
+                      required 
+                    />
+                  </div>
+                </div>
+
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="engineer-holidays">Annual Holiday Allowance</label>
+                  <div className="input-wrapper">
+                    <input 
+                      type="number" 
+                      id="engineer-holidays" 
+                      placeholder="24" 
+                      min="0"
+                      max="365"
+                      value={formHolidayAllowance}
+                      onChange={(e) => setFormHolidayAllowance(parseInt(e.target.value) || 0)}
+                      required 
+                    />
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Section 3: Project assignments check-cards */}
+            <div className="popup-section-divider">
+              <span>Project Assignments</span>
             </div>
-            <p className="field-hint">Assign one or multiple sites to this engineer.</p>
+
+            <div className="form-group" style={{ gridColumn: "1 / -1", margin: 0 }}>
+              <label>Assign Construction Sites</label>
+              <div className="site-check-card-grid">
+                {sites.map(site => {
+                  const isChecked = formSelectedSites.includes(site.id);
+                  return (
+                    <div 
+                      key={site.id} 
+                      className={`site-check-card ${isChecked ? "checked" : ""}`}
+                      onClick={() => handleCheckboxChange(site.id)}
+                    >
+                      <div className="site-check-card-icon">
+                        <Building2 size={16} />
+                      </div>
+                      <div className="site-check-card-details">
+                        <span className="site-check-card-name">{site.siteName}</span>
+                        <span className="site-check-card-loc">{site.location}</span>
+                      </div>
+                      <div className="site-check-checkbox">
+                        <svg width="10" height="8" viewBox="0 0 10 8" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M1 4L3.5 6.5L9 1" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="field-hint" style={{ marginTop: "8px" }}>Assign one or multiple construction sites to this engineer.</p>
+            </div>
           </div>
 
           <div className="modal-actions" style={{ margin: "24px -24px -24px -24px" }}>
@@ -722,167 +732,59 @@ export default function SiteEngineers() {
                 )}
               </ul>
             </div>
+
+            {/* Administrative Actions */}
+            <div style={{ marginTop: "20px", borderTop: "1px solid var(--border-color)", paddingTop: "16px" }}>
+              <h5 style={{ margin: "0 0 12px 0", fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>
+                Administrative Controls
+              </h5>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center" }}>
+                <Button 
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    handleOpenEditModal(selectedEngineer);
+                  }}
+                  icon={Edit3}
+                  variant="outline"
+                  size="sm"
+                >
+                  Edit Profile
+                </Button>
+                
+                <Button 
+                  onClick={async () => {
+                    if (window.confirm(`Are you sure you want to toggle status to ${selectedEngineer.status === "active" ? "inactive" : "active"}?`)) {
+                      await handleToggleStatus(selectedEngineer.id, selectedEngineer.status);
+                      setSelectedEngineer(prev => ({
+                        ...prev,
+                        status: prev.status === "active" ? "inactive" : "active"
+                      }));
+                    }
+                  }}
+                  variant="outline"
+                  size="sm"
+                >
+                  {selectedEngineer.status === "active" ? "Deactivate Account" : "Activate Account"}
+                </Button>
+
+                <Button 
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    handleDeleteEngineer(selectedEngineer);
+                  }}
+                  icon={Trash2}
+                  style={{ backgroundColor: "var(--danger-600)", color: "#fff", borderColor: "var(--danger-700)", marginLeft: "auto" }}
+                  size="sm"
+                >
+                  Delete Engineer
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </Modal>
 
-      {/* MODAL: SECURITY VERIFICATION & CREDENTIAL MANAGEMENT */}
-      <Modal
-        isOpen={showSecurityModal}
-        onClose={() => setShowSecurityModal(false)}
-        title="Security Verification & Credentials"
-        maxWidth="460px"
-      >
-        {securityEngineer && (
-          <div>
-            {!otpVerified ? (
-              <div className="otp-verification-wrapper">
-                <div className="otp-icon-wrapper">
-                  <ShieldCheck size={28} />
-                </div>
-                <h4 className="otp-title">Identity Verification</h4>
-                <p className="otp-subtitle">
-                  To access security settings for <strong>{securityEngineer.fullName}</strong>, we must verify the request by sending an OTP to their registered number:
-                  <strong style={{ display: "block", marginTop: "8px", fontSize: "14px", color: "var(--primary-900)" }}>
-                    {securityEngineer.phoneNumber || "No phone number registered"}
-                  </strong>
-                </p>
 
-                {otpSent && (
-                  <div className="simulated-sms-banner">
-                    <Mail className="sms-icon" size={18} />
-                    <div className="sms-content">
-                      <span><strong>[Simulated SMS Gateway]</strong> Code dispatched:</span>
-                      <strong className="sms-code">{generatedOtp}</strong>
-                    </div>
-                  </div>
-                )}
-
-                {otpError && (
-                  <div className="info-alert" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)", padding: "12px", borderRadius: "var(--radius-sm)", marginBottom: "20px", width: "100%", textAlign: "left" }}>
-                    <span style={{ color: "var(--danger-600)", fontSize: "12px" }}>{otpError}</span>
-                  </div>
-                )}
-
-                {!otpSent ? (
-                  <Button 
-                    onClick={handleSendOtp} 
-                    isLoading={securityLoading}
-                    icon={KeyRound}
-                    style={{ width: "100%" }}
-                  >
-                    Send Verification Code
-                  </Button>
-                ) : (
-                  <form onSubmit={handleVerifyOtp} style={{ width: "100%" }}>
-                    <div className="form-group" style={{ alignItems: "center" }}>
-                      <label htmlFor="entered-otp">Enter 6-Digit OTP</label>
-                      <input
-                        type="text"
-                        id="entered-otp"
-                        className="otp-input-field font-mono"
-                        placeholder="000000"
-                        maxLength={6}
-                        value={enteredOtp}
-                        onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, ""))}
-                        required
-                        autoFocus
-                      />
-                    </div>
-                    <Button 
-                      type="submit" 
-                      style={{ width: "100%", marginBottom: "12px" }}
-                      isLoading={securityLoading}
-                    >
-                      Verify & Unlock
-                    </Button>
-                    <button 
-                      type="button" 
-                      className="btn-text"
-                      onClick={handleSendOtp}
-                      style={{ display: "block", width: "100%", textAlign: "center" }}
-                    >
-                      Resend Code
-                    </button>
-                  </form>
-                )}
-              </div>
-            ) : (
-              <div className="security-panel-unlocked">
-                <div className="security-badge-success">
-                  <ShieldCheck size={20} style={{ color: "var(--success-500)" }} />
-                  <span>Administrator Verified Successfully</span>
-                </div>
-
-                <div className="form-group" style={{ marginBottom: "24px" }}>
-                  <label>Current Account Password</label>
-                  {securityEngineer.password ? (
-                    <div className="password-display-box">
-                      <span className="password-text">
-                        {showPlaintextPassword ? securityEngineer.password : "••••••••"}
-                      </span>
-                      <button 
-                        type="button" 
-                        className="password-btn-toggle" 
-                        onClick={() => setShowPlaintextPassword(!showPlaintextPassword)}
-                        title={showPlaintextPassword ? "Hide password" : "Show password"}
-                      >
-                        {showPlaintextPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="password-display-box empty">
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                        Password not tracked in database.
-                      </span>
-                    </div>
-                  )}
-                  <p className="field-hint">Plaintext passwords are only visible for profiles created with tracking enabled.</p>
-                </div>
-
-                <form onSubmit={handleUpdatePassword} style={{ borderTop: "1px solid var(--border-color)", paddingTop: "20px", marginTop: "20px" }}>
-                  <div className="form-group">
-                    <label htmlFor="new-engineer-password">Change Password</label>
-                    <div className="input-wrapper">
-                      <Lock className="input-icon" size={16} />
-                      <input
-                        type="password"
-                        id="new-engineer-password"
-                        placeholder="Enter new password (min 6 chars)"
-                        value={newPassword}
-                        onChange={(e) => setNewPassword(e.target.value)}
-                        required
-                      />
-                    </div>
-                  </div>
-                  <Button 
-                    type="submit" 
-                    icon={Save}
-                    isLoading={securityLoading}
-                    style={{ width: "100%", marginTop: "8px" }}
-                  >
-                    Update Password
-                  </Button>
-                </form>
-
-                <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: "20px", marginTop: "20px", textAlign: "center" }}>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "12px" }}>
-                    Alternatively, send standard recovery link to engineer's inbox:
-                  </span>
-                  <Button 
-                    variant="outline" 
-                    onClick={handleSendResetEmail}
-                    isLoading={securityLoading}
-                    style={{ width: "100%" }}
-                  >
-                    Send Password Reset Email
-                  </Button>
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </Modal>
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

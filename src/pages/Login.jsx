@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn, signUp } from "../firebase/auth";
-import { createUserProfile } from "../services/firebaseService";
+import { createUserProfile, getUserByEmail, resetUserPasswordInAuthEmulator } from "../services/firebaseService";
 import { useAuth } from "../context/AuthContext";
 import { 
   ShieldCheck, 
@@ -102,6 +102,20 @@ export default function Login() {
   const [error, setError] = useState("");
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   
+  // Forgot Password / OTP States
+  const [loginView, setLoginView] = useState("login"); // "login", "forgotPassword", "verifyOtp", "resetPassword"
+  const [forgotEmail, setForgotEmail] = useState("");
+  const [otpCode, setOtpCode] = useState("");
+  const [enteredOtp, setEnteredOtp] = useState("");
+  const [otpError, setOtpError] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmNewPassword, setConfirmNewPassword] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmNewPassword, setShowConfirmNewPassword] = useState(false);
+  const [resetUserId, setResetUserId] = useState("");
+  const [resetUserPhone, setResetUserPhone] = useState("");
+  const [resetSuccess, setResetSuccess] = useState("");
+  
   const { user, userProfile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
 
@@ -131,6 +145,18 @@ export default function Login() {
   const openLoginModal = () => {
     setError("");
     setShowPassword(false);
+    setLoginView("login");
+    setForgotEmail("");
+    setOtpCode("");
+    setEnteredOtp("");
+    setOtpError("");
+    setNewPassword("");
+    setConfirmNewPassword("");
+    setShowNewPassword(false);
+    setShowConfirmNewPassword(false);
+    setResetUserId("");
+    setResetUserPhone("");
+    setResetSuccess("");
     setIsLoginModalOpen(true);
   };
 
@@ -186,6 +212,96 @@ export default function Login() {
         userFriendlyMsg = err.message;
       }
       setError(userFriendlyMsg);
+      setLoading(false);
+    }
+  };
+
+  // Forgot Password Flow Handlers
+  const handleForgotPasswordSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setLoading(true);
+
+    try {
+      const emailVal = forgotEmail.trim();
+      const profile = await getUserByEmail(emailVal);
+      if (!profile) {
+        throw new Error("No engineer profile found with this corporate email address.");
+      }
+      if (profile.role !== "site_engineer" && profile.role !== "engineer") {
+        throw new Error("Only site engineer accounts can perform password self-reset.");
+      }
+      if (profile.status !== "active") {
+        throw new Error("This account is inactive. Please contact the administrator.");
+      }
+
+      // Generate OTP and save info
+      const code = Math.floor(100000 + Math.random() * 900000).toString();
+      setOtpCode(code);
+      setResetUserId(profile.uid || profile.id);
+      setResetUserPhone(profile.phoneNumber || "No phone number registered");
+      setLoginView("verifyOtp");
+      setEnteredOtp("");
+      setOtpError("");
+      
+      console.log(`[Simulated SMS/Email Gateway] OTP Code: ${code}`);
+    } catch (err) {
+      console.error("Forgot password request failed:", err);
+      setError(err.message || "Failed to process forgot password request.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyOtpSubmit = (e) => {
+    e.preventDefault();
+    setOtpError("");
+
+    if (enteredOtp === otpCode && otpCode !== "") {
+      setLoginView("resetPassword");
+      setError("");
+    } else {
+      setOtpError("Incorrect 6-digit verification code. Please try again.");
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    setError("");
+    setResetSuccess("");
+
+    if (newPassword.length < 6) {
+      setError("New password must be at least 6 characters.");
+      return;
+    }
+    if (newPassword !== confirmNewPassword) {
+      setError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      // 1. Update Auth password via emulator API
+      await resetUserPasswordInAuthEmulator(resetUserId, newPassword);
+
+      // 2. Clear Firestore password field if any was stored
+      await updateEngineerPasswordInDb(resetUserId, newPassword);
+
+      setResetSuccess("Password reset completed successfully!");
+      setNewPassword("");
+      setConfirmNewPassword("");
+      
+      // Navigate back to login view after 3 seconds
+      setTimeout(() => {
+        setLoginView("login");
+        setResetSuccess("");
+        // Auto fill email field
+        setEmail(forgotEmail);
+      }, 3000);
+    } catch (err) {
+      console.error("Reset password failed:", err);
+      setError(err.message || "Failed to complete password reset.");
+    } finally {
       setLoading(false);
     }
   };
@@ -488,9 +604,19 @@ export default function Login() {
         onClose={() => {
           setIsLoginModalOpen(false);
           setShowPassword(false);
+          setLoginView("login");
+          setError("");
         }}
         closeOnOverlayClick={false}
-        title="Apex Console Login"
+        title={
+          loginView === "login" 
+            ? "Apex Console Login" 
+            : loginView === "forgotPassword" 
+              ? "Recover Credentials" 
+              : loginView === "verifyOtp"
+                ? "Verify Mobile OTP"
+                : "Reset Account Password"
+        }
         maxWidth="440px"
         className="modal-overlay login-modal-overlay"
       >
@@ -500,9 +626,17 @@ export default function Login() {
             <div className="login-logo-badge">
               <HardHat size={28} className="login-logo-icon" />
             </div>
-            <h3 className="login-title">Welcome to Apex Console</h3>
+            <h3 className="login-title">
+              {loginView === "login" && "Welcome to Apex Console"}
+              {loginView === "forgotPassword" && "Forgot Password"}
+              {loginView === "verifyOtp" && "Enter Verification Code"}
+              {loginView === "resetPassword" && "Create New Password"}
+            </h3>
             <p className="login-subtitle">
-              Provide your credentials to manage or verify construction site operations.
+              {loginView === "login" && "Provide your credentials to manage or verify construction site operations."}
+              {loginView === "forgotPassword" && "Provide your registered corporate email to receive a mobile verification code."}
+              {loginView === "verifyOtp" && `A simulated SMS verification code has been dispatched to ${resetUserPhone}.`}
+              {loginView === "resetPassword" && "Set a new secure password for your site engineer account."}
             </p>
           </div>
 
@@ -516,59 +650,236 @@ export default function Login() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="login-form-content">
-            <div className="login-form-group">
-              <label htmlFor="modal-email" className="login-field-label">Corporate Email Address</label>
-              <div className="login-input-wrapper">
-                <Mail className="login-input-icon" size={18} />
-                <input
-                  type="email"
-                  id="modal-email"
-                  className="login-input-field"
-                  placeholder="admin@gmail.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  autoComplete="email"
-                />
-              </div>
+          {resetSuccess && (
+            <div className="info-alert" style={{ borderLeft: "4px solid var(--success-500)", backgroundColor: "var(--success-50)", padding: "12px", borderRadius: "8px", display: "flex", gap: "10px", alignItems: "center", marginBottom: "16px" }}>
+              <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
+              <span style={{ color: "var(--success-700)", fontSize: "13px", fontWeight: "600" }}>{resetSuccess}</span>
             </div>
+          )}
 
-            <div className="login-form-group">
-              <label htmlFor="modal-password" className="login-field-label">Security Password</label>
-              <div className="login-input-wrapper">
-                <Lock className="login-input-icon" size={18} />
-                <input
-                  type={showPassword ? "text" : "password"}
-                  id="modal-password"
-                  className="login-input-field password-field"
-                  placeholder="••••••••"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  autoComplete="current-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="login-password-toggle-btn"
-                  aria-label={showPassword ? "Hide password" : "Show password"}
+          {loginView === "login" && (
+            <form onSubmit={handleSubmit} className="login-form-content">
+              <div className="login-form-group">
+                <label htmlFor="modal-email" className="login-field-label">Corporate Email Address</label>
+                <div className="login-input-wrapper">
+                  <Mail className="login-input-icon" size={18} />
+                  <input
+                    type="email"
+                    id="modal-email"
+                    className="login-input-field"
+                    placeholder="admin@gmail.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    required
+                    autoComplete="email"
+                  />
+                </div>
+              </div>
+
+              <div className="login-form-group">
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                  <label htmlFor="modal-password" className="login-field-label" style={{ margin: 0 }}>Security Password</label>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLoginView("forgotPassword");
+                      setError("");
+                    }}
+                    style={{ background: "none", border: "none", color: "var(--primary-600)", fontSize: "12px", fontWeight: "600", cursor: "pointer", padding: 0 }}
+                  >
+                    Forgot Password?
+                  </button>
+                </div>
+                <div className="login-input-wrapper">
+                  <Lock className="login-input-icon" size={18} />
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    id="modal-password"
+                    className="login-input-field password-field"
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    required
+                    autoComplete="current-password"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="login-password-toggle-btn"
+                    aria-label={showPassword ? "Hide password" : "Show password"}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <Button 
+                type="submit" 
+                id="btn-login-submit" 
+                icon={KeyRound} 
+                isLoading={loading}
+                className="login-submit-btn"
+              >
+                {loading ? "Authenticating Credentials..." : "Authorize & Sign In"}
+              </Button>
+            </form>
+          )}
+
+          {loginView === "forgotPassword" && (
+            <form onSubmit={handleForgotPasswordSubmit} className="login-form-content">
+              <div className="login-form-group">
+                <label htmlFor="forgot-email" className="login-field-label">Corporate Email Address</label>
+                <div className="login-input-wrapper">
+                  <Mail className="login-input-icon" size={18} />
+                  <input
+                    type="email"
+                    id="forgot-email"
+                    className="login-input-field"
+                    placeholder="engineer@gmail.com"
+                    value={forgotEmail}
+                    onChange={(e) => setForgotEmail(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <Button 
+                  type="button" 
+                  variant="outline"
+                  onClick={() => {
+                    setLoginView("login");
+                    setError("");
+                  }}
+                  style={{ flex: 1 }}
                 >
-                  {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                </button>
+                  Cancel
+                </Button>
+                <Button 
+                  type="submit" 
+                  isLoading={loading}
+                  style={{ flex: 1.5 }}
+                >
+                  Send OTP Code
+                </Button>
               </div>
-            </div>
+            </form>
+          )}
 
-            <Button 
-              type="submit" 
-              id="btn-login-submit" 
-              icon={KeyRound} 
-              isLoading={loading}
-              className="login-submit-btn"
-            >
-              {loading ? "Authenticating Credentials..." : "Authorize & Sign In"}
-            </Button>
-          </form>
+          {loginView === "verifyOtp" && (
+            <form onSubmit={handleVerifyOtpSubmit} className="login-form-content">
+              {/* Simulated SMS Banner */}
+              <div className="simulated-sms-banner" style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px", backgroundColor: "var(--primary-50)", border: "1px solid var(--primary-200)", borderRadius: "8px", marginBottom: "16px" }}>
+                <Mail className="sms-icon" size={18} style={{ color: "var(--primary-600)" }} />
+                <div className="sms-content" style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>[Simulated SMS Gateway] Code dispatched:</span>
+                  <strong className="sms-code" style={{ fontSize: "14px", color: "var(--primary-900)", fontFamily: "monospace", letterSpacing: "1px" }}>{otpCode}</strong>
+                </div>
+              </div>
+
+              {otpError && (
+                <div className="info-alert" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)", padding: "10px", borderRadius: "6px", marginBottom: "16px" }}>
+                  <span style={{ color: "var(--danger-600)", fontSize: "12px", fontWeight: "600" }}>{otpError}</span>
+                </div>
+              )}
+
+              <div className="login-form-group">
+                <label htmlFor="entered-otp" className="login-field-label">Enter 6-Digit OTP</label>
+                <input
+                  type="text"
+                  id="entered-otp"
+                  className="login-input-field font-mono"
+                  placeholder="000000"
+                  maxLength={6}
+                  value={enteredOtp}
+                  onChange={(e) => setEnteredOtp(e.target.value.replace(/\D/g, ""))}
+                  required
+                  autoFocus
+                  style={{ textAlign: "center", fontSize: "18px", letterSpacing: "4px" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <Button 
+                  type="button" 
+                  variant="outline"
+                  onClick={() => {
+                    setLoginView("forgotPassword");
+                    setError("");
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  Back
+                </Button>
+                <Button 
+                  type="submit" 
+                  style={{ flex: 1.5 }}
+                >
+                  Verify Code
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {loginView === "resetPassword" && (
+            <form onSubmit={handleResetPasswordSubmit} className="login-form-content">
+              <div className="login-form-group">
+                <label htmlFor="new-reset-password" className="login-field-label">New Password (min 6 chars)</label>
+                <div className="login-input-wrapper">
+                  <Lock className="login-input-icon" size={18} />
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    id="new-reset-password"
+                    className="login-input-field"
+                    placeholder="••••••••"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="login-password-toggle-btn"
+                    aria-label={showNewPassword ? "Hide password" : "Show password"}
+                  >
+                    {showNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <div className="login-form-group">
+                <label htmlFor="confirm-reset-password" className="login-field-label">Confirm New Password</label>
+                <div className="login-input-wrapper">
+                  <Lock className="login-input-icon" size={18} />
+                  <input
+                    type={showConfirmNewPassword ? "text" : "password"}
+                    id="confirm-reset-password"
+                    className="login-input-field"
+                    placeholder="••••••••"
+                    value={confirmNewPassword}
+                    onChange={(e) => setConfirmNewPassword(e.target.value)}
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmNewPassword(!showConfirmNewPassword)}
+                    className="login-password-toggle-btn"
+                    aria-label={showConfirmNewPassword ? "Hide password" : "Show password"}
+                  >
+                    {showConfirmNewPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </div>
+
+              <Button 
+                type="submit" 
+                isLoading={loading}
+                className="login-submit-btn"
+              >
+                Reset Password & Login
+              </Button>
+            </form>
+          )}
         </div>
       </Modal>
 

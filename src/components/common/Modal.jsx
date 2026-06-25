@@ -49,7 +49,10 @@ export const Modal = ({
   if (!isOpen) return null;
 
   const handleOverlayClick = (e) => {
-    // Outside clicks (overlay/background) will not close the modal
+    if (e.target === e.currentTarget) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   };
 
   const handleFormChange = () => {
@@ -86,6 +89,7 @@ export const Modal = ({
         style={{ maxWidth }} 
         onChange={handleFormChange}
         onClickCapture={handleModalCardClickCapture}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-header">
           <h3>{title}</h3>
