@@ -1,8 +1,9 @@
 import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { HardHat, LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText } from "lucide-react";
+import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare } from "lucide-react";
 import Button from "../common/Button";
+import CivilEngineerLogo from "../common/CivilEngineerLogo";
 
 
 export default function Sidebar({ isOpen, onClose }) {
@@ -26,7 +27,7 @@ export default function Sidebar({ isOpen, onClose }) {
     <aside className={`sidebar ${isOpen ? "open" : ""}`}>
       <div className="sidebar-header">
         <div className="sidebar-brand">
-          <HardHat className="brand-icon" size={24} />
+          <CivilEngineerLogo className="brand-icon" size={24} />
           <span className="brand-text">Construction Site</span>
         </div>
         <button className="sidebar-close-btn" onClick={onClose} type="button">
@@ -47,6 +48,15 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Overview Dashboard</span>
             </NavLink>
             
+            <NavLink 
+              to="/admin/approvals" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <CheckSquare size={18} />
+              <span>Approval Dashboard</span>
+            </NavLink>
+
             <NavLink 
               to="/admin/engineers" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -72,24 +82,6 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <ClipboardCheck size={18} />
               <span>Site Assignments</span>
-            </NavLink>
-
-            <NavLink 
-              to="/admin/materials" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <Package size={18} />
-              <span>Material Logs</span>
-            </NavLink>
-
-            <NavLink 
-              to="/admin/labour" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <Users size={18} />
-              <span>Labour Logs</span>
             </NavLink>
           </>
         ) : (

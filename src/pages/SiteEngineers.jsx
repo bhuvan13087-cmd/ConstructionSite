@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
+import EngineerActivityDashboard from "./EngineerActivityDashboard";
 import { 
   getSiteEngineers, 
   updateEngineerStatus, 
@@ -42,6 +43,7 @@ import {
 export default function SiteEngineers() {
   const [engineers, setEngineers] = useState([]);
   const [sites, setSites] = useState([]);
+  const [selectedEngineerId, setSelectedEngineerId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -254,6 +256,15 @@ export default function SiteEngineers() {
     }
   };
 
+  if (selectedEngineerId) {
+    return (
+      <EngineerActivityDashboard 
+        engineerId={selectedEngineerId} 
+        onBack={() => setSelectedEngineerId(null)} 
+      />
+    );
+  }
+
   return (
     <Layout title="Site Engineers" description="Manage Site Engineer security credentials and construction site assignments.">
       {toast.show && (
@@ -310,7 +321,7 @@ export default function SiteEngineers() {
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <div 
-                          onClick={() => handleOpenDetails(eng)} 
+                          onClick={() => setSelectedEngineerId(eng.id)} 
                           className="user-avatar" 
                           style={{ 
                             width: "36px", 
@@ -336,7 +347,7 @@ export default function SiteEngineers() {
                         </div>
                         <div>
                           <span 
-                            onClick={() => handleOpenDetails(eng)} 
+                            onClick={() => setSelectedEngineerId(eng.id)} 
                             style={{ cursor: "pointer", fontWeight: 700, color: "var(--primary-900)", transition: "color 0.15s ease" }}
                             onMouseEnter={(e) => e.currentTarget.style.color = "var(--accent-600)"}
                             onMouseLeave={(e) => e.currentTarget.style.color = "var(--primary-900)"}

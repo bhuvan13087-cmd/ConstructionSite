@@ -11,6 +11,7 @@ import {
   calculateDistanceMeters
 } from "../services/firebaseService";
 import Loading from "../components/common/Loading";
+import SiteDetails from "./SiteDetails";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
@@ -210,6 +211,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
 export default function Sites() {
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
+  const [selectedSiteId, setSelectedSiteId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -426,6 +428,15 @@ export default function Sites() {
     }
   };
 
+  if (selectedSiteId) {
+    return (
+      <SiteDetails 
+        siteId={selectedSiteId} 
+        onBack={() => setSelectedSiteId(null)} 
+      />
+    );
+  }
+
   return (
     <Layout title="Construction Sites" description="Manage active civil construction projects and track details.">
       {toast.show && (
@@ -503,7 +514,15 @@ export default function Sites() {
               filteredSites.map((site) => {
                 return (
                   <tr key={site.id}>
-                    <td style={{ fontWeight: 700 }}>{site.siteName}</td>
+                    <td 
+                      style={{ fontWeight: 700, color: "var(--primary-600)", cursor: "pointer" }} 
+                      onClick={() => setSelectedSiteId(site.id)}
+                      title="Click to view site dashboard"
+                      onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
+                      onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
+                    >
+                      {site.siteName}
+                    </td>
                     <td>{site.clientName || "--"}</td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -518,6 +537,14 @@ export default function Sites() {
                     </td>
                     <td>
                       <div className="table-actions">
+                        <button 
+                          onClick={() => setSelectedSiteId(site.id)} 
+                          className="btn-icon" 
+                          title="View Site Dashboard" 
+                          style={{ color: "var(--primary-600)" }}
+                        >
+                          <Building2 size={16} />
+                        </button>
                         <button onClick={() => handleOpenEditModal(site)} className="btn-icon btn-edit-action" title="Edit Site">
                           <Edit3 size={16} />
                         </button>

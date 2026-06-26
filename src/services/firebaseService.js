@@ -337,7 +337,7 @@ function getAddressAccuracyScore(address) {
   if (address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square) {
     score += 5;
   }
-  if (address.neighbourhood || address.colony || address.residential || address.allotments || address.suburb || address.quarter || address.hamlet) {
+  if (address.colony || address.residential || address.neighbourhood || address.allotments || address.suburb || address.quarter || address.hamlet || address.locality) {
     score += 4;
   }
   if (address.village || address.town || address.city_district || address.city || address.municipality) {
@@ -395,7 +395,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
         if (bestResult) {
           const address = bestResult.address;
           const street = address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square || "";
-          const colony = address.neighbourhood || address.colony || address.residential || address.allotments || address.suburb || address.quarter || address.hamlet || "";
+          const colony = address.colony || address.residential || address.neighbourhood || address.allotments || address.suburb || address.quarter || address.hamlet || address.locality || "";
           const town = address.village || address.town || address.city_district || address.city || address.municipality || "";
           const district = address.state_district || address.county || address.district || "";
           const state = address.state || "";
@@ -833,6 +833,7 @@ export async function addMaterial(materialData) {
     purchaseDate: materialData.purchaseDate,
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
+    status: "pending", // Default to pending approval
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
@@ -1162,11 +1163,15 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
     leavesSnap.forEach(docSnap => {
       const data = docSnap.data();
       if (data.date) {
-        if (data.date.startsWith(`${currentYear}-`)) {
-          leavesThisYear++;
-        }
-        if (data.date.startsWith(yearMonthPrefix)) {
-          leavesThisMonth++;
+        // Only count approved leaves (or undefined for backward compatibility)
+        const isApproved = data.status === "approved" || data.status === undefined;
+        if (isApproved) {
+          if (data.date.startsWith(`${currentYear}-`)) {
+            leavesThisYear++;
+          }
+          if (data.date.startsWith(yearMonthPrefix)) {
+            leavesThisMonth++;
+          }
         }
       }
     });
@@ -1205,7 +1210,7 @@ export async function logEngineerLeave(engineerId, dateStr, reason) {
     engineerId,
     date: dateStr,
     reason: reason || "Personal Leave",
-    status: "approved",
+    status: "pending", // Default to pending approval
     createdAt: serverTimestamp()
   });
 }
@@ -1422,6 +1427,244 @@ export async function getEngineerAttendanceHistory(engineerId) {
   });
   return records;
 }
+
+// Log engineer site entry/exit activity
+export async function logActivity(engineerId, siteId, type, latitude, longitude, address) {
+  const db = getDb();
+  
+  // Format local date and time:
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
+  
+  let hours = now.getHours();
+  const minutes = now.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const minStr = minutes < 10 ? '0' + minutes : minutes;
+  const timeStr = `${hours}:${minStr} ${ampm}`;
+
+  const activityRef = doc(collection(db, "activityLogs"));
+  await setDoc(activityRef, {
+    engineerId,
+    siteId,
+    type, // "entry" or "exit"
+    date: dateStr,
+    time: timeStr,
+    latitude: Number(latitude),
+    longitude: Number(longitude),
+    address: address || "",
+    timestamp: serverTimestamp()
+  });
+}
+
+// Get all activity logs (ordered by timestamp desc)
+export async function getActivityLogs() {
+  const db = getDb();
+  const logsQuery = query(collection(db, "activityLogs"));
+  const querySnapshot = await getDocs(logsQuery);
+  const logs = [];
+  querySnapshot.forEach((doc) => {
+    logs.push({ id: doc.id, ...doc.data() });
+  });
+  logs.sort((a, b) => {
+    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+    return tB - tA;
+  });
+  return logs;
+}
+
+// Get activity logs for a specific engineer for today
+export async function getTodayActivityLogsForEngineer(engineerId, dateStr) {
+  const db = getDb();
+  const q = query(
+    collection(db, "activityLogs"),
+    where("engineerId", "==", engineerId),
+    where("date", "==", dateStr)
+  );
+  const querySnapshot = await getDocs(q);
+  const logs = [];
+  querySnapshot.forEach((doc) => {
+    logs.push({ id: doc.id, ...doc.data() });
+  });
+  logs.sort((a, b) => {
+    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+    return tA - tB;
+  });
+  return logs;
+}
+
+// Get all attendance records for a given site
+export async function getAttendanceForSite(siteId) {
+  const db = getDb();
+  const attendanceColl = collection(db, "attendance");
+  const q = query(attendanceColl, where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(docSnap => {
+    records.push({ id: docSnap.id, ...docSnap.data() });
+  });
+  return records;
+}
+
+// Get daily progress updates for a site
+export async function getDailyUpdatesForSite(siteId) {
+  const db = getDb();
+  const updatesColl = collection(db, "dailyUpdates");
+  const q = query(updatesColl, where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  const updates = [];
+  snap.forEach(doc => {
+    updates.push({ id: doc.id, ...doc.data() });
+  });
+  return updates.sort((a, b) => {
+    const timeA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const timeB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// Get all photos captured for a site
+export async function getPhotosForSite(siteId) {
+  const db = getDb();
+  const photosColl = collection(db, "sitePhotos");
+  const q = query(photosColl, where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  const photos = [];
+  snap.forEach(doc => {
+    photos.push({ id: doc.id, ...doc.data() });
+  });
+  return photos.sort((a, b) => {
+    const timeA = a.capturedAt?.seconds || (a.capturedAt ? new Date(a.capturedAt).getTime() : 0);
+    const timeB = b.capturedAt?.seconds || (b.capturedAt ? new Date(b.capturedAt).getTime() : 0);
+    return timeB - timeA;
+  });
+}
+
+// Get engineer activity logs for a site
+export async function getActivityLogsForSite(siteId) {
+  const db = getDb();
+  const q = query(collection(db, "activityLogs"), where("siteId", "==", siteId));
+  const snap = await getDocs(q);
+  const logs = [];
+  snap.forEach(docSnap => {
+    logs.push({ id: docSnap.id, ...docSnap.data() });
+  });
+  logs.sort((a, b) => {
+    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+    return tB - tA;
+  });
+  return logs;
+}
+
+// Get engineer activity logs for an engineer (history)
+export async function getActivityLogsForEngineer(engineerId) {
+  const db = getDb();
+  const q = query(collection(db, "activityLogs"), where("engineerId", "==", engineerId));
+  const snap = await getDocs(q);
+  const logs = [];
+  snap.forEach(docSnap => {
+    logs.push({ id: docSnap.id, ...docSnap.data() });
+  });
+  logs.sort((a, b) => {
+    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+    return tB - tA;
+  });
+  return logs;
+}
+
+// Update existing material records
+export async function updateMaterial(materialId, materialData) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  await updateDoc(docRef, {
+    materialName: materialData.materialName,
+    category: materialData.category,
+    quantity: Number(materialData.quantity),
+    unit: materialData.unit,
+    supplierName: materialData.supplierName,
+    purchaseDate: materialData.purchaseDate,
+    notes: materialData.notes || "",
+    requiredQuantity: Number(materialData.requiredQuantity) || 0,
+    orderedQuantity: Number(materialData.orderedQuantity) || 0,
+    paidQuantity: Number(materialData.paidQuantity) || 0,
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Fetch all leaves across all engineers
+export async function getAllLeaves() {
+  const db = getDb();
+  const leavesColl = collection(db, "leaves");
+  const snap = await getDocs(leavesColl);
+  
+  // Resolve user info
+  const usersColl = collection(db, "users");
+  const usersSnap = await getDocs(usersColl);
+  const usersMap = {};
+  usersSnap.forEach(d => {
+    usersMap[d.id] = d.data();
+  });
+
+  const leaves = [];
+  snap.forEach(d => {
+    const data = d.data();
+    const engineer = usersMap[data.engineerId];
+    leaves.push({
+      id: d.id,
+      ...data,
+      engineerName: engineer ? engineer.fullName : `Engineer (ID: ${data.engineerId})`
+    });
+  });
+  return leaves.sort((a, b) => b.date.localeCompare(a.date));
+}
+
+// Approve a leave request
+export async function approveLeave(leaveId) {
+  const db = getDb();
+  const docRef = doc(db, "leaves", leaveId);
+  await updateDoc(docRef, {
+    status: "approved",
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Reject a leave request
+export async function rejectLeave(leaveId) {
+  const db = getDb();
+  const docRef = doc(db, "leaves", leaveId);
+  await updateDoc(docRef, {
+    status: "rejected",
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Approve a material receipt log
+export async function approveMaterialLog(materialId) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  await updateDoc(docRef, {
+    status: "approved",
+    updatedAt: serverTimestamp()
+  });
+}
+
+// Reject a material receipt log
+export async function rejectMaterialLog(materialId) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  await updateDoc(docRef, {
+    status: "rejected",
+    updatedAt: serverTimestamp()
+  });
+}
+
+
+
 
 
 

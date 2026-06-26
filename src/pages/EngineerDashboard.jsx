@@ -26,7 +26,9 @@ import {
   updateSiteLocation,
   reverseGeocodeLatLng,
   getEngineerAttendanceHistory,
-  updateEngineerPasswordInDb
+  updateEngineerPasswordInDb,
+  logActivity,
+  getTodayActivityLogsForEngineer
 } from "../services/firebaseService";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
@@ -68,7 +70,9 @@ import {
   HardHat,
   Lock,
   Eye,
-  EyeOff
+  EyeOff,
+  ArrowRightCircle,
+  ArrowLeftCircle
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -177,6 +181,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [activeSiteId, setActiveSiteId] = useState("");
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
   const [allSitesAttendance, setAllSitesAttendance] = useState([]);
+  const [showLocationDetails, setShowLocationDetails] = useState(false);
+  const [todayActivityLogs, setTodayActivityLogs] = useState([]);
+  const [activitySubmitting, setActivitySubmitting] = useState(false);
   
   const getLastAttendanceForSite = (siteId) => {
     if (!allSitesAttendance || allSitesAttendance.length === 0) {
@@ -393,6 +400,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         // Fetch material receipts (site-segregated)
         const siteMats = await getMaterialsDetailed(currentActiveId);
         setMaterials(siteMats);
+
+        // Fetch today's activity logs (entry/exit) for the engineer
+        try {
+          const logs = await getTodayActivityLogsForEngineer(engineerId, todayStr);
+          setTodayActivityLogs(logs);
+        } catch (e) {
+          console.error("Failed to load activity logs:", e);
+        }
       }
     } catch (err) {
       console.error("Dashboard data load error:", err);
@@ -599,6 +614,48 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setEngineerLocationSubmitting(false);
       },
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  };
+
+  const handleLogActivity = async (type) => {
+    if (!activeSiteId) {
+      showToast("Please select an active worksite first.", "error");
+      return;
+    }
+    setActivitySubmitting(true);
+    
+    if (!navigator.geolocation) {
+      showToast("Location Permission Denied", "error");
+      setActivitySubmitting(false);
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+        
+        try {
+          const geocode = await reverseGeocodeLatLng(lat, lng);
+          const engineerId = userProfile.uid || userProfile.id || "";
+          
+          await logActivity(engineerId, activeSiteId, type, lat, lng, geocode.fullAddress);
+          
+          showToast(`Logged site ${type === "entry" ? "Entry" : "Exit"} successfully`, "success");
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Log activity error:", err);
+          showToast(`Failed to log ${type}: ${err.message}`, "error");
+        } finally {
+          setActivitySubmitting(false);
+        }
+      },
+      (error) => {
+        console.error("Geolocation error during activity log:", error);
+        showToast("GPS verification failed. Please turn ON location services.", "error");
+        setActivitySubmitting(false);
+      },
+      { enableHighAccuracy: true, timeout: 8000 }
     );
   };
 
@@ -1580,6 +1637,103 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     return sug.toLowerCase().includes(materialName.toLowerCase().trim());
   });
 
+  const renderSubmittedLocationDetails = (site) => {
+    if (!site) return null;
+    
+    const isPending = site.locationStatus === "Pending Approval";
+    const isRejected = site.locationStatus === "Rejected";
+    const isVerified = site.locationStatus === "Verified";
+    
+    let statusText = "No Setup Request";
+    if (isPending) {
+      statusText = "Waiting for Admin Approval";
+    } else if (isVerified) {
+      statusText = "Approved";
+    } else if (isRejected) {
+      statusText = "Rejected";
+    }
+    
+    const lat = isVerified ? site.latitude : site.proposedLatitude;
+    const lng = isVerified ? site.longitude : site.proposedLongitude;
+    const address = isVerified ? site.location : site.proposedLocation;
+    const area = isVerified ? "" : site.proposedArea;
+    const street = isVerified ? "" : site.proposedStreet;
+    const submittedDate = isVerified ? site.locationCreatedDate : site.proposedLocationCreatedDate;
+
+    if (lat === undefined || lat === null) return null;
+
+    return (
+      <div style={{ 
+        marginTop: "12px", 
+        padding: "12px", 
+        backgroundColor: "#ffffff", 
+        borderRadius: "8px", 
+        border: "1px solid var(--border-color, #e2e8f0)",
+        display: "flex",
+        flexDirection: "column",
+        gap: "8px",
+        boxShadow: "0 1px 3px 0 rgba(0, 0, 0, 0.05)"
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted, #64748b)" }}>Submitted Location Details</span>
+          <span style={{ 
+            fontSize: "11.5px", 
+            fontWeight: "700", 
+            padding: "2px 8px", 
+            borderRadius: "12px",
+            backgroundColor: isPending ? "var(--warning-50)" : isRejected ? "var(--danger-50)" : "var(--success-50)",
+            color: isPending ? "var(--warning-700)" : isRejected ? "var(--danger-700)" : "var(--success-700)",
+            border: `1px solid ${isPending ? "var(--warning-200)" : isRejected ? "var(--danger-200)" : "var(--success-200)"}`
+          }}>
+            {statusText}
+          </span>
+        </div>
+        
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+          <div>
+            <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: "600" }}>LATITUDE</span>
+            <span style={{ fontSize: "12px", fontFamily: "monospace", fontWeight: "700", color: "#1e293b" }}>{lat ? Number(lat).toFixed(6) : "--"}</span>
+          </div>
+          <div>
+            <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: "600" }}>LONGITUDE</span>
+            <span style={{ fontSize: "12px", fontFamily: "monospace", fontWeight: "700", color: "#1e293b" }}>{lng ? Number(lng).toFixed(6) : "--"}</span>
+          </div>
+        </div>
+
+        <div>
+          <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: "600" }}>REVERSE GEOCODED ADDRESS</span>
+          <span style={{ fontSize: "12px", fontWeight: "600", color: "#1e293b", lineHeight: "1.4" }}>{address || "Fetching address..."}</span>
+        </div>
+
+        {(street || area) && (
+          <div style={{ display: "grid", gridTemplateColumns: street && area ? "1fr 1fr" : "1fr", gap: "8px" }}>
+            {street && (
+              <div>
+                <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: "600" }}>STREET</span>
+                <span style={{ fontSize: "12px", fontWeight: "600", color: "#1e293b" }}>{street}</span>
+              </div>
+            )}
+            {area && (
+              <div>
+                <span style={{ display: "block", fontSize: "10px", color: "#64748b", fontWeight: "600" }}>AREA</span>
+                <span style={{ fontSize: "12px", fontWeight: "600", color: "#1e293b" }}>{area}</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        {submittedDate && (
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "6px", fontSize: "11px" }}>
+            <span style={{ color: "#64748b", fontWeight: "500" }}>SUBMITTED ON</span>
+            <span style={{ fontWeight: "600", color: "#1e293b" }}>
+              {new Date(submittedDate).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" })}
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   // Mobile UI Render Views
   const renderHomeView = () => {
     return (
@@ -1604,6 +1758,30 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <option key={s.id} value={s.id}>{s.siteName}</option>
               ))}
             </select>
+          )}
+
+          {currentSite && currentSite.locationStatus === "Verified" && (
+            <div style={{ marginTop: "12px", borderTop: "1px dashed var(--border-color)", paddingTop: "8px" }}>
+              <button
+                type="button"
+                onClick={() => setShowLocationDetails(!showLocationDetails)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "var(--accent-700)",
+                  fontSize: "12px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+              >
+                {showLocationDetails ? "Hide Location Details" : "View Established Location Details"}
+              </button>
+              {showLocationDetails && renderSubmittedLocationDetails(currentSite)}
+            </div>
           )}
         </div>
 
@@ -1644,6 +1822,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
                 The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
               </p>
+              {renderSubmittedLocationDetails(currentSite)}
             </div>
           ) : currentSite?.locationStatus === "Rejected" ? (
             <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
@@ -1657,6 +1836,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
                 The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
               </p>
+              {renderSubmittedLocationDetails(currentSite)}
               <button 
                 type="button" 
                 onClick={() => setShowEngineerLocationSetupModal(true)} 
@@ -1690,7 +1870,109 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           )
         )}
 
-        {/* Mock controls completely removed for production */}
+        {/* Entry / Exit Activity Logging */}
+        {currentSite && (
+          <div className="mobile-attendance-card" style={{ flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Activity size={18} style={{ color: "var(--accent-600)" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Entry / Exit Logging</span>
+              </div>
+              <Badge status="default">Separated Log</Badge>
+            </div>
+            
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              Record your entry and exit events for tracking active site operations. This does not affect attendance calculations.
+            </p>
+            
+            <div style={{ display: "flex", gap: "12px", marginTop: "4px" }}>
+              <button 
+                type="button" 
+                disabled={activitySubmitting}
+                onClick={() => handleLogActivity("entry")} 
+                style={{ 
+                  flex: 1, 
+                  backgroundColor: "var(--success-600)", 
+                  color: "#ffffff", 
+                  border: "none", 
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "13px", 
+                  fontWeight: "800", 
+                  padding: "12px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  opacity: activitySubmitting ? 0.7 : 1
+                }}
+              >
+                <ArrowRightCircle size={16} /> Log Entry
+              </button>
+              <button 
+                type="button" 
+                disabled={activitySubmitting}
+                onClick={() => handleLogActivity("exit")} 
+                style={{ 
+                  flex: 1, 
+                  backgroundColor: "var(--danger-600)", 
+                  color: "#ffffff", 
+                  border: "none", 
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "13px", 
+                  fontWeight: "800", 
+                  padding: "12px 10px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  opacity: activitySubmitting ? 0.7 : 1
+                }}
+              >
+                <ArrowLeftCircle size={16} /> Log Exit
+              </button>
+            </div>
+
+            {/* Today's logged activities for this site */}
+            {todayActivityLogs && todayActivityLogs.some(log => log.siteId === activeSiteId) && (
+              <div style={{ marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>
+                  Today's Logs ({currentSite.siteName})
+                </span>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                  {todayActivityLogs
+                    .filter(log => log.siteId === activeSiteId)
+                    .map((log, idx) => (
+                      <div key={log.id || idx} style={{ 
+                        display: "flex", 
+                        justifyContent: "space-between", 
+                        alignItems: "center", 
+                        backgroundColor: "#f8fafc", 
+                        padding: "6px 10px", 
+                        borderRadius: "6px",
+                        fontSize: "12px"
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ 
+                            fontWeight: "800", 
+                            color: log.type === "entry" ? "var(--success-600)" : "var(--danger-600)",
+                            textTransform: "uppercase"
+                          }}>
+                            {log.type}
+                          </span>
+                          <span style={{ color: "#64748b", fontWeight: "500" }}>at {log.time}</span>
+                        </div>
+                        <span style={{ color: "var(--primary-900)", fontWeight: "600", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={log.address}>
+                          {log.address}
+                        </span>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Quick Actions Grid */}
         <div style={{ marginTop: "8px" }}>
@@ -1753,6 +2035,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
                 The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
               </p>
+              {renderSubmittedLocationDetails(currentSite)}
             </div>
           ) : isRejected ? (
             <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
@@ -1766,6 +2049,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
                 The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
               </p>
+              {renderSubmittedLocationDetails(currentSite)}
               <button 
                 type="button" 
                 onClick={() => setShowEngineerLocationSetupModal(true)} 
@@ -2540,9 +2824,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)" }}>
-                      {m.quantity} {m.unit}s
-                    </span>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                      <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)", whiteSpace: "nowrap" }}>
+                        {m.quantity} {m.unit}s
+                      </span>
+                      <Badge status={m.status || "approved"} style={{ fontSize: "9px", padding: "1px 6px" }}>
+                        {m.status ? m.status.toUpperCase() : "APPROVED"}
+                      </Badge>
+                    </div>
                     {m.engineerId === currentEngineerId && (
                       <button 
                         type="button" 

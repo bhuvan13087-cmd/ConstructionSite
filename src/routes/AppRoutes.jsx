@@ -8,6 +8,7 @@ import SiteAssignments from "../pages/SiteAssignments";
 import AdminMaterials from "../pages/AdminMaterials";
 import AdminLabour from "../pages/AdminLabour";
 import EngineerDashboard from "../pages/EngineerDashboard";
+import ApprovalsDashboard from "../pages/ApprovalsDashboard";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import { useAuth } from "../context/AuthContext";
 
@@ -23,11 +24,12 @@ export default function AppRoutes() {
       {/* Protected Admin Dashboard Area */}
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
         <Route path="/admin" element={<AdminDashboard />} />
+        <Route path="/admin/approvals" element={<ApprovalsDashboard />} />
         <Route path="/admin/engineers" element={<SiteEngineers />} />
         <Route path="/admin/sites" element={<Sites />} />
         <Route path="/admin/assignments" element={<SiteAssignments />} />
-        <Route path="/admin/materials" element={<AdminMaterials />} />
-        <Route path="/admin/labour" element={<AdminLabour />} />
+        <Route path="/admin/materials" element={<Navigate to="/admin/sites" replace />} />
+        <Route path="/admin/labour" element={<Navigate to="/admin/sites" replace />} />
       </Route>
 
       {/* Protected Site Engineer Area */}
