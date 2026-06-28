@@ -373,7 +373,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // 7. General Expense states
   const [generalExpenses, setGeneralExpenses] = useState([]);
   const [labourPayments, setLabourPayments] = useState([]);
-  const [labourHistory, setLabourHistory] = useState([]);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
   const [expenseCategory, setExpenseCategory] = useState("Site Expense");
   const [expenseAmount, setExpenseAmount] = useState("");
@@ -676,11 +675,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          resolve({
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy
-          });
+          const { latitude, longitude, accuracy } = position.coords;
+          // Warn and reject if GPS accuracy is too poor (>150m means network-only fix)
+          if (accuracy > 150) {
+            reject(new Error(`GPS accuracy is too low (${Math.round(accuracy)}m). Please step outside or enable GPS and retry.`));
+            return;
+          }
+          resolve({ latitude, longitude, accuracy });
         },
         (error) => {
           let msg = "Unable to detect current location. Please enable GPS and try again.";
@@ -818,6 +819,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
         const accuracy = position.coords.accuracy || 10;
+
+        // Reject poor GPS accuracy (network-only fix >150m)
+        if (accuracy > 150) {
+          setLocationCheckStatus("warning");
+          setLocationError(`GPS accuracy is too low (${Math.round(accuracy)}m). Please enable GPS / step to open area and retry.`);
+          return;
+        }
         
         const coords = { latitude: lat, longitude: lng, accuracy };
         setDeviceCoords(coords);
@@ -2869,978 +2877,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         if (!materialDateFilter) return true;
         return m.purchaseDate === materialDateFilter;
       });
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        {/* Search bar & filter */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
-            <Search size={16} style={{ color: "var(--text-muted)" }} />
-            <input 
-              type="text" 
-              placeholder="Search materials, suppliers..."
-              value={materialSearch}
-              onChange={(e) => setMaterialSearch(e.target.value)}
-              style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
-            />
-          </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <div style={{ flex: 1 }}>
-              <input 
-                type="date" 
-                value={materialDateFilter} 
-                onChange={(e) => setMaterialDateFilter(e.target.value)} 
-                style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
-              />
-            </div>
-            {materialDateFilter && (
-              <button 
-                type="button" 
-                onClick={() => setMaterialDateFilter("")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--danger-600)",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  textDecoration: "underline"
-                }}
-              >
-                Clear Date
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* List display */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {activeMaterials.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
-            </div>
-          ) : (
-            activeMaterials.map(m => (
-              <div key={m.id} className="mobile-material-card">
-                <div className="mobile-material-header">
-                  <div>
-                    <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
-                    <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-                      <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)", whiteSpace: "nowrap" }}>
-                        {m.quantity} {m.unit}s
-                      </span>
-                      <Badge status={m.status || "approved"} style={{ fontSize: "9px", padding: "1px 6px" }}>
-                        {m.status ? m.status.toUpperCase() : "APPROVED"}
-                      </Badge>
-                    </div>
-                    {m.engineerId === currentEngineerId && (
-                      <button 
-                        type="button" 
-                        onClick={() => handleDeleteMaterial(m.id)}
-                        style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                        title="Delete Material Log"
-                      >
-                        <Trash2 size={16} />
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
-                  <div className="mobile-material-detail-item">
-                    <span className="mobile-material-detail-label">Supplier</span>
-                    <span className="mobile-material-detail-value">{m.supplierName}</span>
-                  </div>
-                  <div className="mobile-material-detail-item" style={{ textAlign: "right" }}>
-                    <span className="mobile-material-detail-label">Delivery Date</span>
-                    <span className="mobile-material-detail-value">{m.purchaseDate}</span>
-                  </div>
-                </div>
-
-                {m.notes && (
-                  <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "6px 10px", borderRadius: "4px", fontStyle: "italic" }}>
-                    "{m.notes}"
-                  </p>
-                )}
-
-                {m.invoiceUrl && (
-                  <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
-                    <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
-                      View Challan Photo
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
-
-        <button
-          type="button"
-          className="mobile-btn-large"
-          onClick={() => {
-            setMaterialFlow("add");
-            setMaterialStep(1);
-          }}
-          style={{ position: "sticky", bottom: "16px", zIndex: 10, boxShadow: "0 4px 10px rgba(14, 165, 233, 0.3)" }}
-        >
-          <Plus size={18} />
-          <span>Log New Material</span>
-        </button>
-
-        {/* Modal for adding material */}
-        <Modal
-          isOpen={materialFlow === "add"}
-          onClose={handleCloseMaterialModal}
-          title="Log New Material"
-          maxWidth="460px"
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div className="mobile-step-indicator" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Step {materialStep} of 3</span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <div className={`mobile-step-dot ${materialStep >= 1 ? 'active' : ''}`} />
-                <div className={`mobile-step-dot ${materialStep >= 2 ? 'active' : ''}`} />
-                <div className={`mobile-step-dot ${materialStep >= 3 ? 'active' : ''}`} />
-              </div>
-            </div>
-
-            {/* Step 1: Category selection */}
-            {materialStep === 1 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <span className="mobile-form-label">Choose Material Category</span>
-                <div className="mobile-category-list">
-                  {["Cement", "Steel", "Sand", "Bricks", "Other"].map(cat => {
-                    const emojis = {
-                      Cement: "🧱",
-                      Steel: "🧬",
-                      Sand: "⏳",
-                      Bricks: "🧱",
-                      Other: "📦"
-                    };
-                    const emoji = emojis[cat] || "📦";
-                    return (
-                      <div 
-                        key={cat} 
-                        className={`mobile-category-item ${materialCategory === cat ? 'active' : ''}`}
-                        onClick={() => {
-                          setMaterialCategory(cat);
-                          setMaterialName(""); 
-                          setMaterialStep(2);
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                          <span style={{ fontSize: "20px" }}>{emoji}</span>
-                          <span>{cat}</span>
-                        </div>
-                        <ChevronRight size={18} />
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-
-            {/* Step 2: Name Input */}
-            {materialStep === 2 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div>
-                  <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
-                </div>
-
-                {materialCategory === "Other" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <span className="mobile-form-label">Specify Material Category <span style={{ color: "var(--danger-500)" }}>*</span></span>
-                    <input
-                      type="text"
-                      placeholder="E.g. Glass, Wood, Tiles"
-                      value={customMaterialCategory}
-                      onChange={(e) => setCustomMaterialCategory(e.target.value)}
-                      required
-                      style={{
-                        height: "42px",
-                        padding: "10px 12px",
-                        border: "1.5px solid var(--accent-500)",
-                        borderRadius: "var(--radius-sm)",
-                        fontSize: "14px",
-                        outline: "none",
-                        backgroundColor: "#ffffff"
-                      }}
-                    />
-                  </div>
-                )}
-
-                <div style={{ position: "relative" }} ref={comboboxRef}>
-                  <span className="mobile-form-label">Material Name</span>
-                  <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                    <Package size={18} className="input-icon" />
-                    <input 
-                      type="text" 
-                      placeholder={materialCategory === "Other" ? "Enter custom material name..." : "Search or type material name..."}
-                      value={materialName}
-                      onChange={(e) => {
-                        setMaterialName(e.target.value);
-                        setIsSuggestionsOpen(true);
-                      }}
-                      onFocus={() => setIsSuggestionsOpen(true)}
-                      required 
-                      autoComplete="off"
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                  
-                  {isSuggestionsOpen && materialCategory !== "Other" && (
-                    <div style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      zIndex: 50,
-                      backgroundColor: "#ffffff",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "var(--radius-sm)",
-                      boxShadow: "var(--shadow-md)",
-                      maxHeight: "180px",
-                      overflowY: "auto",
-                      marginTop: "4px"
-                    }}>
-                      {filteredSuggestions.length > 0 ? (
-                        filteredSuggestions.map(sug => {
-                          const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
-                          return (
-                            <button
-                              type="button"
-                              key={sug}
-                              onClick={() => {
-                                setMaterialName(sug);
-                                setIsSuggestionsOpen(false);
-                              }}
-                              style={{
-                                display: "block",
-                                width: "100%",
-                                padding: "10px 14px",
-                                textAlign: "left",
-                                backgroundColor: isSelected ? "var(--accent-50)" : "#ffffff",
-                                color: isSelected ? "var(--accent-700)" : "var(--primary-800)",
-                                border: "none",
-                                borderBottom: "1px solid #f1f5f9",
-                                fontWeight: isSelected ? "700" : "500",
-                                fontSize: "13px",
-                                cursor: "pointer"
-                              }}
-                            >
-                              {sug}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div style={{ padding: "10px 14px", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
-                          Using custom name: "{materialName}"
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    style={{ flex: 1 }}
-                    onClick={() => setMaterialStep(1)}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="button"
-                    style={{ flex: 1 }}
-                    disabled={!materialName.trim()}
-                    onClick={() => setMaterialStep(3)}
-                  >
-                    Next Step
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 3: Logistics details */}
-            {materialStep === 3 && (
-              <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Category & Name:</span>
-                  <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{materialCategory} • {materialName}</strong>
-                </div>
-
-                {/* Units selection */}
-                <div>
-                  <span className="mobile-form-label">Unit Type</span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                    {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
-                      <button
-                        type="button"
-                        key={unitOption}
-                        onClick={() => setMaterialUnit(unitOption)}
-                        style={{
-                          flex: "1 0 auto",
-                          padding: "8px 12px",
-                          borderRadius: "6px",
-                          border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                          backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
-                          color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
-                          fontWeight: "700",
-                          fontSize: "12px",
-                          cursor: "pointer"
-                        }}
-                      >
-                        {unitOption}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Quantity input */}
-                <div>
-                  <span className="mobile-form-label">Quantity</span>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "stretch",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    overflow: "hidden",
-                    backgroundColor: "#ffffff",
-                    height: "44px",
-                    marginTop: "4px"
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--danger-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderRight: "1px solid var(--border-color)"
-                      }}
-                    >
-                      -10
-                    </button>
-                    <input 
-                      type="number" 
-                      placeholder="0.0"
-                      min="0.01"
-                      step="any"
-                      value={materialQuantity}
-                      onChange={(e) => setMaterialQuantity(e.target.value)}
-                      required 
-                      style={{
-                        border: "none",
-                        outline: "none",
-                        textAlign: "center",
-                        flex: 1,
-                        fontSize: "16px",
-                        fontWeight: "800",
-                        color: "var(--primary-950)",
-                        backgroundColor: "transparent",
-                        margin: 0,
-                        padding: 0
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--success-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderLeft: "1px solid var(--border-color)"
-                      }}
-                    >
-                      +10
-                    </button>
-                  </div>
-                </div>
-
-                {/* Supplier */}
-                <div>
-                  <span className="mobile-form-label">Supplier Company</span>
-                  <div className="input-wrapper">
-                    <Briefcase size={18} className="input-icon" />
-                    <input 
-                      type="text" 
-                      placeholder="Enter supplier name..."
-                      value={materialSupplier}
-                      onChange={(e) => setMaterialSupplier(e.target.value)}
-                      required 
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
-                    {["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."].map(sug => (
-                      <button
-                        type="button"
-                        key={sug}
-                        onClick={() => setMaterialSupplier(sug)}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: "16px",
-                          border: "1px solid var(--border-color)",
-                          backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
-                          color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
-                          fontSize: "11px",
-                          fontWeight: "600",
-                          cursor: "pointer"
-                        }}
-                      >
-                        {sug}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Date */}
-                <div>
-                  <span className="mobile-form-label">Receipt Date</span>
-                  <div className="input-wrapper">
-                    <Calendar size={18} className="input-icon" />
-                    <input 
-                      type="date" 
-                      value={materialPurchaseDate}
-                      onChange={(e) => setMaterialPurchaseDate(e.target.value)}
-                      required 
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <span className="mobile-form-label">Remarks / Notes</span>
-                  <textarea 
-                    className="mobile-textarea"
-                    placeholder="Challan number, inspection info, etc..."
-                    value={materialNotes}
-                    onChange={(e) => setMaterialNotes(e.target.value)}
-                    style={{ minHeight: "50px" }}
-                  />
-                </div>
-
-                {/* Invoice Photo */}
-                <div>
-                  <span className="mobile-form-label">Upload Challan Photo</span>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                    <label style={{ 
-                      display: "flex", 
-                      flexDirection: "column", 
-                      alignItems: "center", 
-                      gap: "6px", 
-                      padding: "20px 16px", 
-                      border: "2px dashed var(--border-color)", 
-                      borderRadius: "8px", 
-                      cursor: "pointer", 
-                      backgroundColor: "var(--primary-50)",
-                      textAlign: "center"
-                    }}>
-                      <Camera size={24} style={{ color: "var(--primary-600)" }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
-                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
-                    </label>
-                    {materialInvoicePreview && (
-                      <div style={{ position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", alignSelf: "center" }}>
-                        <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Form Actions */}
-                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    style={{ flex: 1 }}
-                    onClick={() => setMaterialStep(2)}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="submit"
-                    style={{ flex: 1 }}
-                    disabled={materialSubmitting}
-                  >
-                    {materialSubmitting ? "Saving..." : "Save Delivery"}
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
-        </Modal>
-      </div>
-    );
-  };
-
-  const renderExpensesView = () => {
-    const currentSiteObj = assignedSites.find(s => s.id === activeSiteId);
-    if (!currentSiteObj) {
-      return (
-        <div style={{ textAlign: "center", padding: "32px 16px" }}>
-          <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>Please select a construction site.</p>
-        </div>
-      );
-    }
-
-    const formatINR = (val) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(val);
-
-    const ledger = getSiteExpenseLedger(currentSiteObj, materials, labourHistory, generalExpenses, labourPayments, labourMaster?.categories || {});
-    const myExpenses = generalExpenses.filter(g => g.siteId === activeSiteId);
-
-    const handleSaveExpense = async (e) => {
-      e.preventDefault();
-      if (!expenseAmount || !expenseDesc.trim()) return;
-      try {
-        await saveGeneralExpense({
-          siteId: activeSiteId,
-          category: expenseCategory,
-          amount: Number(expenseAmount),
-          date: expenseDate,
-          description: expenseDesc.trim(),
-          notes: expenseNotes.trim(),
-          createdBy: userProfile?.fullName || "Engineer",
-          status: "Pending" // Require Admin approval
-        });
-        showToast("Expense requisition submitted to Admin!", "success");
-        setShowAddExpenseModal(false);
-        setExpenseAmount("");
-        setExpenseDesc("");
-        setExpenseNotes("");
-        await loadDashboardData();
-      } catch (err) {
-        showToast(`Submission failed: ${err.message}`, "error");
-      }
-    };
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        
-        {/* Stats card */}
-        <div className="mobile-stats-card" style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "16px", backgroundColor: "var(--primary-900)", color: "#ffffff", borderRadius: "12px" }}>
-          <div>
-            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase" }}>Total Site Budget</span>
-            <h2 style={{ margin: "4px 0 0 0", fontSize: "28px", fontWeight: "800" }}>{formatINR(ledger.totalBudget)}</h2>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px", fontSize: "12px" }}>
-            <div>
-              <span style={{ opacity: 0.8 }}>Expenses Accrued:</span>
-              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#fca5a5" }}>{formatINR(ledger.totalExpenses)}</div>
-            </div>
-            <div>
-              <span style={{ opacity: 0.8 }}>Payments Recv:</span>
-              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#86efac" }}>{formatINR(ledger.totalPayments)}</div>
-            </div>
-            <div style={{ gridColumn: "span 2" }}>
-              <span style={{ opacity: 0.8 }}>Remaining Balance:</span>
-              <div style={{ fontWeight: "800", fontSize: "14px", marginTop: "2px", color: "#93c5fd" }}>{formatINR(ledger.remainingBalance)}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Expenses List */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Requisitions Summary</h4>
-          <button
-            type="button"
-            onClick={() => setShowAddExpenseModal(true)}
-            style={{
-              padding: "6px 12px",
-              backgroundColor: "var(--primary-100)",
-              color: "var(--primary-800)",
-              border: "none",
-              borderRadius: "6px",
-              fontSize: "12px",
-              fontWeight: "800",
-              cursor: "pointer"
-            }}
-          >
-            + Request
-          </button>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {myExpenses.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No expense requests logged yet.</p>
-            </div>
-          ) : (
-            myExpenses.map(exp => (
-              <div key={exp.id} className="mobile-material-card" style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)" }}>{exp.category}</span>
-                  <Badge status={exp.status === "Approved" ? "success" : exp.status === "Rejected" ? "danger" : "pending"}>
-                    {exp.status ? exp.status.toUpperCase() : "PENDING"}
-                  </Badge>
-                </div>
-                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800" }}>{exp.description}</h4>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                  <span>Requested Amount: <strong>{formatINR(exp.amount)}</strong></span>
-                  <span className="font-mono">{exp.date}</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        {/* Modal: Request New Expense */}
-        {showAddExpenseModal && (
-          <Modal
-            isOpen={showAddExpenseModal}
-            onClose={() => setShowAddExpenseModal(false)}
-            title="Request Site Expense Requisition"
-            maxWidth="380px"
-          >
-            <form onSubmit={handleSaveExpense} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Expense Category</span>
-                <select
-                  value={expenseCategory}
-                  onChange={(e) => setExpenseCategory(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                >
-                  <option value="Site Expense">Site Expense (fuel, water, transport)</option>
-                  <option value="Other Expense">Other Expense (fees, emergency bills)</option>
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Description / Particulars</span>
-                <input
-                  type="text"
-                  placeholder="e.g. diesel for backup generator"
-                  value={expenseDesc}
-                  onChange={(e) => setExpenseDesc(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Amount Required (₹)</span>
-                <input
-                  type="number"
-                  placeholder="e.g. 1500"
-                  value={expenseAmount}
-                  onChange={(e) => setExpenseAmount(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Date Needed</span>
-                <input
-                  type="date"
-                  value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Additional notes</span>
-                <input
-                  type="text"
-                  placeholder="e.g. urgent generator backup"
-                  value={expenseNotes}
-                  onChange={(e) => setExpenseNotes(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
-                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
-                <Button type="submit" variant="primary" style={{ flex: 1 }}>Submit Request</Button>
-              </div>
-            </form>
-          </Modal>
-        )}
-
-      </div>
-    );
-  };
-
-  const renderLabourView = () => {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        {/* Date Selector */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Count Date</span>
-            {assignedSites.length > 1 && (
-              <select
-                value={activeSiteId}
-                onChange={(e) => setActiveSiteId(e.target.value)}
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  border: "1px solid var(--border-color)",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "var(--primary-800)",
-                  backgroundColor: "#fff"
-                }}
-              >
-                {assignedSites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
-            )}
-          </div>
-          <div className="input-wrapper" style={{ marginTop: "4px" }}>
-            <Calendar size={18} className="input-icon" />
-            <input 
-              type="date" 
-              value={labourDate} 
-              onChange={(e) => setLabourDate(e.target.value)} 
-              required 
-              style={{ height: "42px", padding: "10px 14px 10px 40px", fontSize: "14px" }}
-            />
-          </div>
-        </div>
-
-        {/* Workforce headcounts */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <span className="mobile-form-label">Worker Headcounts</span>
-          {categories.map(cat => {
-            const currentVal = countsMap[cat] || 0;
-            const emojis = {
-              Mason: "👷",
-              Helper: "🧱",
-              Electrician: "🔧",
-              Plumber: "🚰",
-              Painter: "🖌️",
-              Other: "📋"
-            };
-            const emoji = emojis[cat] || "🔨";
-            const isCore = ["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(cat);
-            
-            return (
-              <div key={cat} className="mobile-labour-card">
-                <div className="mobile-labour-info">
-                  <span style={{ fontSize: "20px" }}>{emoji}</span>
-                  <div>
-                    <span className="mobile-labour-name">{getLabourDisplayName(cat)}</span>
-                    {!isCore && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLabourCategory(cat)}
-                        style={{
-                          marginLeft: "8px",
-                          background: "none",
-                          border: "none",
-                          color: "var(--danger-500)",
-                          fontSize: "11px",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          padding: 0
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="counter-control">
-                  <button
-                    type="button"
-                    className="counter-btn"
-                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <input
-                    type="number"
-                    value={currentVal}
-                    onChange={(e) => {
-                      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      if (cat === "Other" && val > 0) {
-                        handleOtherLabourInteract(val);
-                      } else {
-                        setCountsMap(prev => ({ ...prev, [cat]: val }));
-                      }
-                    }}
-                    className="counter-value"
-                    style={{
-                      width: "44px",
-                      border: "none",
-                      textAlign: "center",
-                      fontWeight: "800",
-                      fontSize: "15px",
-                      color: "var(--primary-950)",
-                      background: "transparent",
-                      outline: "none",
-                      padding: 0,
-                      margin: 0
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="counter-btn"
-                    onClick={() => {
-                      if (cat === "Other") {
-                        handleOtherLabourInteract(currentVal + 1);
-                      } else {
-                        setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }));
-                      }
-                    }}
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Add custom trade category */}
-        <div style={{
-          backgroundColor: "#ffffff",
-          border: "1px solid var(--border-color)",
-          borderRadius: "var(--radius-md)",
-          padding: "16px",
-          boxShadow: "var(--shadow-sm)",
-          marginTop: "8px"
-        }}>
-          <span className="mobile-form-label">Add Custom Worker Type</span>
-          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-            <input
-              type="text"
-              placeholder="E.g. Welder, Carpenter"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                border: "1px solid var(--border-color)",
-                borderRadius: "var(--radius-sm)",
-                fontSize: "13px",
-                outline: "none",
-                margin: 0
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleAddLabourCategory}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "var(--accent-50)",
-                color: "var(--accent-700)",
-                border: "1px solid var(--accent-200)",
-                borderRadius: "var(--radius-sm)",
-                fontSize: "13px",
-                fontWeight: "700",
-                cursor: "pointer"
-              }}
-            >
-              Add
-            </button>
-          </div>
-        </div>
-
-        {/* Workforce Total Count */}
-        <div style={{
-          backgroundColor: "var(--primary-900)",
-          color: "#ffffff",
-          borderRadius: "var(--radius-md)",
-          padding: "16px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          boxShadow: "var(--shadow-md)",
-          marginTop: "16px"
-        }}>
-          <div>
-            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Total Workers Present</span>
-            <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--accent-400)" }}>
-              {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
-            </span>
-          </div>
-          <button
-            type="button"
-            className="mobile-attendance-btn"
-            style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
-            onClick={handleSaveLabourCounts}
-            disabled={labourSaving}
-          >
-            {labourSaving ? "Saving..." : "Save Counts"}
-          </button>
-        </div>
-
-        {/* History logs */}
-        <div style={{ marginTop: "24px" }}>
-          <span className="mobile-form-label">Workforce History Logs</span>
-          {labourHistoryLoading ? (
-            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>Loading logs...</div>
-          ) : labourHistory.length === 0 ? (
-            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>No past records found.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {labourHistory.map(row => (
-                <div key={row.date} style={{
-                  padding: "12px 16px",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "var(--radius-md)",
-                  backgroundColor: "#ffffff",
-                  boxShadow: "var(--shadow-sm)"
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                    <span className="font-mono" style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "13px" }}>{row.date}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
-                      {row.engineerId === currentEngineerId && (
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteLabourLog(row.date)}
-                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                          title="Delete Labour Log"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
-                    {Object.entries(row).map(([k, v]) => {
-                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt", "engineerId"].includes(k)) return null;
-                      let masterKey = k;
-                      if (k === "Masons") masterKey = "Mason";
-                      if (k === "Helpers") masterKey = "Helper";
-                      if (k === "Painters") masterKey = "Painter";
-                      if (k === "Plumbers") masterKey = "Plumber";
-                      if (k === "Electricians") masterKey = "Electrician";
-                      if (k === "Others") masterKey = "Other";
-                      return <span key={k}>{getLabourDisplayName(masterKey)}: {v}</span>;
-                    }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
     const handleOpenDelivery = (m) => {
       setSelectedMatDelivery(m);
       setDeliveryRecQty(m.pendingDelivery.toString());
@@ -4578,6 +3614,458 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       </div>
     );
   };
+  const renderExpensesView = () => {
+    const currentSiteObj = assignedSites.find(s => s.id === activeSiteId);
+    if (!currentSiteObj) {
+      return (
+        <div style={{ textAlign: "center", padding: "32px 16px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>Please select a construction site.</p>
+        </div>
+      );
+    }
+
+    const formatINR = (val) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(val);
+
+    const ledger = getSiteExpenseLedger(currentSiteObj, materials, labourHistory, generalExpenses, labourPayments, labourMaster?.categories || {});
+    const myExpenses = generalExpenses.filter(g => g.siteId === activeSiteId);
+
+    const handleSaveExpense = async (e) => {
+      e.preventDefault();
+      if (!expenseAmount || !expenseDesc.trim()) return;
+      try {
+        await saveGeneralExpense({
+          siteId: activeSiteId,
+          category: expenseCategory,
+          amount: Number(expenseAmount),
+          date: expenseDate,
+          description: expenseDesc.trim(),
+          notes: expenseNotes.trim(),
+          createdBy: userProfile?.fullName || "Engineer",
+          status: "Pending" // Require Admin approval
+        });
+        showToast("Expense requisition submitted to Admin!", "success");
+        setShowAddExpenseModal(false);
+        setExpenseAmount("");
+        setExpenseDesc("");
+        setExpenseNotes("");
+        await loadDashboardData();
+      } catch (err) {
+        showToast(`Submission failed: ${err.message}`, "error");
+      }
+    };
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        
+        {/* Stats card */}
+        <div className="mobile-stats-card" style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "16px", backgroundColor: "var(--primary-900)", color: "#ffffff", borderRadius: "12px" }}>
+          <div>
+            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase" }}>Total Site Budget</span>
+            <h2 style={{ margin: "4px 0 0 0", fontSize: "28px", fontWeight: "800" }}>{formatINR(ledger.totalBudget)}</h2>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px", fontSize: "12px" }}>
+            <div>
+              <span style={{ opacity: 0.8 }}>Expenses Accrued:</span>
+              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#fca5a5" }}>{formatINR(ledger.totalExpenses)}</div>
+            </div>
+            <div>
+              <span style={{ opacity: 0.8 }}>Payments Recv:</span>
+              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#86efac" }}>{formatINR(ledger.totalPayments)}</div>
+            </div>
+            <div style={{ gridColumn: "span 2" }}>
+              <span style={{ opacity: 0.8 }}>Remaining Balance:</span>
+              <div style={{ fontWeight: "800", fontSize: "14px", marginTop: "2px", color: "#93c5fd" }}>{formatINR(ledger.remainingBalance)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Expenses List */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Requisitions Summary</h4>
+          <button
+            type="button"
+            onClick={() => setShowAddExpenseModal(true)}
+            style={{
+              padding: "6px 12px",
+              backgroundColor: "var(--primary-100)",
+              color: "var(--primary-800)",
+              border: "none",
+              borderRadius: "6px",
+              fontSize: "12px",
+              fontWeight: "800",
+              cursor: "pointer"
+            }}
+          >
+            + Request
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {myExpenses.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No expense requests logged yet.</p>
+            </div>
+          ) : (
+            myExpenses.map(exp => (
+              <div key={exp.id} className="mobile-material-card" style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)" }}>{exp.category}</span>
+                  <Badge status={exp.status === "Approved" ? "success" : exp.status === "Rejected" ? "danger" : "pending"}>
+                    {exp.status ? exp.status.toUpperCase() : "PENDING"}
+                  </Badge>
+                </div>
+                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800" }}>{exp.description}</h4>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                  <span>Requested Amount: <strong>{formatINR(exp.amount)}</strong></span>
+                  <span className="font-mono">{exp.date}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Modal: Request New Expense */}
+        {showAddExpenseModal && (
+          <Modal
+            isOpen={showAddExpenseModal}
+            onClose={() => setShowAddExpenseModal(false)}
+            title="Request Site Expense Requisition"
+            maxWidth="380px"
+          >
+            <form onSubmit={handleSaveExpense} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Expense Category</span>
+                <select
+                  value={expenseCategory}
+                  onChange={(e) => setExpenseCategory(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
+                >
+                  <option value="Site Expense">Site Expense (fuel, water, transport)</option>
+                  <option value="Other Expense">Other Expense (fees, emergency bills)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Description / Particulars</span>
+                <input
+                  type="text"
+                  placeholder="e.g. diesel for backup generator"
+                  value={expenseDesc}
+                  onChange={(e) => setExpenseDesc(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Amount Required (₹)</span>
+                <input
+                  type="number"
+                  placeholder="e.g. 1500"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Date Needed</span>
+                <input
+                  type="date"
+                  value={expenseDate}
+                  onChange={(e) => setExpenseDate(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Additional notes</span>
+                <input
+                  type="text"
+                  placeholder="e.g. urgent generator backup"
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
+                <Button type="submit" variant="primary" style={{ flex: 1 }}>Submit Request</Button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+      </div>
+    );
+  };
+
+  const renderLabourView = () => {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Date Selector */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Count Date</span>
+            {assignedSites.length > 1 && (
+              <select
+                value={activeSiteId}
+                onChange={(e) => setActiveSiteId(e.target.value)}
+                style={{
+                  padding: "4px 8px",
+                  borderRadius: "4px",
+                  border: "1px solid var(--border-color)",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--primary-800)",
+                  backgroundColor: "#fff"
+                }}
+              >
+                {assignedSites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div className="input-wrapper" style={{ marginTop: "4px" }}>
+            <Calendar size={18} className="input-icon" />
+            <input 
+              type="date" 
+              value={labourDate} 
+              onChange={(e) => setLabourDate(e.target.value)} 
+              required 
+              style={{ height: "42px", padding: "10px 14px 10px 40px", fontSize: "14px" }}
+            />
+          </div>
+        </div>
+
+        {/* Workforce headcounts */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <span className="mobile-form-label">Worker Headcounts</span>
+          {categories.map(cat => {
+            const currentVal = countsMap[cat] || 0;
+            const emojis = {
+              Mason: "👷",
+              Helper: "🧱",
+              Electrician: "🔧",
+              Plumber: "🚰",
+              Painter: "🖌️",
+              Other: "📋"
+            };
+            const emoji = emojis[cat] || "🔨";
+            const isCore = ["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(cat);
+            
+            return (
+              <div key={cat} className="mobile-labour-card">
+                <div className="mobile-labour-info">
+                  <span style={{ fontSize: "20px" }}>{emoji}</span>
+                  <div>
+                    <span className="mobile-labour-name">{getLabourDisplayName(cat)}</span>
+                    {!isCore && (
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteLabourCategory(cat)}
+                        style={{
+                          marginLeft: "8px",
+                          background: "none",
+                          border: "none",
+                          color: "var(--danger-500)",
+                          fontSize: "11px",
+                          cursor: "pointer",
+                          textDecoration: "underline",
+                          padding: 0
+                        }}
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="counter-control">
+                  <button
+                    type="button"
+                    className="counter-btn"
+                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <input
+                    type="number"
+                    value={currentVal}
+                    onChange={(e) => {
+                      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
+                      if (cat === "Other" && val > 0) {
+                        handleOtherLabourInteract(val);
+                      } else {
+                        setCountsMap(prev => ({ ...prev, [cat]: val }));
+                      }
+                    }}
+                    className="counter-value"
+                    style={{
+                      width: "44px",
+                      border: "none",
+                      textAlign: "center",
+                      fontWeight: "800",
+                      fontSize: "15px",
+                      color: "var(--primary-950)",
+                      background: "transparent",
+                      outline: "none",
+                      padding: 0,
+                      margin: 0
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="counter-btn"
+                    onClick={() => {
+                      if (cat === "Other") {
+                        handleOtherLabourInteract(currentVal + 1);
+                      } else {
+                        setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }));
+                      }
+                    }}
+                  >
+                    <Plus size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Add custom trade category */}
+        <div style={{
+          backgroundColor: "#ffffff",
+          border: "1px solid var(--border-color)",
+          borderRadius: "var(--radius-md)",
+          padding: "16px",
+          boxShadow: "var(--shadow-sm)",
+          marginTop: "8px"
+        }}>
+          <span className="mobile-form-label">Add Custom Worker Type</span>
+          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+            <input
+              type="text"
+              placeholder="E.g. Welder, Carpenter"
+              value={newCategoryName}
+              onChange={(e) => setNewCategoryName(e.target.value)}
+              style={{
+                flex: 1,
+                padding: "8px 12px",
+                border: "1px solid var(--border-color)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "13px",
+                outline: "none",
+                margin: 0
+              }}
+            />
+            <button
+              type="button"
+              onClick={handleAddLabourCategory}
+              style={{
+                padding: "8px 16px",
+                backgroundColor: "var(--accent-50)",
+                color: "var(--accent-700)",
+                border: "1px solid var(--accent-200)",
+                borderRadius: "var(--radius-sm)",
+                fontSize: "13px",
+                fontWeight: "700",
+                cursor: "pointer"
+              }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+
+        {/* Workforce Total Count */}
+        <div style={{
+          backgroundColor: "var(--primary-900)",
+          color: "#ffffff",
+          borderRadius: "var(--radius-md)",
+          padding: "16px",
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          boxShadow: "var(--shadow-md)",
+          marginTop: "16px"
+        }}>
+          <div>
+            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Total Workers Present</span>
+            <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--accent-400)" }}>
+              {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
+            </span>
+          </div>
+          <button
+            type="button"
+            className="mobile-attendance-btn"
+            style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
+            onClick={handleSaveLabourCounts}
+            disabled={labourSaving}
+          >
+            {labourSaving ? "Saving..." : "Save Counts"}
+          </button>
+        </div>
+
+        {/* History logs */}
+        <div style={{ marginTop: "24px" }}>
+          <span className="mobile-form-label">Workforce History Logs</span>
+          {labourHistoryLoading ? (
+            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>Loading logs...</div>
+          ) : labourHistory.length === 0 ? (
+            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>No past records found.</div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {labourHistory.map(row => (
+                <div key={row.date} style={{
+                  padding: "12px 16px",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "var(--radius-md)",
+                  backgroundColor: "#ffffff",
+                  boxShadow: "var(--shadow-sm)"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <span className="font-mono" style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "13px" }}>{row.date}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
+                      {row.engineerId === currentEngineerId && (
+                        <button 
+                          type="button" 
+                          onClick={() => handleDeleteLabourLog(row.date)}
+                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
+                          title="Delete Labour Log"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
+                    {Object.entries(row).map(([k, v]) => {
+                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt", "engineerId"].includes(k)) return null;
+                      let masterKey = k;
+                      if (k === "Masons") masterKey = "Mason";
+                      if (k === "Helpers") masterKey = "Helper";
+                      if (k === "Painters") masterKey = "Painter";
+                      if (k === "Plumbers") masterKey = "Plumber";
+                      if (k === "Electricians") masterKey = "Electrician";
+                      if (k === "Others") masterKey = "Other";
+                      return <span key={k}>{getLabourDisplayName(masterKey)}: {v}</span>;
+                    }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
 
   const renderMoreView = () => {
     if (moreSubView === "menu") {

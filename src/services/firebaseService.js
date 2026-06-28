@@ -115,7 +115,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
     });
   } else {
     // Create Mode: Register profile document
-    batch.set(userDocRef, {
+    const createPayload = {
       fullName: name,
       email: email,
       phoneNumber: phone,
@@ -125,7 +125,12 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       holidayAllowance: Number(holidayAllowance) || 24,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    });
+    };
+    // Store admin-provided initial password so it can be shown to engineer on first login
+    if (password) {
+      createPayload.password = password;
+    }
+    batch.set(userDocRef, createPayload);
     
     // Apply site assignments
     selectedSites.forEach(siteId => {
