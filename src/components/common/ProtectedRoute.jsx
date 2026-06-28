@@ -37,7 +37,9 @@ export default function ProtectedRoute({ allowedRoles = ["admin"] }) {
 
   if (!allowedRoles.includes(userProfile.role)) {
     // Redirect authorized users to their respective home dashboard instead of logging out
-    if (userProfile.role === "admin") {
+    if (userProfile.role === "super_admin" || userProfile.role === "superadmin") {
+      return <Navigate to="/superadmin" replace />;
+    } else if (userProfile.role === "admin") {
       return <Navigate to="/admin" replace />;
     } else if (userProfile.role === "site_engineer" || userProfile.role === "engineer") {
       return <Navigate to="/engineer" replace />;

@@ -1,9 +1,10 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
 
 let firebaseApp = null;
 let secondaryApp = null;
+let dbInstance = null;
 
 import { firebaseConfig as importedConfig } from "../../env";
 
@@ -76,7 +77,19 @@ export function getFirebaseDb() {
   if (!firebaseApp) {
     initFirebase(firebaseConfig);
   }
-  return getFirestore(firebaseApp);
+  if (!dbInstance) {
+    try {
+      dbInstance = initializeFirestore(firebaseApp, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager()
+        })
+      });
+    } catch (e) {
+      console.warn("Firestore already initialized or error enabling offline cache:", e);
+      dbInstance = getFirestore(firebaseApp);
+    }
+  }
+  return dbInstance;
 }
 
 // Getter for secondary Auth (used to create engineer accounts without logging out admin)

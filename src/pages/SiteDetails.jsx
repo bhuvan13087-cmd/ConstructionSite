@@ -17,6 +17,7 @@ import {
   updateMaterial,
   deleteMaterial
 } from "../services/firebaseService";
+import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress } from "../services/businessLogic";
 import { 
   ArrowLeft, 
   Building2, 
@@ -204,39 +205,7 @@ export default function SiteDetails({ siteId, onBack }) {
   if (!site) return null;
 
   // Map materials to include derived tracking values
-  const processedMaterials = materials.map(mat => {
-    const isApproved = mat.status === "approved" || mat.status === undefined;
-    const reqQty = mat.requiredQuantity !== undefined ? Number(mat.requiredQuantity) : Number(mat.quantity);
-    const ordQty = mat.orderedQuantity !== undefined ? Number(mat.orderedQuantity) : Number(mat.quantity);
-    const recQty = isApproved ? (Number(mat.quantity) || 0) : 0;
-    const paidQty = isApproved ? (mat.paidQuantity !== undefined ? Number(mat.paidQuantity) : 0) : 0;
-    const pendingDel = Math.max(0, reqQty - recQty);
-    const pendingPay = Math.max(0, recQty - paidQty);
-    
-    let delStatus = "Fully Delivered";
-    if (recQty < reqQty) {
-      delStatus = "Pending Delivery";
-    }
-
-    let payStatus = "Pending Payment";
-    if (paidQty >= recQty && recQty > 0) {
-      payStatus = "Paid";
-    } else if (paidQty > 0 && paidQty < recQty) {
-      payStatus = "Partial Payment";
-    }
-
-    return {
-      ...mat,
-      requiredQuantity: reqQty,
-      orderedQuantity: ordQty,
-      receivedQuantity: recQty,
-      paidQuantity: paidQty,
-      pendingDelivery: pendingDel,
-      pendingPayment: pendingPay,
-      deliveryStatus: delStatus,
-      paymentStatus: payStatus
-    };
-  });
+  const processedMaterials = materials.map(mat => processMaterialPaymentAndDelivery(mat));
 
   // Filter materials based on all active filters
   const filteredMaterials = processedMaterials.filter(mat => {
@@ -1119,73 +1088,184 @@ export default function SiteDetails({ siteId, onBack }) {
         {/* ===================================================================
             TAB: PROGRESS
             =================================================================== */}
-        {activeTab === "progress" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
-            <Card title="Daily Progress Timeline" subtitle="Timeline of milestone logs reported by engineers">
-              {progressUpdates.length === 0 ? (
-                <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
-                  No daily progress logs submitted yet for this site.
-                </p>
-              ) : (
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "24px",
-                  paddingLeft: "16px",
-                  borderLeft: "2.5px solid var(--primary-100)",
-                  marginLeft: "12px",
-                  position: "relative"
-                }}>
-                  {progressUpdates.map((update, index) => {
-                    const eng = engineers.find(e => e.id === update.engineerId) || { fullName: `Engineer (ID: ${update.engineerId})` };
-                    const formattedDate = update.createdAt?.seconds 
-                      ? new Date(update.createdAt.seconds * 1000).toLocaleString()
-                      : (update.createdAt ? new Date(update.createdAt).toLocaleString() : "--");
+        {activeTab === "progress" && (() => {
+          const planned = calculatePlannedProgress(site.startDate, site.expectedEndDate);
+          let actual = 0;
+          if (site.status === "Completed") {
+            actual = 100;
+          } else if (progressUpdates.length > 0) {
+            const sorted = [...progressUpdates].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+            actual = Number(String(sorted[0].progress).replace(/%/g, '')) || 0;
+          }
+          
+          const gap = actual - planned;
+          const statusText = gap >= 0 ? "Ahead of Schedule" : "Delayed";
+          const statusBadge = gap >= 0 ? "success" : "danger";
+          
+          const weeklyReports = generateWeeklyReportFromDprs(progressUpdates);
 
-                    return (
-                      <div key={update.id || index} style={{ position: "relative" }}>
-                        {/* Timeline bubble */}
-                        <div style={{
-                          position: "absolute",
-                          left: "-25px",
-                          top: "2px",
-                          width: "15px",
-                          height: "15px",
-                          borderRadius: "50%",
-                          backgroundColor: "var(--primary-600)",
-                          border: "3px solid #ffffff",
-                          boxShadow: "0 0 0 2px var(--primary-100)"
-                        }} />
-                        
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>{formattedDate}</span>
-                          <span style={{ 
-                            fontSize: "12px", 
-                            fontWeight: "800", 
-                            color: "var(--primary-750)",
-                            backgroundColor: "var(--primary-100)",
-                            padding: "2px 8px",
-                            borderRadius: "6px"
-                          }}>
-                            {update.progress}% Completed
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
+              
+              {/* Planned vs Actual summary */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "20px" }}>
+                <Card>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Planned Completion Date</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+                    <Calendar size={18} style={{ color: "var(--primary-600)" }} />
+                    <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-900)" }} className="font-mono">{site.expectedEndDate || "No date set"}</span>
+                  </div>
+                </Card>
+
+                <Card>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Milestone Progress comparison</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "8px" }}>
+                    <div>
+                      <span style={{ fontSize: "22px", fontWeight: "800", color: "var(--primary-900)" }}>{actual}%</span>
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)", marginLeft: "4px" }}>actual</span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-muted)" }}>vs {planned}%</span>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "2px" }}>target</span>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Schedule standing</span>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
+                    <Badge status={statusBadge}>{statusText}</Badge>
+                    <span style={{ fontSize: "13px", fontWeight: "800", color: gap >= 0 ? "var(--success-700)" : "var(--danger-700)" }}>
+                      {gap >= 0 ? `+${gap}%` : `${gap}%`}
+                    </span>
+                  </div>
+                </Card>
+              </div>
+
+              {/* Weekly Reports checklist card */}
+              <Card title="Auto-Generated Weekly Progress Reports" subtitle="Synthesized from daily site entries without duplication.">
+                {weeklyReports.length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", textAlign: "center", padding: "10px" }}>
+                    No weekly reports available.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {weeklyReports.map((report, idx) => (
+                      <div key={idx} style={{ border: "1px solid var(--border-color)", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center", borderBottom: "1.5px solid var(--border-color)", paddingBottom: "8px", marginBottom: "10px" }}>
+                          <span style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-900)" }}>{report.weekLabel}</span>
+                          <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)", backgroundColor: "var(--success-50)", padding: "2px 8px", borderRadius: "6px" }}>
+                            Progress: {report.startProgress}% → {report.endProgress}% (Change: +{report.progressChange}%)
                           </span>
                         </div>
-                        
-                        <h4 style={{ margin: "6px 0 4px 0", fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
-                          Reported by {eng.fullName}
-                        </h4>
-                        
-                        <p style={{ margin: 0, fontSize: "13px", color: "#334155", lineHeight: "1.5" }}>
-                          {update.description}
-                        </p>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "12.5px" }}>
+                          <div>
+                            <strong style={{ display: "block", color: "var(--primary-900)", marginBottom: "4px" }}>Completed Work:</strong>
+                            <p style={{ margin: 0, color: "#334155" }}>{report.completedWork}</p>
+                          </div>
+                          <div>
+                            <strong style={{ display: "block", color: "var(--primary-900)", marginBottom: "4px" }}>Pending Activities:</strong>
+                            <p style={{ margin: 0, color: "#334155" }}>{report.pendingActivities}</p>
+                          </div>
+                        </div>
+                        {report.delayReasons !== "No major issues faced" && (
+                          <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--danger-50)", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
+                            <AlertCircle size={14} style={{ color: "var(--danger-600)", flexShrink: 0 }} />
+                            <span style={{ color: "var(--danger-700)", fontWeight: "600" }}><strong>Delay issues faced:</strong> {report.delayReasons}</span>
+                          </div>
+                        )}
                       </div>
-                    );
-                  })}
-                </div>
-              )}
-            </Card>
-          </div>
-        )}
+                    ))}
+                  </div>
+                )}
+              </Card>
+
+              {/* Daily timeline logs detailed view */}
+              <Card title="Daily Progress Timeline Logs" subtitle="Thorough inspection of entries registered by site engineer.">
+                {progressUpdates.length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
+                    No daily progress logs submitted yet for this site.
+                  </p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "24px", paddingLeft: "16px", borderLeft: "2.5px solid var(--primary-100)", marginLeft: "12px" }}>
+                    {progressUpdates.map((update, index) => {
+                      const eng = engineers.find(e => e.id === update.engineerId) || { fullName: `Engineer (ID: ${update.engineerId})` };
+                      const formattedDate = update.createdAt?.seconds 
+                        ? new Date(update.createdAt.seconds * 1000).toLocaleString()
+                        : (update.createdAt ? new Date(update.createdAt).toLocaleString() : "--");
+
+                      return (
+                        <div key={update.id || index} style={{ position: "relative" }}>
+                          <div style={{
+                            position: "absolute",
+                            left: "-25px",
+                            top: "2px",
+                            width: "15px",
+                            height: "15px",
+                            borderRadius: "50%",
+                            backgroundColor: "var(--primary-600)",
+                            border: "3px solid #ffffff",
+                            boxShadow: "0 0 0 2px var(--primary-100)"
+                          }} />
+                          
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700" }}>{update.date || formattedDate}</span>
+                            <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-750)", backgroundColor: "var(--primary-100)", padding: "2px 8px", borderRadius: "6px" }}>
+                              {update.progress || "0%"} Completed
+                            </span>
+                          </div>
+                          
+                          <h4 style={{ margin: "6px 0 4px 0", fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                            Reported by {eng.fullName}
+                          </h4>
+
+                          {/* Expanded detailed notes */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px", padding: "14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}>
+                            <div>
+                              <strong style={{ color: "var(--primary-900)" }}>Work Completed:</strong>
+                              <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.completedToday || update.description}</p>
+                            </div>
+                            {update.currentlyRunning && (
+                              <div>
+                                <strong style={{ color: "var(--primary-900)" }}>Work Currently Running:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.currentlyRunning}</p>
+                              </div>
+                            )}
+                            {update.materialsStatus && (
+                              <div>
+                                <strong style={{ color: "var(--primary-900)" }}>Materials/Work Status:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.materialsStatus}</p>
+                              </div>
+                            )}
+                            {update.problemsFaced && (
+                              <div>
+                                <strong style={{ color: "var(--danger-700)" }}>Problems Faced:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "var(--danger-800)" }}>{update.problemsFaced}</p>
+                              </div>
+                            )}
+                            {update.pendingWork && (
+                              <div>
+                                <strong style={{ color: "var(--primary-900)" }}>Pending Work:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.pendingWork}</p>
+                              </div>
+                            )}
+                            {update.nextActivity && (
+                              <div>
+                                <strong style={{ color: "var(--primary-900)" }}>Next Planned Activity:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.nextActivity}</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </Card>
+
+            </div>
+          );
+        })()}
 
         {/* ===================================================================
             TAB: PHOTOS

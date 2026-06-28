@@ -1,17 +1,12 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { 
-  getSites, 
-  getSiteEngineers, 
-  approveSiteLocation, 
-  rejectSiteLocation, 
-  getAllLeaves, 
-  approveLeave, 
-  rejectLeave, 
-  getMaterialsDetailed, 
-  approveMaterialLog, 
-  rejectMaterialLog 
+  getSiteEngineers,
+  getCentralApprovals,
+  resolveApprovalRequest,
+  syncApprovalsFromLegacy
 } from "../services/firebaseService";
+import { useAuth } from "../context/AuthContext";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
@@ -23,26 +18,25 @@ import {
   Calendar, 
   User, 
   Package, 
-  ClipboardCheck, 
   MapPin, 
   Layers, 
-  Search, 
   AlertCircle, 
-  ExternalLink 
+  ExternalLink,
+  CreditCard,
+  Users
 } from "lucide-react";
 
 export default function ApprovalsDashboard() {
+  const { userProfile } = useAuth();
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   
   // Data States
-  const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
-  const [leaves, setLeaves] = useState([]);
-  const [materials, setMaterials] = useState([]);
+  const [allRequests, setAllRequests] = useState([]);
   
   // Filter States
-  const [filterType, setFilterType] = useState("all"); // "all", "Leave", "Location", "Material"
+  const [filterType, setFilterType] = useState("all"); // "all", "Leave", "Location", "Material", "Payment", "Labour"
   const [filterStatus, setFilterStatus] = useState("pending"); // "all", "pending", "approved", "rejected"
   const [filterDate, setFilterDate] = useState("");
   const [filterEngineer, setFilterEngineer] = useState("");
@@ -57,16 +51,15 @@ export default function ApprovalsDashboard() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [fetchedSites, fetchedEngineers, fetchedLeaves, fetchedMaterials] = await Promise.all([
-        getSites(),
+      // Perform legacy database synchronization first
+      await syncApprovalsFromLegacy();
+      
+      const [fetchedEngineers, fetchedApprovals] = await Promise.all([
         getSiteEngineers(),
-        getAllLeaves(),
-        getMaterialsDetailed()
+        getCentralApprovals()
       ]);
-      setSites(fetchedSites);
       setEngineers(fetchedEngineers);
-      setLeaves(fetchedLeaves);
-      setMaterials(fetchedMaterials);
+      setAllRequests(fetchedApprovals);
     } catch (err) {
       console.error("Failed to load approvals data:", err);
       showToast("Failed to fetch database logs.", "error");
@@ -79,70 +72,21 @@ export default function ApprovalsDashboard() {
     loadData();
   }, []);
 
-  // Unify and map data
-  const leaveRequests = leaves.map(l => ({
-    id: l.id,
-    type: "Leave",
-    employeeId: l.engineerId,
-    employeeName: l.engineerName,
-    requestDate: l.date,
-    details: l.reason,
-    leaveType: l.leaveType || "Casual",
-    days: l.days || 1,
-    status: l.status || "approved",
-    raw: l
-  }));
-
-  const locationRequests = sites.filter(s => s.locationStatus).map(s => {
-    const engineer = engineers.find(e => e.id === (s.proposedLocationCapturedBy || s.locationCapturedBy));
-    const isPending = s.locationStatus === "Pending Approval";
-    return {
-      id: s.id,
-      type: "Location",
-      employeeId: s.proposedLocationCapturedBy || s.locationCapturedBy || "",
-      employeeName: engineer ? engineer.fullName : "Unknown Engineer",
-      requestDate: (s.proposedLocationCreatedDate || s.locationCreatedDate || "").split("T")[0] || "",
-      details: s.siteName,
-      address: isPending ? s.proposedLocation : s.location,
-      latitude: isPending ? s.proposedLatitude : s.latitude,
-      longitude: isPending ? s.proposedLongitude : s.longitude,
-      accuracy: isPending ? s.proposedLocationAccuracy : s.locationAccuracy,
-      status: s.locationStatus === "Verified" ? "approved" : s.locationStatus === "Pending Approval" ? "pending" : "rejected",
-      raw: s
-    };
-  });
-
-  const materialRequests = materials.map(m => ({
-    id: m.id,
-    type: "Material",
-    employeeId: m.engineerId,
-    employeeName: m.engineerName,
-    requestDate: m.purchaseDate,
-    details: `${m.materialName} (${m.category})`,
-    quantity: `${m.quantity} ${m.unit || "Unit"}${Number(m.quantity) !== 1 ? "s" : ""}`,
-    supplier: m.supplierName,
-    invoiceUrl: m.invoiceUrl || "",
-    status: m.status === undefined ? "approved" : m.status,
-    raw: m
-  }));
-
-  // Combine and sort
-  const allRequests = [...leaveRequests, ...locationRequests, ...materialRequests].sort((a, b) => {
-    return b.requestDate.localeCompare(a.requestDate);
-  });
-
   // Calculate Metrics
-  const pendingCount = allRequests.filter(r => r.status === "pending").length;
-  const approvedCount = allRequests.filter(r => r.status === "approved").length;
-  const rejectedCount = allRequests.filter(r => r.status === "rejected").length;
+  const pendingCount = allRequests.filter(r => r.status === "pending" || r.status === "Pending").length;
+  const approvedCount = allRequests.filter(r => r.status === "approved" || r.status === "Approved").length;
+  const rejectedCount = allRequests.filter(r => r.status === "rejected" || r.status === "Rejected").length;
   const totalCount = allRequests.length;
 
   // Apply filters
   const filteredRequests = allRequests.filter(r => {
+    const rStatus = (r.status || "").toLowerCase();
+    const fStatus = filterStatus.toLowerCase();
+    
     if (filterType !== "all" && r.type !== filterType) return false;
-    if (filterStatus !== "all" && r.status !== filterStatus) return false;
+    if (filterStatus !== "all" && rStatus !== fStatus) return false;
     if (filterDate && r.requestDate !== filterDate) return false;
-    if (filterEngineer && r.employeeId !== filterEngineer) return false;
+    if (filterEngineer && r.engineerId !== filterEngineer) return false;
     return true;
   });
 
@@ -151,20 +95,7 @@ export default function ApprovalsDashboard() {
     if (!window.confirm(`Approve this ${req.type} request?`)) return;
     setLoading(true);
     try {
-      if (req.type === "Leave") {
-        await approveLeave(req.id);
-      } else if (req.type === "Location") {
-        await approveSiteLocation(req.id, {
-          proposedLatitude: req.latitude,
-          proposedLongitude: req.longitude,
-          proposedLocation: req.address,
-          proposedLocationAccuracy: req.accuracy,
-          proposedLocationCapturedBy: req.employeeId,
-          proposedLocationCreatedDate: req.raw.proposedLocationCreatedDate || new Date().toISOString()
-        });
-      } else if (req.type === "Material") {
-        await approveMaterialLog(req.id);
-      }
+      await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request approved successfully.`, "success");
       await loadData();
     } catch (err) {
@@ -179,13 +110,7 @@ export default function ApprovalsDashboard() {
     if (!window.confirm(`Reject this ${req.type} request?`)) return;
     setLoading(true);
     try {
-      if (req.type === "Leave") {
-        await rejectLeave(req.id);
-      } else if (req.type === "Location") {
-        await rejectSiteLocation(req.id);
-      } else if (req.type === "Material") {
-        await rejectMaterialLog(req.id);
-      }
+      await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request rejected.`, "info");
       await loadData();
     } catch (err) {
@@ -229,7 +154,7 @@ export default function ApprovalsDashboard() {
               Approval Management Console
             </h1>
             <p style={{ color: "var(--text-muted)", fontSize: "14px", marginTop: "4px" }}>
-              Unified dashboard to review, approve, or reject field logs and leave submissions.
+              Centralized interface to review and resolve all site requisitions, general expense payments, leaves, and configurations.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={loadData}>Reload Data</Button>
@@ -241,7 +166,7 @@ export default function ApprovalsDashboard() {
             <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Pending Action</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
               <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{pendingCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--warning-600)", fontWeight: "600" }}>Requests waiting</span>
+              <span style={{ fontSize: "12px", color: "var(--warning-600)", fontWeight: "600" }}>Waiting review</span>
             </div>
           </Card>
 
@@ -262,10 +187,10 @@ export default function ApprovalsDashboard() {
           </Card>
 
           <Card style={{ borderLeft: "4px solid var(--accent-500)", padding: "20px" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Scope Logs</span>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Submissions</span>
             <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
               <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{totalCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--accent-600)", fontWeight: "600" }}>Total parsed</span>
+              <span style={{ fontSize: "12px", color: "var(--accent-600)", fontWeight: "600" }}>Overall timeline</span>
             </div>
           </Card>
         </div>
@@ -274,7 +199,7 @@ export default function ApprovalsDashboard() {
         <Card style={{ padding: "20px", marginBottom: "24px", backgroundColor: "#fff" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
             <Filter size={16} style={{ color: "var(--accent-600)" }} />
-            <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>Filter Request Logs</strong>
+            <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>Filter Requests Queue</strong>
           </div>
           
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
@@ -289,6 +214,8 @@ export default function ApprovalsDashboard() {
                 <option value="Leave">Leaves</option>
                 <option value="Location">Locations</option>
                 <option value="Material">Materials</option>
+                <option value="Payment">Payments & Expenses</option>
+                <option value="Labour">Labour Requests</option>
               </select>
             </div>
 
@@ -307,7 +234,7 @@ export default function ApprovalsDashboard() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Request Date</label>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Submission Date</label>
               <input 
                 type="date"
                 value={filterDate}
@@ -347,16 +274,17 @@ export default function ApprovalsDashboard() {
             <div style={{ textAlign: "center", padding: "48px 24px", color: "var(--text-muted)" }}>
               <AlertCircle size={32} style={{ color: "var(--primary-300)", marginBottom: "12px" }} />
               <p style={{ fontWeight: "600", fontSize: "14px", margin: "0" }}>No matching approval requests found.</p>
-              <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>Change the status or type filter dropdown values.</p>
+              <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>Modify type or status filter selectors.</p>
             </div>
           ) : (
             <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", textCombineUpright: "left" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
                   <tr style={{ borderBottom: "1px solid var(--border-color)", backgroundColor: "#f8fafc", textAlign: "left" }}>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Type</th>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Employee</th>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Details / Specification</th>
+                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Site / Project</th>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Requested Date</th>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Status</th>
                     <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase", textAlign: "right" }}>Actions</th>
@@ -364,7 +292,7 @@ export default function ApprovalsDashboard() {
                 </thead>
                 <tbody>
                   {filteredRequests.map((req, index) => {
-                    const isPending = req.status === "pending";
+                    const isPending = (req.status || "").toLowerCase() === "pending";
                     return (
                       <tr key={`${req.type}-${req.id}-${index}`} style={{ borderBottom: "1px solid var(--border-color)", transition: "background var(--transition-fast)" }} className="table-row-hover">
                         
@@ -374,6 +302,8 @@ export default function ApprovalsDashboard() {
                             {req.type === "Leave" && <Layers size={14} style={{ color: "var(--warning-500)" }} />}
                             {req.type === "Location" && <MapPin size={14} style={{ color: "var(--accent-600)" }} />}
                             {req.type === "Material" && <Package size={14} style={{ color: "var(--primary-600)" }} />}
+                            {req.type === "Payment" && <CreditCard size={14} style={{ color: "var(--success-500)" }} />}
+                            {req.type === "Labour" && <Users size={14} style={{ color: "var(--danger-500)" }} />}
                             <span style={{ fontWeight: "700", fontSize: "13px", color: "var(--primary-800)" }}>{req.type}</span>
                           </div>
                         </td>
@@ -382,50 +312,24 @@ export default function ApprovalsDashboard() {
                         <td style={{ padding: "16px 20px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "var(--primary-100)", color: "var(--primary-800)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: "700" }}>
-                              {req.employeeName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()}
+                              {(req.requestedBy || "SE").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()}
                             </div>
-                            <span style={{ fontSize: "13px", color: "var(--primary-900)", fontWeight: "600" }}>{req.employeeName}</span>
+                            <span style={{ fontSize: "13px", color: "var(--primary-900)", fontWeight: "600" }}>{req.requestedBy}</span>
                           </div>
                         </td>
 
                         {/* Details */}
                         <td style={{ padding: "16px 20px", maxWidth: "450px" }}>
-                          {req.type === "Leave" && (
-                            <div style={{ fontSize: "13px" }}>
-                              <span style={{ fontWeight: "700", display: "block" }}>{req.leaveType} Leave ({req.days} Day{req.days > 1 ? "s" : ""})</span>
-                              <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>Reason: "{req.details}"</span>
-                            </div>
-                          )}
-                          
-                          {req.type === "Location" && (
-                            <div style={{ fontSize: "13px" }}>
-                              <span style={{ fontWeight: "700", display: "block" }}>{req.details} Setup Request</span>
-                              <span style={{ color: "var(--text-muted)", fontSize: "12px", display: "block", wordBreak: "break-all" }}>Address: {req.address}</span>
-                              <span style={{ fontFamily: "monospace", fontSize: "11px", color: "var(--accent-600)" }}>
-                                Coords: {req.latitude?.toFixed(6)}, {req.longitude?.toFixed(6)} (Acc: {Math.round(req.accuracy)}m)
-                              </span>
-                            </div>
-                          )}
+                          <div style={{ fontSize: "13px", color: "var(--primary-950)", fontWeight: "600" }}>
+                            {req.details}
+                          </div>
+                        </td>
 
-                          {req.type === "Material" && (
-                            <div style={{ fontSize: "13px" }}>
-                              <span style={{ fontWeight: "700", display: "block" }}>{req.details}</span>
-                              <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
-                                <span>Qty: <strong>{req.quantity}</strong></span>
-                                <span>Supplier: <strong>{req.supplier}</strong></span>
-                              </div>
-                              {req.invoiceUrl && (
-                                <a 
-                                  href={req.invoiceUrl} 
-                                  target="_blank" 
-                                  rel="noopener noreferrer" 
-                                  style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--accent-600)", fontWeight: "700", marginTop: "4px" }}
-                                >
-                                  View Challan Invoice <ExternalLink size={10} />
-                                </a>
-                              )}
-                            </div>
-                          )}
+                        {/* Site */}
+                        <td style={{ padding: "16px 20px", fontSize: "13px", color: "var(--primary-800)" }}>
+                          <strong style={{ color: req.siteName === "N/A" ? "var(--text-muted)" : "var(--primary-900)" }}>
+                            {req.siteName}
+                          </strong>
                         </td>
 
                         {/* Date */}
@@ -439,7 +343,7 @@ export default function ApprovalsDashboard() {
                         {/* Status Badge */}
                         <td style={{ padding: "16px 20px" }}>
                           <Badge status={req.status}>
-                            {req.status === "pending" ? "Pending Approval" : req.status.toUpperCase()}
+                            {req.status === "pending" || req.status === "Pending" ? "Pending Approval" : req.status.toUpperCase()}
                           </Badge>
                         </td>
 
@@ -495,7 +399,7 @@ export default function ApprovalsDashboard() {
         </Card>
 
       </div>
-      <Loading show={loading} text="Updating state database..." />
+      <Loading show={loading} text="Updating approval state..." />
     </Layout>
   );
 }

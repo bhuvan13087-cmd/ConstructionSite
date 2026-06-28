@@ -34,6 +34,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   const [distance, setDistance] = useState(null);
   const [loadingDistance, setLoadingDistance] = useState(false);
   const [errorDistance, setErrorDistance] = useState(null);
+  const [mapType, setMapType] = useState("k"); // "m" for roadmap, "k" for satellite/hybrid
 
   useEffect(() => {
     const fetchDistance = async () => {
@@ -193,13 +194,49 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
 
       {/* Right Column: Map Embed */}
       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-        <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-500)", textAlign: "left" }}>Live Map Verification View</span>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-500)", textAlign: "left" }}>Live Map Verification View</span>
+          <div style={{ display: "flex", gap: "4px" }}>
+            <button
+              type="button"
+              onClick={() => setMapType("m")}
+              style={{
+                fontSize: "10px",
+                fontWeight: "700",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: mapType === "m" ? "var(--primary-600)" : "#ffffff",
+                color: mapType === "m" ? "#ffffff" : "var(--text-muted)",
+                cursor: "pointer"
+              }}
+            >
+              Road Map
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapType("k")}
+              style={{
+                fontSize: "10px",
+                fontWeight: "700",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: mapType === "k" ? "var(--primary-600)" : "#ffffff",
+                color: mapType === "k" ? "#ffffff" : "var(--text-muted)",
+                cursor: "pointer"
+              }}
+            >
+              Satellite
+            </button>
+          </div>
+        </div>
         <div style={{ border: "1px solid var(--border-color)", borderRadius: "8px", overflow: "hidden", minHeight: "260px", height: "100%" }}>
           <iframe 
             width="100%" 
             height="100%" 
             style={{ border: "0", minHeight: "260px" }} 
-            src={`https://maps.google.com/maps?q=${site.proposedLatitude},${site.proposedLongitude}&z=16&output=embed`}
+            src={`https://maps.google.com/maps?q=${site.proposedLatitude},${site.proposedLongitude}&z=18&t=${mapType}&output=embed`}
             title={`Proposed Map for ${site.siteName}`}
           />
         </div>

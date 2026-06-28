@@ -246,6 +246,8 @@ export default function Login() {
         if (userProfile.status !== "active") {
           setError("Account is inactive.");
           setLoading(false);
+        } else if (userProfile.role === "super_admin" || userProfile.role === "superadmin") {
+          navigate("/superadmin");
         } else if (userProfile.role === "admin") {
           navigate("/admin");
         } else if (userProfile.role === "site_engineer" || userProfile.role === "engineer") {

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { onAuthChange, signOutUser } from "../firebase/auth";
-import { getUserProfile, createUserProfile } from "../services/firebaseService";
+import { getUserProfile, createUserProfile, logSystemActivity } from "../services/firebaseService";
 import { isFirebaseConfigured } from "../firebase/config";
 
 const AuthContext = createContext(null);
@@ -59,6 +59,22 @@ export function AuthProvider({ children }) {
             profile = await getUserProfile(firebaseUser.uid);
           }
           setUserProfile(profile);
+          
+          // Centralized audit logging for successful logins
+          try {
+            await logSystemActivity(
+              firebaseUser.uid,
+              profile?.fullName || firebaseUser.email,
+              profile?.role || "user",
+              "",
+              "",
+              "Login",
+              `${profile?.fullName || firebaseUser.email} logged in successfully`,
+              "Auth"
+            );
+          } catch (e) {
+            console.error("Audit log failed for login:", e);
+          }
         } catch (err) {
           console.error("Auth Listener Error fetching profile:", err);
           setUserProfile(null);
@@ -74,6 +90,22 @@ export function AuthProvider({ children }) {
   }, [configured]);
 
   const logout = async () => {
+    if (user && userProfile) {
+      try {
+        await logSystemActivity(
+          user.uid,
+          userProfile.fullName || user.email,
+          userProfile.role || "user",
+          "",
+          "",
+          "Logout",
+          `${userProfile.fullName || user.email} logged out`,
+          "Auth"
+        );
+      } catch (err) {
+        console.error("Audit log failed for logout:", err);
+      }
+    }
     localStorage.removeItem("is_session_active");
     localStorage.removeItem("is_logged_in");
     await signOutUser();

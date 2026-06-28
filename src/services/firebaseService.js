@@ -11,7 +11,8 @@ import {
   writeBatch,
   arrayUnion,
   arrayRemove,
-  deleteField
+  deleteField,
+  deleteDoc
 } from "firebase/firestore";
 import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
@@ -315,6 +316,68 @@ export async function updateSiteLocation(siteId, latitude, longitude, address, l
     radius: Number(radius) || 100,
     updatedAt: serverTimestamp()
   });
+
+  // central approvals integration
+  let siteName = "Unknown Site";
+  try {
+    const siteDoc = await getDoc(siteDocRef);
+    if (siteDoc.exists()) {
+      siteName = siteDoc.data().siteName;
+    }
+  } catch (e) {}
+
+  let engineerName = "Site Engineer";
+  try {
+    const userDoc = await getDoc(doc(db, "users", engineerId));
+    if (userDoc.exists()) {
+      engineerName = userDoc.data().fullName;
+    }
+  } catch (e) {}
+
+  const approvalId = `loc_${siteId}`;
+
+  await saveApprovalRequest({
+    id: approvalId,
+    type: "Location",
+    requestedBy: engineerName,
+    engineerId: engineerId,
+    siteId: siteId,
+    siteName: siteName,
+    details: `Site Geofence Setup: ${address}`,
+    amount: 0,
+    requestDate: locationCreatedDate.split("T")[0],
+    status: "pending",
+    raw: {
+      proposedLatitude: Number(latitude),
+      proposedLongitude: Number(longitude),
+      proposedLocation: address,
+      proposedLocationAccuracy: Number(locationAccuracy),
+      proposedLocationCapturedBy: engineerId,
+      proposedLocationCreatedDate: locationCreatedDate
+    }
+  });
+
+  await logSystemActivity(
+    engineerId,
+    engineerName,
+    "site_engineer",
+    siteId,
+    siteName,
+    "Create",
+    `${engineerName} requested site location geofencing setup for ${siteName}`,
+    "Location",
+    { siteId }
+  );
+
+  await notifyAdmins(
+    "New Site Location Setup Request",
+    `${engineerName} requested a geofence location setup at ${siteName}.`,
+    "Location",
+    siteId,
+    siteName,
+    engineerId,
+    engineerName
+  );
 }
 
 // Helper to calculate distance in meters between two coordinates
@@ -394,19 +457,24 @@ export async function reverseGeocodeLatLng(lat, lng) {
 
         if (bestResult) {
           const address = bestResult.address;
+          const landmark = address.amenity || address.shop || address.tourism || address.building || address.office || address.leisure || address.house_name || "";
+          const houseNumber = address.house_number || "";
           const street = address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square || "";
-          const colony = address.colony || address.residential || address.neighbourhood || address.allotments || address.suburb || address.quarter || address.hamlet || address.locality || "";
+          const colony = address.colony || address.residential || address.neighbourhood || address.allotments || "";
+          const suburb = address.suburb || address.quarter || address.hamlet || address.locality || "";
           const town = address.village || address.town || address.city_district || address.city || address.municipality || "";
           const district = address.state_district || address.county || address.district || "";
           const state = address.state || "";
           const country = address.country || "";
 
-          // Prioritized Custom Address Construction:
-          // 1. Street -> 2. Colony/Locality -> 3. Town/Village -> 4. District -> 5. State -> 6. Country
+          // Prioritized Custom Address Construction for maximum location details
           const addressParts = [];
+          if (landmark) addressParts.push(landmark);
+          if (houseNumber) addressParts.push(`No. ${houseNumber}`);
           if (street) addressParts.push(street);
           if (colony && !addressParts.includes(colony)) addressParts.push(colony);
-          if (town && !addressParts.includes(town)) addressParts.push(town);
+          if (suburb && !addressParts.includes(suburb) && suburb !== colony) addressParts.push(suburb);
+          if (town && !addressParts.includes(town) && town !== suburb) addressParts.push(town);
           if (district && !addressParts.includes(district)) addressParts.push(district);
           if (state && !addressParts.includes(state)) addressParts.push(state);
           if (country && !addressParts.includes(country)) addressParts.push(country);
@@ -415,7 +483,8 @@ export async function reverseGeocodeLatLng(lat, lng) {
 
           let areaParts = [];
           if (colony) areaParts.push(colony);
-          if (town && town !== colony) areaParts.push(town);
+          if (suburb && suburb !== colony) areaParts.push(suburb);
+          if (town && town !== colony && town !== suburb) areaParts.push(town);
           const area = areaParts.join(", ") || "";
 
           return {
@@ -576,6 +645,19 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
   });
 }
 
+// Mark check-out attendance
+export async function markCheckOut(attendanceId, latitude, longitude, address, photoUrl = "") {
+  const db = getDb();
+  const attRef = doc(db, "attendance", attendanceId);
+  await updateDoc(attRef, {
+    checkOutTime: serverTimestamp(),
+    checkOutLatitude: Number(latitude),
+    checkOutLongitude: Number(longitude),
+    checkOutAddress: address || "",
+    checkOutPhotoUrl: photoUrl
+  });
+}
+
 // Save site photo
 export async function saveSitePhoto(engineerId, siteId, imageUrl, latitude, longitude) {
   const db = getDb();
@@ -618,7 +700,7 @@ export async function getSitePhotos(engineerId, siteId = null) {
 }
 
 // Save progress report (daily updates)
-export async function saveDailyProgressReport(engineerId, siteId, description, progress, photoIds = []) {
+export async function saveDailyProgressReport(engineerId, siteId, description, progress, photoIds = [], additionalNotes = {}) {
   const db = getDb();
   const newUpdateRef = doc(collection(db, "dailyUpdates"));
   await setDoc(newUpdateRef, {
@@ -627,8 +709,55 @@ export async function saveDailyProgressReport(engineerId, siteId, description, p
     description,
     progress,
     photoIds,
+    completedToday: additionalNotes.completedToday || "",
+    currentlyRunning: additionalNotes.currentlyRunning || "",
+    materialsStatus: additionalNotes.materialsStatus || "",
+    problemsFaced: additionalNotes.problemsFaced || "",
+    pendingWork: additionalNotes.pendingWork || "",
+    nextActivity: additionalNotes.nextActivity || "",
+    date: additionalNotes.date || new Date().toISOString().split("T")[0],
     createdAt: serverTimestamp()
   });
+
+  // central updates integration
+  let siteName = "Unknown Site";
+  try {
+    const siteDoc = await getDoc(doc(db, "sites", siteId));
+    if (siteDoc.exists()) {
+      siteName = siteDoc.data().siteName;
+    }
+  } catch (e) {}
+
+  let engineerName = "Site Engineer";
+  try {
+    const userDoc = await getDoc(doc(db, "users", engineerId));
+    if (userDoc.exists()) {
+      engineerName = userDoc.data().fullName;
+    }
+  } catch (e) {}
+
+  const activityDesc = `${engineerName} updated site progress at ${siteName} to ${progress}%`;
+  await logSystemActivity(
+    engineerId,
+    engineerName,
+    "site_engineer",
+    siteId,
+    siteName,
+    "Update",
+    activityDesc,
+    "Progress",
+    { progress }
+  );
+
+  await notifyAdmins(
+    "Site Progress Updated",
+    `${engineerName} logged progress at ${siteName}: "${description}" (${progress}% completed).`,
+    "Progress",
+    siteId,
+    siteName,
+    engineerId,
+    engineerName
+  );
 }
 
 // Get daily updates for an engineer (optionally filtered by siteId)
@@ -821,6 +950,7 @@ export async function addMaterial(materialData) {
   const db = getDb();
   const materialsColl = collection(db, "materials");
   const newMaterialRef = doc(materialsColl);
+  const matId = newMaterialRef.id;
   
   await setDoc(newMaterialRef, {
     siteId: materialData.siteId,
@@ -837,6 +967,61 @@ export async function addMaterial(materialData) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
+
+  // central approvals integration
+  let siteName = "Unknown Site";
+  try {
+    const siteDoc = await getDoc(doc(db, "sites", materialData.siteId));
+    if (siteDoc.exists()) {
+      siteName = siteDoc.data().siteName;
+    }
+  } catch (e) {}
+
+  let engineerName = "Site Engineer";
+  try {
+    const userDoc = await getDoc(doc(db, "users", materialData.engineerId));
+    if (userDoc.exists()) {
+      engineerName = userDoc.data().fullName;
+    }
+  } catch (e) {}
+
+  const details = `${materialData.materialName} (${materialData.category}) - Qty: ${materialData.quantity} ${materialData.unit}`;
+
+  await saveApprovalRequest({
+    id: matId,
+    type: "Material",
+    requestedBy: engineerName,
+    engineerId: materialData.engineerId,
+    siteId: materialData.siteId,
+    siteName: siteName,
+    details: details,
+    amount: 0,
+    requestDate: materialData.purchaseDate || new Date().toISOString().split("T")[0],
+    status: "pending",
+    raw: { id: matId }
+  });
+
+  await logSystemActivity(
+    materialData.engineerId,
+    engineerName,
+    "site_engineer",
+    materialData.siteId,
+    siteName,
+    "Create",
+    `${engineerName} requested ${details} for ${siteName}`,
+    "Material",
+    { materialId: matId }
+  );
+
+  await notifyAdmins(
+    "New Material Requisition Request",
+    `${engineerName} submitted a new request for ${details} at ${siteName}.`,
+    "Material",
+    materialData.siteId,
+    siteName,
+    materialData.engineerId,
+    engineerName
+  );
 }
 
 // Get materials, optionally filtered by siteId, and resolve names
@@ -1206,6 +1391,8 @@ export async function logEngineerLeave(engineerId, dateStr, reason) {
   }
   
   const newLeaveRef = doc(collection(db, "leaves"));
+  const leaveId = newLeaveRef.id;
+  
   await setDoc(newLeaveRef, {
     engineerId,
     date: dateStr,
@@ -1213,6 +1400,51 @@ export async function logEngineerLeave(engineerId, dateStr, reason) {
     status: "pending", // Default to pending approval
     createdAt: serverTimestamp()
   });
+
+  // Central approvals integration
+  let engineerName = "Site Engineer";
+  try {
+    const userDoc = await getDoc(doc(db, "users", engineerId));
+    if (userDoc.exists()) {
+      engineerName = userDoc.data().fullName;
+    }
+  } catch (e) {}
+
+  await saveApprovalRequest({
+    id: leaveId,
+    type: "Leave",
+    requestedBy: engineerName,
+    engineerId: engineerId,
+    siteId: "",
+    siteName: "N/A",
+    details: `Leave Request on ${dateStr} for "${reason || 'Personal Leave'}"`,
+    amount: 0,
+    requestDate: dateStr,
+    status: "pending",
+    raw: { id: leaveId }
+  });
+
+  await logSystemActivity(
+    engineerId,
+    engineerName,
+    "site_engineer",
+    "",
+    "N/A",
+    "Create",
+    `${engineerName} requested Leave for ${dateStr}`,
+    "Leave",
+    { leaveId }
+  );
+
+  await notifyAdmins(
+    "New Leave Request",
+    `${engineerName} requested leave for ${dateStr}. Reason: "${reason || 'Personal Leave'}"`,
+    "Leave",
+    "",
+    "",
+    engineerId,
+    engineerName
+  );
 }
 
 // Get all logged leaves for an engineer
@@ -1661,6 +1893,913 @@ export async function rejectMaterialLog(materialId) {
     status: "rejected",
     updatedAt: serverTimestamp()
   });
+}
+
+// ==========================================================================
+// CENTRAL LABOUR MASTER & SALARY MANAGEMENT API
+// ==========================================================================
+
+export async function getLabourMaster() {
+  const db = getDb();
+  const docRef = doc(db, "users", "__labour_master__");
+  const docSnap = await getDoc(docRef);
+  
+  const defaults = {
+    "Mason": { wage: 800, type: "Daily", status: "Active" },
+    "Helper": { wage: 500, type: "Daily", status: "Active" },
+    "Carpenter": { wage: 700, type: "Daily", status: "Active" },
+    "Electrician": { wage: 700, type: "Daily", status: "Active" },
+    "Plumber": { wage: 700, type: "Daily", status: "Active" },
+    "Painter": { wage: 700, type: "Daily", status: "Active" },
+    "Other": { wage: 600, type: "Daily", status: "Active" }
+  };
+  
+  if (docSnap.exists()) {
+    const data = docSnap.data();
+    const mergedCategories = { ...defaults, ...(data.categories || {}) };
+    return {
+      categories: mergedCategories,
+      history: data.history || []
+    };
+  } else {
+    await setDoc(docRef, {
+      categories: defaults,
+      history: []
+    });
+    return {
+      categories: defaults,
+      history: []
+    };
+  }
+}
+
+export async function saveLabourMaster(categories, history) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__labour_master__");
+  await setDoc(docRef, {
+    categories,
+    history,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function getLabourPayments() {
+  const db = getDb();
+  const docRef = doc(db, "users", "__labour_payments__");
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    return docSnap.data().payments || [];
+  }
+  return [];
+}
+
+export async function saveLabourPayment(paymentData) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__labour_payments__");
+  const docSnap = await getDoc(docRef);
+  
+  const newPayment = {
+    id: `${paymentData.siteId}_${Date.now()}`,
+    siteId: paymentData.siteId,
+    amount: Number(paymentData.amount) || 0,
+    date: paymentData.date || new Date().toISOString().split("T")[0],
+    reference: paymentData.reference || "",
+    notes: paymentData.notes || "",
+    loggedBy: paymentData.loggedBy || "admin"
+  };
+  
+  if (docSnap.exists()) {
+    await updateDoc(docRef, {
+      payments: arrayUnion(newPayment),
+      updatedAt: serverTimestamp()
+    });
+  } else {
+    await setDoc(docRef, {
+      payments: [newPayment],
+      updatedAt: serverTimestamp()
+    });
+  }
+  return newPayment;
+}
+
+export async function getMaterialMaster() {
+  const db = getDb();
+  const docRef = doc(db, "users", "__material_master__");
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    return docSnap.data().materialsList || [];
+  }
+  const defaultList = [
+    { name: "Cement", category: "Cement", unit: "Bag", status: "Active" },
+    { name: "Steel", category: "Steel", unit: "Ton", status: "Active" },
+    { name: "Sand", category: "Sand", unit: "Load", status: "Active" },
+    { name: "Bricks", category: "Bricks", unit: "Piece", status: "Active" }
+  ];
+  return defaultList;
+}
+
+export async function saveMaterialMaster(materialsList) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__material_master__");
+  await setDoc(docRef, {
+    materialsList,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function logMaterialUsage(materialId, usageData) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) throw new Error("Material log not found");
+  
+  const currentData = docSnap.data();
+  const currentConsumed = Number(currentData.consumedQuantity) || 0;
+  
+  const newUsageEntry = {
+    id: `usage_${Date.now()}`,
+    quantity: Number(usageData.quantity) || 0,
+    date: usageData.date || new Date().toISOString().split("T")[0],
+    notes: usageData.notes || ""
+  };
+  
+  await updateDoc(docRef, {
+    usageHistory: arrayUnion(newUsageEntry),
+    consumedQuantity: currentConsumed + newUsageEntry.quantity,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function logMaterialPayment(materialId, paymentData) {
+  const db = getDb();
+  const docRef = doc(db, "materials", materialId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) throw new Error("Material log not found");
+  
+  const currentData = docSnap.data();
+  const currentPaid = Number(currentData.paidAmount) || 0;
+  
+  const newPaymentEntry = {
+    id: `pay_${Date.now()}`,
+    amount: Number(paymentData.amount) || 0,
+    date: paymentData.date || new Date().toISOString().split("T")[0],
+    reference: paymentData.reference || "",
+    notes: paymentData.notes || ""
+  };
+  
+  await updateDoc(docRef, {
+    paymentHistory: arrayUnion(newPaymentEntry),
+    paidAmount: currentPaid + newPaymentEntry.amount,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function getGeneralExpenses() {
+  const db = getDb();
+  const docRef = doc(db, "users", "__site_expenses__");
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    return docSnap.data().expenses || [];
+  }
+  return [];
+}
+
+export async function saveGeneralExpense(expenseData) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__site_expenses__");
+  const docSnap = await getDoc(docRef);
+  
+  const newExpense = {
+    id: `exp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+    siteId: expenseData.siteId,
+    category: expenseData.category || "Site Expense",
+    amount: Number(expenseData.amount) || 0,
+    date: expenseData.date || new Date().toISOString().split("T")[0],
+    description: expenseData.description || "",
+    notes: expenseData.notes || "",
+    createdBy: expenseData.createdBy || "Engineer",
+    status: expenseData.status || "Pending",
+    paidAmount: 0,
+    paymentHistory: []
+  };
+
+  if (docSnap.exists()) {
+    await updateDoc(docRef, {
+      expenses: arrayUnion(newExpense),
+      updatedAt: serverTimestamp()
+    });
+  } else {
+    await setDoc(docRef, {
+      expenses: [newExpense],
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  // central approvals integration
+  const expId = newExpense.id;
+
+  let siteName = "Unknown Site";
+  try {
+    const siteDoc = await getDoc(doc(db, "sites", expenseData.siteId));
+    if (siteDoc.exists()) {
+      siteName = siteDoc.data().siteName;
+    }
+  } catch (e) {}
+
+  let engineerName = expenseData.createdBy || "Engineer";
+
+  if (newExpense.status === "Pending" || newExpense.status === "pending") {
+    await saveApprovalRequest({
+      id: expId,
+      type: "Payment",
+      requestedBy: engineerName,
+      engineerId: expenseData.engineerId || "",
+      siteId: expenseData.siteId,
+      siteName: siteName,
+      details: `${expenseData.category} - ${expenseData.description} (₹${expenseData.amount})`,
+      amount: Number(expenseData.amount) || 0,
+      requestDate: expenseData.date || new Date().toISOString().split("T")[0],
+      status: "pending",
+      raw: { id: expId }
+    });
+
+    await notifyAdmins(
+      "New Field Payment Request",
+      `${engineerName} requested ₹${expenseData.amount} for "${expenseData.description}" at ${siteName}.`,
+      "Payment",
+      expenseData.siteId,
+      siteName,
+      expenseData.engineerId || "",
+      engineerName
+    );
+  }
+
+  await logSystemActivity(
+    expenseData.engineerId || "",
+    engineerName,
+    expenseData.createdBy === "Admin" ? "admin" : "site_engineer",
+    expenseData.siteId,
+    siteName,
+    "Create",
+    `${engineerName} logged ${expenseData.category} of ₹${expenseData.amount} (${expenseData.description})`,
+    "Payment",
+    { expenseId: expId }
+  );
+
+  if (Number(expenseData.amount) >= 100000) {
+    try {
+      const superadmins = await getUsersByRole("super_admin");
+      const superadmins2 = await getUsersByRole("superadmin");
+      const uniqueSas = [...superadmins, ...superadmins2].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+      
+      const promises = uniqueSas.map(sa => 
+        sendNotification(
+          sa.id,
+          "⚠️ High-Value Payment logged",
+          `A payment of ₹${expenseData.amount} for "${expenseData.description}" was logged at ${siteName}.`,
+          "Payment",
+          expenseData.siteId,
+          siteName,
+          expenseData.engineerId || "",
+          engineerName,
+          "high"
+        )
+      );
+      await Promise.all(promises);
+    } catch (err) {
+      console.error("Super Admin high value notification failed:", err);
+    }
+  }
+
+  return newExpense;
+}
+
+export async function approveGeneralExpense(expenseId) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__site_expenses__");
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return;
+  
+  const expenses = docSnap.data().expenses || [];
+  const updatedExpenses = expenses.map(e => {
+    if (e.id === expenseId) {
+      return { ...e, status: "Approved" };
+    }
+    return e;
+  });
+  
+  await updateDoc(docRef, {
+    expenses: updatedExpenses,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function logGeneralExpensePayment(expenseId, paymentData) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__site_expenses__");
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return;
+  
+  const expenses = docSnap.data().expenses || [];
+  const updatedExpenses = expenses.map(e => {
+    if (e.id === expenseId) {
+      const currentPaid = Number(e.paidAmount) || 0;
+      const payAmt = Number(paymentData.amount) || 0;
+      const history = e.paymentHistory || [];
+      const newPayEntry = {
+        id: `pay_${Date.now()}`,
+        amount: payAmt,
+        date: paymentData.date || new Date().toISOString().split("T")[0],
+        reference: paymentData.reference || "",
+        notes: paymentData.notes || ""
+      };
+      
+      return {
+        ...e,
+        paidAmount: currentPaid + payAmt,
+        paymentHistory: [...history, newPayEntry]
+      };
+    }
+    return e;
+  });
+  
+  await updateDoc(docRef, {
+    expenses: updatedExpenses,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function rejectGeneralExpense(expenseId) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__site_expenses__");
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) return;
+  
+  const expenses = docSnap.data().expenses || [];
+  const updatedExpenses = expenses.map(e => {
+    if (e.id === expenseId) {
+      return { ...e, status: "Rejected" };
+    }
+    return e;
+  });
+  
+  await updateDoc(docRef, {
+    expenses: updatedExpenses,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function getNotifications(userId) {
+  const db = getDb();
+  const q = query(
+    collection(db, "notifications"),
+    where("recipientId", "==", userId)
+  );
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list.sort((a, b) => {
+    const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const tB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return tB - tA;
+  });
+}
+
+export async function sendNotification(recipientId, title, description, moduleType, siteId, siteName, createdUserId, createdUserName, priority = "normal") {
+  const db = getDb();
+  const docRef = doc(collection(db, "notifications"));
+  await setDoc(docRef, {
+    recipientId,
+    title,
+    description,
+    moduleType,
+    siteId: siteId || "",
+    siteName: siteName || "",
+    createdUserId: createdUserId || "",
+    createdUserName: createdUserName || "",
+    priority,
+    read: false,
+    createdAt: serverTimestamp()
+  });
+  return docRef.id;
+}
+
+export async function markNotificationAsRead(notificationId) {
+  const db = getDb();
+  const docRef = doc(db, "notifications", notificationId);
+  await updateDoc(docRef, {
+    read: true,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function markAllNotificationsAsRead(userId) {
+  const db = getDb();
+  const q = query(
+    collection(db, "notifications"),
+    where("recipientId", "==", userId),
+    where("read", "==", false)
+  );
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.forEach(d => {
+    batch.update(doc(db, "notifications", d.id), {
+      read: true,
+      updatedAt: serverTimestamp()
+    });
+  });
+  await batch.commit();
+}
+
+export async function logSystemActivity(userId, userName, userRole, siteId, siteName, actionType, description, moduleType, details = {}) {
+  const db = getDb();
+  const docRef = doc(collection(db, "activities"));
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0];
+  
+  await setDoc(docRef, {
+    userId: userId || "",
+    userName: userName || "",
+    userRole: userRole || "",
+    siteId: siteId || "",
+    siteName: siteName || "",
+    actionType,
+    description,
+    moduleType,
+    details,
+    oldValue: details?.oldValue || "",
+    newValue: details?.newValue || "",
+    date: dateStr,
+    createdAt: serverTimestamp()
+  });
+  return docRef.id;
+}
+
+export async function getSystemActivities() {
+  const db = getDb();
+  const q = collection(db, "activities");
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list.sort((a, b) => {
+    const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const tB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return tB - tA;
+  });
+}
+
+export async function getCentralApprovals() {
+  const db = getDb();
+  const q = collection(db, "approvals");
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list.sort((a, b) => {
+    const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+    const tB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+    return tB - tA;
+  });
+}
+
+export async function saveApprovalRequest(approvalData) {
+  const db = getDb();
+  const docRef = doc(db, "approvals", approvalData.id);
+  await setDoc(docRef, {
+    id: approvalData.id,
+    type: approvalData.type,
+    requestedBy: approvalData.requestedBy || "",
+    engineerId: approvalData.engineerId || "",
+    siteId: approvalData.siteId || "",
+    siteName: approvalData.siteName || "",
+    details: approvalData.details || "",
+    amount: Number(approvalData.amount) || 0,
+    requestDate: approvalData.requestDate || new Date().toISOString().split("T")[0],
+    status: approvalData.status || "pending",
+    createdAt: serverTimestamp(),
+    raw: approvalData.raw || {}
+  });
+  return docRef.id;
+}
+
+export async function getUsersByRole(role) {
+  const db = getDb();
+  const q = query(
+    collection(db, "users"),
+    where("role", "==", role)
+  );
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list;
+}
+
+export async function notifyAdmins(title, description, moduleType, siteId, siteName, createdUserId, createdUserName, priority = "normal") {
+  try {
+    const admins = await getUsersByRole("admin");
+    const superadmins = await getUsersByRole("super_admin");
+    const superadmins2 = await getUsersByRole("superadmin");
+    const recipients = [...admins, ...superadmins, ...superadmins2];
+    
+    const uniqueRecipients = [];
+    const seen = new Set();
+    recipients.forEach(r => {
+      if (!seen.has(r.id)) {
+        seen.add(r.id);
+        uniqueRecipients.push(r);
+      }
+    });
+
+    const promises = uniqueRecipients.map(admin => 
+      sendNotification(admin.id, title, description, moduleType, siteId, siteName, createdUserId, createdUserName, priority)
+    );
+    await Promise.all(promises);
+  } catch (err) {
+    console.error("Failed to distribute notifications to admins:", err);
+  }
+}
+
+export async function resolveApprovalRequest(approvalId, status, resolverId, resolverName) {
+  const db = getDb();
+  const docRef = doc(db, "approvals", approvalId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) throw new Error("Approval record not found");
+  
+  const appData = docSnap.data();
+  
+  await updateDoc(docRef, {
+    status,
+    resolverId: resolverId || "",
+    resolverName: resolverName || "",
+    resolvedAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  if (appData.type === "Leave") {
+    if (status === "approved" || status === "Approved") {
+      await approveLeave(approvalId);
+    } else {
+      await rejectLeave(approvalId);
+    }
+  } else if (appData.type === "Location") {
+    if (status === "approved" || status === "Approved") {
+      await approveSiteLocation(appData.siteId, {
+        proposedLatitude: appData.raw.proposedLatitude,
+        proposedLongitude: appData.raw.proposedLongitude,
+        proposedLocation: appData.raw.proposedLocation,
+        proposedLocationAccuracy: appData.raw.proposedLocationAccuracy,
+        proposedLocationCapturedBy: appData.raw.proposedLocationCapturedBy,
+        proposedLocationCreatedDate: appData.raw.proposedLocationCreatedDate
+      });
+    } else {
+      await rejectSiteLocation(appData.siteId);
+    }
+  } else if (appData.type === "Material") {
+    if (status === "approved" || status === "Approved") {
+      await approveMaterialLog(approvalId);
+    } else {
+      await rejectMaterialLog(approvalId);
+    }
+  } else if (appData.type === "Payment") {
+    if (status === "approved" || status === "Approved") {
+      await approveGeneralExpense(approvalId);
+    } else {
+      await rejectGeneralExpense(approvalId);
+    }
+  } else if (appData.type === "Labour") {
+    if (appData.raw && appData.raw.workerId) {
+      await updateWorkerStatus(appData.raw.workerId, status === "approved" || status === "Approved" ? "active" : "rejected");
+    }
+  }
+
+  const actionText = status === "approved" || status === "Approved" ? "approved" : "rejected";
+  const desc = `${resolverName || "Admin"} ${actionText} ${appData.type} request from ${appData.requestedBy} for ${appData.siteName}`;
+  await logSystemActivity(
+    resolverId, 
+    resolverName, 
+    "admin", 
+    appData.siteId, 
+    appData.siteName, 
+    status === "approved" || status === "Approved" ? "Approve" : "Reject", 
+    desc, 
+    appData.type, 
+    { approvalId, oldValue: appData.status || "pending", newValue: status }
+  );
+
+  if (appData.engineerId) {
+    const title = `${appData.type} Request ${status === "approved" || status === "Approved" ? "Approved" : "Rejected"}`;
+    const description = `Your request for "${appData.details}" at ${appData.siteName} has been ${actionText} by ${resolverName}.`;
+    await sendNotification(appData.engineerId, title, description, appData.type, appData.siteId, appData.siteName, resolverId, resolverName, "normal");
+  }
+}
+
+export async function syncApprovalsFromLegacy() {
+  const db = getDb();
+  
+  const leavesSnap = await getDocs(collection(db, "leaves"));
+  const usersSnap = await getDocs(collection(db, "users"));
+  const usersMap = {};
+  usersSnap.forEach(d => { usersMap[d.id] = d.data().fullName; });
+
+  const sitesSnap = await getDocs(collection(db, "sites"));
+  const sitesMap = {};
+  sitesSnap.forEach(d => { sitesMap[d.id] = d.data().siteName; });
+
+  const batch = writeBatch(db);
+  let writeCount = 0;
+
+  for (const d of leavesSnap.docs) {
+    const data = d.data();
+    const appRef = doc(db, "approvals", d.id);
+    const appSnap = await getDoc(appRef);
+    if (!appSnap.exists()) {
+      batch.set(appRef, {
+        id: d.id,
+        type: "Leave",
+        requestedBy: usersMap[data.engineerId] || "Site Engineer",
+        engineerId: data.engineerId || "",
+        siteId: "",
+        siteName: "N/A",
+        details: `Leave Request on ${data.date} for "${data.reason}"`,
+        amount: 0,
+        requestDate: data.date,
+        status: data.status || "pending",
+        createdAt: data.createdAt || serverTimestamp(),
+        raw: { id: d.id }
+      });
+      writeCount++;
+    }
+  }
+
+  const materialsSnap = await getDocs(collection(db, "materials"));
+  for (const d of materialsSnap.docs) {
+    const data = d.data();
+    const appRef = doc(db, "approvals", d.id);
+    const appSnap = await getDoc(appRef);
+    if (!appSnap.exists()) {
+      batch.set(appRef, {
+        id: d.id,
+        type: "Material",
+        requestedBy: usersMap[data.engineerId] || "Site Engineer",
+        engineerId: data.engineerId || "",
+        siteId: data.siteId || "",
+        siteName: sitesMap[data.siteId] || "Unknown Site",
+        details: `${data.materialName} (${data.category}) - Qty: ${data.quantity} ${data.unit || 'Units'}`,
+        amount: Number(data.totalAmount) || 0,
+        requestDate: data.purchaseDate || "--",
+        status: data.status || "pending",
+        createdAt: data.createdAt || serverTimestamp(),
+        raw: { id: d.id }
+      });
+      writeCount++;
+    }
+  }
+
+  for (const d of sitesSnap.docs) {
+    const data = d.data();
+    if (data.locationStatus === "Pending Approval") {
+      const appRef = doc(db, "approvals", `loc_${d.id}`);
+      const appSnap = await getDoc(appRef);
+      if (!appSnap.exists()) {
+        batch.set(appRef, {
+          id: `loc_${d.id}`,
+          type: "Location",
+          requestedBy: usersMap[data.proposedLocationCapturedBy] || "Site Engineer",
+          engineerId: data.proposedLocationCapturedBy || "",
+          siteId: d.id,
+          siteName: data.siteName,
+          details: `Site Geofence Setup: ${data.proposedLocation}`,
+          amount: 0,
+          requestDate: (data.proposedLocationCreatedDate || "").split("T")[0] || new Date().toISOString().split("T")[0],
+          status: "pending",
+          createdAt: data.updatedAt || serverTimestamp(),
+          raw: {
+            proposedLatitude: data.proposedLatitude,
+            proposedLongitude: data.proposedLongitude,
+            proposedLocation: data.proposedLocation,
+            proposedLocationAccuracy: data.proposedLocationAccuracy,
+            proposedLocationCapturedBy: data.proposedLocationCapturedBy,
+            proposedLocationCreatedDate: data.proposedLocationCreatedDate
+          }
+        });
+        writeCount++;
+      }
+    }
+  }
+
+  const expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
+  if (expensesDoc.exists()) {
+    const expenses = expensesDoc.data().expenses || [];
+    for (const exp of expenses) {
+      if (exp.status === "Pending" || exp.status === "pending") {
+        const appRef = doc(db, "approvals", exp.id);
+        const appSnap = await getDoc(appRef);
+        if (!appSnap.exists()) {
+          batch.set(appRef, {
+            id: exp.id,
+            type: "Payment",
+            requestedBy: exp.createdBy || "Engineer",
+            engineerId: exp.engineerId || "",
+            siteId: exp.siteId,
+            siteName: sitesMap[exp.siteId] || "Unknown Site",
+            details: `${exp.category} - ${exp.description} (₹${exp.amount})`,
+            amount: Number(exp.amount) || 0,
+            requestDate: exp.date,
+            status: "pending",
+            createdAt: serverTimestamp(),
+            raw: { id: exp.id }
+          });
+          writeCount++;
+        }
+      }
+    }
+  }
+
+  if (writeCount > 0) {
+    await batch.commit();
+  }
+  return writeCount;
+}
+
+export async function getDocumentCategories() {
+  const db = getDb();
+  const docRef = doc(db, "users", "__document_categories__");
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists() && docSnap.data().categoriesList) {
+    return docSnap.data().categoriesList;
+  }
+  return ["Contract", "Invoice", "Bill", "Photo", "Report", "Certificate"];
+}
+
+export async function saveDocumentCategories(categoriesList) {
+  const db = getDb();
+  const docRef = doc(db, "users", "__document_categories__");
+  await setDoc(docRef, {
+    categoriesList,
+    updatedAt: serverTimestamp()
+  });
+}
+
+export async function uploadDocument(docData) {
+  const db = getDb();
+  const docRef = doc(collection(db, "documents"));
+  const now = new Date();
+  const dateStr = now.toISOString().split("T")[0];
+  
+  const newDoc = {
+    id: docRef.id,
+    siteId: docData.siteId,
+    siteName: docData.siteName,
+    category: docData.category,
+    title: docData.title,
+    description: docData.description || "",
+    fileUrl: docData.fileUrl || "",
+    fileName: docData.fileName || "unnamed_file",
+    fileSize: Number(docData.fileSize) || 0,
+    uploadedBy: docData.uploadedBy,
+    uploadedById: docData.uploadedById,
+    uploadedAt: serverTimestamp(),
+    date: dateStr,
+    status: "Uploaded",
+    verifiedBy: "",
+    verifiedById: "",
+    verifiedAt: null,
+    comments: ""
+  };
+  
+  await setDoc(docRef, newDoc);
+
+  const desc = `${docData.uploadedBy} uploaded "${docData.title}" (${docData.category}) for site ${docData.siteName}`;
+  await logSystemActivity(
+    docData.uploadedById,
+    docData.uploadedBy,
+    docData.userRole || "site_engineer",
+    docData.siteId,
+    docData.siteName,
+    "Create",
+    desc,
+    "Document",
+    { documentId: docRef.id }
+  );
+
+  await notifyAdmins(
+    "New Project Document Uploaded",
+    `${docData.uploadedBy} uploaded a new document "${docData.title}" (${docData.category}) for ${docData.siteName}. Verification pending.`,
+    "Document",
+    docData.siteId,
+    docData.siteName,
+    docData.uploadedById,
+    docData.uploadedBy
+  );
+
+  return newDoc;
+}
+
+export async function getSiteDocuments(siteId) {
+  const db = getDb();
+  const q = query(
+    collection(db, "documents"),
+    where("siteId", "==", siteId)
+  );
+  const snap = await getDocs(q);
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list.sort((a, b) => {
+    const tA = a.uploadedAt?.seconds || 0;
+    const tB = b.uploadedAt?.seconds || 0;
+    return tB - tA;
+  });
+}
+
+export async function getAllDocuments() {
+  const db = getDb();
+  const snap = await getDocs(collection(db, "documents"));
+  const list = [];
+  snap.forEach(d => {
+    list.push({ id: d.id, ...d.data() });
+  });
+  return list.sort((a, b) => {
+    const tA = a.uploadedAt?.seconds || 0;
+    const tB = b.uploadedAt?.seconds || 0;
+    return tB - tA;
+  });
+}
+
+export async function verifyDocument(docId, status, verifierId, verifierName, comments) {
+  const db = getDb();
+  const docRef = doc(db, "documents", docId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) throw new Error("Document not found");
+  
+  const data = docSnap.data();
+  
+  await updateDoc(docRef, {
+    status,
+    verifiedBy: verifierName,
+    verifiedById: verifierId,
+    verifiedAt: serverTimestamp(),
+    comments: comments || ""
+  });
+
+  const desc = `${verifierName} marked document "${data.title}" as ${status} with comments "${comments || 'None'}"`;
+  await logSystemActivity(
+    verifierId,
+    verifierName,
+    "admin",
+    data.siteId,
+    data.siteName,
+    "Approve",
+    desc,
+    "Document",
+    { documentId: docId }
+  );
+
+  if (data.uploadedById) {
+    const alertTitle = `Document ${status}`;
+    const alertDesc = `Your document "${data.title}" at site ${data.siteName} has been ${status.toLowerCase()} by ${verifierName}.`;
+    await sendNotification(
+      data.uploadedById,
+      alertTitle,
+      alertDesc,
+      "Document",
+      data.siteId,
+      data.siteName,
+      verifierId,
+      verifierName
+    );
+  }
+}
+
+export async function deleteDocument(docId, userId, userName) {
+  const db = getDb();
+  const docRef = doc(db, "documents", docId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) throw new Error("Document not found");
+  
+  const data = docSnap.data();
+  await deleteDoc(docRef);
+
+  const desc = `${userName} deleted document "${data.title}" (${data.category}) from ${data.siteName}`;
+  await logSystemActivity(
+    userId,
+    userName,
+    "admin",
+    data.siteId,
+    data.siteName,
+    "Delete",
+    desc,
+    "Document",
+    { documentId: docId }
+  );
 }
 
 

@@ -165,8 +165,7 @@ export default function SiteEngineers() {
     setFormId("");
     setFormName("");
     setFormEmail("");
-    const tempPassword = `Apex@${Math.floor(100000 + Math.random() * 900000)}`;
-    setFormPassword(tempPassword);
+    setFormPassword("");
     setFormPhone("");
     setFormHolidayAllowance(24);
     setFormSelectedSites([]);
@@ -468,34 +467,19 @@ export default function SiteEngineers() {
                 </div>
 
                 <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="engineer-password">Temporary Password</label>
-                  <div className="input-wrapper" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-                    <div style={{ position: "relative", flexGrow: 1 }}>
-                      <Lock className="input-icon" size={16} />
-                      <input 
-                        type="text" 
-                        id="engineer-password" 
-                        value={formPassword}
-                        readOnly
-                        style={{ width: "100%", backgroundColor: "var(--primary-50)", cursor: "default", paddingLeft: "36px" }}
-                      />
-                    </div>
-                    <Button 
-                      type="button" 
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        navigator.clipboard.writeText(formPassword);
-                        showToast("Temporary password copied to clipboard!", "success");
-                      }}
-                      style={{ height: "42px", padding: "0 12px" }}
-                    >
-                      Copy
-                    </Button>
+                  <label htmlFor="engineer-password">Initial Password</label>
+                  <div className="input-wrapper">
+                    <Lock className="input-icon" size={16} />
+                    <input 
+                      type="password" 
+                      id="engineer-password" 
+                      placeholder="Enter initial password (min 6 chars)"
+                      value={formPassword}
+                      onChange={(e) => setFormPassword(e.target.value)}
+                      required 
+                      autoComplete="new-password"
+                    />
                   </div>
-                  <p className="field-hint" style={{ color: "var(--danger-600)", fontWeight: "600", marginTop: "4px" }}>
-                    Share this temporary password with the engineer. It will not be stored in the database.
-                  </p>
                 </div>
 
                 <div className="form-group" style={{ margin: 0, gridColumn: "1 / -1" }}>

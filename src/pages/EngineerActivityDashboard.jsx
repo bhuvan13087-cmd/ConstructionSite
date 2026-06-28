@@ -14,6 +14,7 @@ import {
   getEngineerAttendanceAndLeaveStats,
   getEngineerLeaves
 } from "../services/firebaseService";
+import { pairActivityLogs } from "../services/businessLogic";
 import { 
   ArrowLeft, 
   User, 
@@ -118,91 +119,9 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
 
   if (!engineer) return null;
 
-  // Pair Entry and Exit activity logs and compute working durations
-  const getDuration = (entry, exit) => {
-    if (!entry || !exit) return null;
-    const entryTime = entry.timestamp?.seconds ? entry.timestamp.seconds * 1000 : (entry.timestamp ? new Date(entry.timestamp).getTime() : 0);
-    const exitTime = exit.timestamp?.seconds ? exit.timestamp.seconds * 1000 : (exit.timestamp ? new Date(exit.timestamp).getTime() : 0);
-    if (!entryTime || !exitTime) return null;
-    const diffMs = exitTime - entryTime;
-    if (diffMs < 0) return null;
-    const diffHrs = Math.floor(diffMs / (1000 * 60 * 60));
-    const diffMins = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
-    return `${diffHrs} hrs ${diffMins} mins`;
-  };
-
+  // Process activity logs using unified business logic service
   const processActivityLogs = (logsList) => {
-    // Group logs by siteId and date
-    const groups = {};
-    logsList.forEach(log => {
-      const key = `${log.siteId}_${log.date}`;
-      if (!groups[key]) {
-        groups[key] = [];
-      }
-      groups[key].push(log);
-    });
-
-    const processed = [];
-    Object.keys(groups).forEach(key => {
-      // Sort chronologically ascending
-      const groupLogs = groups[key].sort((a, b) => {
-        const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-        const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-        return tA - tB;
-      });
-
-      // Pair entries and exits
-      let entry = null;
-      groupLogs.forEach(log => {
-        if (log.type === "entry") {
-          entry = log;
-        } else if (log.type === "exit" && entry) {
-          processed.push({
-            id: `${entry.id}_${log.id}`,
-            date: log.date,
-            siteId: log.siteId,
-            entryTime: entry.time,
-            exitTime: log.time,
-            entryAddress: entry.address,
-            exitAddress: log.address,
-            entryLat: entry.latitude,
-            entryLng: entry.longitude,
-            exitLat: log.latitude,
-            exitLng: log.longitude,
-            duration: getDuration(entry, log)
-          });
-          entry = null;
-        } else {
-          // Unpaired exit or duplicate exit
-          processed.push({
-            id: log.id,
-            date: log.date,
-            siteId: log.siteId,
-            type: "exit_only",
-            time: log.time,
-            address: log.address,
-            lat: log.latitude,
-            lng: log.longitude
-          });
-        }
-      });
-
-      // If trailing entry with no exit
-      if (entry) {
-        processed.push({
-          id: entry.id,
-          date: entry.date,
-          siteId: entry.siteId,
-          type: "entry_only",
-          time: entry.time,
-          address: entry.address,
-          lat: entry.latitude,
-          lng: entry.longitude
-        });
-      }
-    });
-
-    return processed;
+    return pairActivityLogs(logsList);
   };
 
   const rawProcessedActivities = processActivityLogs(activityLogs);

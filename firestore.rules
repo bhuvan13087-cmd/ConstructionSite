@@ -19,18 +19,20 @@ service cloud.firestore {
              getUserData().status == 'active';
     }
 
-    // Verify if the authenticated user is an active admin
+    // Verify if the authenticated user is an active admin (includes super admins)
     function isAdmin() {
-      return isActiveUser() && getUserData().role == 'admin';
+      return isActiveUser() && (getUserData().role == 'admin' || getUserData().role == 'super_admin' || getUserData().role == 'superadmin');
     }
 
     match /users/{userId} {
       // Allow user profile read if the user is authenticated and either:
       // 1. Reading their own profile
       // 2. Is an active admin reading any profile
+      // 3. Reading the global document categories document
       allow read: if isAuthenticated() && (
         request.auth.uid == userId || 
-        isAdmin()
+        isAdmin() ||
+        userId == '__document_categories__'
       );
       
       // Allow user profile creation if the user is authenticated and either:
@@ -155,6 +157,10 @@ service cloud.firestore {
     match /engineerLocations/{locationId} {
       allow read: if isActiveUser();
       allow write: if isActiveUser() && request.resource.data.engineerId == request.auth.uid;
+    }
+
+    match /documents/{docId} {
+      allow read, write: if isActiveUser();
     }
     
   }

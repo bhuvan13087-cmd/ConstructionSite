@@ -5,6 +5,7 @@ import {
   getAssignedSitesForEngineer, 
   getTodayAttendance,
   markAttendance,
+  markCheckOut,
   saveSitePhoto,
   getSitePhotos,
   saveDailyProgressReport,
@@ -28,8 +29,19 @@ import {
   getEngineerAttendanceHistory,
   updateEngineerPasswordInDb,
   logActivity,
-  getTodayActivityLogsForEngineer
+  getTodayActivityLogsForEngineer,
+  getLabourMaster,
+  getMaterialMaster,
+  logMaterialUsage,
+  getGeneralExpenses,
+  saveGeneralExpense,
+  getLabourPayments,
+  getLabourDailyCountsSummary,
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead
 } from "../services/firebaseService";
+import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -275,6 +287,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [locationCheckStatus, setLocationCheckStatus] = useState("unchecked"); // "unchecked", "checking", "warning", "granted"
   const [deviceCoords, setDeviceCoords] = useState(null); // { latitude, longitude }
   const [locationError, setLocationError] = useState("");
+  const [attendanceMode, setAttendanceMode] = useState("checkin"); // "checkin" or "checkout"
+  const [notifications, setNotifications] = useState([]);
 
   // Camera WebRTC States
   const [cameraActive, setCameraActive] = useState(false);
@@ -334,7 +348,38 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [progressPhotoPreview, setProgressPhotoPreview] = useState(null);
   const [issuesText, setIssuesText] = useState("");
   const [notesText, setNotesText] = useState("");
+  const [progressDate, setProgressDate] = useState(new Date().toISOString().split("T")[0]);
+  const [currentlyRunning, setCurrentlyRunning] = useState("");
+  const [materialsStatus, setMaterialsStatus] = useState("");
+  const [pendingWork, setPendingWork] = useState("");
+  const [nextActivity, setNextActivity] = useState("");
   const [progressSubmitting, setProgressSubmitting] = useState(false);
+
+  // 6. Material Master & Consumption state variables
+  const [materialMaster, setMaterialMaster] = useState([]);
+  const [showDeliveryModal, setShowDeliveryModal] = useState(false);
+  const [selectedMatDelivery, setSelectedMatDelivery] = useState(null);
+  const [deliveryRecQty, setDeliveryRecQty] = useState("");
+  const [deliverySupplierVal, setDeliverySupplierVal] = useState("");
+  const [deliveryPhotoFile, setDeliveryPhotoFile] = useState(null);
+  const [deliveryPhotoPreview, setDeliveryPhotoPreview] = useState("");
+
+  const [showUsageModal, setShowUsageModal] = useState(false);
+  const [selectedMatUsage, setSelectedMatUsage] = useState(null);
+  const [usageQtyVal, setUsageQtyVal] = useState("");
+  const [usageDateVal, setUsageDateVal] = useState(new Date().toISOString().split("T")[0]);
+  const [usageNotesVal, setUsageNotesVal] = useState("");
+
+  // 7. General Expense states
+  const [generalExpenses, setGeneralExpenses] = useState([]);
+  const [labourPayments, setLabourPayments] = useState([]);
+  const [labourHistory, setLabourHistory] = useState([]);
+  const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
+  const [expenseCategory, setExpenseCategory] = useState("Site Expense");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split("T")[0]);
+  const [expenseDesc, setExpenseDesc] = useState("");
+  const [expenseNotes, setExpenseNotes] = useState("");
 
   // Helper to trigger toast messages
   const showToast = (message, type = "info") => {
@@ -383,6 +428,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           setMaterials([]);
           setLoading(false);
           return;
+        } else {
+          const isAssigned = filteredSites.some(s => s.id === activeSiteId);
+          if (!isAssigned) {
+            console.warn(`Unauthorized site access attempt: site ${activeSiteId} is not assigned to engineer ${engineerId}`);
+            currentActiveId = filteredSites[0].id;
+            setActiveSiteId(currentActiveId);
+          }
         }
 
         // Fetch today's check-in attendance
@@ -401,12 +453,34 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const siteMats = await getMaterialsDetailed(currentActiveId);
         setMaterials(siteMats);
 
+        // Fetch general expenses, labour history, and payments
+        try {
+          const [ge, lp, lh] = await Promise.all([
+            getGeneralExpenses(),
+            getLabourPayments(),
+            getLabourDailyCountsSummary(currentActiveId)
+          ]);
+          setGeneralExpenses(ge);
+          setLabourPayments(lp);
+          setLabourHistory(lh);
+        } catch (e) {
+          console.error("Failed to load financials:", e);
+        }
+
         // Fetch today's activity logs (entry/exit) for the engineer
         try {
           const logs = await getTodayActivityLogsForEngineer(engineerId, todayStr);
           setTodayActivityLogs(logs);
         } catch (e) {
           console.error("Failed to load activity logs:", e);
+        }
+
+        // Fetch notifications for the engineer
+        try {
+          const userNotifications = await getNotifications(engineerId);
+          setNotifications(userNotifications || []);
+        } catch (e) {
+          console.error("Failed to load notifications:", e);
         }
       }
     } catch (err) {
@@ -467,6 +541,35 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   }, [tab]);
 
+  // Load labour & material master categories on mount
+  useEffect(() => {
+    const loadMasterData = async () => {
+      try {
+        const [labourMaster, mm] = await Promise.all([
+          getLabourMaster(),
+          getMaterialMaster()
+        ]);
+        
+        const activeCats = Object.keys(labourMaster.categories).filter(c => labourMaster.categories[c].status === "Active");
+        if (activeCats.length > 0) {
+          setCategories(activeCats);
+          setCountsMap(current => {
+            const updated = {};
+            activeCats.forEach(cat => {
+              updated[cat] = current[cat] || 0;
+            });
+            return updated;
+          });
+        }
+        
+        setMaterialMaster(mm);
+      } catch (err) {
+        console.error("Failed to load master categories:", err);
+      }
+    };
+    loadMasterData();
+  }, []);
+
   // Sync labour counts & historical summary whenever active site or select date changes
   useEffect(() => {
     const fetchLabourCountsAndHistory = async () => {
@@ -507,14 +610,59 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     fetchLabourCountsAndHistory();
   }, [activeSiteId, labourDate]);
 
-  // Handle local photo files base64 parsing
+  // Handle local photo files base64 parsing with automatic canvas compression
   const handleFileChange = (e, setFile, setPreview) => {
     const file = e.target.files[0];
     if (file) {
-      setFile(file);
+      if (!file.type.startsWith("image/")) {
+        showToast("Please upload an image file.", "error");
+        return;
+      }
+      
       const reader = new FileReader();
-      reader.onloadend = () => {
-        setPreview(reader.result);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.onload = () => {
+          // Production constraints: max 1200px dimensions to prevent high storage bills
+          const MAX_WIDTH = 1200;
+          const MAX_HEIGHT = 1200;
+          let width = img.width;
+          let height = img.height;
+          
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height = Math.round((height * MAX_WIDTH) / width);
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width = Math.round((width * MAX_HEIGHT) / height);
+              height = MAX_HEIGHT;
+            }
+          }
+          
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, width, height);
+          
+          const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.75);
+          setPreview(compressedDataUrl);
+          
+          canvas.toBlob((blob) => {
+            if (blob) {
+              const compressedFile = new File([blob], file.name, {
+                type: "image/jpeg",
+                lastModified: Date.now()
+              });
+              setFile(compressedFile);
+            } else {
+              setFile(file);
+            }
+          }, "image/jpeg", 0.75);
+        };
+        img.src = event.target.result;
       };
       reader.readAsDataURL(file);
     }
@@ -543,7 +691,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           err.code = error.code;
           reject(err);
         },
-        { enableHighAccuracy: true, timeout: 8000 }
+        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
       );
     });
   };
@@ -568,13 +716,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         
         try {
           const geocode = await reverseGeocodeLatLng(lat, lng);
-          const stateStr = (geocode.state || "").toLowerCase();
-          const countryStr = (geocode.country || "").toLowerCase();
-          const isTamilNadu = stateStr.includes("tamil") && (stateStr.includes("nadu") || stateStr.includes("nādū"));
-          const isIndia = countryStr.includes("india");
-          const isCoordinateInTN = lat >= 8.08 && lat <= 13.9 && lng >= 76.15 && lng <= 80.3;
+          const isValidTN = verifyTNLocation(lat, lng, geocode);
           
-          if (!((isTamilNadu && isIndia) || (geocode.fullAddress.startsWith("Lat:") && isCoordinateInTN))) {
+          if (!isValidTN) {
             setEngineerLocationError("Attendance allowed only inside Tamil Nadu location");
             setEngineerLocationSubmitting(false);
             return;
@@ -655,7 +799,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         showToast("GPS verification failed. Please turn ON location services.", "error");
         setActivitySubmitting(false);
       },
-      { enableHighAccuracy: true, timeout: 8000 }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     );
   };
 
@@ -741,13 +885,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     try {
       // 3. State Validation (Tamil Nadu, India)
       const geocode = await reverseGeocodeLatLng(lat, lng);
-      const stateStr = (geocode.state || "").toLowerCase();
-      const countryStr = (geocode.country || "").toLowerCase();
-      const isTamilNadu = stateStr.includes("tamil") && (stateStr.includes("nadu") || stateStr.includes("nādū"));
-      const isIndia = countryStr.includes("india");
-      const isCoordinateInTN = lat >= 8.08 && lat <= 13.9 && lng >= 76.15 && lng <= 80.3;
+      const isValidTN = verifyTNLocation(lat, lng, geocode);
 
-      if (!((isTamilNadu && isIndia) || (geocode.fullAddress.startsWith("Lat:") && isCoordinateInTN))) {
+      if (!isValidTN) {
         setVerificationStatus("failed");
         setVerificationDetails({
           message: "Outside Tamil Nadu",
@@ -759,32 +899,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
 
       // 4. Geofence Validation
-      const savedLat = Number(savedSiteLocation.latitude);
-      const savedLng = Number(savedSiteLocation.longitude);
-      const siteRadius = Number(site.radius || 100);
+      const geofenceResult = verifySiteGeofence(coords, savedSiteLocation, site.radius);
 
-      const distance = calculateDistanceMeters(savedLat, savedLng, lat, lng);
-      const isWithinRadius = distance <= siteRadius;
-
-      if (isWithinRadius) {
+      if (geofenceResult.status === "success") {
         setVerificationStatus("success");
         setVerificationDetails({
           message: "Site Verified Successfully",
           expectedSiteName: site.siteName,
           expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: geocode.fullAddress,
-          distance: Math.round(distance)
+          distance: geofenceResult.distance
         });
       } else {
         setVerificationStatus("failed");
         setVerificationDetails({
-          message: "Outside Site Radius",
-          details: "You are outside the assigned site location",
+          message: geofenceResult.message,
+          details: geofenceResult.details,
           expectedSiteName: site.siteName,
           expectedAddress: savedSiteLocation.address || site.location,
           capturedAddress: geocode.fullAddress,
-          distance: Math.round(distance),
-          allowedRadius: siteRadius
+          distance: geofenceResult.distance,
+          allowedRadius: geofenceResult.allowedRadius
         });
       }
       setLocationCheckStatus("granted");
@@ -913,26 +1048,51 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
-      await markAttendance(
-        engineerId, 
-        activeSiteId, 
-        todayStr, 
-        lat, 
-        lng, 
-        verificationDetails?.capturedAddress || "",
-        attendancePhotoPreview, 
-        "verified"
-      );
+      if (attendanceMode === "checkout") {
+        if (!todayAttendance?.id) {
+          throw new Error("No check-in record found for today to check out from.");
+        }
+        await markCheckOut(
+          todayAttendance.id,
+          lat,
+          lng,
+          verificationDetails?.capturedAddress || "",
+          attendancePhotoPreview
+        );
+        showToast(`Checked out successfully from ${site.siteName}!`, "success");
+      } else {
+        await markAttendance(
+          engineerId, 
+          activeSiteId, 
+          todayStr, 
+          lat, 
+          lng, 
+          verificationDetails?.capturedAddress || "",
+          attendancePhotoPreview, 
+          "verified"
+        );
+        showToast(`Checked in present at ${site.siteName}!`, "success");
+      }
 
-      showToast(`Checked in present at ${site.siteName}!`, "success");
       handleResetVerification();
 
       await loadDashboardData();
     } catch (err) {
       console.error("Mark attendance error:", err);
-      showToast(err.message || "Failed to complete check-in.", "error");
+      showToast(err.message || "Failed to complete attendance transaction.", "error");
     } finally {
       setAttendanceSubmitting(false);
+    }
+  };
+
+  const handleMarkNotificationRead = async (id) => {
+    try {
+      await markNotificationAsRead(id);
+      const engineerId = userProfile.uid || userProfile.id || "";
+      const userNotifications = await getNotifications(engineerId);
+      setNotifications(userNotifications || []);
+    } catch (e) {
+      console.error("Failed to dismiss notification:", e);
     }
   };
 
@@ -1251,19 +1411,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         engineerId,
         materialName: materialName.trim(),
         category: categoryToSave,
-        quantity: Number(materialQuantity),
+        requiredQuantity: Number(materialQuantity),
+        quantity: 0,
         unit: materialUnit,
-        supplierName: materialSupplier.trim(),
+        supplierName: materialSupplier.trim() || "Pending Quote",
         purchaseDate: materialPurchaseDate,
         notes: materialNotes.trim(),
-        invoiceUrl: materialInvoicePreview || ""
+        invoiceUrl: materialInvoicePreview || "",
+        status: "Pending" // Awaiting Admin approval
       });
 
-      showToast("Material receipt logged successfully!", "success");
-      
-      // Reset forms and close modal
+      showToast("Material request submitted for Admin approval!", "success");
       handleCloseMaterialModal();
-
       await loadDashboardData();
     } catch (err) {
       console.error("Material submit error:", err);
@@ -1360,16 +1519,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       // Format description to store work completed, issues, notes in same string
       const compiledDescription = 
-        `Work Completed: ${workDescription.trim()}` +
-        `\n\nIssues/Blockers: ${issuesText.trim() ? issuesText.trim() : "None"}` +
-        `\n\nNotes/Remarks: ${notesText.trim() ? notesText.trim() : "None"}`;
+        `Work Completed Today: ${workDescription.trim()}` +
+        `\n\nCurrently Running: ${currentlyRunning.trim() || "None"}` +
+        `\n\nMaterials/Work Status: ${materialsStatus.trim() || "None"}` +
+        `\n\nProblems Faced: ${issuesText.trim() || "None"}` +
+        `\n\nPending Work: ${pendingWork.trim() || "None"}` +
+        `\n\nNext Planned Activity: ${nextActivity.trim() || "None"}` +
+        `\n\nRemarks/Notes: ${notesText.trim() || "None"}`;
 
       await saveDailyProgressReport(
         engineerId,
         activeSiteId,
         compiledDescription,
         `${progressPercent}%`,
-        photoIds
+        photoIds,
+        {
+          completedToday: workDescription.trim(),
+          currentlyRunning: currentlyRunning.trim(),
+          materialsStatus: materialsStatus.trim(),
+          problemsFaced: issuesText.trim(),
+          pendingWork: pendingWork.trim(),
+          nextActivity: nextActivity.trim(),
+          date: progressDate
+        }
       );
 
       showToast("Daily progress updates logged successfully!", "success");
@@ -1377,6 +1549,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setProgressPercent(50);
       setIssuesText("");
       setNotesText("");
+      setCurrentlyRunning("");
+      setMaterialsStatus("");
+      setPendingWork("");
+      setNextActivity("");
       setProgressPhotoFile(null);
       setProgressPhotoPreview(null);
 
@@ -1786,25 +1962,44 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* Attendance checklist widget */}
-        <div className="mobile-attendance-card">
+        <div className="mobile-attendance-card" style={{ height: "auto", padding: "16px" }}>
           <div className="mobile-attendance-left">
-            <span className="mobile-attendance-status-label">Your Check-In</span>
+            <span className="mobile-attendance-status-label">Your Attendance Status</span>
             <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
-              {todayAttendance ? '✓ Checked In Present' : '✗ Not Checked In Yet'}
+              {todayAttendance 
+                ? (todayAttendance.checkOutTime ? '✓ Shift Completed' : '✓ Checked In Present')
+                : '✗ Not Checked In Yet'}
             </div>
             {todayAttendance && (
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Time: {todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}
+                Check-In: {todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}
+                {todayAttendance.checkOutTime && ` | Check-Out: ${todayAttendance.checkOutTime}`}
               </span>
             )}
           </div>
           {!todayAttendance && savedSiteLocation && (
             <button 
               type="button" 
-              onClick={() => navigate("/engineer/attendance")} 
+              onClick={() => {
+                setAttendanceMode("checkin");
+                navigate("/engineer/attendance");
+              }} 
               className="mobile-attendance-btn"
             >
               Check In
+            </button>
+          )}
+          {todayAttendance && !todayAttendance.checkOutTime && (
+            <button 
+              type="button" 
+              onClick={() => {
+                setAttendanceMode("checkout");
+                navigate("/engineer/attendance");
+              }} 
+              className="mobile-attendance-btn"
+              style={{ backgroundColor: "var(--danger-600)" }}
+            >
+              Check Out
             </button>
           )}
         </div>
@@ -1976,37 +2171,151 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
         {/* Quick Actions Grid */}
         <div style={{ marginTop: "8px" }}>
-          <span className="mobile-form-label">Quick Operations</span>
+          <span className="mobile-form-label">Field Quick Operations</span>
           <div className="mobile-quick-action-grid">
-            <div className="mobile-action-card attendance" onClick={() => navigate("/engineer/attendance")}>
-              <div className="mobile-action-icon-wrapper">
+            
+            {/* Check In Action */}
+            <button 
+              type="button"
+              className="mobile-action-card attendance"
+              onClick={() => {
+                setAttendanceMode("checkin");
+                navigate("/engineer/attendance");
+              }}
+              disabled={!!todayAttendance}
+              style={{ opacity: todayAttendance ? 0.5 : 1, border: "none", cursor: todayAttendance ? "not-allowed" : "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--success-50)", color: "var(--success-700)" }}>
                 <ClipboardCheck size={20} />
               </div>
-              <span className="mobile-action-title">Take Attendance</span>
-            </div>
-            
-            <div className="mobile-action-card materials" onClick={() => navigate("/engineer/material")}>
-              <div className="mobile-action-icon-wrapper">
+              <span className="mobile-action-title">Check In</span>
+            </button>
+
+            {/* Check Out Action */}
+            <button 
+              type="button"
+              className="mobile-action-card attendance"
+              onClick={() => {
+                setAttendanceMode("checkout");
+                navigate("/engineer/attendance");
+              }}
+              disabled={!todayAttendance || !!todayAttendance.checkOutTime}
+              style={{ opacity: (!todayAttendance || todayAttendance.checkOutTime) ? 0.5 : 1, border: "none", cursor: (!todayAttendance || todayAttendance.checkOutTime) ? "not-allowed" : "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--danger-50)", color: "var(--danger-700)" }}>
+                <LogOut size={20} />
+              </div>
+              <span className="mobile-action-title">Check Out</span>
+            </button>
+
+            {/* Add Progress */}
+            <button 
+              type="button"
+              className="mobile-action-card progress" 
+              onClick={() => navigate("/engineer/progress")}
+              style={{ border: "none", cursor: "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--primary-50)", color: "var(--primary-700)" }}>
+                <TrendingUp size={20} />
+              </div>
+              <span className="mobile-action-title">Add Progress</span>
+            </button>
+
+            {/* Upload Photo */}
+            <button 
+              type="button"
+              className="mobile-action-card photos" 
+              onClick={() => navigate("/engineer/photos")}
+              style={{ border: "none", cursor: "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--accent-50)", color: "var(--accent-700)" }}>
+                <Camera size={20} />
+              </div>
+              <span className="mobile-action-title">Upload Photo</span>
+            </button>
+
+            {/* Create Material Request */}
+            <button 
+              type="button"
+              className="mobile-action-card materials" 
+              onClick={() => navigate("/engineer/material")}
+              style={{ border: "none", cursor: "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--warning-50)", color: "var(--warning-700)" }}>
                 <Package size={20} />
               </div>
-              <span className="mobile-action-title">Add Material</span>
-            </div>
-            
-            <div className="mobile-action-card labour" onClick={() => navigate("/engineer/labour")}>
-              <div className="mobile-action-icon-wrapper">
-                <Users size={20} />
+              <span className="mobile-action-title">Request Material</span>
+            </button>
+
+            {/* View Tasks */}
+            <button 
+              type="button"
+              className="mobile-action-card labour" 
+              onClick={() => navigate("/engineer/more")}
+              style={{ border: "none", cursor: "pointer" }}
+            >
+              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "#f1f5f9", color: "#475569" }}>
+                <Sliders size={20} />
               </div>
-              <span className="mobile-action-title">Add Labour</span>
-            </div>
-            
-            <div className="mobile-action-card progress" onClick={() => navigate("/engineer/progress")}>
-              <div className="mobile-action-icon-wrapper">
-                <FileText size={20} />
-              </div>
-              <span className="mobile-action-title">Upload Progress</span>
-            </div>
+              <span className="mobile-action-title">View Tasks & Tools</span>
+            </button>
+
           </div>
         </div>
+
+        {/* Notification Center */}
+        {notifications && notifications.length > 0 && (
+          <div style={{ marginTop: "12px" }}>
+            <span className="mobile-form-label">Alerts & Field Updates</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "6px" }}>
+              {notifications.slice(0, 3).map((notif) => (
+                <div 
+                  key={notif.id} 
+                  style={{
+                    backgroundColor: notif.isRead ? "#f8fafc" : "#eff6ff",
+                    border: `1.5px solid ${notif.isRead ? "var(--border-color)" : "#bfdbfe"}`,
+                    padding: "12px",
+                    borderRadius: "8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    gap: "8px"
+                  }}
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: notif.isRead ? "var(--text-muted)" : "var(--primary-700)" }}>
+                        {notif.moduleType || "Notification"}
+                      </span>
+                      {!notif.isRead && (
+                        <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "var(--primary-600)" }} />
+                      )}
+                    </div>
+                    <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{notif.title}</strong>
+                    <span style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>{notif.description}</span>
+                  </div>
+                  {!notif.isRead && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkNotificationRead(notif.id)}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--primary-600)",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        padding: "2px 6px"
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -2118,8 +2427,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <CheckCircle2 size={32} />
             </div>
             <div>
-              <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>Check-In Confirmed</h4>
-              <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>You are marked present at the construction site today.</p>
+              <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>
+                {todayAttendance.checkOutTime ? "Shift Completed Successfully" : "Check-In Confirmed"}
+              </h4>
+              <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
+                {todayAttendance.checkOutTime ? "You have checked in and checked out for today's work shift." : "You are marked present at the construction site today."}
+              </p>
             </div>
             
             <div style={{
@@ -2139,14 +2452,58 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <strong style={{ color: "var(--primary-900)" }}>{currentSite?.siteName}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--text-muted)" }}>Verified Time:</span>
+                <span style={{ color: "var(--text-muted)" }}>Check-In Time:</span>
                 <strong style={{ color: "var(--primary-900)" }}>{todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--text-muted)" }}>GPS Location:</span>
+                <span style={{ color: "var(--text-muted)" }}>Check-In GPS:</span>
                 <strong style={{ color: "var(--primary-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.gpsLocationAddress || (todayAttendance.latitude ? `${Number(todayAttendance.latitude).toFixed(4)}, ${Number(todayAttendance.longitude).toFixed(4)}` : "Verified Boundary")}</strong>
               </div>
             </div>
+
+            {todayAttendance.checkOutTime ? (
+              <div style={{
+                width: "100%",
+                backgroundColor: "var(--danger-50)",
+                borderRadius: "8px",
+                border: "1px solid var(--danger-100)",
+                padding: "12px",
+                textAlign: "left",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px",
+                fontSize: "12px"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--danger-700)" }}>Check-Out:</span>
+                  <strong style={{ color: "var(--danger-900)" }}>Checked Out</strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--danger-700)" }}>Check-Out Time:</span>
+                  <strong style={{ color: "var(--danger-900)" }}>
+                    {todayAttendance.checkOutTime?.seconds
+                      ? new Date(todayAttendance.checkOutTime.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                      : new Date(todayAttendance.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </strong>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between" }}>
+                  <span style={{ color: "var(--danger-700)" }}>Check-Out GPS:</span>
+                  <strong style={{ color: "var(--danger-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.checkOutAddress || (todayAttendance.checkOutLatitude ? `${Number(todayAttendance.checkOutLatitude).toFixed(4)}, ${Number(todayAttendance.checkOutLongitude).toFixed(4)}` : "Verified Boundary")}</strong>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="mobile-btn-large"
+                onClick={() => {
+                  setAttendanceMode("checkout");
+                  handlePreCaptureCheck();
+                }}
+                style={{ width: "100%", backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none" }}
+              >
+                <LogOut size={16} /> Check Out of Shift
+              </button>
+            )}
 
             {todayAttendance.photoUrl && (
               <div style={{ width: "100%", height: "160px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
@@ -2178,7 +2535,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <button
                   type="button"
                   className="mobile-btn-large"
-                  onClick={handlePreCaptureCheck}
+                  onClick={() => {
+                    setAttendanceMode("checkin");
+                    handlePreCaptureCheck();
+                  }}
                   style={{ marginTop: "12px", width: "100%" }}
                 >
                   Mark Attendance
@@ -2493,6 +2853,195 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     );
   };
 
+  const renderExpensesView = () => {
+    const currentSiteObj = assignedSites.find(s => s.id === activeSiteId);
+    if (!currentSiteObj) {
+      return (
+        <div style={{ textAlign: "center", padding: "32px 16px" }}>
+          <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>Please select a construction site.</p>
+        </div>
+      );
+    }
+
+    const formatINR = (val) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(val);
+
+    const ledger = getSiteExpenseLedger(currentSiteObj, materials, labourHistory, generalExpenses, labourPayments, labourMaster?.categories || {});
+    const myExpenses = generalExpenses.filter(g => g.siteId === activeSiteId);
+
+    const handleSaveExpense = async (e) => {
+      e.preventDefault();
+      if (!expenseAmount || !expenseDesc.trim()) return;
+      try {
+        await saveGeneralExpense({
+          siteId: activeSiteId,
+          category: expenseCategory,
+          amount: Number(expenseAmount),
+          date: expenseDate,
+          description: expenseDesc.trim(),
+          notes: expenseNotes.trim(),
+          createdBy: userProfile?.fullName || "Engineer",
+          status: "Pending" // Require Admin approval
+        });
+        showToast("Expense requisition submitted to Admin!", "success");
+        setShowAddExpenseModal(false);
+        setExpenseAmount("");
+        setExpenseDesc("");
+        setExpenseNotes("");
+        await loadDashboardData();
+      } catch (err) {
+        showToast(`Submission failed: ${err.message}`, "error");
+      }
+    };
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        
+        {/* Stats card */}
+        <div className="mobile-stats-card" style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "16px", backgroundColor: "var(--primary-900)", color: "#ffffff", borderRadius: "12px" }}>
+          <div>
+            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase" }}>Total Site Budget</span>
+            <h2 style={{ margin: "4px 0 0 0", fontSize: "28px", fontWeight: "800" }}>{formatINR(ledger.totalBudget)}</h2>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderTop: "1px solid rgba(255,255,255,0.15)", paddingTop: "12px", fontSize: "12px" }}>
+            <div>
+              <span style={{ opacity: 0.8 }}>Expenses Accrued:</span>
+              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#fca5a5" }}>{formatINR(ledger.totalExpenses)}</div>
+            </div>
+            <div>
+              <span style={{ opacity: 0.8 }}>Payments Recv:</span>
+              <div style={{ fontWeight: "800", fontSize: "13px", marginTop: "2px", color: "#86efac" }}>{formatINR(ledger.totalPayments)}</div>
+            </div>
+            <div style={{ gridColumn: "span 2" }}>
+              <span style={{ opacity: 0.8 }}>Remaining Balance:</span>
+              <div style={{ fontWeight: "800", fontSize: "14px", marginTop: "2px", color: "#93c5fd" }}>{formatINR(ledger.remainingBalance)}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Expenses List */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Requisitions Summary</h4>
+          <button
+            type="button"
+            onClick={() => setShowAddExpenseModal(true)}
+            style={{
+              padding: "6px 12px",
+              backgroundColor: "var(--primary-100)",
+              color: "var(--primary-800)",
+              border: "none",
+              borderRadius: "6px",
+              fontSize: "12px",
+              fontWeight: "800",
+              cursor: "pointer"
+            }}
+          >
+            + Request
+          </button>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+          {myExpenses.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No expense requests logged yet.</p>
+            </div>
+          ) : (
+            myExpenses.map(exp => (
+              <div key={exp.id} className="mobile-material-card" style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)" }}>{exp.category}</span>
+                  <Badge status={exp.status === "Approved" ? "success" : exp.status === "Rejected" ? "danger" : "pending"}>
+                    {exp.status ? exp.status.toUpperCase() : "PENDING"}
+                  </Badge>
+                </div>
+                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800" }}>{exp.description}</h4>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                  <span>Requested Amount: <strong>{formatINR(exp.amount)}</strong></span>
+                  <span className="font-mono">{exp.date}</span>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        {/* Modal: Request New Expense */}
+        {showAddExpenseModal && (
+          <Modal
+            isOpen={showAddExpenseModal}
+            onClose={() => setShowAddExpenseModal(false)}
+            title="Request Site Expense Requisition"
+            maxWidth="380px"
+          >
+            <form onSubmit={handleSaveExpense} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Expense Category</span>
+                <select
+                  value={expenseCategory}
+                  onChange={(e) => setExpenseCategory(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
+                >
+                  <option value="Site Expense">Site Expense (fuel, water, transport)</option>
+                  <option value="Other Expense">Other Expense (fees, emergency bills)</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Description / Particulars</span>
+                <input
+                  type="text"
+                  placeholder="e.g. diesel for backup generator"
+                  value={expenseDesc}
+                  onChange={(e) => setExpenseDesc(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Amount Required (₹)</span>
+                <input
+                  type="number"
+                  placeholder="e.g. 1500"
+                  value={expenseAmount}
+                  onChange={(e) => setExpenseAmount(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Date Needed</span>
+                <input
+                  type="date"
+                  value={expenseDate}
+                  onChange={(e) => setExpenseDate(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Additional notes</span>
+                <input
+                  type="text"
+                  placeholder="e.g. urgent generator backup"
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
+                <Button type="submit" variant="primary" style={{ flex: 1 }}>Submit Request</Button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+      </div>
+    );
+  };
+
   const renderLabourView = () => {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -2553,7 +3102,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <div className="mobile-labour-info">
                   <span style={{ fontSize: "20px" }}>{emoji}</span>
                   <div>
-                    <span className="mobile-labour-name">{cat}</span>
+                    <span className="mobile-labour-name">{getLabourDisplayName(cat)}</span>
                     {!isCore && (
                       <button
                         type="button"
@@ -2737,7 +3286,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
                     {Object.entries(row).map(([k, v]) => {
                       if (["date", "total", "id", "siteId", "createdAt", "updatedAt", "engineerId"].includes(k)) return null;
-                      return <span key={k}>{k}: {v}</span>;
+                      let masterKey = k;
+                      if (k === "Masons") masterKey = "Mason";
+                      if (k === "Helpers") masterKey = "Helper";
+                      if (k === "Painters") masterKey = "Painter";
+                      if (k === "Plumbers") masterKey = "Plumber";
+                      if (k === "Electricians") masterKey = "Electrician";
+                      if (k === "Others") masterKey = "Other";
+                      return <span key={k}>{getLabourDisplayName(masterKey)}: {v}</span>;
                     }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
                   </div>
                 </div>
@@ -2749,22 +3305,84 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     );
   };
 
-  const renderMaterialView = () => {
-    const activeMaterials = materials
-      .filter(m => m.siteId === activeSiteId)
-      .filter(m => {
-        const query = materialSearch.toLowerCase().trim();
-        if (!query) return true;
-        return (
-          m.materialName.toLowerCase().includes(query) ||
-          m.category.toLowerCase().includes(query) ||
-          m.supplierName.toLowerCase().includes(query)
-        );
-      })
-      .filter(m => {
-        if (!materialDateFilter) return true;
-        return m.purchaseDate === materialDateFilter;
-      });
+    const handleOpenDelivery = (m) => {
+      setSelectedMatDelivery(m);
+      setDeliveryRecQty(m.pendingDelivery.toString());
+      setDeliverySupplierVal(m.supplierName === "Pending Quote" ? "" : m.supplierName);
+      setDeliveryPhotoFile(null);
+      setDeliveryPhotoPreview("");
+      setShowDeliveryModal(true);
+    };
+
+    const handleOpenUsage = (m) => {
+      setSelectedMatUsage(m);
+      setUsageQtyVal("");
+      setUsageNotesVal("");
+      setShowUsageModal(true);
+    };
+
+    const handleDeliverySubmit = async (e) => {
+      e.preventDefault();
+      if (!selectedMatDelivery || !deliveryRecQty) return;
+      const qty = Number(deliveryRecQty);
+      if (qty <= 0) return;
+
+      try {
+        let finalPhoto = selectedMatDelivery.invoiceUrl;
+        if (deliveryPhotoPreview) {
+          finalPhoto = deliveryPhotoPreview;
+        }
+
+        const newRecQty = selectedMatDelivery.receivedQuantity + qty;
+        await updateMaterial(selectedMatDelivery.id, {
+          quantity: newRecQty, // actual received maps to 'quantity'
+          supplierName: deliverySupplierVal.trim() || selectedMatDelivery.supplierName,
+          invoiceUrl: finalPhoto
+        });
+
+        showToast("Material delivery quantity updated!", "success");
+        setShowDeliveryModal(false);
+        await loadDashboardData();
+      } catch (err) {
+        showToast(`Failed: ${err.message}`, "error");
+      }
+    };
+
+    const handleUsageSubmit = async (e) => {
+      e.preventDefault();
+      if (!selectedMatUsage || !usageQtyVal) return;
+      const qty = Number(usageQtyVal);
+      if (qty <= 0) return;
+      if (qty > selectedMatUsage.remainingStock) {
+        showToast("Consumption cannot exceed remaining stock!", "error");
+        return;
+      }
+
+      try {
+        await logMaterialUsage(selectedMatUsage.id, {
+          quantity: qty,
+          date: usageDateVal,
+          notes: usageNotesVal
+        });
+
+        showToast("Material consumption logged successfully!", "success");
+        setShowUsageModal(false);
+        await loadDashboardData();
+      } catch (err) {
+        showToast(`Failed: ${err.message}`, "error");
+      }
+    };
+
+    const handleDeliveryPhotoChange = (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          setDeliveryPhotoPreview(reader.result);
+        };
+        reader.readAsDataURL(file);
+      }
+    };
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
@@ -2786,7 +3404,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 type="date" 
                 value={materialDateFilter} 
                 onChange={(e) => setMaterialDateFilter(e.target.value)} 
-                style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
+                style={{ width: "100%", padding: "8px 12px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
               />
             </div>
             {materialDateFilter && (
@@ -2816,63 +3434,203 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
             </div>
           ) : (
-            activeMaterials.map(m => (
-              <div key={m.id} className="mobile-material-card">
-                <div className="mobile-material-header">
-                  <div>
-                    <span className="mobile-material-detail-label" style={{ color: "var(--accent-600)", fontSize: "10px" }}>{m.category}</span>
-                    <h4 className="mobile-material-title" style={{ margin: "2px 0 0 0" }}>{m.materialName}</h4>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
-                      <span className="badge badge-completed" style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "var(--primary-100)", color: "var(--primary-800)", whiteSpace: "nowrap" }}>
-                        {m.quantity} {m.unit}s
-                      </span>
-                      <Badge status={m.status || "approved"} style={{ fontSize: "9px", padding: "1px 6px" }}>
-                        {m.status ? m.status.toUpperCase() : "APPROVED"}
-                      </Badge>
+            activeMaterials.map(m => {
+              const processed = processMaterialPaymentAndDelivery(m);
+              const isApproved = processed.status === "Approved" || processed.status === "approved";
+              
+              return (
+                <div key={processed.id} className="mobile-material-card" style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{processed.category}</span>
+                      <h4 style={{ margin: "2px 0 0 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{processed.materialName}</h4>
                     </div>
-                    {m.engineerId === currentEngineerId && (
-                      <button 
-                        type="button" 
-                        onClick={() => handleDeleteMaterial(m.id)}
-                        style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                        title="Delete Material Log"
+                    <Badge status={processed.status === "Approved" ? "success" : processed.status === "Rejected" ? "danger" : "pending"}>
+                      {processed.status ? processed.status.toUpperCase() : "PENDING"}
+                    </Badge>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px", color: "#475569" }}>
+                    <div>
+                      <strong>Required:</strong> {processed.requiredQuantity} {processed.unit}
+                    </div>
+                    <div>
+                      <strong>Received:</strong> {processed.receivedQuantity} {processed.unit}
+                    </div>
+                    <div>
+                      <strong>Remaining Stock:</strong> <span style={{ color: "var(--success-700)", fontWeight: "700" }}>{processed.remainingStock} {processed.unit}</span>
+                    </div>
+                    <div>
+                      <strong>Delivery Status:</strong> <span style={{ fontWeight: "700" }}>{processed.deliveryStatus}</span>
+                    </div>
+                  </div>
+
+                  {processed.notes && (
+                    <p style={{ margin: "4px 0 0 0", fontSize: "11px", fontStyle: "italic", color: "var(--text-muted)", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px" }}>
+                      "{processed.notes}"
+                    </p>
+                  )}
+
+                  {/* Actions for approved material records */}
+                  {isApproved && (
+                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenDelivery(processed)}
+                        style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--primary-50)", border: "none", borderRadius: "6px", color: "var(--primary-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
                       >
-                        <Trash2 size={16} />
+                        <Truck size={14} />
+                        <span>Log Delivery</span>
                       </button>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="mobile-material-details" style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px" }}>
-                  <div className="mobile-material-detail-item">
-                    <span className="mobile-material-detail-label">Supplier</span>
-                    <span className="mobile-material-detail-value">{m.supplierName}</span>
-                  </div>
-                  <div className="mobile-material-detail-item" style={{ textAlign: "right" }}>
-                    <span className="mobile-material-detail-label">Delivery Date</span>
-                    <span className="mobile-material-detail-value">{m.purchaseDate}</span>
-                  </div>
-                </div>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenUsage(processed)}
+                        style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--accent-50)", border: "none", borderRadius: "6px", color: "var(--accent-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
+                      >
+                        <Layers size={14} />
+                        <span>Log Usage</span>
+                      </button>
+                    </div>
+                  )}
 
-                {m.notes && (
-                  <p style={{ margin: "10px 0 0 0", fontSize: "11px", color: "var(--text-muted)", backgroundColor: "var(--primary-50)", padding: "6px 10px", borderRadius: "4px", fontStyle: "italic" }}>
-                    "{m.notes}"
-                  </p>
-                )}
-
-                {m.invoiceUrl && (
-                  <div style={{ marginTop: "10px", display: "flex", justifyContent: "flex-end" }}>
-                    <a href={m.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "800", textDecoration: "underline" }}>
-                      View Challan Photo
-                    </a>
-                  </div>
-                )}
-              </div>
-            ))
+                  {/* usage history list log */}
+                  {processed.usageHistory && processed.usageHistory.length > 0 && (
+                    <div style={{ marginTop: "6px", backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px", fontSize: "10.5px" }}>
+                      <span style={{ fontWeight: "800", color: "var(--primary-750)", display: "block", marginBottom: "4px" }}>Stock Usage History:</span>
+                      {processed.usageHistory.map((u, ui) => (
+                        <div key={ui} style={{ color: "#475569", marginBottom: "2px" }}>
+                          • {u.date}: <strong>-{u.quantity} {processed.unit}</strong> ({u.notes})
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
           )}
         </div>
+
+        {/* Modal: Log Delivery */}
+        {showDeliveryModal && selectedMatDelivery && (
+          <Modal
+            isOpen={showDeliveryModal}
+            onClose={() => setShowDeliveryModal(false)}
+            title="Log Material Shipment Delivery"
+            maxWidth="450px"
+          >
+            <form onSubmit={handleDeliverySubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <p style={{ fontSize: "12.5px", color: "#475569", margin: 0 }}>
+                Material: <strong>{selectedMatDelivery.materialName}</strong><br />
+                Pending Delivery: <strong>{selectedMatDelivery.pendingDelivery} {selectedMatDelivery.unit}</strong>
+              </p>
+              
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Quantity Received Today</span>
+                <input
+                  type="number"
+                  step="any"
+                  min="0.1"
+                  max={selectedMatDelivery.pendingDelivery}
+                  value={deliveryRecQty}
+                  onChange={(e) => setDeliveryRecQty(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Supplier Name</span>
+                <input
+                  type="text"
+                  placeholder="Enter supplier company..."
+                  value={deliverySupplierVal}
+                  onChange={(e) => setDeliverySupplierVal(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Attach Challan / Receipt Photo</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleDeliveryPhotoChange}
+                  style={{ fontSize: "12px" }}
+                />
+                {deliveryPhotoPreview && (
+                  <img
+                    src={deliveryPhotoPreview}
+                    alt="Challan Challan"
+                    style={{ width: "100%", maxHeight: "150px", objectFit: "cover", borderRadius: "8px", marginTop: "6px" }}
+                  />
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowDeliveryModal(false)}>Cancel</Button>
+                <Button type="submit" variant="primary" style={{ flex: 1 }}>Save Delivery</Button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+        {/* Modal: Log Usage */}
+        {showUsageModal && selectedMatUsage && (
+          <Modal
+            isOpen={showUsageModal}
+            onClose={() => setShowUsageModal(false)}
+            title="Log Stock Consumption"
+            maxWidth="450px"
+          >
+            <form onSubmit={handleUsageSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <p style={{ fontSize: "12.5px", color: "#475569", margin: 0 }}>
+                Material: <strong>{selectedMatUsage.materialName}</strong><br />
+                Available Stock: <strong>{selectedMatUsage.remainingStock} {selectedMatUsage.unit}</strong>
+              </p>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Quantity Consumed</span>
+                <input
+                  type="number"
+                  step="any"
+                  min="0.1"
+                  max={selectedMatUsage.remainingStock}
+                  value={usageQtyVal}
+                  onChange={(e) => setUsageQtyVal(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Consumption Date</span>
+                <input
+                  type="date"
+                  value={usageDateVal}
+                  onChange={(e) => setUsageDateVal(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Usage details / Notes</span>
+                <input
+                  type="text"
+                  placeholder="e.g. Columns casting, structural curing"
+                  value={usageNotesVal}
+                  onChange={(e) => setUsageNotesVal(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowUsageModal(false)}>Cancel</Button>
+                <Button type="submit" variant="primary" style={{ flex: 1 }}>Save Log</Button>
+              </div>
+            </form>
+          </Modal>
+        )}
 
         <button
           type="button"
@@ -2909,7 +3667,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 <span className="mobile-form-label">Choose Material Category</span>
                 <div className="mobile-category-list">
-                  {["Cement", "Steel", "Sand", "Bricks", "Other"].map(cat => {
+                  {Array.from(new Set(materialMaster.filter(m => m.status === "Active").map(m => m.category))).concat("Other").map(cat => {
                     const emojis = {
                       Cement: "🧱",
                       Steel: "🧬",
@@ -3003,8 +3761,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       overflowY: "auto",
                       marginTop: "4px"
                     }}>
-                      {filteredSuggestions.length > 0 ? (
-                        filteredSuggestions.map(sug => {
+                      {materialMaster.filter(m => m.status === "Active" && m.category === materialCategory).map(m => m.name).length > 0 ? (
+                        materialMaster.filter(m => m.status === "Active" && m.category === materialCategory).map(m => m.name).map(sug => {
                           const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
                           return (
                             <button
@@ -3074,7 +3832,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <div>
                   <span className="mobile-form-label">Unit Type</span>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                    {["Bag", "Kg", "Ton", "Load", "Pieces"].map(unitOption => (
+                    {["Bag", "Kg", "Ton", "Load", "Pieces", "Meter", "Unit"].map(unitOption => (
                       <button
                         type="button"
                         key={unitOption}
@@ -3324,6 +4082,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p className="dashboard-card-desc">Log structural progress logs and onsite blockers.</p>
             </button>
 
+            <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/expenses")}>
+              <div className="dashboard-card-icon-wrapper progress" style={{ backgroundColor: "var(--success-50)", color: "var(--success-700)" }}>
+                <DollarSign size={22} />
+              </div>
+              <h4 className="dashboard-card-title">Expenses Log</h4>
+              <p className="dashboard-card-desc">Log field expenses and view site budget status.</p>
+            </button>
+
             <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/profile")}>
               <div className="dashboard-card-icon-wrapper leaves">
                 <Calendar size={22} />
@@ -3489,10 +4255,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
 
               <div className="login-form-group">
+                <span className="mobile-form-label">Report Date</span>
+                <input 
+                  type="date" 
+                  value={progressDate}
+                  onChange={(e) => setProgressDate(e.target.value)}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
+                />
+              </div>
+
+              <div className="login-form-group">
                 <span className="mobile-form-label">Work Completed Today</span>
                 <textarea 
                   className="mobile-textarea"
-                  placeholder="Describe pours completed, walls built, etc..."
+                  placeholder="Describe pours completed, walls built, structures finished..."
                   value={workDescription}
                   onChange={(e) => setWorkDescription(e.target.value)}
                   required 
@@ -3501,7 +4277,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
 
               <div className="login-form-group">
-                <span className="mobile-form-label">Issues / Delay Obstacles</span>
+                <span className="mobile-form-label">Work Currently Running</span>
+                <textarea 
+                  className="mobile-textarea"
+                  placeholder="e.g., Excavation of wing B, plastering work..."
+                  value={currentlyRunning}
+                  onChange={(e) => setCurrentlyRunning(e.target.value)}
+                  style={{ minHeight: "80px", borderRadius: "10px", padding: "12px" }}
+                />
+              </div>
+
+              <div className="login-form-group">
+                <span className="mobile-form-label">Materials / Work Status</span>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Cement stock adequate, shuttering in progress..."
+                  value={materialsStatus}
+                  onChange={(e) => setMaterialsStatus(e.target.value)}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
+                />
+              </div>
+
+              <div className="login-form-group">
+                <span className="mobile-form-label">Problems Faced / Delay Obstacles</span>
                 <input 
                   type="text" 
                   placeholder="E.g. Delay due to cement delivery lag..."
@@ -3512,7 +4310,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
 
               <div className="login-form-group">
-                <span className="mobile-form-label">Notes / Instructions</span>
+                <span className="mobile-form-label">Pending Work</span>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Wing A second floor slab casting..."
+                  value={pendingWork}
+                  onChange={(e) => setPendingWork(e.target.value)}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
+                />
+              </div>
+
+              <div className="login-form-group">
+                <span className="mobile-form-label">Next Planned Activity</span>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Curing, starting brickwork for column C..."
+                  value={nextActivity}
+                  onChange={(e) => setNextActivity(e.target.value)}
+                  style={{ padding: "12px 14px", border: "1.5px solid #cbd5e1", borderRadius: "10px", fontSize: "14px", width: "100%", margin: 0, outline: "none", backgroundColor: "#f8fafc" }}
+                />
+              </div>
+
+              <div className="login-form-group">
+                <span className="mobile-form-label">Additional Remarks / Notes</span>
                 <input 
                   type="text" 
                   placeholder="E.g. Inspector checked reinforcement today..."
@@ -4058,6 +4878,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               {tab === "attendance" ? "Attendance" : 
                tab === "material" ? "Materials" : 
                tab === "labour" ? "Workforce" : 
+               tab === "expenses" ? "Financials & Expenses" : 
                ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Apex Build"}
             </h3>
           </div>
@@ -4115,6 +4936,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           {tab === "attendance" && renderAttendanceView()}
           {tab === "material" && renderMaterialView()}
           {tab === "labour" && renderLabourView()}
+          {tab === "expenses" && renderExpensesView()}
           {["more", "photos", "progress", "profile"].includes(tab) && renderMoreView()}
           {(tab === "dashboard" || !tab) && renderHomeView()}
         </div>
