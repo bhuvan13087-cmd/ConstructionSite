@@ -251,7 +251,6 @@ export default function AdminDashboard() {
   
   const sortedDates = Object.keys(groupedTimeline).sort((a, b) => b.localeCompare(a));
 
-  const pendingDocs = documents.filter(d => d.status === "Uploaded");
   const recentDocs = [...documents]
     .sort((a, b) => {
       const tA = a.uploadedAt?.seconds || (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0);
