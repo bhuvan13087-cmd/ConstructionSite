@@ -5603,3 +5603,199 @@ body:has(.landing-page-container) {
 }
 
 
+/* ==========================================================================
+   DASHBOARD LAYOUT UTILITIES
+   ========================================================================== */
+
+/* --- Compact KPI Stat Bar --- */
+.dash-kpi-bar {
+  display: flex;
+  align-items: stretch;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.dash-kpi-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 16px 20px;
+  gap: 4px;
+  position: relative;
+  transition: background var(--transition-fast);
+}
+
+.dash-kpi-item:hover {
+  background: var(--primary-50);
+}
+
+.dash-kpi-item + .dash-kpi-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 14px;
+  bottom: 14px;
+  width: 1px;
+  background-color: var(--border-color);
+}
+
+.dash-kpi-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+}
+
+.dash-kpi-value {
+  font-family: var(--font-family-title);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--primary-950);
+  line-height: 1.1;
+}
+
+.dash-kpi-sub {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.dash-kpi-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+
+/* --- Section Label Divider --- */
+.dash-section-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 0 0;
+}
+
+.dash-section-label span {
+  font-size: 11px;
+  font-weight: 800;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  white-space: nowrap;
+}
+
+.dash-section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border-color);
+}
+
+/* --- Compact Alert Row --- */
+.dash-alert-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border-left: 3px solid transparent;
+}
+
+.dash-alert-row.danger {
+  background-color: var(--danger-50);
+  border-left-color: var(--danger-500);
+}
+
+.dash-alert-row.warning {
+  background-color: var(--warning-100);
+  border-left-color: var(--warning-500);
+}
+
+.dash-alert-title {
+  font-size: 12px;
+  font-weight: 800;
+  display: block;
+}
+
+.dash-alert-row.danger .dash-alert-title {
+  color: var(--danger-600);
+}
+
+.dash-alert-row.warning .dash-alert-title {
+  color: var(--warning-600);
+}
+
+.dash-alert-msg {
+  font-size: 11.5px;
+  color: #334155;
+  margin: 2px 0 0 0;
+  line-height: 1.5;
+}
+
+/* --- Net Position Card (Profit/Loss) --- */
+.dash-net-positive {
+  background: linear-gradient(135deg, hsl(142, 72%, 20%) 0%, hsl(142, 72%, 28%) 100%);
+  color: #fff;
+}
+
+.dash-net-negative {
+  background: linear-gradient(135deg, hsl(0, 75%, 35%) 0%, hsl(0, 75%, 45%) 100%);
+  color: #fff;
+}
+
+.sa-net-card {
+  transition: all var(--transition-fast);
+}
+
+.sa-net-card.profit {
+  background-color: hsl(142, 60%, 97%) !important;
+}
+
+.sa-net-card.profit .dash-kpi-value {
+  color: var(--success-600) !important;
+}
+
+.sa-net-card.profit .dash-kpi-icon {
+  background-color: rgba(16, 185, 129, 0.12) !important;
+  color: var(--success-600) !important;
+}
+
+.sa-net-card.deficit {
+  background-color: hsl(0, 75%, 98%) !important;
+}
+
+.sa-net-card.deficit .dash-kpi-value {
+  color: var(--danger-600) !important;
+}
+
+.sa-net-card.deficit .dash-kpi-icon {
+  background-color: rgba(239, 68, 68, 0.12) !important;
+  color: var(--danger-600) !important;
+}
+
+/* Responsive: stack KPI bar on narrow screens */
+@media (max-width: 768px) {
+  .dash-kpi-bar {
+    flex-direction: column;
+  }
+  .dash-kpi-item + .dash-kpi-item::before {
+    top: 0;
+    left: 14px;
+    right: 14px;
+    bottom: auto;
+    width: auto;
+    height: 1px;
+  }
+}
+
+

@@ -81,6 +81,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // Specific views state
   const [selectedSiteId, setSelectedSiteId] = useState("");
   const [laborHistoryMap, setLaborHistoryMap] = useState({});
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -239,6 +240,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
   // Render sub-view handlers
   const renderDashboardView = () => {
+    const pendingDocs = documents.filter(d => (d.status || '').toLowerCase() === 'uploaded' || (d.status || '').toLowerCase() === 'pending' || !d.status);
     const alerts = [];
     const nowMs = Date.now();
     
@@ -246,29 +248,29 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       if (Number(exp.amount) >= 100000) {
         alerts.push({
           id: `alert_sa_high_${exp.id}`,
-          type: "warning",
-          category: "Payment Alert",
-          title: "High-Value Field Payment Logged",
-          message: `General expense of ₹${exp.amount} for "${exp.description}" has been logged at site ${sites.find(s => s.id === exp.siteId)?.siteName || "Site"}.`
+          type: 'warning',
+          category: 'Payment Alert',
+          title: 'High-Value Field Payment Logged',
+          message: `General expense of ₹${exp.amount} for "${exp.description}" has been logged at site ${sites.find(s => s.id === exp.siteId)?.siteName || 'Site'}.`
         });
       }
     });
 
     sites.forEach(site => {
-      if (site.status === "Delayed" || site.isSiteDelayed) {
+      if (site.status === 'Delayed' || site.isSiteDelayed) {
         alerts.push({
           id: `alert_sa_delay_${site.id}`,
-          type: "danger",
-          category: "Schedule Alert",
-          title: "Project Schedule Delayed Milestone",
+          type: 'danger',
+          category: 'Schedule Alert',
+          title: 'Project Schedule Delayed Milestone',
           message: `Site execution status for "${site.siteName}" is delayed.`
         });
       }
     });
 
     sites.forEach(site => {
-      if ((site.status || "").toLowerCase() === "active") {
-        const updates = systemActivities.filter(a => a.siteId === site.id && a.moduleType === "Progress");
+      if ((site.status || '').toLowerCase() === 'active') {
+        const updates = systemActivities.filter(a => a.siteId === site.id && a.moduleType === 'Progress');
         let lastUpdatedMs = 0;
         if (updates.length > 0) {
           const latestUpdate = updates[0];
@@ -284,9 +286,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         if (diffHours >= 48) {
           alerts.push({
             id: `alert_sa_dpr_${site.id}`,
-            type: "danger",
-            category: "Progress Alert",
-            title: "Missing Daily Progress Update",
+            type: 'danger',
+            category: 'Progress Alert',
+            title: 'Missing Daily Progress Update',
             message: `No Daily Progress Report submitted in the last 48 hours for active site "${site.siteName}".`
           });
         }
@@ -294,7 +296,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     approvals.forEach(a => {
-      if ((a.status || "").toLowerCase() === "pending") {
+      if ((a.status || '').toLowerCase() === 'pending') {
         const createdMs = a.createdAt?.seconds 
           ? a.createdAt.seconds * 1000 
           : (a.createdAt ? new Date(a.createdAt).getTime() : nowMs);
@@ -302,23 +304,21 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         if (diffDays >= 3) {
           alerts.push({
             id: `alert_sa_app_${a.id}`,
-            type: "warning",
-            category: "Approvals Alert",
-            title: "Long Pending Approval",
+            type: 'warning',
+            category: 'Approvals Alert',
+            title: 'Long Pending Approval',
             message: `${a.type} request from ${a.requestedBy} for ${a.siteName} has been pending for over 3 days.`
           });
         }
       }
     });
 
-    // Pending Document Verification Alert
-    const pendingDocs = documents.filter(d => (d.status || "").toLowerCase() === "uploaded" || (d.status || "").toLowerCase() === "pending" || !d.status);
     if (pendingDocs.length > 0) {
       alerts.push({
-        id: "alert_sa_pending_docs",
-        type: "warning",
-        category: "Documents Alert",
-        title: "Pending Document Verification",
+        id: 'alert_sa_pending_docs',
+        type: 'warning',
+        category: 'Documents Alert',
+        title: 'Pending Document Verification',
         message: `There are ${pendingDocs.length} uploaded project document(s) waiting for verification.`
       });
     }
@@ -326,11 +326,11 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const mappedLogs = activityLogs.map(l => ({
       id: l.id,
       type: l.type,
-      engineerName: engineersMap[l.engineerId] || "Site Engineer",
-      siteName: sites.find(s => s.id === l.siteId)?.siteName || "Unknown Site",
+      engineerName: engineersMap[l.engineerId] || 'Site Engineer',
+      siteName: sites.find(s => s.id === l.siteId)?.siteName || 'Unknown Site',
       date: l.date,
       time: l.time,
-      description: `Clocked ${l.type.toUpperCase()} at ${sites.find(s => s.id === l.siteId)?.siteName || "Site"}`,
+      description: `Clocked ${l.type.toUpperCase()} at ${sites.find(s => s.id === l.siteId)?.siteName || 'Site'}`,
       details: l.address,
       timestamp: l.timestamp,
       isSystem: false
@@ -339,8 +339,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const mappedSys = systemActivities.map(s => ({
       id: s.id,
       type: s.actionType,
-      engineerName: s.userName || "System User",
-      siteName: s.siteName || "N/A",
+      engineerName: s.userName || 'System User',
+      siteName: s.siteName || 'N/A',
       date: s.date,
       time: s.createdAt?.seconds 
         ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -358,178 +358,137 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         return tB - tA;
       });
 
+    const netPosition = overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses;
+    const isProfit = netPosition >= 0;
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "28px" }}>
-        
-        {alerts.length > 0 && (
-          <Card 
-            title="Executive Operations Alerts & Reminders" 
-            subtitle="Real-time alerts tracking high-value expenditures, missing progress reports, geofences, and schedule deviations."
-            style={{ borderLeft: "4px solid var(--danger-500)" }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {alerts.slice(0, 5).map(alert => (
-                <div 
-                  key={alert.id} 
-                  style={{ 
-                    display: "flex", 
-                    gap: "10px", 
-                    alignItems: "flex-start", 
-                    padding: "12px 16px", 
-                    borderRadius: "6px",
-                    backgroundColor: alert.type === "danger" ? "var(--danger-50)" : "var(--warning-50)",
-                    border: `1px solid ${alert.type === "danger" ? "var(--danger-200)" : "var(--warning-200)"}`
-                  }}
-                >
-                  <AlertTriangle 
-                    size={18} 
-                    style={{ 
-                      color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", 
-                      flexShrink: 0,
-                      marginTop: "2px"
-                    }} 
-                  />
-                  <div>
-                    <span style={{ 
-                      fontWeight: "800", 
-                      fontSize: "12.5px", 
-                      color: alert.type === "danger" ? "var(--danger-800)" : "var(--warning-800)",
-                      display: "block" 
-                    }}>
-                      [{alert.category}] {alert.title}
-                    </span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#334155" }}>
-                      {alert.message}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        )}
-        
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "20px" }}>
-          
-          <Card style={{ borderLeft: "4px solid var(--primary-500)" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Construction Sites</span>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-              <span style={{ fontSize: "32px", fontWeight: "800", color: "var(--primary-950)" }}>{overallMetrics.totalSites}</span>
-              <div style={{ fontSize: "12px", color: "var(--text-muted)", display: "flex", gap: "8px" }}>
-                <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} Active</span>
-                <span>•</span>
-                <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.completedSites} Done</span>
-              </div>
-            </div>
-          </Card>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
 
-          <Card style={{ borderLeft: "4px solid var(--danger-500)" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Schedule Delays</span>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-              <span style={{ fontSize: "32px", fontWeight: "800", color: "var(--danger-700)" }}>{overallMetrics.delayedSites}</span>
-              <Badge status={overallMetrics.delayedSites > 0 ? "warning" : "success"}>
-                {overallMetrics.delayedSites > 0 ? "Attention Required" : "On Track"}
-              </Badge>
-            </div>
-          </Card>
+        {/* ── TOP: Compact KPI Bar ── */}
+        <div className="dash-kpi-bar">
 
-          <Card style={{ borderLeft: "4px solid var(--success-500)" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Payments Received</span>
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-              <span style={{ fontSize: "24px", fontWeight: "800", color: "var(--success-700)" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</span>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Out of {formatINR(overallMetrics.totalProjectValue)} budget</span>
+          <div className="dash-kpi-item">
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
+              <Building2 size={17} />
             </div>
-          </Card>
+            <span className="dash-kpi-label">Total Sites</span>
+            <span className="dash-kpi-value">{overallMetrics.totalSites}</span>
+            <span className="dash-kpi-sub">
+              <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} active</span>
+              {" · "}
+              <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.completedSites} done</span>
+            </span>
+          </div>
 
-          <Card style={{ borderLeft: "4px solid var(--accent-500)" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Expenses Spent</span>
-            <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-              <span style={{ fontSize: "24px", fontWeight: "800", color: "var(--accent-700)" }}>{formatINR(overallMetrics.totalExpenses)}</span>
-              <span style={{ fontSize: "12px", color: "var(--warning-600)", fontWeight: "600" }}>Owed suppliers: {formatINR(overallMetrics.pendingPayments)}</span>
+          <div className="dash-kpi-item">
+            <div className="dash-kpi-icon" style={{ backgroundColor: overallMetrics.delayedSites > 0 ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.08)", color: overallMetrics.delayedSites > 0 ? "var(--danger-600)" : "var(--success-600)" }}>
+              <AlertTriangle size={17} />
             </div>
-          </Card>
+            <span className="dash-kpi-label">Schedule Delays</span>
+            <span className="dash-kpi-value" style={{ color: overallMetrics.delayedSites > 0 ? "var(--danger-600)" : "var(--success-600)" }}>{overallMetrics.delayedSites}</span>
+            <span className="dash-kpi-sub">{overallMetrics.delayedSites > 0 ? "Attention required" : "All on track"}</span>
+          </div>
 
-          <Card style={{ borderLeft: "4px solid #8b5cf6" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Project Records</span>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-              <span style={{ fontSize: "32px", fontWeight: "800", color: "#6d28d9" }}>{documents.length}</span>
-              <Link to="/superadmin/documents" style={{ fontSize: "12px", color: "var(--accent-700)", fontWeight: "700", textDecoration: "none" }}>
-                {pendingDocs.length} Pending →
-              </Link>
+          <div className="dash-kpi-item">
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "var(--success-600)" }}>
+              <TrendingUp size={17} />
             </div>
-          </Card>
+            <span className="dash-kpi-label">Payments Received</span>
+            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</span>
+            <span className="dash-kpi-sub">of {formatINR(overallMetrics.totalProjectValue)} budget</span>
+          </div>
+
+          <div className="dash-kpi-item">
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "#f97316" }}>
+              <DollarSign size={17} />
+            </div>
+            <span className="dash-kpi-label">Total Expenses</span>
+            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalExpenses)}</span>
+            <span className="dash-kpi-sub" style={{ color: "var(--warning-600)" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
+          </div>
+
+          <div className={`dash-kpi-item sa-net-card ${isProfit ? "profit" : "deficit"}`}>
+            <div className="dash-kpi-icon">
+              {isProfit ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
+            </div>
+            <span className="dash-kpi-label">Net Position</span>
+            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>
+              {isProfit ? "+" : ""}{formatINR(netPosition)}
+            </span>
+            <span className="dash-kpi-sub">{isProfit ? "Profit margin" : "Deficit"}</span>
+          </div>
+
+          <div className="dash-kpi-item">
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(139,92,246,0.08)", color: "#8b5cf6" }}>
+              <Layers size={17} />
+            </div>
+            <span className="dash-kpi-label">Project Records</span>
+            <span className="dash-kpi-value">{documents.length}</span>
+            <Link to="/superadmin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", textDecoration: "none" }}>
+              {pendingDocs.length} pending <ArrowRight size={10} />
+            </Link>
+          </div>
 
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "start" }}>
-          
-          <Card title="Overall Progress Ring">
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "16px 0" }}>
+        {/* ── MIDDLE: 3-Column ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: "20px", alignItems: "start" }}>
+
+          {/* Progress Ring */}
+          <Card title="Overall Progress">
+            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 0" }}>
               <div style={{
                 position: "relative",
-                width: "150px",
-                height: "150px",
+                width: "130px",
+                height: "130px",
                 borderRadius: "50%",
                 background: `conic-gradient(var(--primary-600) ${overallMetrics.overallProgressPercent}%, var(--primary-100) 0)`,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
-                boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)"
+                boxShadow: "0 4px 6px -1px rgba(0,0,0,0.08)"
               }}>
-                <div style={{
-                  width: "120px",
-                  height: "120px",
-                  borderRadius: "50%",
-                  backgroundColor: "#ffffff",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center"
-                }}>
-                  <span style={{ fontSize: "32px", fontWeight: "900", color: "var(--primary-900)" }}>{overallMetrics.overallProgressPercent}%</span>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>Corporate Avg</span>
+                <div style={{ width: "100px", height: "100px", borderRadius: "50%", backgroundColor: "#ffffff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
+                  <span style={{ fontSize: "26px", fontWeight: "900", color: "var(--primary-900)" }}>{overallMetrics.overallProgressPercent}%</span>
+                  <span style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>Corp. Avg</span>
                 </div>
               </div>
-              
-              <div style={{ marginTop: "20px", display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
+              <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
                   <span style={{ color: "var(--text-muted)" }}>Total Projects</span>
                   <span style={{ fontWeight: "700" }}>{overallMetrics.totalSites} sites</span>
                 </div>
                 <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Total Budget Value</span>
+                  <span style={{ color: "var(--text-muted)" }}>Total Budget</span>
                   <span style={{ fontWeight: "700" }}>{formatINR(overallMetrics.totalProjectValue)}</span>
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
+                  <span style={{ color: "var(--text-muted)" }}>Pending Approvals</span>
+                  <span style={{ fontWeight: "700", color: allApprovalRequests.length > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{allApprovalRequests.length}</span>
                 </div>
               </div>
             </div>
           </Card>
 
-          <Card title="Recent Corporate Operations Timeline" subtitle="Unified real-time activities log of field engineer check-ins, materials log, progress reports, and workflows.">
+          {/* Recent Timeline */}
+          <Card title="Corporate Operations Timeline" subtitle="Recent field activities, check-ins, progress logs.">
             {combinedTimeline.length === 0 ? (
               <p style={{ color: "var(--text-muted)", fontStyle: "italic", padding: "20px", textAlign: "center" }}>No logs recorded yet.</p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px", maxHeight: "360px", overflowY: "auto", paddingRight: "6px" }}>
-                {combinedTimeline.slice(0, 10).map((log, i) => {
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "340px", overflowY: "auto", paddingRight: "4px" }}>
+                {combinedTimeline.slice(0, 12).map((log, i) => {
                   const isSystem = log.isSystem;
-                  
+                  const dotColor = isSystem ? "var(--primary-400)" : (log.type === "entry" ? "var(--success-500)" : "var(--danger-500)");
                   return (
-                    <div key={log.id || i} style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
-                      <div style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        backgroundColor: isSystem ? "var(--primary-500)" : (log.type === "entry" ? "var(--success-500)" : "var(--danger-500)"),
-                        marginTop: "6px",
-                        flexShrink: 0
-                      }} />
-                      <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
+                    <div key={log.id || i} style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                      <div style={{ width: "7px", height: "7px", borderRadius: "50%", backgroundColor: dotColor, marginTop: "5px", flexShrink: 0 }} />
+                      <div style={{ display: "flex", flexDirection: "column", flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
                           <span style={{ fontWeight: "700", color: "var(--primary-900)" }}>{log.engineerName}</span>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }} className="font-mono">{log.date} {log.time}</span>
+                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", flexShrink: 0 }} className="font-mono">{log.date} {log.time}</span>
                         </div>
-                        <span style={{ fontSize: "12px", color: "#334155", marginTop: "2px" }}>
-                          {log.description}
-                        </span>
-                        <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>{log.details}</span>
+                        <span style={{ fontSize: "11.5px", color: "#334155", marginTop: "1px" }}>{log.description}</span>
+                        <span style={{ fontSize: "10.5px", color: "var(--text-muted)", marginTop: "1px" }}>{log.details}</span>
                       </div>
                     </div>
                   );
@@ -538,7 +497,81 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             )}
           </Card>
 
+          {/* Quick Approvals */}
+          <Card title="Pending Approvals">
+            {allApprovalRequests.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)" }}>
+                <CheckCircle2 size={24} style={{ color: "var(--success-500)", marginBottom: "6px" }} />
+                <p style={{ fontSize: "12px" }}>No pending requests</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {allApprovalRequests.slice(0, 3).map(req => (
+                  <div key={req.id} style={{ padding: "10px 12px", border: "1px solid var(--border-color)", borderRadius: "6px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#fafafa" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <Badge status={req.type === "Leave" ? "warning" : req.type === "Location" ? "pending" : "success"}>{req.type}</Badge>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }} className="font-mono">{req.requestDate}</span>
+                    </div>
+                    <span style={{ fontSize: "12px", fontWeight: "700" }}>{req.employeeName}</span>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{req.details}</span>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      <button onClick={() => handleApproveRequest(req)} style={{ flex: 1, padding: "4px", backgroundColor: "var(--success-600)", color: "#fff", border: "none", borderRadius: "4px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Approve</button>
+                      <button onClick={() => handleRejectRequest(req)} style={{ flex: 1, padding: "4px", backgroundColor: "transparent", color: "var(--danger-600)", border: "1px solid var(--danger-200)", borderRadius: "4px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Reject</button>
+                    </div>
+                  </div>
+                ))}
+                {allApprovalRequests.length > 3 && (
+                  <Link to="/superadmin/approvals" style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "700", textAlign: "center", display: "block" }}>
+                    + {allApprovalRequests.length - 3} more
+                  </Link>
+                )}
+              </div>
+            )}
+          </Card>
+
         </div>
+
+        {/* ── BOTTOM: Alerts ── */}
+        {alerts.length > 0 && (
+          <>
+            <div className="dash-section-label" style={{ marginBottom: "12px" }}>
+              <span>Operations Alerts &amp; Reminders</span>
+            </div>
+            <Card style={{ borderLeft: "3px solid var(--danger-500)" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                {(showAllAlerts ? alerts : alerts.slice(0, 3)).map(alert => (
+                  <div key={alert.id} className={`dash-alert-row ${alert.type}`}>
+                    <AlertTriangle size={14} style={{ color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", flexShrink: 0, marginTop: "2px" }} />
+                    <div>
+                      <span className="dash-alert-title">[{alert.category}] {alert.title}</span>
+                      <p className="dash-alert-msg">{alert.message}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {alerts.length > 3 && (
+                <div style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px", textAlign: "center" }}>
+                  <button 
+                    onClick={() => setShowAllAlerts(!showAllAlerts)}
+                    style={{ 
+                      background: "none", 
+                      border: "none", 
+                      color: "var(--primary-600)", 
+                      fontWeight: "700", 
+                      fontSize: "12px", 
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px"
+                    }}
+                  >
+                    {showAllAlerts ? "Show Less" : `View All Alerts (${alerts.length})`}
+                  </button>
+                </div>
+              )}
+            </Card>
+          </>
+        )}
 
       </div>
     );
@@ -559,44 +592,34 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const plannedProgress = selectedSite ? calculatePlannedProgress(selectedSite.startDate, selectedSite.expectedEndDate) : 0;
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
-        {/* Site Selector control */}
-        <Card title="Site Selector" subtitle="Choose a civil construction project to monitor assignments and operations">
-          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "center" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%", maxWidth: "450px" }}>
-              <label htmlFor="site-select" style={{ fontSize: "12px", fontWeight: "700" }}>Active Construction Site</label>
-              <select
-                id="site-select"
-                value={selectedSiteId}
-                onChange={(e) => setSelectedSiteId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "10px 14px",
-                  borderRadius: "var(--radius-sm)",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontWeight: 600,
-                  outline: "none"
-                }}
-              >
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName} ({s.location})</option>
-                ))}
-              </select>
+        <div className="dash-section-label"><span>Site Operations Monitor</span></div>
+
+        {/* Compact Inline Site Selector */}
+        <div style={{ display: "flex", alignItems: "center", gap: "14px", padding: "12px 16px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "var(--radius-md)", boxShadow: "var(--shadow-sm)", flexWrap: "wrap" }}>
+          <MapPin size={16} style={{ color: "var(--primary-500)", flexShrink: 0 }} />
+          <label htmlFor="site-select" style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px", whiteSpace: "nowrap" }}>Viewing Site:</label>
+          <select
+            id="site-select"
+            value={selectedSiteId}
+            onChange={(e) => setSelectedSiteId(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontWeight: 600, outline: "none", fontSize: "13px", flex: "1 1 240px", maxWidth: "400px" }}
+          >
+            {sites.map(s => (
+              <option key={s.id} value={s.id}>{s.siteName} ({s.location})</option>
+            ))}
+          </select>
+          {selectedSite && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <Badge status={selectedSite.status || "Planning"} />
+              {isDelayed && <Badge status="danger">Delayed</Badge>}
             </div>
-            
-            {selectedSite && (
-              <div style={{ display: "flex", gap: "12px", marginTop: "20px" }}>
-                <Badge status={selectedSite.status || "Planning"} />
-                {isDelayed && <Badge status="danger">Delayed Schedule</Badge>}
-              </div>
-            )}
-          </div>
-        </Card>
+          )}
+        </div>
 
         {selectedSite && financials && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px", alignItems: "start" }}>
             
             {/* Project Details Panel */}
             <Card title="Project Site Registry Details">
@@ -712,39 +735,35 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             </Card>
 
-          </div>
-        )}
+            {/* Selected site activities list */}
+            <Card title={`Recent Site Operations Timeline (${selectedSite.siteName})`}>
+              {siteActivities.length === 0 ? (
+                <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "20px" }}>No recent entry exit logs on record.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {siteActivities.slice(0, 5).map((log, idx) => (
+                    <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "6px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontWeight: "700", fontSize: "13px", color: "var(--primary-900)" }}>
+                          {engineersMap[log.engineerId] || "Site Engineer"}
+                        </span>
+                        <Badge status={log.type === "entry" ? "success" : "pending"} style={{ fontSize: "10px", padding: "2px 6px" }}>
+                          {log.type.toUpperCase()}
+                        </Badge>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "var(--text-muted)" }}>
+                        <span style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "160px" }} title={log.address}>
+                          {log.address || "No address"}
+                        </span>
+                        <span className="font-mono">{log.date} {log.time}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </Card>
 
-        {/* Selected site activities list */}
-        {selectedSite && (
-          <Card title={`Recent Site Operations Timeline (${selectedSite.siteName})`}>
-            {siteActivities.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "20px" }}>No recent entry exit logs on record.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {siteActivities.slice(0, 5).map((log, idx) => (
-                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <div>
-                      <span style={{ fontWeight: "700", fontSize: "13px", color: "var(--primary-900)" }}>
-                        {engineersMap[log.engineerId] || "Site Engineer"}
-                      </span>
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "8px" }}>
-                        ({log.address})
-                      </span>
-                    </div>
-                    <div>
-                      <Badge status={log.type === "entry" ? "success" : "pending"}>
-                        {log.type.toUpperCase()}
-                      </Badge>
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "12px" }} className="font-mono">
-                        {log.date} {log.time}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+          </div>
         )}
 
       </div>
@@ -764,7 +783,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        
+        <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Financial Ledger &amp; Auditing</span></div>
         
         <Card title="Corporate Site-wise Financial ledger" variant="table">
           <div style={{ overflowX: "auto" }}>
@@ -841,7 +862,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const delayedList = sites.filter(s => isSiteDelayed(s));
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        
+        <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Operations &amp; Schedule Standing</span></div>
         
         {/* Delay Warnings */}
         {delayedList.length > 0 && (
@@ -981,8 +1004,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
   const renderApprovalCenter = () => {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
+        <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Central Approvals Gateway</span></div>
+
         <Card title="Pending Approvals Ledger" subtitle="Approve or Reject locations setup, leaves, and materials purchases.">
           {allApprovalRequests.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>

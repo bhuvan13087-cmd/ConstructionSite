@@ -23,7 +23,9 @@ import {
   CheckCircle2, 
   Filter, 
   Eye,
-  FolderOpen
+  FolderOpen,
+  HardHat,
+  ArrowRight
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -273,161 +275,84 @@ export default function AdminDashboard() {
       )}
 
       {sites.length === 0 && (
-        <div className="info-alert" style={{ borderLeft: "4px solid var(--warning-500)", backgroundColor: "var(--warning-50)", margin: "0 0 24px 0", padding: "16px", borderRadius: "var(--radius-sm)" }}>
-          <div className="info-text" style={{ color: "var(--warning-700)", fontWeight: "600" }}>
-            <strong>No sites created yet!</strong> Please navigate to the <Link to="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Construction Sites</Link> page to register your first construction site.
-          </div>
+        <div style={{ borderLeft: "4px solid var(--warning-500)", backgroundColor: "var(--warning-100)", marginBottom: "20px", padding: "12px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "10px" }}>
+          <AlertTriangle size={16} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
+          <span style={{ color: "var(--warning-700)", fontWeight: "600", fontSize: "13px" }}>
+            <strong>No sites created yet!</strong> Navigate to the <Link to="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Construction Sites</Link> page to register your first construction site.
+          </span>
         </div>
       )}
 
-      {/* Metrics Section */}
-      <div className="metrics-hero-grid" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "20px" }}>
-        
-        <div className="metric-hero-card projects">
-          <div className="metric-hero-header">
-            <span className="metric-hero-title">Active Projects & Assignments</span>
-            <div className="metric-hero-icon">
-              <Building2 size={24} />
-            </div>
+      {/* ── TOP: Compact KPI Bar ── */}
+      <div className="dash-kpi-bar" style={{ marginBottom: "20px" }}>
+
+        <div className="dash-kpi-item">
+          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
+            <Building2 size={17} />
           </div>
-          <div className="metric-hero-main">
-            <span className="metric-hero-value">{metrics.totalSites}</span>
-            <span className="metric-hero-label">Total Sites</span>
-          </div>
-          <div className="metric-hero-footer">
-            <div className="metric-hero-sub">
-              <span className="metric-hero-sub-val">{totalAssignedProjects}</span>
-              <span className="metric-hero-sub-label">Assigned Sites</span>
-            </div>
-            <div className="metric-hero-divider"></div>
-            <div className="metric-hero-sub">
-              <span className="metric-hero-sub-val">{metrics.activeEngineers}</span>
-              <span className="metric-hero-sub-label">Active Engineers</span>
-            </div>
-          </div>
+          <span className="dash-kpi-label">Total Sites</span>
+          <span className="dash-kpi-value">{metrics.totalSites}</span>
+          <span className="dash-kpi-sub">{totalAssignedProjects} assigned</span>
         </div>
 
-        <div className="metric-hero-card operations">
-          <div className="metric-hero-header">
-            <span className="metric-hero-title">Operations & Workforce</span>
-            <div className="metric-hero-icon">
-              <Users size={24} />
-            </div>
+        <div className="dash-kpi-item">
+          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "#10b981" }}>
+            <HardHat size={17} />
           </div>
-          <div className="metric-hero-main">
-            <span className="metric-hero-value">{metrics.attendanceToday}</span>
-            <span className="metric-hero-label">Today's Attendance</span>
-          </div>
-          <div className="metric-hero-footer">
-            <div className="metric-hero-sub">
-              <span className="metric-hero-sub-val">{metrics.activeWorkers}</span>
-              <span className="metric-hero-sub-label">Active Workers</span>
-            </div>
-            <div className="metric-hero-divider"></div>
-            <div className="metric-hero-sub">
-              <span className="metric-hero-sub-val">{metrics.totalMaterials}</span>
-              <span className="metric-hero-sub-label">Materials Logged</span>
-            </div>
-          </div>
+          <span className="dash-kpi-label">Active Engineers</span>
+          <span className="dash-kpi-value">{metrics.activeEngineers}</span>
+          <span className="dash-kpi-sub">Site personnel</span>
         </div>
 
-        {/* Approvals dial card */}
-        <div className="metric-hero-card approvals" style={{ 
-          background: "linear-gradient(135deg, var(--warning-700) 0%, var(--warning-900) 100%)", 
-          color: "#ffffff"
-        }}>
-          <div className="metric-hero-header">
-            <span className="metric-hero-title" style={{ color: "rgba(255,255,255,0.9)" }}>Approvals & Audits Queue</span>
-            <div className="metric-hero-icon" style={{ color: "#ffffff" }}>
-              <ClipboardCheck size={24} />
-            </div>
+        <div className="dash-kpi-item">
+          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "#f97316" }}>
+            <Users size={17} />
           </div>
-          <div className="metric-hero-main">
-            <span className="metric-hero-value" style={{ color: "#ffffff" }}>{pendingCount}</span>
-            <span className="metric-hero-label" style={{ color: "rgba(255,255,255,0.8)" }}>Pending Actions</span>
+          <span className="dash-kpi-label">Workforce &amp; Materials</span>
+          <span className="dash-kpi-value">{metrics.attendanceToday}</span>
+          <span className="dash-kpi-sub">{metrics.activeWorkers} workers active · {metrics.totalMaterials} logged</span>
+        </div>
+
+        <div className="dash-kpi-item" style={{ backgroundColor: pendingCount > 0 ? "hsl(38,90%,97%)" : undefined }}>
+          <div className="dash-kpi-icon" style={{ backgroundColor: pendingCount > 0 ? "rgba(234,179,8,0.12)" : "rgba(16,185,129,0.08)", color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>
+            <ClipboardCheck size={17} />
           </div>
-          <div className="metric-hero-footer" style={{ borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: "12px" }}>
-            <Link to="/admin/approvals" style={{ color: "#ffffff", fontWeight: "700", fontSize: "13px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
-              Navigate to Approval Center →
-            </Link>
+          <span className="dash-kpi-label">Pending Approvals</span>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <span className="dash-kpi-value" style={{ color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{pendingCount}</span>
+            {pendingCount > 0 && (
+              <span className="badge badge-danger" style={{ fontSize: "9px", padding: "1px 5px", lineHeight: "1" }}>Action</span>
+            )}
           </div>
+          <Link to="/admin/approvals" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", marginTop: "2px", textDecoration: "none" }}>
+            Review <ArrowRight size={10} />
+          </Link>
         </div>
 
       </div>
 
-      {/* Alerts and Reminders Row */}
-      {alerts.length > 0 && (
-        <div style={{ marginTop: "24px" }}>
-          <Card 
-            title="Important Operations Alerts & Reminders" 
-            subtitle="Automated alerts tracking delayed progress updates, long-pending workflows, and delayed timelines."
-            style={{ borderLeft: "4px solid var(--danger-500)" }}
-          >
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-              {alerts.slice(0, 5).map(alert => (
-                <div 
-                  key={alert.id} 
-                  style={{ 
-                    display: "flex", 
-                    gap: "10px", 
-                    alignItems: "flex-start", 
-                    padding: "12px 16px", 
-                    borderRadius: "6px",
-                    backgroundColor: alert.type === "danger" ? "var(--danger-50)" : "var(--warning-50)",
-                    border: `1px solid ${alert.type === "danger" ? "var(--danger-200)" : "var(--warning-200)"}`
-                  }}
-                >
-                  <AlertTriangle 
-                    size={18} 
-                    style={{ 
-                      color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", 
-                      flexShrink: 0,
-                      marginTop: "2px"
-                    }} 
-                  />
-                  <div>
-                    <span style={{ 
-                      fontWeight: "800", 
-                      fontSize: "12.5px", 
-                      color: alert.type === "danger" ? "var(--danger-800)" : "var(--warning-800)",
-                      display: "block" 
-                    }}>
-                      [{alert.category}] {alert.title}
-                    </span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#334155" }}>
-                      {alert.message}
-                    </p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </Card>
-        </div>
-      )}
+      {/* ── MIDDLE: Two-Column Layout ── */}
+      <div style={{ display: "flex", gap: "20px", alignItems: "start", marginBottom: "20px" }}>
 
-      {/* Two-Column Dashboard Layout */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "24px", marginTop: "24px", alignItems: "start" }}>
-        
-        {/* Left Column (2fr) */}
-        <div style={{ flex: "2 1 600px", display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          {/* Projects Overview Section */}
+        {/* Left Column — Projects Table (2/3 width) */}
+        <div style={{ flex: "2 1 560px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+          <div className="dash-section-label"><span>Projects &amp; Assignments</span></div>
+
           <Card 
             variant="table" 
-            title="Projects & Site Assignments Overview"
             headerActions={
-              <Badge status="success">{sites.length} Active Projects</Badge>
+              <Badge status="success">{sites.length} Projects</Badge>
             }
-            className="w-full"
           >
             <table className="data-table" style={{ margin: "0" }}>
               <thead>
                 <tr>
                   <th>Project / Site Name</th>
-                  <th>Assigned Site Engineer</th>
+                  <th>Assigned Engineer</th>
                   <th>Location</th>
                   <th>Status</th>
-                  <th>Created Date</th>
+                  <th>Created</th>
                 </tr>
               </thead>
               <tbody>
@@ -450,7 +375,7 @@ export default function AdminDashboard() {
                         <td style={{ fontWeight: 700, color: "var(--primary-900)" }}>{site.siteName}</td>
                         <td>
                           {site.assignedEngineers && site.assignedEngineers.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
                               {site.assignedEngineers.map(uid => {
                                 const name = engineersMap[uid] || "Unknown Engineer";
                                 return (
@@ -459,7 +384,7 @@ export default function AdminDashboard() {
                                     className="badge badge-completed" 
                                     style={{ 
                                       fontSize: "11px", 
-                                      padding: "4px 8px",
+                                      padding: "3px 7px",
                                       fontWeight: "600",
                                       backgroundColor: "var(--primary-100)",
                                       color: "var(--primary-800)",
@@ -473,20 +398,20 @@ export default function AdminDashboard() {
                             </div>
                           ) : (
                             <span style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>
-                              No Engineer Assigned
+                              Unassigned
                             </span>
                           )}
                         </td>
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <MapPin size={14} className="text-muted" style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                            <MapPin size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
                             <span style={{ fontSize: "13px" }}>{site.location}</span>
                           </div>
                         </td>
                         <td>
                           <Badge status={site.status || "Planning"} />
                         </td>
-                        <td className="font-mono" style={{ fontSize: "13px" }}>{createdDateStr}</td>
+                        <td className="font-mono" style={{ fontSize: "12px" }}>{createdDateStr}</td>
                       </tr>
                     );
                   })
@@ -495,214 +420,72 @@ export default function AdminDashboard() {
             </table>
           </Card>
 
-          {/* Central Timeline */}
-          <Card title="Unified Site Operations & System Activity History Timeline">
-            
-            {/* Timeline Filters */}
-            <div style={{ 
-              display: "grid", 
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", 
-              gap: "16px", 
-              marginBottom: "20px",
-              padding: "16px",
-              backgroundColor: "#f8fafc",
-              borderRadius: "6px",
-              border: "1px solid var(--border-color)"
-            }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Filter by Project</label>
-                <select 
-                  value={filterSite} 
-                  onChange={(e) => setFilterSite(e.target.value)}
-                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-                >
-                  <option value="">All Projects</option>
-                  {sites.map(s => (
-                    <option key={s.id} value={s.id}>{s.siteName}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Filter by Engineer</label>
-                <select 
-                  value={filterEngineer} 
-                  onChange={(e) => setFilterEngineer(e.target.value)}
-                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-                >
-                  <option value="">All Engineers</option>
-                  {engineers.map(e => (
-                    <option key={e.id} value={e.id}>{e.fullName}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Filter by Date</label>
-                <input 
-                  type="date"
-                  value={filterDate}
-                  onChange={(e) => setFilterDate(e.target.value)}
-                  style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-                />
-              </div>
-            </div>
-
-            {sortedDates.length === 0 ? (
-              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "40px" }}>
-                <Activity size={32} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
-                <p>No matching activities or operations logged.</p>
-              </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "24px", padding: "8px" }}>
-                {sortedDates.map((dateStr) => {
-                  let formattedDate = dateStr;
-                  try {
-                    const [y, m, d] = dateStr.split("-").map(Number);
-                    const dateObj = new Date(y, m - 1, d);
-                    formattedDate = dateObj.toLocaleDateString("en-GB", {
-                      day: "numeric",
-                      month: "long",
-                      year: "numeric"
-                    });
-                  } catch (e) {
-                    console.error(e);
-                  }
-
-                  const logsForDate = groupedTimeline[dateStr];
-
-                  return (
-                    <div key={dateStr} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      <div style={{ 
-                        fontSize: "14px", 
-                        fontWeight: "800", 
-                        color: "var(--primary-900)", 
-                        borderBottom: "2px solid var(--border-color)", 
-                        paddingBottom: "4px",
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "6px"
-                      }}>
-                        <Calendar size={16} style={{ color: "var(--primary-600)" }} />
-                        {formattedDate}
-                      </div>
-                      
-                      <div style={{ 
-                        position: "relative", 
-                        paddingLeft: "20px", 
-                        borderLeft: "2.5px solid var(--border-color)",
-                        marginLeft: "10px",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "16px"
-                      }}>
-                        {logsForDate.map((log, index) => {
-                          const isEntry = log.type === "entry";
-                          const isExit = log.type === "exit";
-                          const isSystem = log.isSystem;
-
-                          return (
-                            <div key={log.id || index} style={{ position: "relative" }}>
-                              <div style={{ 
-                                position: "absolute", 
-                                left: "-28.5px", 
-                                top: "2px", 
-                                width: "14px", 
-                                height: "14px", 
-                                borderRadius: "50%", 
-                                backgroundColor: isEntry ? "var(--success-500)" : (isExit ? "var(--danger-500)" : "var(--primary-600)"),
-                                border: "3px solid #ffffff",
-                                boxShadow: "0 0 0 2px " + (isEntry ? "var(--success-100)" : (isExit ? "var(--danger-100)" : "var(--primary-100)"))
-                              }} />
-                              
-                              <div style={{ 
-                                display: "flex", 
-                                flexDirection: "column", 
-                                gap: "4px",
-                                padding: "12px 16px",
-                                borderRadius: "var(--radius-sm)",
-                                border: "1.5px solid " + (isEntry ? "var(--success-100)" : (isExit ? "var(--danger-100)" : "var(--primary-100)")),
-                                backgroundColor: isEntry ? "rgba(34, 197, 94, 0.01)" : (isExit ? "rgba(239, 68, 68, 0.01)" : "rgba(30, 41, 59, 0.01)")
-                              }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
-                                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                                    <span style={{ 
-                                      fontWeight: "800", 
-                                      fontSize: "11px", 
-                                      color: isEntry ? "var(--success-600)" : (isExit ? "var(--danger-600)" : "var(--primary-700)"),
-                                      backgroundColor: isEntry ? "var(--success-50)" : (isExit ? "var(--danger-50)" : "var(--primary-50)"),
-                                      padding: "2px 8px",
-                                      borderRadius: "12px",
-                                      textTransform: "uppercase",
-                                      letterSpacing: "0.5px"
-                                    }}>
-                                      {log.type.toUpperCase()}
-                                    </span>
-                                    <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{log.engineerName}</strong>
-                                  </div>
-                                  <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                                    <Clock size={12} /> {log.time}
-                                  </span>
-                                </div>
-
-                                <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "4px" }}>
-                                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#1e293b" }}>
-                                    {log.description}
-                                  </span>
-                                  <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                                    {log.details}
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-
         </div>
 
-        {/* Right Column (1fr) */}
-        <div style={{ flex: "1 1 300px", display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          {/* Document Verification Action Items */}
-          <Card title="Document Verification Tasks">
-            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+        {/* Right Column — Alerts + Docs (1/3 width) */}
+        <div style={{ flex: "1 1 280px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+          {/* Alerts Panel */}
+          {alerts.length > 0 && (
+            <>
+              <div className="dash-section-label"><span>Alerts &amp; Reminders</span></div>
+              <Card style={{ borderLeft: "3px solid var(--danger-500)" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {alerts.slice(0, 5).map(alert => (
+                    <div key={alert.id} className={`dash-alert-row ${alert.type}`}>
+                      <AlertTriangle 
+                        size={14} 
+                        style={{ 
+                          color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", 
+                          flexShrink: 0,
+                          marginTop: "2px"
+                        }} 
+                      />
+                      <div>
+                        <span className="dash-alert-title">[{alert.category}] {alert.title}</span>
+                        <p className="dash-alert-msg">{alert.message}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </>
+          )}
+
+          {/* Document Verification Tasks */}
+          <div className="dash-section-label"><span>Document Verification</span></div>
+          <Card>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               <div style={{ 
                 display: "flex", 
                 alignItems: "center", 
                 gap: "8px", 
-                padding: "12px", 
-                backgroundColor: pendingDocs.length > 0 ? "var(--warning-50)" : "var(--success-50)", 
+                padding: "10px 12px", 
+                backgroundColor: pendingDocs.length > 0 ? "var(--warning-100)" : "var(--success-50)", 
                 borderRadius: "6px", 
-                border: pendingDocs.length > 0 ? "1px solid var(--warning-200)" : "1px solid var(--success-200)" 
+                border: pendingDocs.length > 0 ? "1px solid var(--warning-500)" : "1px solid var(--success-100)" 
               }}>
                 {pendingDocs.length > 0 ? (
                   <>
-                    <AlertTriangle size={18} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--warning-800)" }}>
-                      {pendingDocs.length} document(s) pending verification
+                    <AlertTriangle size={16} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
+                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--warning-600)" }}>
+                      {pendingDocs.length} document(s) pending
                     </span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--success-800)" }}>
-                      All documents are verified
+                    <CheckCircle2 size={16} style={{ color: "var(--success-600)", flexShrink: 0 }} />
+                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--success-600)" }}>
+                      All documents verified
                     </span>
                   </>
                 )}
               </div>
 
               {pendingDocs.length > 0 && (
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   {pendingDocs.slice(0, 3).map(doc => (
-                    <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", border: "1px solid var(--border-color)", borderRadius: "6px", backgroundColor: "#ffffff" }}>
+                    <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", border: "1px solid var(--border-color)", borderRadius: "6px", backgroundColor: "#ffffff" }}>
                       <div style={{ minWidth: 0, marginRight: "8px" }}>
                         <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</div>
                         <p style={{ margin: 0, fontSize: "10.5px", color: "var(--text-muted)" }} className="text-ellipsis">{doc.siteName}</p>
@@ -713,51 +496,51 @@ export default function AdminDashboard() {
                     </div>
                   ))}
                   {pendingDocs.length > 3 && (
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center" }}>
-                      + {pendingDocs.length - 3} more pending documents
-                    </span>
+                    <Link to="/admin/documents" style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center", display: "block" }}>
+                      + {pendingDocs.length - 3} more pending
+                    </Link>
                   )}
                 </div>
               )}
             </div>
           </Card>
 
-          {/* Recent Document Uploads timeline panel */}
+          {/* Recent Document Uploads */}
           <Card 
-            title="Recent Document Uploads" 
+            title="Recent Uploads" 
             headerActions={
-              <Link to="/admin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none", display: "flex", alignItems: "center", gap: "2px" }}>
-                <span>View all</span>
+              <Link to="/admin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none" }}>
+                View all
               </Link>
             }
           >
             {recentDocs.length === 0 ? (
               <p style={{ textAlign: "center", color: "var(--text-muted)", padding: "12px", fontSize: "13px" }}>No documents uploaded yet.</p>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 {recentDocs.map(doc => {
                   const isUploaded = doc.status === "Uploaded";
                   const isVerified = doc.status === "Verified";
                   return (
-                    <div key={doc.id} style={{ display: "flex", gap: "12px", borderBottom: "1px solid var(--border-color)", paddingBottom: "12px" }}>
+                    <div key={doc.id} style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
                       <div style={{
                         backgroundColor: isVerified ? "var(--success-50)" : (isUploaded ? "var(--primary-50)" : "var(--danger-50)"),
                         color: isVerified ? "var(--success-600)" : (isUploaded ? "var(--primary-600)" : "var(--danger-600)"),
-                        padding: "8px",
+                        padding: "7px",
                         borderRadius: "6px",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        height: "36px",
-                        width: "36px",
+                        height: "32px",
+                        width: "32px",
                         flexShrink: 0
                       }}>
-                        <FolderOpen size={20} />
+                        <FolderOpen size={16} />
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</span>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{doc.category} • {doc.siteName}</span>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "4px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2px" }}>
                           <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>By: {doc.uploadedBy}</span>
                           <Badge status={doc.status === "Uploaded" ? "pending" : (doc.status === "Verified" ? "success" : "danger")} style={{ fontSize: "9px", padding: "1px 6px" }}>
                             {doc.status}
@@ -773,6 +556,182 @@ export default function AdminDashboard() {
 
         </div>
       </div>
+
+      {/* ── BOTTOM: Full-Width Activity Timeline ── */}
+      <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Site Operations &amp; Activity Timeline</span></div>
+
+      <Card>
+        {/* Compact Inline Filter Bar */}
+        <div style={{ 
+          display: "flex", 
+          flexWrap: "wrap",
+          gap: "10px", 
+          marginBottom: "18px",
+          alignItems: "center",
+          padding: "10px 14px",
+          backgroundColor: "#f8fafc",
+          borderRadius: "6px",
+          border: "1px solid var(--border-color)"
+        }}>
+          <Filter size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          <select 
+            value={filterSite} 
+            onChange={(e) => setFilterSite(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 160px" }}
+          >
+            <option value="">All Projects</option>
+            {sites.map(s => (
+              <option key={s.id} value={s.id}>{s.siteName}</option>
+            ))}
+          </select>
+
+          <select 
+            value={filterEngineer} 
+            onChange={(e) => setFilterEngineer(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 160px" }}
+          >
+            <option value="">All Engineers</option>
+            {engineers.map(e => (
+              <option key={e.id} value={e.id}>{e.fullName}</option>
+            ))}
+          </select>
+
+          <input 
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 140px" }}
+          />
+
+          {(filterSite || filterEngineer || filterDate) && (
+            <button 
+              type="button"
+              onClick={() => { setFilterSite(""); setFilterEngineer(""); setFilterDate(""); }}
+              style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12px", fontWeight: "600", color: "var(--text-muted)", cursor: "pointer" }}
+            >
+              Clear
+            </button>
+          )}
+        </div>
+
+        {sortedDates.length === 0 ? (
+          <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "40px" }}>
+            <Activity size={32} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
+            <p>No matching activities or operations logged.</p>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            {sortedDates.map((dateStr) => {
+              let formattedDate = dateStr;
+              try {
+                const [y, m, d] = dateStr.split("-").map(Number);
+                const dateObj = new Date(y, m - 1, d);
+                formattedDate = dateObj.toLocaleDateString("en-GB", {
+                  day: "numeric",
+                  month: "long",
+                  year: "numeric"
+                });
+              } catch (e) {
+                console.error(e);
+              }
+
+              const logsForDate = groupedTimeline[dateStr];
+
+              return (
+                <div key={dateStr} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {/* Date Header */}
+                  <div style={{ 
+                    fontSize: "12px", 
+                    fontWeight: "800", 
+                    color: "var(--primary-700)", 
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    paddingBottom: "6px",
+                    borderBottom: "1.5px solid var(--border-color)"
+                  }}>
+                    <Calendar size={13} style={{ color: "var(--primary-500)" }} />
+                    {formattedDate}
+                    <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: "var(--text-muted)" }}>
+                      {logsForDate.length} {logsForDate.length === 1 ? "event" : "events"}
+                    </span>
+                  </div>
+                  
+                  {/* Timeline Items */}
+                  <div style={{ 
+                    position: "relative", 
+                    paddingLeft: "18px", 
+                    borderLeft: "2px solid var(--border-color)",
+                    marginLeft: "8px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px"
+                  }}>
+                    {logsForDate.map((log, index) => {
+                      const isEntry = log.type === "entry";
+                      const isExit = log.type === "exit";
+
+                      const dotColor = isEntry ? "var(--success-500)" : (isExit ? "var(--danger-500)" : "var(--primary-500)");
+                      const tagBg = isEntry ? "var(--success-50)" : (isExit ? "var(--danger-50)" : "var(--primary-50)");
+                      const tagColor = isEntry ? "var(--success-600)" : (isExit ? "var(--danger-600)" : "var(--primary-600)");
+
+                      return (
+                        <div key={log.id || index} style={{ position: "relative" }}>
+                          <div style={{ 
+                            position: "absolute", 
+                            left: "-25px", 
+                            top: "4px", 
+                            width: "10px", 
+                            height: "10px", 
+                            borderRadius: "50%", 
+                            backgroundColor: dotColor,
+                            border: "2px solid #ffffff",
+                            boxShadow: `0 0 0 2px ${dotColor}33`
+                          }} />
+                          
+                          <div style={{ 
+                            display: "flex", 
+                            justifyContent: "space-between",
+                            alignItems: "flex-start",
+                            gap: "8px",
+                            padding: "8px 12px",
+                            borderRadius: "var(--radius-sm)",
+                            border: "1px solid var(--border-color)",
+                            backgroundColor: "#ffffff"
+                          }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "3px", flex: 1, minWidth: 0 }}>
+                              <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
+                                <span style={{ 
+                                  fontWeight: "800", 
+                                  fontSize: "10px", 
+                                  color: tagColor,
+                                  backgroundColor: tagBg,
+                                  padding: "1px 7px",
+                                  borderRadius: "10px",
+                                  textTransform: "uppercase",
+                                  letterSpacing: "0.5px"
+                                }}>
+                                  {log.type.toUpperCase()}
+                                </span>
+                                <strong style={{ fontSize: "13px", color: "var(--primary-900)" }}>{log.engineerName}</strong>
+                              </div>
+                              <span style={{ fontSize: "12.5px", color: "#334155", fontWeight: "500" }}>{log.description}</span>
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{log.details}</span>
+                            </div>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", flexShrink: 0 }}>
+                              <Clock size={11} /> {log.time}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Card>
 
       <Loading show={loading} text="Loading executive panel..." />
     </Layout>
