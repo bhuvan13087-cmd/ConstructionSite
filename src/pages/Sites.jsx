@@ -34,7 +34,8 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   const [distance, setDistance] = useState(null);
   const [loadingDistance, setLoadingDistance] = useState(false);
   const [errorDistance, setErrorDistance] = useState(null);
-  const [mapType, setMapType] = useState("k"); // "m" for roadmap, "k" for satellite/hybrid
+  const [mapType, setMapType] = useState("h"); // "m" for roadmap, "k" for satellite, "h" for hybrid
+  const [zoomLevel, setZoomLevel] = useState(19); // default 19 for street-level detail
 
   useEffect(() => {
     const fetchDistance = async () => {
@@ -43,7 +44,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
       setLoadingDistance(true);
       setErrorDistance(null);
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(targetAddress)}&limit=1`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(targetAddress)}&limit=1&cb=${Date.now()}`);
         if (res.ok) {
           const data = await res.json();
           if (data && data.length > 0) {
@@ -196,7 +197,28 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-500)", textAlign: "left" }}>Live Map Verification View</span>
-          <div style={{ display: "flex", gap: "4px" }}>
+          <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+            <select
+              value={zoomLevel}
+              onChange={(e) => setZoomLevel(Number(e.target.value))}
+              style={{
+                fontSize: "10px",
+                fontWeight: "700",
+                padding: "2px 4px",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: "#ffffff",
+                cursor: "pointer",
+                outline: "none"
+              }}
+            >
+              <option value="15">Zoom 15</option>
+              <option value="17">Zoom 17</option>
+              <option value="18">Zoom 18</option>
+              <option value="19">Zoom 19</option>
+              <option value="20">Zoom 20</option>
+              <option value="21">Zoom 21</option>
+            </select>
             <button
               type="button"
               onClick={() => setMapType("m")}
@@ -211,7 +233,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
                 cursor: "pointer"
               }}
             >
-              Road Map
+              Road
             </button>
             <button
               type="button"
@@ -227,7 +249,23 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
                 cursor: "pointer"
               }}
             >
-              Satellite
+              Sat
+            </button>
+            <button
+              type="button"
+              onClick={() => setMapType("h")}
+              style={{
+                fontSize: "10px",
+                fontWeight: "700",
+                padding: "2px 6px",
+                borderRadius: "4px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: mapType === "h" ? "var(--primary-600)" : "#ffffff",
+                color: mapType === "h" ? "#ffffff" : "var(--text-muted)",
+                cursor: "pointer"
+              }}
+            >
+              Hybrid
             </button>
           </div>
         </div>
@@ -236,7 +274,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
             width="100%" 
             height="100%" 
             style={{ border: "0", minHeight: "260px" }} 
-            src={`https://maps.google.com/maps?q=${site.proposedLatitude},${site.proposedLongitude}&z=18&t=${mapType}&output=embed`}
+            src={`https://maps.google.com/maps?q=${site.proposedLatitude},${site.proposedLongitude}&z=${zoomLevel}&t=${mapType}&output=embed`}
             title={`Proposed Map for ${site.siteName}`}
           />
         </div>

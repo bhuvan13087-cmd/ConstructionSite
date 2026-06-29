@@ -673,17 +673,53 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         reject(new Error("Geolocation is not supported by your browser."));
         return;
       }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const { latitude, longitude, accuracy } = position.coords;
-          // Warn and reject if GPS accuracy is too poor (>150m means network-only fix)
-          if (accuracy > 150) {
-            reject(new Error(`GPS accuracy is too low (${Math.round(accuracy)}m). Please step outside or enable GPS and retry.`));
-            return;
+
+      let watchId = null;
+      let bestPosition = null;
+      
+      const timeoutId = setTimeout(() => {
+        if (watchId !== null) {
+          navigator.geolocation.clearWatch(watchId);
+        }
+        if (bestPosition) {
+          if (bestPosition.coords.accuracy <= 150) {
+            resolve({
+              latitude: bestPosition.coords.latitude,
+              longitude: bestPosition.coords.longitude,
+              accuracy: bestPosition.coords.accuracy
+            });
+          } else {
+            reject(new Error(`GPS accuracy is too low (${Math.round(bestPosition.coords.accuracy)}m). Please turn ON device GPS and try again in an open space.`));
           }
-          resolve({ latitude, longitude, accuracy });
+        } else {
+          reject(new Error("Device GPS search timed out. Please ensure location services are enabled."));
+        }
+      }, 7000);
+
+      watchId = navigator.geolocation.watchPosition(
+        (position) => {
+          const { accuracy } = position.coords;
+          
+          if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
+            bestPosition = position;
+          }
+          
+          // Target accuracy of 20 meters or better
+          if (accuracy <= 20) {
+            clearTimeout(timeoutId);
+            navigator.geolocation.clearWatch(watchId);
+            resolve({
+              latitude: position.coords.latitude,
+              longitude: position.coords.longitude,
+              accuracy: accuracy
+            });
+          }
         },
         (error) => {
+          clearTimeout(timeoutId);
+          if (watchId !== null) {
+            navigator.geolocation.clearWatch(watchId);
+          }
           let msg = "Unable to detect current location. Please enable GPS and try again.";
           if (error.code === error.PERMISSION_DENIED) {
             msg = "Location permission denied.";
@@ -692,7 +728,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           err.code = error.code;
           reject(err);
         },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+        { enableHighAccuracy: true, timeout: 6000, maximumAge: 0 }
       );
     });
   };
@@ -701,65 +737,46 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setEngineerLocationError("");
     setEngineerLocationSubmitting(true);
     
-    if (!navigator.geolocation) {
-      setEngineerLocationError("Location Permission Denied");
-      setEngineerLocationSubmitting(false);
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy || 10;
-        const engineerId = userProfile.uid || userProfile.id || "";
-        const deviceDetails = navigator.userAgent || "Unknown Device";
-        
-        try {
-          const geocode = await reverseGeocodeLatLng(lat, lng);
-          const isValidTN = verifyTNLocation(lat, lng, geocode);
-          
-          if (!isValidTN) {
-            setEngineerLocationError("Attendance allowed only inside Tamil Nadu location");
-            setEngineerLocationSubmitting(false);
-            return;
-          }
-
-          await updateSiteLocation(
-            activeSiteId,
-            lat,
-            lng,
-            geocode.fullAddress,
-            accuracy,
-            engineerId,
-            deviceDetails,
-            Number(engineerRadius) || 100,
-            new Date().toISOString(),
-            geocode.area || "",
-            geocode.street || ""
-          );
-          
-          await loadDashboardData();
-          showToast("Location submitted for Admin approval", "success");
-          setShowEngineerLocationSetupModal(false);
-        } catch (err) {
-          console.error("Save location error:", err);
-          setEngineerLocationError("Site Verification Failed");
-        } finally {
-          setEngineerLocationSubmitting(false);
-        }
-      },
-      (error) => {
-        console.error("Geolocation capture error:", error);
-        if (error.code === error.PERMISSION_DENIED) {
-          setEngineerLocationError("Location permission denied. Please allow location access in your browser/device settings.");
-        } else {
-          setEngineerLocationError("GPS is OFF or disabled. Please enable GPS/location services on your device and try again.");
-        }
+    try {
+      const coords = await getDeviceLocation();
+      const lat = coords.latitude;
+      const lng = coords.longitude;
+      const accuracy = coords.accuracy || 10;
+      const engineerId = userProfile.uid || userProfile.id || "";
+      const deviceDetails = navigator.userAgent || "Unknown Device";
+      
+      const geocode = await reverseGeocodeLatLng(lat, lng);
+      const isValidTN = verifyTNLocation(lat, lng, geocode);
+      
+      if (!isValidTN) {
+        setEngineerLocationError("Attendance allowed only inside Tamil Nadu location");
         setEngineerLocationSubmitting(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
+        return;
+      }
+
+      await updateSiteLocation(
+        activeSiteId,
+        lat,
+        lng,
+        geocode.fullAddress,
+        accuracy,
+        engineerId,
+        deviceDetails,
+        Number(engineerRadius) || 100,
+        new Date().toISOString(),
+        geocode.area || "",
+        geocode.street || ""
+      );
+      
+      await loadDashboardData();
+      showToast("Location submitted for Admin approval", "success");
+      setShowEngineerLocationSetupModal(false);
+    } catch (err) {
+      console.error("Save location error:", err);
+      setEngineerLocationError(err.message || "Site Verification Failed");
+    } finally {
+      setEngineerLocationSubmitting(false);
+    }
   };
 
   const handleLogActivity = async (type) => {
@@ -769,81 +786,41 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
     setActivitySubmitting(true);
     
-    if (!navigator.geolocation) {
-      showToast("Location Permission Denied", "error");
+    try {
+      const coords = await getDeviceLocation();
+      const lat = coords.latitude;
+      const lng = coords.longitude;
+      
+      const geocode = await reverseGeocodeLatLng(lat, lng);
+      const engineerId = userProfile.uid || userProfile.id || "";
+      
+      await logActivity(engineerId, activeSiteId, type, lat, lng, geocode.fullAddress);
+      
+      showToast(`Logged site ${type === "entry" ? "Entry" : "Exit"} successfully`, "success");
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Log activity error:", err);
+      showToast(err.message || `Failed to log ${type}`, "error");
+    } finally {
       setActivitySubmitting(false);
-      return;
     }
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        
-        try {
-          const geocode = await reverseGeocodeLatLng(lat, lng);
-          const engineerId = userProfile.uid || userProfile.id || "";
-          
-          await logActivity(engineerId, activeSiteId, type, lat, lng, geocode.fullAddress);
-          
-          showToast(`Logged site ${type === "entry" ? "Entry" : "Exit"} successfully`, "success");
-          await loadDashboardData();
-        } catch (err) {
-          console.error("Log activity error:", err);
-          showToast(`Failed to log ${type}: ${err.message}`, "error");
-        } finally {
-          setActivitySubmitting(false);
-        }
-      },
-      (error) => {
-        console.error("Geolocation error during activity log:", error);
-        showToast("GPS verification failed. Please turn ON location services.", "error");
-        setActivitySubmitting(false);
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
   };
 
   const handlePreCaptureCheck = async () => {
     setLocationError("");
     setLocationCheckStatus("checking");
 
-    if (!navigator.geolocation) {
+    try {
+      const coords = await getDeviceLocation();
+      setDeviceCoords(coords);
+      
+      const site = assignedSites.find(s => s.id === activeSiteId);
+      verifySiteLocation(coords, site);
+    } catch (error) {
+      console.warn("Location check failed:", error);
       setLocationCheckStatus("warning");
-      setLocationError("Location Permission Denied");
-      return;
+      setLocationError(error.message || "GPS Disabled");
     }
-
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const lat = position.coords.latitude;
-        const lng = position.coords.longitude;
-        const accuracy = position.coords.accuracy || 10;
-
-        // Reject poor GPS accuracy (network-only fix >150m)
-        if (accuracy > 150) {
-          setLocationCheckStatus("warning");
-          setLocationError(`GPS accuracy is too low (${Math.round(accuracy)}m). Please enable GPS / step to open area and retry.`);
-          return;
-        }
-        
-        const coords = { latitude: lat, longitude: lng, accuracy };
-        setDeviceCoords(coords);
-        
-        const site = assignedSites.find(s => s.id === activeSiteId);
-        verifySiteLocation(coords, site);
-      },
-      (error) => {
-        console.warn("Location check failed:", error);
-        setLocationCheckStatus("warning");
-        if (error.code === error.PERMISSION_DENIED) {
-          setLocationError("Location Permission Denied");
-        } else {
-          setLocationError("GPS Disabled");
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
   };
 
   const handleEnableLocation = async () => {
@@ -1466,15 +1443,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
       
-      const position = await new Promise((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject, {
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0
-        });
-      });
-      const userLat = position.coords.latitude;
-      const userLng = position.coords.longitude;
+      const position = await getDeviceLocation();
+      const userLat = position.latitude;
+      const userLng = position.longitude;
 
       // Check distance
       const distance = calculateDistanceMeters(siteLat, siteLng, userLat, userLng);

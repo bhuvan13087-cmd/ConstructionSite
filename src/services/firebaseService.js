@@ -402,13 +402,13 @@ function getGeocodeDistance(lat1, lon1, lat2, lon2) {
 function getAddressAccuracyScore(address) {
   if (!address) return 0;
   let score = 0;
-  if (address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square) {
+  if (address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square || address.lane || address.street || address.alley) {
     score += 5;
   }
-  if (address.colony || address.residential || address.neighbourhood || address.allotments || address.suburb || address.quarter || address.hamlet || address.locality) {
+  if (address.colony || address.residential || address.neighbourhood || address.allotments || address.subdivision || address.farm || address.suburb || address.quarter || address.hamlet || address.locality || address.isolated_dwelling || address.croft) {
     score += 4;
   }
-  if (address.village || address.town || address.city_district || address.city || address.municipality) {
+  if (address.village || address.town || address.city_district || address.city || address.municipality || address.borough) {
     score += 3;
   }
   if (address.state_district || address.county || address.district) {
@@ -426,7 +426,7 @@ function getAddressAccuracyScore(address) {
 // Reverse geocode helper via Nominatim OSM API
 export async function reverseGeocodeLatLng(lat, lng) {
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&cb=${Date.now()}`, {
       headers: {
         'Accept-Language': 'en',
         'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0 (contact@apexbuild.com)'
@@ -462,14 +462,15 @@ export async function reverseGeocodeLatLng(lat, lng) {
 
         if (bestResult) {
           const address = bestResult.address;
-          const landmark = address.amenity || address.shop || address.tourism || address.building || address.office || address.leisure || address.house_name || "";
+          const landmark = address.amenity || address.shop || address.tourism || address.building || address.office || address.leisure || address.historic || address.emergency || address.place || address.aeroway || address.highway || address.man_made || address.institution || address.workplace || address.hotel || address.house_name || "";
           const houseNumber = address.house_number || "";
-          const street = address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square || "";
-          const colony = address.colony || address.residential || address.neighbourhood || address.allotments || "";
-          const suburb = address.suburb || address.quarter || address.hamlet || address.locality || "";
-          const town = address.village || address.town || address.city_district || address.city || address.municipality || "";
+          const street = address.road || address.pedestrian || address.path || address.cycleway || address.footway || address.steps || address.track || address.square || address.lane || address.street || address.alley || address.road_reference || "";
+          const colony = address.colony || address.residential || address.neighbourhood || address.allotments || address.subdivision || address.farm || "";
+          const suburb = address.suburb || address.quarter || address.hamlet || address.locality || address.isolated_dwelling || address.croft || "";
+          const town = address.village || address.town || address.city_district || address.city || address.municipality || address.borough || "";
           const district = address.state_district || address.county || address.district || "";
           const state = address.state || "";
+          const postcode = address.postcode || "";
           const country = address.country || "";
 
           // Prioritized Custom Address Construction for maximum location details
@@ -482,9 +483,20 @@ export async function reverseGeocodeLatLng(lat, lng) {
           if (town && !addressParts.includes(town) && town !== suburb) addressParts.push(town);
           if (district && !addressParts.includes(district)) addressParts.push(district);
           if (state && !addressParts.includes(state)) addressParts.push(state);
+          if (postcode && !addressParts.includes(postcode)) addressParts.push(postcode);
           if (country && !addressParts.includes(country)) addressParts.push(country);
 
-          const customFullAddress = addressParts.join(", ") || bestResult.display_name || "";
+          let customFullAddress = addressParts.join(", ") || bestResult.display_name || "";
+
+          // Compare GPS coordinates with returned address center
+          const resLat = Number(bestResult.lat);
+          const resLng = Number(bestResult.lon);
+          const dist = (!isNaN(resLat) && !isNaN(resLng)) 
+            ? getGeocodeDistance(Number(lat), Number(lng), resLat, resLng) 
+            : 0;
+          if (dist > 300) {
+            customFullAddress += ` (within ${Math.round(dist)}m of resolved geocode)`;
+          }
 
           let areaParts = [];
           if (colony) areaParts.push(colony);
