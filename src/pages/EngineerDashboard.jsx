@@ -1056,6 +1056,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const lat = deviceCoords.latitude;
       const lng = deviceCoords.longitude;
       const accuracy = deviceCoords.accuracy || 10;
+      const distance = verificationDetails?.distance !== undefined ? verificationDetails.distance : null;
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
@@ -1069,7 +1070,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           lng,
           accuracy,
           verificationDetails?.capturedAddress || "",
-          attendancePhotoPreview
+          attendancePhotoPreview,
+          distance
         );
         showToast(`Checked out successfully from ${site.siteName}!`, "success");
       } else {
@@ -1082,7 +1084,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           accuracy,
           verificationDetails?.capturedAddress || "",
           attendancePhotoPreview, 
-          "verified"
+          "verified",
+          distance
         );
         showToast(`Checked in present at ${site.siteName}!`, "success");
       }

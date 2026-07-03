@@ -59,7 +59,7 @@ export function verifySiteGeofence(coords, savedLocation, siteRadius) {
       status: "failed",
       errorType: "OUTSIDE_RADIUS",
       message: "Outside Site Radius",
-      details: "You are outside the assigned site location",
+      details: "You are outside the allowed attendance area.",
       distance: Math.round(distance),
       allowedRadius
     };

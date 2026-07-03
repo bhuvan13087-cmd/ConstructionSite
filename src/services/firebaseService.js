@@ -914,7 +914,7 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
 }
 
 // Mark attendance
-export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, accuracy, address, photoUrl = "", verificationStatus = "verified") {
+export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, accuracy, address, photoUrl = "", verificationStatus = "verified", distance = null) {
   const db = getDb();
   const existing = await getTodayAttendance(engineerId, dateStr, siteId);
   if (existing) {
@@ -935,12 +935,13 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
     checkInTime: serverTimestamp(), // compatibility
     photoUrl,
     verificationStatus,
-    status: "present"
+    status: "present",
+    distance: distance !== null ? Number(distance) : null // Store distance from site
   });
 }
 
 // Mark check-out attendance
-export async function markCheckOut(attendanceId, latitude, longitude, accuracy, address, photoUrl = "") {
+export async function markCheckOut(attendanceId, latitude, longitude, accuracy, address, photoUrl = "", distance = null) {
   const db = getDb();
   const attRef = doc(db, "attendance", attendanceId);
   await updateDoc(attRef, {
@@ -950,7 +951,8 @@ export async function markCheckOut(attendanceId, latitude, longitude, accuracy, 
     checkOutAccuracy: Number(accuracy) || null,
     checkOutAddress: address || "",
     checkOutPhotoUrl: photoUrl,
-    status: "checked_out"
+    status: "checked_out",
+    checkOutDistance: distance !== null ? Number(distance) : null // Store check-out distance from site
   });
 }
 
