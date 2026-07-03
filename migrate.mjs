@@ -18,8 +18,40 @@ async function migrate() {
   const db = getFirestore(app);
 
   console.log("Authenticating as admin...");
-  await signInWithEmailAndPassword(auth, "admin@gmail.com", "123456");
-  console.log("Authenticated successfully!");
+  const userCred = await signInWithEmailAndPassword(auth, "admin@gmail.com", "123456");
+  const adminUid = userCred.user.uid;
+  console.log(`Authenticated successfully! UID: ${adminUid}`);
+
+  // Provision admin profile if missing to grant rule permissions for the rest of the script
+  const adminDocRef = doc(db, "users", adminUid);
+  const adminDocSnap = await getDoc(adminDocRef);
+  if (!adminDocSnap.exists()) {
+    console.log("Admin profile not found in users. Provisioning...");
+    await setDoc(adminDocRef, {
+      fullName: "Admin User",
+      username: "admin",
+      role: "admin",
+      status: "active",
+      email: "admin@gmail.com",
+      isFirstLogin: false
+    });
+    console.log("Admin profile provisioned in users.");
+  }
+
+  const adminRoleDocRef = doc(db, "admins", adminUid);
+  const adminRoleDocSnap = await getDoc(adminRoleDocRef);
+  if (!adminRoleDocSnap.exists()) {
+    console.log("Admin profile not found in admins. Provisioning...");
+    await setDoc(adminRoleDocRef, {
+      uid: adminUid,
+      name: "Admin User",
+      email: "admin@gmail.com",
+      role: "admin",
+      assignedSites: [],
+      status: "active"
+    });
+    console.log("Admin profile provisioned in admins.");
+  }
 
   console.log("Fetching users collection...");
   const usersCollection = collection(db, "users");

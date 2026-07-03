@@ -181,6 +181,11 @@ service cloud.firestore {
       allow read, write: if isActiveUser();
     }
 
+    match /dailyUpdates/{updateId} {
+      // Allow active users (admins or engineers) to read and write daily updates
+      allow read, write: if isActiveUser();
+    }
+
     match /expenses/{expenseId} {
       // Allow active users to read and write general expenses
       allow read, write: if isActiveUser();
