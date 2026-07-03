@@ -502,7 +502,7 @@ export async function getSites(adminId = null) {
 }
 
 // Create a new construction site document
-export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 50, adminId = null, googlePlaceId = null) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 50, adminId = null, googlePlaceId = null, siteLocationName = null) {
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
@@ -522,6 +522,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
     longitude: lngVal,
     googlePlaceId: googlePlaceId || null,
     placeId: googlePlaceId || null, // Task 6 placeId field
+    siteLocationName: siteLocationName || "", // Requirement 4 siteLocationName
     radius: Number(radius) || 50,
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     ...(adminId ? { createdByAdmin: adminId } : {}),
@@ -532,7 +533,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
 }
 
 // Update site details (including coordinates and googlePlaceId)
-export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 50, latitude = null, longitude = null, googlePlaceId = null) {
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 50, latitude = null, longitude = null, googlePlaceId = null, siteLocationName = null) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
 
@@ -552,6 +553,7 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     longitude: lngVal,
     googlePlaceId: googlePlaceId || null,
     placeId: googlePlaceId || null, // Task 6 placeId field
+    siteLocationName: siteLocationName || "", // Requirement 4 siteLocationName
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     radius: Number(radius) || 50,
     updatedAt: serverTimestamp()

@@ -303,6 +303,7 @@ export default function Sites() {
   const [formName, setFormName] = useState("");
   const [formClientName, setFormClientName] = useState("");
   const [formLocation, setFormLocation] = useState("");
+  const [formLocationName, setFormLocationName] = useState("");
   const [formLatitude, setFormLatitude] = useState("");
   const [formLongitude, setFormLongitude] = useState("");
   const [formPlaceId, setFormPlaceId] = useState("");
@@ -464,6 +465,7 @@ export default function Sites() {
           setFormLatitude(latVal);
           setFormLongitude(lngVal);
           setFormLocation(place.formatted_address || place.name || "");
+          setFormLocationName(place.name || ""); // Save the name (siteLocationName)
           setFormPlaceId(place.place_id || "");
           parseAddressComponents(place.address_components);
 
@@ -482,8 +484,24 @@ export default function Sites() {
           setFormLocation(results[0].formatted_address);
           setFormPlaceId(results[0].place_id || "");
           parseAddressComponents(results[0].address_components);
+          
+          // Get the siteLocationName (establishment or first address part)
+          const estComponent = results[0].address_components.find(c => 
+            c.types.includes("establishment") || 
+            c.types.includes("point_of_interest") || 
+            c.types.includes("premise") ||
+            c.types.includes("sublocality_level_1")
+          );
+          if (estComponent) {
+            setFormLocationName(estComponent.long_name);
+          } else {
+            const firstPart = results[0].formatted_address.split(",")[0];
+            setFormLocationName(firstPart);
+          }
         } else {
-          setFormLocation(`Lat: ${latLng.lat().toFixed(6)}, Lng: ${latLng.lng().toFixed(6)}`);
+          // Requirement 7 - Friendly error message on failure
+          setFormLocation("Unable to fetch address. Please move the marker or search again.");
+          setFormLocationName("");
           setFormPlaceId("");
           parseAddressComponents([]);
         }
@@ -495,8 +513,29 @@ export default function Sites() {
       geocodePosition({ lat: initialLat, lng: initialLng });
     }
 
-    // Draggable adjustments event (Task 3)
+    let dragGeocodeTimeout = null;
+
+    // Real-time dragging updates (Requirement 6)
+    window.google.maps.event.addListener(marker, "drag", () => {
+      const pos = marker.getPosition();
+      const latVal = pos.lat();
+      const lngVal = pos.lng();
+      setFormLatitude(latVal);
+      setFormLongitude(lngVal);
+      setFormLocation("Fetching address...");
+      
+      if (dragGeocodeTimeout) {
+        clearTimeout(dragGeocodeTimeout);
+      }
+      dragGeocodeTimeout = setTimeout(() => {
+        geocodePosition(pos);
+      }, 350);
+    });
+
     window.google.maps.event.addListener(marker, "dragend", () => {
+      if (dragGeocodeTimeout) {
+        clearTimeout(dragGeocodeTimeout);
+      }
       const pos = marker.getPosition();
       const latVal = pos.lat();
       const lngVal = pos.lng();
@@ -562,6 +601,7 @@ export default function Sites() {
     setFormName("");
     setFormClientName("");
     setFormLocation("");
+    setFormLocationName("");
     setFormLatitude("");
     setFormLongitude("");
     setFormPlaceId("");
@@ -577,6 +617,7 @@ export default function Sites() {
     setFormName(site.siteName || "");
     setFormClientName(site.clientName || "");
     setFormLocation(site.location || "");
+    setFormLocationName(site.siteLocationName || "");
     setFormLatitude(site.latitude || "");
     setFormLongitude(site.longitude || "");
     setFormPlaceId(site.googlePlaceId || "");
@@ -637,7 +678,8 @@ export default function Sites() {
           formLongitude,
           50,
           adminId,
-          formPlaceId
+          formPlaceId,
+          formLocationName.trim()
         );
         showToast("Construction Site added successfully.", "success");
         setShowFormModal(false);
@@ -654,7 +696,8 @@ export default function Sites() {
           rad,
           formLatitude,
           formLongitude,
-          formPlaceId
+          formPlaceId,
+          formLocationName.trim()
         );
         showToast("Construction Site updated successfully.", "success");
         setShowFormModal(false);
@@ -913,7 +956,7 @@ export default function Sites() {
               </div>
             )}
 
-            <div className="input-wrapper" style={{ marginBottom: "12px" }}>
+            <div className="input-wrapper" style={{ marginBottom: "8px" }}>
               <MapPin className="input-icon" size={16} />
               <input 
                 ref={autocompleteInputRef}
@@ -925,6 +968,15 @@ export default function Sites() {
                 required 
               />
             </div>
+
+            {formLocation && (
+              <div style={{ marginTop: "4px", marginBottom: "12px", padding: "12px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "left" }}>
+                <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.5px" }}>Selected Location</div>
+                <div style={{ fontSize: "13px", color: "#1e293b", fontWeight: "600", whiteSpace: "pre-line", lineHeight: "1.5" }}>
+                  {formLocationName ? `${formLocationName},\n` : ""}{formLocation.split(", ").join(",\n")}
+                </div>
+              </div>
+            )}
             
             <div 
               ref={mapDivRef} 
