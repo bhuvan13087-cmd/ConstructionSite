@@ -449,7 +449,10 @@ export default function Sites() {
 
     // Autocomplete Search Configuration (Task 1)
     if (autocompleteInputRef.current) {
-      const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
+      const inputEl = autocompleteInputRef.current;
+      map.controls[window.google.maps.ControlPosition.TOP_LEFT].push(inputEl);
+      
+      const autocomplete = new window.google.maps.places.Autocomplete(inputEl, {
         fields: ["geometry", "formatted_address", "place_id", "name", "address_components"],
         componentRestrictions: { country: "in" }
       });
@@ -481,7 +484,11 @@ export default function Sites() {
       const geocoder = new window.google.maps.Geocoder();
       geocoder.geocode({ location: latLng }, (results, status) => {
         if (status === window.google.maps.GeocoderStatus.OK && results && results[0]) {
-          setFormLocation(results[0].formatted_address);
+          const addr = results[0].formatted_address;
+          setFormLocation(addr);
+          if (autocompleteInputRef.current) {
+            autocompleteInputRef.current.value = addr;
+          }
           setFormPlaceId(results[0].place_id || "");
           parseAddressComponents(results[0].address_components);
           
@@ -495,12 +502,16 @@ export default function Sites() {
           if (estComponent) {
             setFormLocationName(estComponent.long_name);
           } else {
-            const firstPart = results[0].formatted_address.split(",")[0];
+            const firstPart = addr.split(",")[0];
             setFormLocationName(firstPart);
           }
         } else if (status === window.google.maps.GeocoderStatus.ZERO_RESULTS) {
           // Requirement 4 - Only show friendly message on ZERO_RESULTS
-          setFormLocation("Unable to fetch address. Please move the marker or search again.");
+          const errMsg = "Unable to fetch address. Please move the marker or search again.";
+          setFormLocation(errMsg);
+          if (autocompleteInputRef.current) {
+            autocompleteInputRef.current.value = "";
+          }
           setFormLocationName("");
           setFormPlaceId("");
           parseAddressComponents([]);
@@ -508,7 +519,11 @@ export default function Sites() {
           // For other errors (like OVER_QUERY_LIMIT, REQUEST_DENIED, etc.), fall back to coordinates readout
           const latVal = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
           const lngVal = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
-          setFormLocation(`Lat: ${Number(latVal).toFixed(6)}, Lng: ${Number(lngVal).toFixed(6)}`);
+          const coordStr = `Lat: ${Number(latVal).toFixed(6)}, Lng: ${Number(lngVal).toFixed(6)}`;
+          setFormLocation(coordStr);
+          if (autocompleteInputRef.current) {
+            autocompleteInputRef.current.value = coordStr;
+          }
           setFormLocationName("Pinpointed Location");
           setFormPlaceId("");
           parseAddressComponents([]);
@@ -964,18 +979,30 @@ export default function Sites() {
               </div>
             )}
 
-            <div className="input-wrapper" style={{ marginBottom: "8px" }}>
-              <MapPin className="input-icon" size={16} />
-              <input 
-                ref={autocompleteInputRef}
-                type="text" 
-                id="site-search" 
-                placeholder="Search site name, street, area, city, landmark or full address..." 
-                value={formLocation}
-                onChange={(e) => setFormLocation(e.target.value)}
-                required 
-              />
-            </div>
+            {/* Google Places Autocomplete Input box pushed inside Map controls overlay */}
+            <input 
+              ref={autocompleteInputRef}
+              type="text" 
+              placeholder="Search site name, street, city, landmark or address..." 
+              style={{
+                boxSizing: "border-box",
+                border: "1px solid transparent",
+                width: "300px",
+                height: "38px",
+                marginTop: "10px",
+                marginLeft: "10px",
+                padding: "0 12px",
+                borderRadius: "4px",
+                boxShadow: "0 2px 6px rgba(0, 0, 0, 0.25)",
+                fontSize: "14px",
+                outline: "none",
+                textOverflow: "ellipsis",
+                backgroundColor: "#ffffff",
+                color: "#1e293b",
+                fontWeight: "500",
+                display: isMapsLoaded ? "block" : "none"
+              }}
+            />
 
             {formLocation && (
               <div style={{ marginTop: "4px", marginBottom: "12px", padding: "12px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "left" }}>
