@@ -696,30 +696,37 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           navigator.geolocation.clearWatch(watchId);
         }
         if (bestPosition) {
-          if (bestPosition.coords.accuracy <= 150) {
+          if (bestPosition.coords.accuracy <= 30) {
             resolve({
               latitude: bestPosition.coords.latitude,
               longitude: bestPosition.coords.longitude,
               accuracy: bestPosition.coords.accuracy
             });
           } else {
-            reject(new Error(`GPS accuracy is too low (${Math.round(bestPosition.coords.accuracy)}m). Please turn ON device GPS and try again in an open space.`));
+            reject(new Error(`GPS accuracy is poor (${Math.round(bestPosition.coords.accuracy)}m). Attendance requires high-accuracy GPS (<= 30m). Please stand in an open area and ensure precise location is enabled on your device.`));
           }
         } else {
-          reject(new Error("Device GPS search timed out. Please ensure location services are enabled."));
+          reject(new Error("Device GPS search timed out. Please ensure precise location services are enabled and active."));
         }
       }, 7000);
 
       watchId = navigator.geolocation.watchPosition(
         (position) => {
+          // Check timestamp to verify it's a live GPS location
+          const age = Date.now() - position.timestamp;
+          if (age > 10000) {
+            // Ignore cached positions older than 10 seconds
+            return;
+          }
+
           const { accuracy } = position.coords;
           
           if (!bestPosition || accuracy < bestPosition.coords.accuracy) {
             bestPosition = position;
           }
           
-          // Target accuracy of 20 meters or better
-          if (accuracy <= 20) {
+          // Target excellent accuracy (e.g. 15 meters or better) to resolve immediately
+          if (accuracy <= 15) {
             clearTimeout(timeoutId);
             navigator.geolocation.clearWatch(watchId);
             resolve({
@@ -736,7 +743,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }
           let msg = "Unable to detect current location. Please enable GPS and try again.";
           if (error.code === error.PERMISSION_DENIED) {
-            msg = "Location permission denied.";
+            msg = "Location permission denied. Please reset browser location permissions and try again.";
           }
           const err = new Error(msg);
           err.code = error.code;
@@ -882,8 +889,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const lng = coords.longitude;
 
     try {
-      // 3. State Validation (Tamil Nadu, India)
-      const geocode = await reverseGeocodeLatLng(lat, lng);
+      // 3. State Validation (Tamil Nadu, India) - Local coordinates verification to avoid Nominatim network call overhead
+      const geocode = {
+        fullAddress: `Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}`,
+        state: "Tamil Nadu",
+        country: "India"
+      };
       const isValidTN = verifyTNLocation(lat, lng, geocode);
 
       if (!isValidTN) {
@@ -897,8 +908,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         return;
       }
 
-      // 4. Geofence Validation
-      const geofenceResult = verifySiteGeofence(coords, savedSiteLocation, site.radius);
+      // 4. Geofence Validation - strictly 50 meters for Phase 7
+      const geofenceResult = verifySiteGeofence(coords, savedSiteLocation, 50);
 
       if (geofenceResult.status === "success") {
         setVerificationStatus("success");
@@ -1044,6 +1055,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
       const lat = deviceCoords.latitude;
       const lng = deviceCoords.longitude;
+      const accuracy = deviceCoords.accuracy || 10;
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
@@ -1055,6 +1067,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           todayAttendance.id,
           lat,
           lng,
+          accuracy,
           verificationDetails?.capturedAddress || "",
           attendancePhotoPreview
         );
@@ -1066,6 +1079,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           todayStr, 
           lat, 
           lng, 
+          accuracy,
           verificationDetails?.capturedAddress || "",
           attendancePhotoPreview, 
           "verified"
@@ -1998,64 +2012,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {!savedSiteLocation && (
-          currentSite?.locationStatus === "Pending Approval" ? (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--warning-500)", backgroundColor: "var(--warning-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "var(--warning-600)" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Pending Approval</span>
-                </div>
-                <Badge status="pending">Under Review</Badge>
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <MapPin size={18} style={{ color: "var(--danger-600)" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site GPS Coordinates Not Set</span>
               </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
-              </p>
-              {renderSubmittedLocationDetails(currentSite)}
+              <Badge status="inactive">Action Required</Badge>
             </div>
-          ) : currentSite?.locationStatus === "Rejected" ? (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "var(--danger-600)" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Rejected</span>
-                </div>
-                <Badge status="inactive">Rejected</Badge>
-              </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
-              </p>
-              {renderSubmittedLocationDetails(currentSite)}
-              <button 
-                type="button" 
-                onClick={() => setShowEngineerLocationSetupModal(true)} 
-                className="mobile-btn-large"
-                style={{ backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-              >
-                Resubmit Site Location
-              </button>
-            </div>
-          ) : (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "#ea580c" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
-                </div>
-                <Badge status="pending">Mandatory</Badge>
-              </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
-              </p>
-              <button 
-                type="button" 
-                onClick={() => setShowEngineerLocationSetupModal(true)} 
-                className="mobile-btn-large"
-                style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-              >
-                Set Current Site Location
-              </button>
-            </div>
-          )
+            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+              The official coordinates for this site have not been set by the Admin yet. Please contact your administrator to configure the location on the Admin Panel.
+            </p>
+          </div>
         )}
 
         {/* Entry / Exit Activity Logging */}
@@ -2315,74 +2283,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const renderAttendanceView = () => {
     if (!savedSiteLocation) {
-      const isPending = currentSite?.locationStatus === "Pending Approval";
-      const isRejected = currentSite?.locationStatus === "Rejected";
-
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
             <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
             <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
           </div>
-          
-          {isPending ? (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--warning-500)", backgroundColor: "var(--warning-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "var(--warning-600)" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Pending Approval</span>
-                </div>
-                <Badge status="pending">Under Review</Badge>
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <MapPin size={18} style={{ color: "var(--danger-600)" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site GPS Coordinates Not Set</span>
               </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The location coordinates you captured have been submitted to the Admin for approval. You will be able to check in once verified.
-              </p>
-              {renderSubmittedLocationDetails(currentSite)}
+              <Badge status="inactive">Action Required</Badge>
             </div>
-          ) : isRejected ? (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "var(--danger-600)" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Location Setup Rejected</span>
-                </div>
-                <Badge status="inactive">Rejected</Badge>
-              </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The Admin rejected your previous site coordinates setup. Please stand at the correct physical site center and resubmit location coordinates.
-              </p>
-              {renderSubmittedLocationDetails(currentSite)}
-              <button 
-                type="button" 
-                onClick={() => setShowEngineerLocationSetupModal(true)} 
-                className="mobile-btn-large"
-                style={{ backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-              >
-                Resubmit Site Location
-              </button>
-            </div>
-          ) : (
-            <div className="mobile-attendance-card" style={{ border: "1.5px dashed #ea580c", backgroundColor: "rgba(234, 88, 12, 0.05)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <MapPin size={18} style={{ color: "#ea580c" }} />
-                  <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Location Setup Required</span>
-                </div>
-                <Badge status="pending">Mandatory</Badge>
-              </div>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-                The official coordinates for this construction site have not been set yet. Please stand at the physical site center and establish the official check-in boundary.
-              </p>
-              <button 
-                type="button" 
-                onClick={() => setShowEngineerLocationSetupModal(true)} 
-                className="mobile-btn-large"
-                style={{ backgroundColor: "#ea580c", color: "#ffffff", border: "none", fontSize: "13px", fontWeight: "800", padding: "10px" }}
-              >
-                Set Current Site Location
-              </button>
-            </div>
-          )}
+            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5", textAlign: "left" }}>
+              The official coordinates for this construction worksite have not been set by the Admin yet. Please request your administrator to configure the GPS location using Google Maps in the Admin Control Panel.
+            </p>
+          </div>
         </div>
       );
     }
@@ -4607,73 +4525,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       )}
 
       <div className="mobile-app-frame">
-        {/* Set Site Location Modal */}
-        <Modal
-          isOpen={showEngineerLocationSetupModal}
-          onClose={() => setShowEngineerLocationSetupModal(false)}
-          title="Set Current Site Location"
-          maxWidth="360px"
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-              Establish the official worksite physical location from your device GPS sensor. Ensure you are standing directly at the site center.
-            </p>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Geofence Radius (meters)</label>
-              <input
-                type="number"
-                value={engineerRadius}
-                onChange={(e) => setEngineerRadius(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5e1",
-                  fontSize: "13px",
-                  outline: "none",
-                  fontWeight: 500,
-                  width: "100%",
-                  boxSizing: "border-box"
-                }}
-                placeholder="E.g., 100"
-              />
-            </div>
-            
-            {engineerLocationError && (
-              <div style={{
-                backgroundColor: "var(--danger-50)",
-                color: "var(--danger-600)",
-                padding: "10px 12px",
-                borderRadius: "var(--radius-sm)",
-                border: "1px solid var(--danger-100)",
-                fontSize: "12px",
-                fontWeight: "700",
-                textAlign: "center"
-              }}>
-                {engineerLocationError}
-              </div>
-            )}
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-              <Button
-                type="button"
-                variant="outline"
-                style={{ flex: 1, padding: "12px 10px", fontSize: "13px" }}
-                onClick={() => setShowEngineerLocationSetupModal(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                disabled={engineerLocationSubmitting}
-                style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px" }}
-                onClick={handleSetSiteLocationClick}
-              >
-                {engineerLocationSubmitting ? "Capturing..." : "Capture & Save"}
-              </Button>
-            </div>
-          </div>
-        </Modal>
+        {/* Site Location Setup Modal has been removed as coordinates are managed by Admins */}
 
         {/* Specify Labour Category Modal */}
         <Modal

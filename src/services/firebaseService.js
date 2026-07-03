@@ -502,7 +502,7 @@ export async function getSites(adminId = null) {
 }
 
 // Create a new construction site document
-export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100, adminId = null) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 50, adminId = null, googlePlaceId = null) {
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
@@ -516,7 +516,8 @@ export async function createSite(siteName, clientName, location, startDate, expe
     status,
     latitude: latitude !== null && latitude !== "" ? Number(latitude) : null,
     longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
-    radius: Number(radius) || 100,
+    googlePlaceId: googlePlaceId || null,
+    radius: Number(radius) || 50,
     locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
     ...(adminId ? { createdByAdmin: adminId } : {}),
     createdAt: serverTimestamp(),
@@ -525,8 +526,8 @@ export async function createSite(siteName, clientName, location, startDate, expe
   return newSiteRef.id;
 }
 
-// Update site details (without modifying captured coordinates)
-export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 100) {
+// Update site details (including coordinates and googlePlaceId)
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 50, latitude = null, longitude = null, googlePlaceId = null) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
 
@@ -538,7 +539,11 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     startDate,
     expectedEndDate,
     status,
-    radius: Number(radius) || 100,
+    latitude: latitude !== null && latitude !== "" ? Number(latitude) : null,
+    longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
+    googlePlaceId: googlePlaceId || null,
+    locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
+    radius: Number(radius) || 50,
     updatedAt: serverTimestamp()
   });
 }
@@ -895,7 +900,7 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
 }
 
 // Mark attendance
-export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, address, photoUrl = "", verificationStatus = "verified") {
+export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, accuracy, address, photoUrl = "", verificationStatus = "verified") {
   const db = getDb();
   const existing = await getTodayAttendance(engineerId, dateStr, siteId);
   if (existing) {
@@ -910,6 +915,7 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
     date: dateStr,
     latitude: Number(latitude),
     longitude: Number(longitude),
+    gpsAccuracy: Number(accuracy) || null,
     address: address || "",
     timestamp: serverTimestamp(),
     checkInTime: serverTimestamp(), // compatibility
@@ -920,15 +926,17 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
 }
 
 // Mark check-out attendance
-export async function markCheckOut(attendanceId, latitude, longitude, address, photoUrl = "") {
+export async function markCheckOut(attendanceId, latitude, longitude, accuracy, address, photoUrl = "") {
   const db = getDb();
   const attRef = doc(db, "attendance", attendanceId);
   await updateDoc(attRef, {
     checkOutTime: serverTimestamp(),
     checkOutLatitude: Number(latitude),
     checkOutLongitude: Number(longitude),
+    checkOutAccuracy: Number(accuracy) || null,
     checkOutAddress: address || "",
-    checkOutPhotoUrl: photoUrl
+    checkOutPhotoUrl: photoUrl,
+    status: "checked_out"
   });
 }
 

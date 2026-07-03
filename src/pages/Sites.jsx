@@ -17,6 +17,7 @@ import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
 import { useAuth } from "../context/AuthContext";
+import { firebaseConfig } from "../firebase/config";
 import { 
   Plus, 
   Search, 
@@ -302,9 +303,138 @@ export default function Sites() {
   const [formName, setFormName] = useState("");
   const [formClientName, setFormClientName] = useState("");
   const [formLocation, setFormLocation] = useState("");
+  const [formLatitude, setFormLatitude] = useState("");
+  const [formLongitude, setFormLongitude] = useState("");
+  const [formPlaceId, setFormPlaceId] = useState("");
   const [formStartDate, setFormStartDate] = useState("");
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
+
+  // Google Maps States & Refs
+  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
+  const mapDivRef = useRef(null);
+  const autocompleteInputRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerInstanceRef = useRef(null);
+  const autocompleteInstanceRef = useRef(null);
+
+  // Load Google Maps API script
+  useEffect(() => {
+    if (window.google && window.google.maps) {
+      setIsMapsLoaded(true);
+      return;
+    }
+    const apiKey = firebaseConfig.apiKey;
+    if (!apiKey) {
+      console.error("Google Maps API Key is not set in firebaseConfig.");
+      return;
+    }
+    const existingScript = document.getElementById("google-maps-script");
+    if (existingScript) {
+      setIsMapsLoaded(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.id = "google-maps-script";
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => setIsMapsLoaded(true);
+    document.head.appendChild(script);
+  }, []);
+
+  // Initialize Map in Modal
+  useEffect(() => {
+    if (!showFormModal || !isMapsLoaded || !mapDivRef.current || !window.google || !window.google.maps) return;
+
+    const initialLat = Number(formLatitude) || 11.1271; // Tamil Nadu center default
+    const initialLng = Number(formLongitude) || 78.6569;
+    const hasCoords = !!formLatitude && !!formLongitude;
+
+    const mapOptions = {
+      center: { lat: initialLat, lng: initialLng },
+      zoom: hasCoords ? 19 : 8,
+      mapTypeId: window.google.maps.MapTypeId.ROADMAP,
+      mapTypeControl: true,
+      mapTypeControlOptions: {
+        style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+        position: window.google.maps.ControlPosition.TOP_RIGHT
+      },
+      zoomControl: true,
+      streetViewControl: false,
+      fullscreenControl: true
+    };
+
+    const map = new window.google.maps.Map(mapDivRef.current, mapOptions);
+    mapInstanceRef.current = map;
+
+    const marker = new window.google.maps.Marker({
+      position: { lat: initialLat, lng: initialLng },
+      map: map,
+      draggable: true,
+      title: "Construction Site Location",
+      animation: window.google.maps.Animation.DROP
+    });
+    markerInstanceRef.current = marker;
+
+    if (autocompleteInputRef.current) {
+      const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
+        fields: ["geometry", "formatted_address", "place_id", "name"]
+      });
+      autocompleteInstanceRef.current = autocomplete;
+
+      autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        if (place.geometry && place.geometry.location) {
+          const loc = place.geometry.location;
+          const latVal = loc.lat();
+          const lngVal = loc.lng();
+          
+          setFormLatitude(latVal);
+          setFormLongitude(lngVal);
+          setFormLocation(place.formatted_address || place.name || "");
+          setFormPlaceId(place.place_id || "");
+
+          map.setCenter(loc);
+          map.setZoom(19);
+          marker.setPosition(loc);
+        }
+      });
+    }
+
+    const geocodePosition = (latLng) => {
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ location: latLng }, (results, status) => {
+        if (status === "OK" && results && results[0]) {
+          setFormLocation(results[0].formatted_address);
+          setFormPlaceId(results[0].place_id || "");
+        } else {
+          setFormLocation(`Lat: ${latLng.lat().toFixed(6)}, Lng: ${latLng.lng().toFixed(6)}`);
+          setFormPlaceId("");
+        }
+      });
+    };
+
+    window.google.maps.event.addListener(marker, "dragend", () => {
+      const pos = marker.getPosition();
+      const latVal = pos.lat();
+      const lngVal = pos.lng();
+      setFormLatitude(latVal);
+      setFormLongitude(lngVal);
+      geocodePosition(pos);
+    });
+
+    map.addListener("click", (e) => {
+      const latLng = e.latLng;
+      marker.setPosition(latLng);
+      const latVal = latLng.lat();
+      const lngVal = latLng.lng();
+      setFormLatitude(latVal);
+      setFormLongitude(lngVal);
+      geocodePosition(latLng);
+    });
+
+  }, [showFormModal, isMapsLoaded]);
 
 
   const showToast = (message, type = "info") => {
@@ -352,6 +482,9 @@ export default function Sites() {
     setFormName("");
     setFormClientName("");
     setFormLocation("");
+    setFormLatitude("");
+    setFormLongitude("");
+    setFormPlaceId("");
     setFormStartDate("");
     setFormExpectedEndDate("");
     setFormStatus("Planning");
@@ -364,6 +497,9 @@ export default function Sites() {
     setFormName(site.siteName || "");
     setFormClientName(site.clientName || "");
     setFormLocation(site.location || "");
+    setFormLatitude(site.latitude || "");
+    setFormLongitude(site.longitude || "");
+    setFormPlaceId(site.googlePlaceId || "");
     setFormStartDate(site.startDate || "");
     setFormExpectedEndDate(site.expectedEndDate || "");
     setFormStatus(site.status || "Planning");
@@ -382,11 +518,6 @@ export default function Sites() {
       showToast("Client Name is required.", "error");
       return;
     }
-    if (!formLocation.trim()) {
-      showToast("Site Address is required.", "error");
-      return;
-    }
-
     if (!formStartDate) {
       showToast("Start Date is required.", "error");
       return;
@@ -400,10 +531,15 @@ export default function Sites() {
       return;
     }
 
-    let rad = 100;
+    if (!formLatitude || !formLongitude) {
+      showToast("Please search for or click to pin the exact site location on Google Maps.", "error");
+      return;
+    }
+
+    let rad = 50;
     if (formMode === "edit") {
       const existingSite = sites.find(s => s.id === formId);
-      rad = existingSite ? Number(existingSite.radius || 100) : 100;
+      rad = existingSite ? Number(existingSite.radius || 50) : 50;
     }
 
     setLoading(true);
@@ -417,10 +553,11 @@ export default function Sites() {
           formStartDate, 
           formExpectedEndDate, 
           formStatus,
-          null,
-          null,
-          100,
-          adminId
+          formLatitude,
+          formLongitude,
+          50,
+          adminId,
+          formPlaceId
         );
         showToast("Construction Site added successfully.", "success");
         setShowFormModal(false);
@@ -434,7 +571,10 @@ export default function Sites() {
           formStartDate,
           formExpectedEndDate,
           formStatus,
-          rad
+          rad,
+          formLatitude,
+          formLongitude,
+          formPlaceId
         );
         showToast("Construction Site updated successfully.", "success");
         setShowFormModal(false);
@@ -679,18 +819,72 @@ export default function Sites() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="site-location">Site Address</label>
-            <div className="input-wrapper">
+            <label htmlFor="site-search">Google Maps Location Picker</label>
+            <div className="input-wrapper" style={{ marginBottom: "10px" }}>
               <MapPin className="input-icon" size={16} />
               <input 
+                ref={autocompleteInputRef}
                 type="text" 
-                id="site-location" 
-                placeholder="E.g., Sector 45" 
+                id="site-search" 
+                placeholder="Search location on Google Maps..." 
                 value={formLocation}
                 onChange={(e) => setFormLocation(e.target.value)}
                 required 
               />
             </div>
+            
+            <div 
+              ref={mapDivRef} 
+              style={{ 
+                width: "100%", 
+                height: "300px", 
+                borderRadius: "8px", 
+                border: "1px solid var(--border-color)", 
+                marginBottom: "12px" 
+              }} 
+            />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "6px" }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", display: "block", marginBottom: "4px" }}>Selected Latitude</label>
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={formLatitude || "Not Pinpointed"} 
+                  style={{ 
+                    backgroundColor: "var(--primary-50)", 
+                    color: "var(--primary-900)", 
+                    fontWeight: "600",
+                    padding: "8px 12px",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    width: "100%",
+                    outline: "none"
+                  }} 
+                />
+              </div>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label style={{ fontSize: "11px", fontWeight: "700", display: "block", marginBottom: "4px" }}>Selected Longitude</label>
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={formLongitude || "Not Pinpointed"} 
+                  style={{ 
+                    backgroundColor: "var(--primary-50)", 
+                    color: "var(--primary-900)", 
+                    fontWeight: "600",
+                    padding: "8px 12px",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    width: "100%",
+                    outline: "none"
+                  }} 
+                />
+              </div>
+            </div>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "4px", marginBottom: "12px" }}>
+              💡 <em>Tip: Drag the pin or click on the map to fine-tune the exact location.</em>
+            </span>
           </div>
 
 

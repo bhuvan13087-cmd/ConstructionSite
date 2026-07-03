@@ -47,7 +47,7 @@ export function verifySiteGeofence(coords, savedLocation, siteRadius) {
     coords.latitude,
     coords.longitude
   );
-  const allowedRadius = Number(siteRadius || 100);
+  const allowedRadius = 50; // Strictly 50 meters for Phase 7
   const isWithinRadius = distance <= allowedRadius;
   if (isWithinRadius) {
     return {
