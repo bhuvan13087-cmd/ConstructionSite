@@ -4,6 +4,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import { useAuth } from "../context/AuthContext";
 import {
   getSites,
   getMaterialsDetailed,
@@ -37,6 +38,7 @@ import {
 } from "lucide-react";
 
 export default function AdminMaterials() {
+  const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState("master"); // master, requests, inventory, payments
   const [loading, setLoading] = useState(true);
   const [sites, setSites] = useState([]);
@@ -76,8 +78,9 @@ export default function AdminMaterials() {
   const loadData = async () => {
     try {
       setLoading(true);
+      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedMaster, fetchedMaterials] = await Promise.all([
-        getSites(),
+        getSites(adminId),
         getMaterialMaster(),
         getMaterialsDetailed(null) // Fetch all materials across all sites
       ]);

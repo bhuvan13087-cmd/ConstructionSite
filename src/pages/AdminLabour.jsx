@@ -82,11 +82,12 @@ export default function AdminLabour() {
   const loadData = async () => {
     try {
       setLoading(true);
+      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedWorkers, fetchedMaster, fetchedPayments] = await Promise.all([
-        getSites(),
-        getWorkers(),
-        getLabourMaster(),
-        getLabourPayments()
+        getSites(adminId),
+        getWorkers(null, adminId),
+        getLabourMaster(adminId),
+        getLabourPayments(adminId)
       ]);
 
       setSites(fetchedSites);
@@ -171,7 +172,7 @@ export default function AdminLabour() {
 
       const updatedHistory = [newHistoryLog, ...labourMaster.history];
       
-      await saveLabourMaster(updatedCats, updatedHistory);
+      await saveLabourMaster(updatedCats, updatedHistory, userProfile?.uid || userProfile?.id || null);
       showToast(`Labour category ${nameClean} created!`, "success");
       setNewCatName("");
       setNewCatWage("");
@@ -212,7 +213,7 @@ export default function AdminLabour() {
 
       const updatedHistory = [newHistoryLog, ...labourMaster.history];
       
-      await saveLabourMaster(updatedCats, updatedHistory);
+      await saveLabourMaster(updatedCats, updatedHistory, userProfile?.uid || userProfile?.id || null);
       showToast(`Wage rate updated for ${catKey}.`, "success");
       setEditingCatKey(null);
       setEditingWage("");
@@ -243,7 +244,7 @@ export default function AdminLabour() {
         }
       };
       
-      await saveLabourMaster(updatedCats, labourMaster.history);
+      await saveLabourMaster(updatedCats, labourMaster.history, userProfile?.uid || userProfile?.id || null);
       showToast(`Category "${catKey}" set to ${newStatus}.`, "info");
       await loadData();
     } catch (err) {
@@ -271,6 +272,7 @@ export default function AdminLabour() {
       await addWorker({
         siteId: newWorkerSiteId,
         engineerId: userProfile?.uid || userProfile?.id || "admin",
+        adminId: userProfile?.uid || userProfile?.id || null,
         workerName: name,
         category: newWorkerCategory,
         phoneNumber: phone,
@@ -329,7 +331,7 @@ export default function AdminLabour() {
         reference: paymentReference.trim(),
         notes: paymentNotes.trim(),
         loggedBy: userProfile?.fullName || "Admin"
-      });
+      }, userProfile?.uid || userProfile?.id || null);
 
       showToast(`Salary payment of ${amountNum} logged for ${site.siteName}!`, "success");
       setPaymentAmount("");

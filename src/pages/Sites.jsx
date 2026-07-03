@@ -16,6 +16,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import { useAuth } from "../context/AuthContext";
 import { 
   Plus, 
   Search, 
@@ -284,6 +285,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
 };
 
 export default function Sites() {
+  const { userProfile } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState(null);
@@ -315,9 +317,10 @@ export default function Sites() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const fetchedSites = await getSites();
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      const fetchedSites = await getSites(adminId);
       setSites(fetchedSites);
-      const fetchedEngineers = await getSiteEngineers();
+      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading sites page data:", err);
@@ -406,6 +409,7 @@ export default function Sites() {
     setLoading(true);
     try {
       if (formMode === "add") {
+        const adminId = userProfile?.uid || userProfile?.id || null;
         const newSiteId = await createSite(
           formName.trim(), 
           formClientName.trim(), 
@@ -415,7 +419,8 @@ export default function Sites() {
           formStatus,
           null,
           null,
-          100
+          100,
+          adminId
         );
         showToast("Construction Site added successfully.", "success");
         setShowFormModal(false);

@@ -79,11 +79,15 @@ export default function AdminDashboard() {
       }
     };
 
-    // 1. Sites Listener
+    // 1. Sites Listener — filtered to this admin's sites (soft filter for legacy data)
+    const adminUid = user?.uid || null;
     const unsubSites = onSnapshot(collection(db, "sites"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        // Soft filter: include sites with no createdByAdmin (legacy) or matching this admin
+        if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
+        list.push({ id: docSnap.id, ...data });
       });
       setSites(list);
       sitesLoaded = true;
@@ -94,7 +98,7 @@ export default function AdminDashboard() {
       checkLoadingComplete();
     });
 
-    // 2. Engineers Listener (with legacy fallback)
+    // 2. Engineers Listener (with legacy fallback) — filtered to this admin's engineers
     let unsubLegacyEngineers = null;
     const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
       if (snapshot.empty) {
@@ -104,6 +108,7 @@ export default function AdminDashboard() {
           const list = [];
           legacySnap.forEach(docSnap => {
             const data = docSnap.data();
+            if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
             list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
           });
           setEngineers(list);
@@ -122,6 +127,7 @@ export default function AdminDashboard() {
         const list = [];
         snapshot.forEach(docSnap => {
           const data = docSnap.data();
+          if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
           list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
         });
         setEngineers(list);
@@ -136,6 +142,7 @@ export default function AdminDashboard() {
         const list = [];
         legacySnap.forEach(docSnap => {
           const data = docSnap.data();
+          if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
           list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
         });
         setEngineers(list);

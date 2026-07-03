@@ -4,6 +4,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import { useAuth } from "../context/AuthContext";
 import {
   getSites,
   getMaterialsDetailed,
@@ -41,6 +42,7 @@ import {
 } from "lucide-react";
 
 export default function AdminPayments() {
+  const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState("overview"); // overview, expenses, payments, reports
   const [loading, setLoading] = useState(true);
   
@@ -76,10 +78,11 @@ export default function AdminPayments() {
   const loadData = async () => {
     try {
       setLoading(true);
+      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedLabourPayments, fetchedLabourMaster, fetchedGeneralExpenses, fetchedAllMaterials] = await Promise.all([
-        getSites(),
-        getLabourPayments(),
-        getLabourMaster(),
+        getSites(adminId),
+        getLabourPayments(adminId),
+        getLabourMaster(adminId),
         getGeneralExpenses(),
         getMaterialsDetailed(null) // All sites materials
       ]);
@@ -181,7 +184,7 @@ export default function AdminPayments() {
           reference: payoutRef,
           notes: payoutNotes,
           loggedBy: "admin"
-        });
+        }, userProfile?.uid || userProfile?.id || null);
       } else {
         if (!selectedGeneralExpenseId) {
           showToast("Please select an approved site expense invoice", "error");

@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 
 export default function SiteAssignments() {
-  const { user } = useAuth();
+  const { user, userProfile } = useAuth();
   
   // State variables
   const [sites, setSites] = useState([]);
@@ -51,12 +51,13 @@ export default function SiteAssignments() {
   const loadData = async () => {
     try {
       setLoading(true);
+      const adminId = userProfile?.uid || userProfile?.id || null;
       
       // Fetch sites, engineers, and detailed assignments list
-      const fetchedSites = await getSites();
+      const fetchedSites = await getSites(adminId);
       setSites(fetchedSites);
 
-      const fetchedEngineers = await getSiteEngineers();
+      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
 
       const fetchedAssignments = await getSiteAssignmentsDetailed();

@@ -21,6 +21,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import { useAuth } from "../context/AuthContext";
 import { 
   Plus, 
   Search, 
@@ -41,6 +42,7 @@ import {
 
 
 export default function SiteEngineers() {
+  const { userProfile } = useAuth();
   const [engineers, setEngineers] = useState([]);
   const [sites, setSites] = useState([]);
   const [selectedEngineerId, setSelectedEngineerId] = useState(null);
@@ -82,10 +84,11 @@ export default function SiteEngineers() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const fetchedSites = await getSites();
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      const fetchedSites = await getSites(adminId);
       setSites(fetchedSites);
 
-      const fetchedEngineers = await getSiteEngineers();
+      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading engineers page data:", err);
@@ -113,7 +116,8 @@ export default function SiteEngineers() {
       await updateEngineerStatus(id, newStatus);
       showToast(`Status updated to ${newStatus}.`, "success");
       // Reload engineers list
-      const fetchedEngineers = await getSiteEngineers();
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error toggling status:", err);
@@ -225,7 +229,8 @@ export default function SiteEngineers() {
           false,
           [],
           formHolidayAllowance,
-          formPassword
+          formPassword,
+          userProfile?.uid || userProfile?.id || null
         );
 
         showToast("Site Engineer registered successfully.", "success");

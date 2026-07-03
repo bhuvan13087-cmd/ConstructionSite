@@ -47,6 +47,7 @@ export default function AppRoutes() {
         <Route path="/engineer/material" element={<EngineerDashboard tab="material" />} />
         <Route path="/engineer/photos" element={<EngineerDashboard tab="photos" />} />
         <Route path="/engineer/progress" element={<EngineerDashboard tab="progress" />} />
+        <Route path="/engineer/expenses" element={<EngineerDashboard tab="expenses" />} />
         <Route path="/engineer/more" element={<EngineerDashboard tab="more" />} />
         <Route path="/engineer/profile" element={<EngineerDashboard tab="profile" />} />
         <Route path="/engineer/documents" element={<DocumentsDashboard />} />

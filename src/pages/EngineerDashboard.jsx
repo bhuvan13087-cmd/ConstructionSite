@@ -84,7 +84,8 @@ import {
   Eye,
   EyeOff,
   ArrowRightCircle,
-  ArrowLeftCircle
+  ArrowLeftCircle,
+  DollarSign
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -453,10 +454,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setMaterials(siteMats);
 
         // Fetch general expenses, labour history, and payments
+        // Derive adminId from the assigned site's createdByAdmin for payment scoping
         try {
+          const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
           const [ge, lp, lh] = await Promise.all([
             getGeneralExpenses(),
-            getLabourPayments(),
+            getLabourPayments(adminId),
             getLabourDailyCountsSummary(currentActiveId)
           ]);
           setGeneralExpenses(ge);
@@ -544,8 +547,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   useEffect(() => {
     const loadMasterData = async () => {
       try {
+        // Derive adminId from the engineer's assigned sites (for admin-scoped labour master)
+        const engineerId = userProfile?.uid || userProfile?.id || "";
+        let adminId = null;
+        try {
+          const sites = await getAssignedSitesForEngineer(engineerId);
+          if (sites.length > 0 && sites[0].createdByAdmin) {
+            adminId = sites[0].createdByAdmin;
+          }
+        } catch (e) {
+          console.warn("Could not determine adminId for labour master:", e);
+        }
         const [labourMaster, mm] = await Promise.all([
-          getLabourMaster(),
+          getLabourMaster(adminId),
           getMaterialMaster()
         ]);
         

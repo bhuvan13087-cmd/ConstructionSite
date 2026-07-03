@@ -290,6 +290,8 @@ export default function ReportsDashboard() {
   const loadData = async () => {
     try {
       setLoading(true);
+      // Super admins see all data; regular admins are scoped to their own data
+      const adminId = isSuperAdmin ? null : (userProfile?.uid || userProfile?.id || null);
       const [
         fetchedSites,
         fetchedMaterials,
@@ -299,11 +301,11 @@ export default function ReportsDashboard() {
         fetchedApprovals,
         fetchedDocs
       ] = await Promise.all([
-        getSites(),
+        getSites(adminId),
         getMaterialsDetailed(),
-        getLabourMaster(),
+        getLabourMaster(adminId),
         getGeneralExpenses(),
-        getLabourPayments(),
+        getLabourPayments(adminId),
         getCentralApprovals(),
         getAllDocuments()
       ]);

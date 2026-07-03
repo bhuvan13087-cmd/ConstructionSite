@@ -161,7 +161,9 @@ export async function updateUserProfile(uid, updateData) {
 }
 
 // Fetch all registered site engineers
-export async function getSiteEngineers() {
+// Get site engineers. If adminId is provided, filter to only engineers created by that admin.
+// Soft filter: legacy engineers without createdByAdmin are visible to all admins during transition.
+export async function getSiteEngineers(adminId = null) {
   const db = getDb();
   const siteEngineersCollection = collection(db, "siteEngineers");
   let querySnapshot;
@@ -177,6 +179,10 @@ export async function getSiteEngineers() {
   const engineers = [];
   querySnapshot.forEach(doc => {
     const data = doc.data();
+    // Soft adminId filter: skip engineers from a different admin if createdByAdmin is set
+    if (adminId && data.createdByAdmin && data.createdByAdmin !== adminId) {
+      return;
+    }
     engineers.push({ 
       id: doc.id, 
       uid: doc.id,
@@ -193,7 +199,9 @@ export async function getSiteEngineers() {
       const q = query(usersCollection, where("role", "==", "site_engineer"));
       const legacySnapshot = await getDocs(q);
       legacySnapshot.forEach(doc => {
-        engineers.push({ id: doc.id, uid: doc.id, ...doc.data() });
+        const data = doc.data();
+        if (adminId && data.createdByAdmin && data.createdByAdmin !== adminId) return;
+        engineers.push({ id: doc.id, uid: doc.id, ...data });
       });
     } catch (e) {}
   }
@@ -223,7 +231,7 @@ export async function updateEngineerStatus(uid, status) {
 }
 
 // Register or update site engineer user record in Firestore along with site updates
-export async function saveSiteEngineerProfile(id, name, email, phone, selectedSites, isEditMode, oldSites = [], holidayAllowance = 24, password = "") {
+export async function saveSiteEngineerProfile(id, name, email, phone, selectedSites, isEditMode, oldSites = [], holidayAllowance = 24, password = "", adminId = null) {
   const db = getDb();
   const batch = writeBatch(db);
   const userDocRef = doc(db, "users", id);
@@ -272,6 +280,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       status: "active",
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
+      ...(adminId ? { createdByAdmin: adminId } : {}),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
@@ -289,6 +298,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       status: "active",
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
+      ...(adminId ? { createdByAdmin: adminId } : {}),
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...(password ? { password } : {})
@@ -469,20 +479,30 @@ export async function seedDefaultSites() {
 }
 
 // Fetch all construction sites
-export async function getSites() {
+// Get all sites. If adminId is provided, filter to only sites created by that admin.
+// Soft filter: legacy sites without createdByAdmin are included for all admins during transition.
+export async function getSites(adminId = null) {
   const db = getDb();
   const sitesCollection = collection(db, "sites");
   const sitesSnapshot = await getDocs(sitesCollection);
   
   const sites = [];
   sitesSnapshot.forEach(doc => {
-    sites.push({ id: doc.id, ...doc.data() });
+    const data = doc.data();
+    // If adminId filter is active: include only sites owned by this admin,
+    // OR legacy sites that have no createdByAdmin set (backward compat).
+    if (adminId) {
+      if (data.createdByAdmin && data.createdByAdmin !== adminId) {
+        return; // skip another admin's site
+      }
+    }
+    sites.push({ id: doc.id, ...data });
   });
   return sites;
 }
 
 // Create a new construction site document
-export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 100, adminId = null) {
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
@@ -498,6 +518,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
     longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
     radius: Number(radius) || 100,
     locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
+    ...(adminId ? { createdByAdmin: adminId } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
@@ -1418,7 +1439,8 @@ export async function addWorker(workerData) {
   
   await setDoc(newWorkerRef, {
     siteId: workerData.siteId,
-    engineerId: workerData.engineerId,
+    engineerId: workerData.engineerId || null,
+    adminId: workerData.adminId || null,
     workerName: workerData.workerName,
     category: workerData.category,
     phoneNumber: workerData.phoneNumber,
@@ -1439,8 +1461,9 @@ export async function updateWorkerStatus(workerId, status) {
   });
 }
 
-// Fetch workers (optionally filtered by siteId)
-export async function getWorkers(siteId = null) {
+// Fetch workers. If adminId is provided, filter to that admin's workers.
+// Soft filter: workers without adminId (legacy) are included for all admins during transition.
+export async function getWorkers(siteId = null, adminId = null) {
   const db = getDb();
   const workersColl = collection(db, "workers");
   
@@ -1454,11 +1477,16 @@ export async function getWorkers(siteId = null) {
   const snap = await getDocs(q);
   const workers = [];
   snap.forEach(d => {
-    workers.push({ id: d.id, ...d.data() });
+    const data = d.data();
+    // Soft adminId filter: skip workers owned by a different admin if adminId is set on the record
+    if (adminId && data.adminId && data.adminId !== adminId) {
+      return;
+    }
+    workers.push({ id: d.id, ...data });
   });
   
   // Sort by workerName alphabetically
-  return workers.sort((a, b) => a.workerName.localeCompare(b.workerName));
+  return workers.sort((a, b) => (a.workerName || "").localeCompare(b.workerName || ""));
 }
 
 // Save/Mark daily workers attendance batch (idempotent setDoc writes)
@@ -2253,11 +2281,11 @@ export async function rejectMaterialLog(materialId) {
 // CENTRAL LABOUR MASTER & SALARY MANAGEMENT API
 // ==========================================================================
 
-export async function getLabourMaster() {
+// Get admin-scoped labour master categories.
+// If adminId provided, reads from "__labour_master___{adminId}".
+// Falls back to global "__labour_master__" for legacy compatibility.
+export async function getLabourMaster(adminId = null) {
   const db = getDb();
-  const docRef = doc(db, "users", "__labour_master__");
-  const docSnap = await getDoc(docRef);
-  
   const defaults = {
     "Mason": { wage: 800, type: "Daily", status: "Active" },
     "Helper": { wage: 500, type: "Daily", status: "Active" },
@@ -2267,6 +2295,23 @@ export async function getLabourMaster() {
     "Painter": { wage: 700, type: "Daily", status: "Active" },
     "Other": { wage: 600, type: "Daily", status: "Active" }
   };
+
+  // Try admin-scoped doc first if adminId is given
+  if (adminId) {
+    const scopedDocRef = doc(db, "users", `__labour_master__${adminId}`);
+    const scopedSnap = await getDoc(scopedDocRef);
+    if (scopedSnap.exists()) {
+      const data = scopedSnap.data();
+      return {
+        categories: { ...defaults, ...(data.categories || {}) },
+        history: data.history || []
+      };
+    }
+  }
+
+  // Fallback to global document for legacy data
+  const docRef = doc(db, "users", "__labour_master__");
+  const docSnap = await getDoc(docRef);
   
   if (docSnap.exists()) {
     const data = docSnap.data();
@@ -2276,7 +2321,9 @@ export async function getLabourMaster() {
       history: data.history || []
     };
   } else {
-    await setDoc(docRef, {
+    // Initialise the document (global or scoped)
+    const targetRef = adminId ? doc(db, "users", `__labour_master__${adminId}`) : docRef;
+    await setDoc(targetRef, {
       categories: defaults,
       history: []
     });
@@ -2287,9 +2334,12 @@ export async function getLabourMaster() {
   }
 }
 
-export async function saveLabourMaster(categories, history) {
+// Save admin-scoped labour master categories.
+// If adminId provided, writes to "__labour_master___{adminId}".
+export async function saveLabourMaster(categories, history, adminId = null) {
   const db = getDb();
-  const docRef = doc(db, "users", "__labour_master__");
+  const docKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+  const docRef = doc(db, "users", docKey);
   await setDoc(docRef, {
     categories,
     history,
@@ -2297,8 +2347,20 @@ export async function saveLabourMaster(categories, history) {
   });
 }
 
-export async function getLabourPayments() {
+// Get admin-scoped labour payments.
+// If adminId is provided, reads from "__labour_payments___{adminId}".
+// Falls back to global for legacy compatibility.
+export async function getLabourPayments(adminId = null) {
   const db = getDb();
+  // Try admin-scoped doc first
+  if (adminId) {
+    const scopedRef = doc(db, "users", `__labour_payments__${adminId}`);
+    const scopedSnap = await getDoc(scopedRef);
+    if (scopedSnap.exists()) {
+      return scopedSnap.data().payments || [];
+    }
+  }
+  // Fallback to global document
   const docRef = doc(db, "users", "__labour_payments__");
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
@@ -2307,9 +2369,12 @@ export async function getLabourPayments() {
   return [];
 }
 
-export async function saveLabourPayment(paymentData) {
+// Save admin-scoped labour payment.
+// If adminId provided, writes to "__labour_payments___{adminId}".
+export async function saveLabourPayment(paymentData, adminId = null) {
   const db = getDb();
-  const docRef = doc(db, "users", "__labour_payments__");
+  const docKey = adminId ? `__labour_payments__${adminId}` : "__labour_payments__";
+  const docRef = doc(db, "users", docKey);
   const docSnap = await getDoc(docRef);
   
   const newPayment = {
