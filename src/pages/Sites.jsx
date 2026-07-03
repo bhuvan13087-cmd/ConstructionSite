@@ -310,131 +310,223 @@ export default function Sites() {
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
 
-  // Google Maps States & Refs
-  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
+  // Leaflet States & Refs
+  const [isLeafletLoaded, setIsLeafletLoaded] = useState(false);
   const mapDivRef = useRef(null);
-  const autocompleteInputRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const markerInstanceRef = useRef(null);
-  const autocompleteInstanceRef = useRef(null);
+  const leafletMapInstanceRef = useRef(null);
+  const leafletMarkerInstanceRef = useRef(null);
+  const searchTimeoutRef = useRef(null);
+  const [searchSuggestions, setSearchSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearching, setIsSearching] = useState(false);
+  const [mapType, setMapType] = useState("roadmap");
+  const leafletLayersRef = useRef({});
 
-  // Load Google Maps API script
+  // Load Leaflet API script & stylesheet
   useEffect(() => {
-    if (window.google && window.google.maps) {
-      setIsMapsLoaded(true);
+    if (window.L) {
+      setIsLeafletLoaded(true);
       return;
     }
-    const apiKey = firebaseConfig.apiKey;
-    if (!apiKey) {
-      console.error("Google Maps API Key is not set in firebaseConfig.");
-      return;
-    }
-    const existingScript = document.getElementById("google-maps-script");
-    if (existingScript) {
-      setIsMapsLoaded(true);
-      return;
-    }
+    
+    // Load CSS
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(link);
+
+    // Load JS
     const script = document.createElement("script");
-    script.id = "google-maps-script";
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
     script.async = true;
-    script.defer = true;
-    script.onload = () => setIsMapsLoaded(true);
+    script.onload = () => setIsLeafletLoaded(true);
     document.head.appendChild(script);
   }, []);
 
-  // Initialize Map in Modal
+  // Initialize Leaflet Map in Modal
   useEffect(() => {
-    if (!showFormModal || !isMapsLoaded || !mapDivRef.current || !window.google || !window.google.maps) return;
+    if (!showFormModal || !isLeafletLoaded || !mapDivRef.current || !window.L) return;
 
     const initialLat = Number(formLatitude) || 11.1271; // Tamil Nadu center default
     const initialLng = Number(formLongitude) || 78.6569;
     const hasCoords = !!formLatitude && !!formLongitude;
 
-    const mapOptions = {
-      center: { lat: initialLat, lng: initialLng },
-      zoom: hasCoords ? 19 : 8,
-      mapTypeId: window.google.maps.MapTypeId.ROADMAP,
-      mapTypeControl: true,
-      mapTypeControlOptions: {
-        style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
-        position: window.google.maps.ControlPosition.TOP_RIGHT
-      },
-      zoomControl: true,
-      streetViewControl: false,
-      fullscreenControl: true
-    };
-
-    const map = new window.google.maps.Map(mapDivRef.current, mapOptions);
-    mapInstanceRef.current = map;
-
-    const marker = new window.google.maps.Marker({
-      position: { lat: initialLat, lng: initialLng },
-      map: map,
-      draggable: true,
-      title: "Construction Site Location",
-      animation: window.google.maps.Animation.DROP
-    });
-    markerInstanceRef.current = marker;
-
-    if (autocompleteInputRef.current) {
-      const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
-        fields: ["geometry", "formatted_address", "place_id", "name"]
-      });
-      autocompleteInstanceRef.current = autocomplete;
-
-      autocomplete.addListener("place_changed", () => {
-        const place = autocomplete.getPlace();
-        if (place.geometry && place.geometry.location) {
-          const loc = place.geometry.location;
-          const latVal = loc.lat();
-          const lngVal = loc.lng();
-          
-          setFormLatitude(latVal);
-          setFormLongitude(lngVal);
-          setFormLocation(place.formatted_address || place.name || "");
-          setFormPlaceId(place.place_id || "");
-
-          map.setCenter(loc);
-          map.setZoom(19);
-          marker.setPosition(loc);
-        }
-      });
+    // Destroy existing map instance
+    if (leafletMapInstanceRef.current) {
+      leafletMapInstanceRef.current.remove();
+      leafletMapInstanceRef.current = null;
     }
 
-    const geocodePosition = (latLng) => {
-      const geocoder = new window.google.maps.Geocoder();
-      geocoder.geocode({ location: latLng }, (results, status) => {
-        if (status === "OK" && results && results[0]) {
-          setFormLocation(results[0].formatted_address);
-          setFormPlaceId(results[0].place_id || "");
-        } else {
-          setFormLocation(`Lat: ${latLng.lat().toFixed(6)}, Lng: ${latLng.lng().toFixed(6)}`);
-          setFormPlaceId("");
-        }
-      });
+    // Create map instance
+    const map = window.L.map(mapDivRef.current, {
+      zoomControl: true,
+      attributionControl: true
+    }).setView([initialLat, initialLng], hasCoords ? 18 : 8);
+    leafletMapInstanceRef.current = map;
+
+    // Define Tile Layers
+    const roadmapLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    });
+
+    const satelliteLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
+      maxZoom: 19,
+      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
+    });
+
+    leafletLayersRef.current = {
+      roadmap: roadmapLayer,
+      satellite: satelliteLayer
     };
 
-    window.google.maps.event.addListener(marker, "dragend", () => {
-      const pos = marker.getPosition();
-      const latVal = pos.lat();
-      const lngVal = pos.lng();
-      setFormLatitude(latVal);
-      setFormLongitude(lngVal);
-      geocodePosition(pos);
+    // Add selected layer
+    if (mapType === "satellite") {
+      satelliteLayer.addTo(map);
+    } else {
+      roadmapLayer.addTo(map);
+    }
+
+    // Custom CSS-based pulse marker icon (avoiding broken assets paths)
+    const customIcon = window.L.divIcon({
+      html: `
+        <div style="position: relative; display: flex; justify-content: center; align-items: center; width: 34px; height: 34px;">
+          <div style="position: absolute; width: 28px; height: 28px; background-color: rgba(249, 115, 22, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
+          <div style="position: absolute; display: flex; justify-content: center; align-items: center; width: 22px; height: 22px; background-color: var(--primary-600); border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.35);">
+            <div style="width: 7px; height: 7px; background-color: white; border-radius: 50%;"></div>
+          </div>
+        </div>
+        <style>
+          @keyframes ping {
+            0% { transform: scale(0.8); opacity: 1; }
+            100% { transform: scale(1.8); opacity: 0; }
+          }
+        </style>
+      `,
+      className: "custom-leaflet-marker",
+      iconSize: [34, 34],
+      iconAnchor: [17, 17]
     });
 
-    map.addListener("click", (e) => {
-      const latLng = e.latLng;
-      marker.setPosition(latLng);
-      const latVal = latLng.lat();
-      const lngVal = latLng.lng();
-      setFormLatitude(latVal);
-      setFormLongitude(lngVal);
-      geocodePosition(latLng);
+    // Create marker
+    const marker = window.L.marker([initialLat, initialLng], {
+      draggable: true,
+      icon: customIcon
+    }).addTo(map);
+    leafletMarkerInstanceRef.current = marker;
+
+    // Helper for reverse geocoding via Nominatim
+    const reverseGeocode = async (lat, lng) => {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
+          headers: {
+            'Accept-Language': 'en',
+            'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0'
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data && data.display_name) {
+            setFormLocation(data.display_name);
+            setFormPlaceId(data.osm_id ? String(data.osm_id) : "");
+          }
+        }
+      } catch (e) {
+        console.warn("Reverse geocode failed:", e);
+      }
+    };
+
+    // Marker drag end
+    marker.on("dragend", () => {
+      const position = marker.getLatLng();
+      setFormLatitude(position.lat);
+      setFormLongitude(position.lng);
+      reverseGeocode(position.lat, position.lng);
     });
 
-  }, [showFormModal, isMapsLoaded]);
+    // Map click
+    map.on("click", (e) => {
+      const position = e.latlng;
+      marker.setLatLng(position);
+      setFormLatitude(position.lat);
+      setFormLongitude(position.lng);
+      reverseGeocode(position.lat, position.lng);
+    });
+
+    // Invalidate size to load tiles correctly inside modal
+    setTimeout(() => {
+      map.invalidateSize();
+    }, 250);
+
+  }, [showFormModal, isLeafletLoaded]);
+
+  // Autocomplete search handlers
+  const handleSearchChange = (e) => {
+    const val = e.target.value;
+    setFormLocation(val);
+
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (!val.trim() || val.length < 3) {
+      setSearchSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setIsSearching(true);
+    searchTimeoutRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=5&addressdetails=1`, {
+          headers: {
+            'Accept-Language': 'en',
+            'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0'
+          }
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setSearchSuggestions(data || []);
+          setShowSuggestions(true);
+        }
+      } catch (err) {
+        console.warn("Suggestions search error:", err);
+      } finally {
+        setIsSearching(false);
+      }
+    }, 500);
+  };
+
+  const handleSelectSuggestion = (s) => {
+    const latVal = Number(s.lat);
+    const lngVal = Number(s.lon);
+    
+    setFormLatitude(latVal);
+    setFormLongitude(lngVal);
+    setFormLocation(s.display_name);
+    setFormPlaceId(s.osm_id ? String(s.osm_id) : "");
+    setShowSuggestions(false);
+
+    if (leafletMapInstanceRef.current && leafletMarkerInstanceRef.current) {
+      leafletMapInstanceRef.current.setView([latVal, lngVal], 19);
+      leafletMarkerInstanceRef.current.setLatLng([latVal, lngVal]);
+    }
+  };
+
+  const handleToggleMapType = (type) => {
+    setMapType(type);
+    const map = leafletMapInstanceRef.current;
+    const layers = leafletLayersRef.current;
+    if (!map || !layers) return;
+
+    if (type === "satellite") {
+      if (layers.roadmap) map.removeLayer(layers.roadmap);
+      if (layers.satellite) layers.satellite.addTo(map);
+    } else {
+      if (layers.satellite) map.removeLayer(layers.satellite);
+      if (layers.roadmap) layers.roadmap.addTo(map);
+    }
+  };
 
 
   const showToast = (message, type = "info") => {
@@ -818,21 +910,109 @@ export default function Sites() {
             </div>
           </div>
 
-          <div className="form-group">
+          <div className="form-group" style={{ position: "relative" }}>
             <label htmlFor="site-search">Google Maps Location Picker</label>
             <div className="input-wrapper" style={{ marginBottom: "10px" }}>
               <MapPin className="input-icon" size={16} />
               <input 
-                ref={autocompleteInputRef}
                 type="text" 
                 id="site-search" 
-                placeholder="Search location on Google Maps..." 
+                placeholder="Type to search location on map..." 
                 value={formLocation}
-                onChange={(e) => setFormLocation(e.target.value)}
+                onChange={handleSearchChange}
                 required 
               />
+              {isSearching && (
+                <div style={{
+                  position: "absolute",
+                  right: "12px",
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  width: "16px",
+                  height: "16px",
+                  border: "2px solid #e2e8f0",
+                  borderTopColor: "var(--primary-600)",
+                  borderRadius: "50%",
+                  animation: "leaflet-spin 0.8s linear infinite"
+                }} />
+              )}
             </div>
+
+            {showSuggestions && searchSuggestions.length > 0 && (
+              <div style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                backgroundColor: "#ffffff",
+                border: "1px solid var(--border-color)",
+                borderRadius: "8px",
+                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                zIndex: 9999,
+                maxHeight: "180px",
+                overflowY: "auto",
+                marginTop: "4px"
+              }}>
+                {searchSuggestions.map((s, idx) => (
+                  <div 
+                    key={idx}
+                    onClick={() => handleSelectSuggestion(s)}
+                    style={{
+                      padding: "8px 12px",
+                      fontSize: "12px",
+                      color: "var(--primary-900)",
+                      cursor: "pointer",
+                      borderBottom: idx < searchSuggestions.length - 1 ? "1px solid var(--primary-50)" : "none",
+                      textAlign: "left",
+                      lineHeight: "1.4"
+                    }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                  >
+                    {s.display_name}
+                  </div>
+                ))}
+              </div>
+            )}
             
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", marginBottom: "8px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Map Control</span>
+              <div style={{ display: "flex", gap: "4px" }}>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("roadmap")}
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "3px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    backgroundColor: mapType === "roadmap" ? "var(--primary-600)" : "#ffffff",
+                    color: mapType === "roadmap" ? "#ffffff" : "var(--text-muted)",
+                    cursor: "pointer"
+                  }}
+                >
+                  Map View
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleMapType("satellite")}
+                  style={{
+                    fontSize: "10px",
+                    fontWeight: "700",
+                    padding: "3px 8px",
+                    borderRadius: "4px",
+                    border: "1px solid var(--border-color)",
+                    backgroundColor: mapType === "satellite" ? "var(--primary-600)" : "#ffffff",
+                    color: mapType === "satellite" ? "#ffffff" : "var(--text-muted)",
+                    cursor: "pointer"
+                  }}
+                >
+                  Satellite View
+                </button>
+              </div>
+            </div>
+
             <div 
               ref={mapDivRef} 
               style={{ 
@@ -840,7 +1020,8 @@ export default function Sites() {
                 height: "300px", 
                 borderRadius: "8px", 
                 border: "1px solid var(--border-color)", 
-                marginBottom: "12px" 
+                marginBottom: "12px",
+                zIndex: 1
               }} 
             />
 
@@ -885,6 +1066,12 @@ export default function Sites() {
             <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "4px", marginBottom: "12px" }}>
               💡 <em>Tip: Drag the pin or click on the map to fine-tune the exact location.</em>
             </span>
+            <style>{`
+              @keyframes leaflet-spin {
+                0% { transform: translateY(-50%) rotate(0deg); }
+                100% { transform: translateY(-50%) rotate(360deg); }
+              }
+            `}</style>
           </div>
 
 
