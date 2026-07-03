@@ -12,16 +12,60 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
+    // Helper functions for new collections
+    function isSuperAdmin() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/superAdmins/$(request.auth.uid));
+    }
+    
+    function isAdminUser() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/admins/$(request.auth.uid));
+    }
+
+    function isSiteEngineer() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/siteEngineers/$(request.auth.uid));
+    }
+
+    function getSuperAdminData() {
+      return get(/databases/$(database)/documents/superAdmins/$(request.auth.uid)).data;
+    }
+
+    function getAdminData() {
+      return get(/databases/$(database)/documents/admins/$(request.auth.uid)).data;
+    }
+
+    function getSiteEngineerData() {
+      return get(/databases/$(database)/documents/siteEngineers/$(request.auth.uid)).data;
+    }
+
+    function isActiveSuperAdmin() {
+      return isSuperAdmin() && getSuperAdminData().status == 'active';
+    }
+
+    function isActiveAdmin() {
+      return isAdminUser() && getAdminData().status == 'active';
+    }
+
+    function isActiveSiteEngineer() {
+      return isSiteEngineer() && getSiteEngineerData().status == 'active';
+    }
+
     // Verify if the authenticated user has an active account in Firestore
     function isActiveUser() {
-      return isAuthenticated() && 
-             exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-             getUserData().status == 'active';
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().status == 'active') ||
+        isActiveSuperAdmin() || 
+        isActiveAdmin() || 
+        isActiveSiteEngineer()
+      );
     }
 
     // Verify if the authenticated user is an active admin (includes super admins)
     function isAdmin() {
-      return isActiveUser() && (getUserData().role == 'admin' || getUserData().role == 'super_admin' || getUserData().role == 'superadmin');
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getUserData().status == 'active' && (getUserData().role == 'admin' || getUserData().role == 'super_admin' || getUserData().role == 'superadmin')) ||
+        isActiveSuperAdmin() || 
+        isActiveAdmin()
+      );
     }
 
     match /users/{userId} {
@@ -59,6 +103,65 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
+    match /superAdmins/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          request.auth.uid == userId && 
+          isActiveUser() && 
+          request.resource.data.role == resource.data.role && 
+          request.resource.data.status == resource.data.status
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /admins/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          request.auth.uid == userId && 
+          isActiveUser() && 
+          request.resource.data.role == resource.data.role && 
+          request.resource.data.status == resource.data.status
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    match /siteEngineers/{userId} {
+      allow read: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        isAdmin()
+      );
+      allow update: if isAuthenticated() && (
+        isAdmin() || (
+          request.auth.uid == userId && 
+          isActiveUser() && 
+          request.resource.data.status == resource.data.status
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
     match /sites/{siteId} {
       // Allow read access to construction sites only for active users (admins or engineers)
       allow read: if isActiveUser();
@@ -66,13 +169,20 @@ service cloud.firestore {
       // Allow write/modify access to construction sites for active admins, and updates for assigned engineers
       allow create, delete: if isAdmin();
       allow update: if isAdmin() || (
-        isActiveUser() && 
-        siteId in getUserData().assignedSites
+        isActiveUser() && (
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && siteId in getSiteEngineerData().assignedSites)
+        )
       );
     }
 
-    match /dailyUpdates/{updateId} {
+    match /reports/{updateId} {
       // Allow active users (admins or engineers) to read and write daily updates
+      allow read, write: if isActiveUser();
+    }
+
+    match /expenses/{expenseId} {
+      // Allow active users to read and write general expenses
       allow read, write: if isActiveUser();
     }
 
@@ -97,15 +207,20 @@ service cloud.firestore {
     match /materials/{materialId} {
       // Allow read access to admins, or active engineers if the site is in their assignedSites list
       allow read: if isAdmin() || (
-        isActiveUser() && 
-        (resource == null || resource.data.siteId in getUserData().assignedSites)
+        isActiveUser() && (
+          resource == null || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && resource.data.siteId in getSiteEngineerData().assignedSites)
+        )
       );
       
       // Allow creation only by active engineers assigned to the site, saving under their own UID
       allow create: if isActiveUser() && 
-                    (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
-                    request.resource.data.engineerId == request.auth.uid &&
-                    request.resource.data.siteId in getUserData().assignedSites;
+                    (
+                      ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'site_engineer' || getUserData().role == 'engineer')) && request.resource.data.siteId in getUserData().assignedSites) ||
+                      (isSiteEngineer() && request.resource.data.siteId in getSiteEngineerData().assignedSites)
+                    ) &&
+                    request.resource.data.engineerId == request.auth.uid;
       
       // Updates and deletes are restricted to admin
       allow update, delete: if isAdmin();
@@ -113,40 +228,55 @@ service cloud.firestore {
 
     match /workers/{workerId} {
       allow read: if isAdmin() || (
-        isActiveUser() && 
-        (resource == null || resource.data.siteId in getUserData().assignedSites)
+        isActiveUser() && (
+          resource == null || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && resource.data.siteId in getSiteEngineerData().assignedSites)
+        )
       );
       allow write: if isAdmin() || (
         isActiveUser() && 
-        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
-        request.resource.data.engineerId == request.auth.uid &&
-        request.resource.data.siteId in getUserData().assignedSites
+        (
+          ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'site_engineer' || getUserData().role == 'engineer')) && request.resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && request.resource.data.siteId in getSiteEngineerData().assignedSites)
+        ) &&
+        request.resource.data.engineerId == request.auth.uid
       );
     }
 
     match /labourAttendance/{attendanceId} {
       allow read: if isAdmin() || (
-        isActiveUser() && 
-        (resource == null || resource.data.siteId in getUserData().assignedSites)
+        isActiveUser() && (
+          resource == null || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && resource.data.siteId in getSiteEngineerData().assignedSites)
+        )
       );
       allow write: if isAdmin() || (
         isActiveUser() && 
-        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
-        request.resource.data.markedBy == request.auth.uid &&
-        request.resource.data.siteId in getUserData().assignedSites
+        (
+          ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'site_engineer' || getUserData().role == 'engineer')) && request.resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && request.resource.data.siteId in getSiteEngineerData().assignedSites)
+        ) &&
+        request.resource.data.markedBy == request.auth.uid
       );
     }
 
     match /labourDailyCount/{countId} {
       allow read: if isAdmin() || (
-        isActiveUser() && 
-        (resource == null || resource.data.siteId in getUserData().assignedSites)
+        isActiveUser() && (
+          resource == null || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && resource.data.siteId in getSiteEngineerData().assignedSites)
+        )
       );
       allow write: if isAdmin() || (
         isActiveUser() && 
-        (getUserData().role == 'site_engineer' || getUserData().role == 'engineer') &&
-        request.resource.data.engineerId == request.auth.uid &&
-        request.resource.data.siteId in getUserData().assignedSites
+        (
+          ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'site_engineer' || getUserData().role == 'engineer')) && request.resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && request.resource.data.siteId in getSiteEngineerData().assignedSites)
+        ) &&
+        request.resource.data.engineerId == request.auth.uid
       );
     }
 

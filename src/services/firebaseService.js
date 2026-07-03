@@ -30,6 +30,32 @@ function getDb() {
 // Get a user profile by UID
 export async function getUserProfile(uid) {
   const db = getDb();
+  // 1. Check superAdmins
+  try {
+    const superAdminDoc = await getDoc(doc(db, "superAdmins", uid));
+    if (superAdminDoc.exists()) {
+      return { uid, id: uid, ...superAdminDoc.data() };
+    }
+  } catch (e) {}
+
+  // 2. Check admins
+  try {
+    const adminDoc = await getDoc(doc(db, "admins", uid));
+    if (adminDoc.exists()) {
+      return { uid, id: uid, ...adminDoc.data() };
+    }
+  } catch (e) {}
+
+  // 3. Check siteEngineers
+  try {
+    const engineerDoc = await getDoc(doc(db, "siteEngineers", uid));
+    if (engineerDoc.exists()) {
+      const data = engineerDoc.data();
+      return { uid, id: uid, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
+    }
+  } catch (e) {}
+
+  // 4. Fallback to legacy users
   const userDocRef = doc(db, "users", uid);
   const userDoc = await getDoc(userDocRef);
   if (userDoc.exists()) {
@@ -41,46 +67,159 @@ export async function getUserProfile(uid) {
 // Create a user profile (e.g. for Admin or Engineer)
 export async function createUserProfile(uid, profileData) {
   const db = getDb();
+  
+  // Write to legacy collection first for backward compatibility
   const userDocRef = doc(db, "users", uid);
-  await setDoc(userDocRef, {
+  const payload = {
     ...profileData,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
-  });
+  };
+  await setDoc(userDocRef, payload);
+
+  // Determine role and write to corresponding collection
+  const role = profileData.role;
+  if (role === "super_admin" || role === "superadmin") {
+    await setDoc(doc(db, "superAdmins", uid), {
+      uid,
+      name: profileData.fullName || profileData.name || "",
+      email: profileData.email || "",
+      role: role,
+      status: profileData.status || "active",
+      ...payload
+    });
+  } else if (role === "admin") {
+    await setDoc(doc(db, "admins", uid), {
+      uid,
+      name: profileData.fullName || profileData.name || "",
+      email: profileData.email || "",
+      role: role,
+      assignedSites: profileData.assignedSites || [],
+      status: profileData.status || "active",
+      ...payload
+    });
+  } else if (role === "site_engineer" || role === "engineer") {
+    await setDoc(doc(db, "siteEngineers", uid), {
+      uid,
+      name: profileData.fullName || profileData.name || "",
+      phone: profileData.phoneNumber || profileData.phone || "",
+      assignedSites: profileData.assignedSites || [],
+      status: profileData.status || "active",
+      ...payload
+    });
+  }
 }
 
 // Update user profile fields (e.g. lastLogin)
 export async function updateUserProfile(uid, updateData) {
   const db = getDb();
-  const userDocRef = doc(db, "users", uid);
-  await updateDoc(userDocRef, {
+  const payload = {
     ...updateData,
     updatedAt: serverTimestamp()
-  });
+  };
+  
+  // Update legacy users doc if it exists
+  try {
+    const userDocRef = doc(db, "users", uid);
+    await updateDoc(userDocRef, payload);
+  } catch (e) {}
+
+  // Update in correct role collection
+  try {
+    const superAdminDoc = doc(db, "superAdmins", uid);
+    const snap = await getDoc(superAdminDoc);
+    if (snap.exists()) {
+      const rolePayload = { ...payload };
+      if (updateData.fullName) rolePayload.name = updateData.fullName;
+      await updateDoc(superAdminDoc, rolePayload);
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const adminDoc = doc(db, "admins", uid);
+    const snap = await getDoc(adminDoc);
+    if (snap.exists()) {
+      const rolePayload = { ...payload };
+      if (updateData.fullName) rolePayload.name = updateData.fullName;
+      await updateDoc(adminDoc, rolePayload);
+      return;
+    }
+  } catch (e) {}
+
+  try {
+    const engineerDoc = doc(db, "siteEngineers", uid);
+    const snap = await getDoc(engineerDoc);
+    if (snap.exists()) {
+      const rolePayload = { ...payload };
+      if (updateData.fullName) rolePayload.name = updateData.fullName;
+      if (updateData.phoneNumber) rolePayload.phone = updateData.phoneNumber;
+      await updateDoc(engineerDoc, rolePayload);
+      return;
+    }
+  } catch (e) {}
 }
 
 // Fetch all registered site engineers
 export async function getSiteEngineers() {
   const db = getDb();
-  const usersCollection = collection(db, "users");
-  const q = query(usersCollection, where("role", "==", "site_engineer"));
-  const querySnapshot = await getDocs(q);
+  const siteEngineersCollection = collection(db, "siteEngineers");
+  let querySnapshot;
+  try {
+    querySnapshot = await getDocs(siteEngineersCollection);
+  } catch (e) {
+    // If permission denied or other error, fallback to legacy query
+    const usersCollection = collection(db, "users");
+    const q = query(usersCollection, where("role", "==", "site_engineer"));
+    querySnapshot = await getDocs(q);
+  }
   
   const engineers = [];
   querySnapshot.forEach(doc => {
-    engineers.push({ id: doc.id, ...doc.data() });
+    const data = doc.data();
+    engineers.push({ 
+      id: doc.id, 
+      uid: doc.id,
+      fullName: data.name || data.fullName || "",
+      phoneNumber: data.phone || data.phoneNumber || "",
+      ...data 
+    });
   });
+  
+  // Fallback to legacy if empty
+  if (engineers.length === 0) {
+    try {
+      const usersCollection = collection(db, "users");
+      const q = query(usersCollection, where("role", "==", "site_engineer"));
+      const legacySnapshot = await getDocs(q);
+      legacySnapshot.forEach(doc => {
+        engineers.push({ id: doc.id, uid: doc.id, ...doc.data() });
+      });
+    } catch (e) {}
+  }
+  
   return engineers;
 }
 
 // Update status of site engineer
 export async function updateEngineerStatus(uid, status) {
   const db = getDb();
-  const userDocRef = doc(db, "users", uid);
-  await updateDoc(userDocRef, {
-    status,
-    updatedAt: serverTimestamp()
-  });
+  
+  try {
+    const engineerDocRef = doc(db, "siteEngineers", uid);
+    await updateDoc(engineerDocRef, {
+      status,
+      updatedAt: serverTimestamp()
+    });
+  } catch (e) {}
+
+  try {
+    const userDocRef = doc(db, "users", uid);
+    await updateDoc(userDocRef, {
+      status,
+      updatedAt: serverTimestamp()
+    });
+  } catch (e) {}
 }
 
 // Register or update site engineer user record in Firestore along with site updates
@@ -88,11 +227,21 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
   const db = getDb();
   const batch = writeBatch(db);
   const userDocRef = doc(db, "users", id);
+  const engineerDocRef = doc(db, "siteEngineers", id);
   
   if (isEditMode) {
-    batch.update(userDocRef, {
+    const updatePayload = {
       fullName: name,
       phoneNumber: phone,
+      assignedSites: selectedSites,
+      holidayAllowance: Number(holidayAllowance) || 24,
+      updatedAt: serverTimestamp()
+    };
+    batch.update(userDocRef, updatePayload);
+    
+    batch.update(engineerDocRef, {
+      name: name,
+      phone: phone,
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
       updatedAt: serverTimestamp()
@@ -126,11 +275,24 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     };
-    // Store admin-provided initial password so it can be shown to engineer on first login
     if (password) {
       createPayload.password = password;
     }
     batch.set(userDocRef, createPayload);
+    
+    batch.set(engineerDocRef, {
+      uid: id,
+      name: name,
+      phone: phone,
+      email: email,
+      role: "site_engineer",
+      status: "active",
+      assignedSites: selectedSites,
+      holidayAllowance: Number(holidayAllowance) || 24,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+      ...(password ? { password } : {})
+    });
     
     // Apply site assignments
     selectedSites.forEach(siteId => {
@@ -147,6 +309,15 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
 // Update password field for an engineer in Firestore database (Clear plaintext password and update timestamp)
 export async function updateEngineerPasswordInDb(uid, newPassword) {
   const db = getDb();
+  
+  try {
+    const engineerDocRef = doc(db, "siteEngineers", uid);
+    await updateDoc(engineerDocRef, {
+      password: deleteField(),
+      updatedAt: serverTimestamp()
+    });
+  } catch (e) {}
+
   const userDocRef = doc(db, "users", uid);
   await updateDoc(userDocRef, {
     password: deleteField(),
@@ -203,8 +374,42 @@ export async function rejectSiteLocation(siteId) {
 // Fetch user profile by corporate email
 export async function getUserByEmail(email) {
   const db = getDb();
+  const trimmed = email.trim();
+  
+  // Try superAdmins
+  try {
+    const q = query(collection(db, "superAdmins"), where("email", "==", trimmed));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      return { id: doc.id, uid: doc.id, ...doc.data() };
+    }
+  } catch (e) {}
+
+  // Try admins
+  try {
+    const q = query(collection(db, "admins"), where("email", "==", trimmed));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      return { id: doc.id, uid: doc.id, ...doc.data() };
+    }
+  } catch (e) {}
+
+  // Try siteEngineers
+  try {
+    const q = query(collection(db, "siteEngineers"), where("email", "==", trimmed));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      const data = doc.data();
+      return { id: doc.id, uid: doc.id, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
+    }
+  } catch (e) {}
+
+  // Fallback to legacy users
   const usersCollection = collection(db, "users");
-  const q = query(usersCollection, where("email", "==", email.trim()));
+  const q = query(usersCollection, where("email", "==", trimmed));
   const querySnapshot = await getDocs(q);
   if (!querySnapshot.empty) {
     const doc = querySnapshot.docs[0];
@@ -216,8 +421,22 @@ export async function getUserByEmail(email) {
 // Fetch user profile by phone number
 export async function getUserByPhone(phone) {
   const db = getDb();
+  const trimmed = phone.trim();
+  
+  // Try siteEngineers
+  try {
+    const q = query(collection(db, "siteEngineers"), where("phone", "==", trimmed));
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const doc = snap.docs[0];
+      const data = doc.data();
+      return { id: doc.id, uid: doc.id, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
+    }
+  } catch (e) {}
+
+  // Try legacy users
   const usersCollection = collection(db, "users");
-  const q = query(usersCollection, where("phoneNumber", "==", phone.trim()));
+  const q = query(usersCollection, where("phoneNumber", "==", trimmed));
   const querySnapshot = await getDocs(q);
   if (!querySnapshot.empty) {
     const doc = querySnapshot.docs[0];
@@ -333,9 +552,9 @@ export async function updateSiteLocation(siteId, latitude, longitude, address, l
 
   let engineerName = "Site Engineer";
   try {
-    const userDoc = await getDoc(doc(db, "users", engineerId));
-    if (userDoc.exists()) {
-      engineerName = userDoc.data().fullName;
+    const userDoc = await getUserProfile(engineerId);
+    if (userDoc) {
+      engineerName = userDoc.fullName || userDoc.name || "Site Engineer";
     }
   } catch (e) {}
 
@@ -553,12 +772,29 @@ export async function getDashboardMetrics() {
     const sitesSnap = await getDocs(collection(db, "sites"));
     totalSitesCount = sitesSnap.size;
 
-    const engineersQuery = query(
-      collection(db, "users"), 
-      where("role", "==", "site_engineer"), 
-      where("status", "==", "active")
-    );
-    const engineersSnap = await getDocs(engineersQuery);
+    let engineersSnap;
+    try {
+      const engineersQuery = query(
+        collection(db, "siteEngineers"), 
+        where("status", "==", "active")
+      );
+      engineersSnap = await getDocs(engineersQuery);
+      if (engineersSnap.empty) {
+        const legacyQuery = query(
+          collection(db, "users"),
+          where("role", "==", "site_engineer"),
+          where("status", "==", "active")
+        );
+        engineersSnap = await getDocs(legacyQuery);
+      }
+    } catch (e) {
+      const legacyQuery = query(
+        collection(db, "users"),
+        where("role", "==", "site_engineer"),
+        where("status", "==", "active")
+      );
+      engineersSnap = await getDocs(legacyQuery);
+    }
     activeEngineersCount = engineersSnap.size;
 
     const todayStr = new Date().toISOString().split("T")[0];
@@ -719,8 +955,7 @@ export async function getSitePhotos(engineerId, siteId = null) {
 // Save progress report (daily updates)
 export async function saveDailyProgressReport(engineerId, siteId, description, progress, photoIds = [], additionalNotes = {}) {
   const db = getDb();
-  const newUpdateRef = doc(collection(db, "dailyUpdates"));
-  await setDoc(newUpdateRef, {
+  const reportData = {
     engineerId,
     siteId,
     description,
@@ -734,7 +969,17 @@ export async function saveDailyProgressReport(engineerId, siteId, description, p
     nextActivity: additionalNotes.nextActivity || "",
     date: additionalNotes.date || new Date().toISOString().split("T")[0],
     createdAt: serverTimestamp()
-  });
+  };
+
+  // Write to reports
+  const newReportRef = doc(collection(db, "reports"));
+  await setDoc(newReportRef, reportData);
+
+  // Write to legacy dailyUpdates using the same document ID for backward compatibility
+  try {
+    const legacyRef = doc(db, "dailyUpdates", newReportRef.id);
+    await setDoc(legacyRef, reportData);
+  } catch (e) {}
 
   // central updates integration
   let siteName = "Unknown Site";
@@ -747,9 +992,9 @@ export async function saveDailyProgressReport(engineerId, siteId, description, p
 
   let engineerName = "Site Engineer";
   try {
-    const userDoc = await getDoc(doc(db, "users", engineerId));
-    if (userDoc.exists()) {
-      engineerName = userDoc.data().fullName;
+    const userDoc = await getUserProfile(engineerId);
+    if (userDoc) {
+      engineerName = userDoc.fullName || userDoc.name || "Site Engineer";
     }
   } catch (e) {}
 
@@ -780,7 +1025,7 @@ export async function saveDailyProgressReport(engineerId, siteId, description, p
 // Get daily updates for an engineer (optionally filtered by siteId)
 export async function getDailyUpdatesForEngineer(engineerId, siteId = null) {
   const db = getDb();
-  const updatesColl = collection(db, "dailyUpdates");
+  let updatesColl = collection(db, "reports");
   let q;
   if (siteId) {
     q = query(
@@ -791,8 +1036,42 @@ export async function getDailyUpdatesForEngineer(engineerId, siteId = null) {
   } else {
     q = query(updatesColl, where("engineerId", "==", engineerId));
   }
-  const snap = await getDocs(q);
-  
+  let snap;
+  try {
+    snap = await getDocs(q);
+  } catch (e) {
+    updatesColl = collection(db, "dailyUpdates");
+    if (siteId) {
+      q = query(
+        updatesColl,
+        where("engineerId", "==", engineerId),
+        where("siteId", "==", siteId)
+      );
+    } else {
+      q = query(updatesColl, where("engineerId", "==", engineerId));
+    }
+    snap = await getDocs(q);
+  }
+  if (snap.empty) {
+    try {
+      const fallbackColl = collection(db, "dailyUpdates");
+      let fallbackQ;
+      if (siteId) {
+        fallbackQ = query(
+          fallbackColl,
+          where("engineerId", "==", engineerId),
+          where("siteId", "==", siteId)
+        );
+      } else {
+        fallbackQ = query(fallbackColl, where("engineerId", "==", engineerId));
+      }
+      const fallbackSnap = await getDocs(fallbackQ);
+      if (!fallbackSnap.empty) {
+        snap = fallbackSnap;
+      }
+    } catch (err) {}
+  }
+  const list = [];
   const updates = [];
   snap.forEach(doc => {
     updates.push({ id: doc.id, ...doc.data() });
@@ -833,12 +1112,24 @@ export async function getSiteAssignmentsDetailed() {
   
   // Fetch sites and users collections to resolve names
   const sites = await getSites();
-  const usersCollection = collection(db, "users");
-  const usersSnapshot = await getDocs(usersCollection);
+  let usersSnapshot;
+  try {
+    usersSnapshot = await getDocs(collection(db, "siteEngineers"));
+    if (usersSnapshot.empty) {
+      usersSnapshot = await getDocs(collection(db, "users"));
+    }
+  } catch (e) {
+    usersSnapshot = await getDocs(collection(db, "users"));
+  }
   
   const usersMap = {};
   usersSnapshot.forEach(doc => {
-    usersMap[doc.id] = doc.data();
+    const data = doc.data();
+    usersMap[doc.id] = {
+      fullName: data.name || data.fullName || "",
+      email: data.email || "",
+      ...data
+    };
   });
 
   const detailedAssignments = [];
@@ -879,13 +1170,19 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
     throw new Error("Invalid site selected.");
   }
 
-  // Validation: Check if engineer exists and is active
-  const engineerDocRef = doc(db, "users", engineerId);
+  // Validation: Check if engineer exists and is active (check siteEngineers first, then users)
+  let engineerData;
+  const engineerDocRef = doc(db, "siteEngineers", engineerId);
   const engineerDoc = await getDoc(engineerDocRef);
   if (!engineerDoc.exists()) {
-    throw new Error("Selected engineer profile does not exist.");
+    const legacyDoc = await getDoc(doc(db, "users", engineerId));
+    if (!legacyDoc.exists()) {
+      throw new Error("Selected engineer profile does not exist.");
+    }
+    engineerData = legacyDoc.data();
+  } else {
+    engineerData = engineerDoc.data();
   }
-  const engineerData = engineerDoc.data();
   if (engineerData.status !== "active") {
     throw new Error("Cannot assign site to an inactive engineer.");
   }
@@ -914,10 +1211,15 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
     status: "active"
   });
 
-  // Also update engineer's profile assignedSites list
-  batch.update(engineerDocRef, {
+  // Also update engineer's profile assignedSites list in both collections
+  batch.update(doc(db, "siteEngineers", engineerId), {
     assignedSites: arrayUnion(siteId)
   });
+  try {
+    batch.update(doc(db, "users", engineerId), {
+      assignedSites: arrayUnion(siteId)
+    });
+  } catch (e) {}
 
   // Also update site's assignedEngineers list
   const siteDocRef = doc(db, "sites", siteId);
@@ -943,11 +1245,15 @@ export async function removeEngineerFromSite(assignmentId) {
   const batch = writeBatch(db);
   batch.delete(assignmentDocRef);
 
-  // Remove siteId from engineer's assignedSites list
-  const engineerDocRef = doc(db, "users", engineerId);
-  batch.update(engineerDocRef, {
+  // Remove siteId from engineer's assignedSites list in both collections
+  batch.update(doc(db, "siteEngineers", engineerId), {
     assignedSites: arrayRemove(siteId)
   });
+  try {
+    batch.update(doc(db, "users", engineerId), {
+      assignedSites: arrayRemove(siteId)
+    });
+  } catch (e) {}
 
   // Remove engineerId from site's assignedEngineers list
   const siteDocRef = doc(db, "sites", siteId);
@@ -996,9 +1302,9 @@ export async function addMaterial(materialData) {
 
   let engineerName = "Site Engineer";
   try {
-    const userDoc = await getDoc(doc(db, "users", materialData.engineerId));
-    if (userDoc.exists()) {
-      engineerName = userDoc.data().fullName;
+    const userDoc = await getUserProfile(materialData.engineerId);
+    if (userDoc) {
+      engineerName = userDoc.fullName || userDoc.name || "Site Engineer";
     }
   } catch (e) {}
 
@@ -1055,12 +1361,20 @@ export async function getMaterialsDetailed(siteId = null) {
   
   const snap = await getDocs(q);
   
-  // Fetch users collection to resolve engineer names
-  const usersColl = collection(db, "users");
-  const usersSnap = await getDocs(usersColl);
+  // Fetch siteEngineers collection to resolve engineer names (fallback to users)
+  let usersSnap;
+  try {
+    usersSnap = await getDocs(collection(db, "siteEngineers"));
+    if (usersSnap.empty) {
+      usersSnap = await getDocs(collection(db, "users"));
+    }
+  } catch (e) {
+    usersSnap = await getDocs(collection(db, "users"));
+  }
   const usersMap = {};
   usersSnap.forEach(d => {
-    usersMap[d.id] = d.data();
+    const data = d.data();
+    usersMap[d.id] = { fullName: data.name || data.fullName || "", ...data };
   });
   
   // Fetch sites list to resolve site names
@@ -1421,9 +1735,9 @@ export async function logEngineerLeave(engineerId, dateStr, reason) {
   // Central approvals integration
   let engineerName = "Site Engineer";
   try {
-    const userDoc = await getDoc(doc(db, "users", engineerId));
-    if (userDoc.exists()) {
-      engineerName = userDoc.data().fullName;
+    const userDoc = await getUserProfile(engineerId);
+    if (userDoc) {
+      engineerName = userDoc.fullName || userDoc.name || "Site Engineer";
     }
   } catch (e) {}
 
@@ -1538,6 +1852,8 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
   // 2. Delete engineer profile document
   const userDocRef = doc(db, "users", engineerId);
   batch.delete(userDocRef);
+  const engineerDocRef = doc(db, "siteEngineers", engineerId);
+  batch.delete(engineerDocRef);
 
   // 3. Query and delete all site assignments for this engineer
   const assignmentsColl = collection(db, "siteAssignments");
@@ -1649,9 +1965,11 @@ export async function deleteLabourDailyCounts(siteId, dateStr) {
 // Delete daily progress report
 export async function deleteDailyProgressReport(reportId) {
   const db = getDb();
-  const docRef = doc(db, "dailyUpdates", reportId);
   const batch = writeBatch(db);
-  batch.delete(docRef);
+  batch.delete(doc(db, "reports", reportId));
+  try {
+    batch.delete(doc(db, "dailyUpdates", reportId));
+  } catch (e) {}
   await batch.commit();
 }
 
@@ -1761,9 +2079,21 @@ export async function getAttendanceForSite(siteId) {
 // Get daily progress updates for a site
 export async function getDailyUpdatesForSite(siteId) {
   const db = getDb();
-  const updatesColl = collection(db, "dailyUpdates");
-  const q = query(updatesColl, where("siteId", "==", siteId));
-  const snap = await getDocs(q);
+  let snap;
+  try {
+    const q = query(collection(db, "reports"), where("siteId", "==", siteId));
+    snap = await getDocs(q);
+    if (snap.empty) {
+      const qFallback = query(collection(db, "dailyUpdates"), where("siteId", "==", siteId));
+      const snapFallback = await getDocs(qFallback);
+      if (!snapFallback.empty) {
+        snap = snapFallback;
+      }
+    }
+  } catch (e) {
+    const qFallback = query(collection(db, "dailyUpdates"), where("siteId", "==", siteId));
+    snap = await getDocs(qFallback);
+  }
   const updates = [];
   snap.forEach(doc => {
     updates.push({ id: doc.id, ...doc.data() });
@@ -1851,12 +2181,19 @@ export async function getAllLeaves() {
   const leavesColl = collection(db, "leaves");
   const snap = await getDocs(leavesColl);
   
-  // Resolve user info
-  const usersColl = collection(db, "users");
-  const usersSnap = await getDocs(usersColl);
+  let usersSnap;
+  try {
+    usersSnap = await getDocs(collection(db, "siteEngineers"));
+    if (usersSnap.empty) {
+      usersSnap = await getDocs(collection(db, "users"));
+    }
+  } catch (e) {
+    usersSnap = await getDocs(collection(db, "users"));
+  }
   const usersMap = {};
   usersSnap.forEach(d => {
-    usersMap[d.id] = d.data();
+    const data = d.data();
+    usersMap[d.id] = { fullName: data.name || data.fullName || "", ...data };
   });
 
   const leaves = [];
@@ -2073,19 +2410,26 @@ export async function logMaterialPayment(materialId, paymentData) {
 
 export async function getGeneralExpenses() {
   const db = getDb();
-  const docRef = doc(db, "users", "__site_expenses__");
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return docSnap.data().expenses || [];
-  }
+  try {
+    const docRef = doc(db, "expenses", "general");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists() && docSnap.data().expenses) {
+      return docSnap.data().expenses || [];
+    }
+  } catch (e) {}
+
+  try {
+    const docRef = doc(db, "users", "__site_expenses__");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      return docSnap.data().expenses || [];
+    }
+  } catch (e) {}
   return [];
 }
 
 export async function saveGeneralExpense(expenseData) {
   const db = getDb();
-  const docRef = doc(db, "users", "__site_expenses__");
-  const docSnap = await getDoc(docRef);
-  
   const newExpense = {
     id: `exp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     siteId: expenseData.siteId,
@@ -2100,17 +2444,39 @@ export async function saveGeneralExpense(expenseData) {
     paymentHistory: []
   };
 
-  if (docSnap.exists()) {
-    await updateDoc(docRef, {
-      expenses: arrayUnion(newExpense),
-      updatedAt: serverTimestamp()
-    });
-  } else {
-    await setDoc(docRef, {
-      expenses: [newExpense],
-      updatedAt: serverTimestamp()
-    });
-  }
+  // Write to new expenses/general collection
+  try {
+    const docRef = doc(db, "expenses", "general");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      await updateDoc(docRef, {
+        expenses: arrayUnion(newExpense),
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      await setDoc(docRef, {
+        expenses: [newExpense],
+        updatedAt: serverTimestamp()
+      });
+    }
+  } catch (e) {}
+
+  // Write to legacy users/__site_expenses__ document
+  try {
+    const docRef = doc(db, "users", "__site_expenses__");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      await updateDoc(docRef, {
+        expenses: arrayUnion(newExpense),
+        updatedAt: serverTimestamp()
+      });
+    } else {
+      await setDoc(docRef, {
+        expenses: [newExpense],
+        updatedAt: serverTimestamp()
+      });
+    }
+  } catch (e) {}
 
   // central approvals integration
   const expId = newExpense.id;
@@ -2193,77 +2559,104 @@ export async function saveGeneralExpense(expenseData) {
 
 export async function approveGeneralExpense(expenseId) {
   const db = getDb();
-  const docRef = doc(db, "users", "__site_expenses__");
-  const docSnap = await getDoc(docRef);
-  if (!docSnap.exists()) return;
-  
-  const expenses = docSnap.data().expenses || [];
-  const updatedExpenses = expenses.map(e => {
-    if (e.id === expenseId) {
-      return { ...e, status: "Approved" };
-    }
-    return e;
-  });
-  
-  await updateDoc(docRef, {
-    expenses: updatedExpenses,
-    updatedAt: serverTimestamp()
-  });
+  const runUpdate = async (docPath) => {
+    const docRef = doc(db, docPath[0], docPath[1]);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) return;
+    
+    const expenses = docSnap.data().expenses || [];
+    const updatedExpenses = expenses.map(e => {
+      if (e.id === expenseId) {
+        return { ...e, status: "Approved" };
+      }
+      return e;
+    });
+    
+    await updateDoc(docRef, {
+      expenses: updatedExpenses,
+      updatedAt: serverTimestamp()
+    });
+  };
+
+  try {
+    await runUpdate(["expenses", "general"]);
+  } catch (e) {}
+  try {
+    await runUpdate(["users", "__site_expenses__"]);
+  } catch (e) {}
 }
 
 export async function logGeneralExpensePayment(expenseId, paymentData) {
   const db = getDb();
-  const docRef = doc(db, "users", "__site_expenses__");
-  const docSnap = await getDoc(docRef);
-  if (!docSnap.exists()) return;
-  
-  const expenses = docSnap.data().expenses || [];
-  const updatedExpenses = expenses.map(e => {
-    if (e.id === expenseId) {
-      const currentPaid = Number(e.paidAmount) || 0;
-      const payAmt = Number(paymentData.amount) || 0;
-      const history = e.paymentHistory || [];
-      const newPayEntry = {
-        id: `pay_${Date.now()}`,
-        amount: payAmt,
-        date: paymentData.date || new Date().toISOString().split("T")[0],
-        reference: paymentData.reference || "",
-        notes: paymentData.notes || ""
-      };
-      
-      return {
-        ...e,
-        paidAmount: currentPaid + payAmt,
-        paymentHistory: [...history, newPayEntry]
-      };
-    }
-    return e;
-  });
-  
-  await updateDoc(docRef, {
-    expenses: updatedExpenses,
-    updatedAt: serverTimestamp()
-  });
+  const runUpdate = async (docPath) => {
+    const docRef = doc(db, docPath[0], docPath[1]);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) return;
+    
+    const expenses = docSnap.data().expenses || [];
+    const updatedExpenses = expenses.map(e => {
+      if (e.id === expenseId) {
+        const currentPaid = Number(e.paidAmount) || 0;
+        const payAmt = Number(paymentData.amount) || 0;
+        const history = e.paymentHistory || [];
+        const newPayEntry = {
+          id: `pay_${Date.now()}`,
+          amount: payAmt,
+          date: paymentData.date || new Date().toISOString().split("T")[0],
+          reference: paymentData.reference || "",
+          notes: paymentData.notes || ""
+        };
+        
+        return {
+          ...e,
+          paidAmount: currentPaid + payAmt,
+          paymentHistory: [...history, newPayEntry]
+        };
+      }
+      return e;
+    });
+    
+    await updateDoc(docRef, {
+      expenses: updatedExpenses,
+      updatedAt: serverTimestamp()
+    });
+  };
+
+  try {
+    await runUpdate(["expenses", "general"]);
+  } catch (e) {}
+  try {
+    await runUpdate(["users", "__site_expenses__"]);
+  } catch (e) {}
 }
 
 export async function rejectGeneralExpense(expenseId) {
   const db = getDb();
-  const docRef = doc(db, "users", "__site_expenses__");
-  const docSnap = await getDoc(docRef);
-  if (!docSnap.exists()) return;
-  
-  const expenses = docSnap.data().expenses || [];
-  const updatedExpenses = expenses.map(e => {
-    if (e.id === expenseId) {
-      return { ...e, status: "Rejected" };
-    }
-    return e;
-  });
-  
-  await updateDoc(docRef, {
-    expenses: updatedExpenses,
-    updatedAt: serverTimestamp()
-  });
+  const runUpdate = async (docPath) => {
+    const docRef = doc(db, docPath[0], docPath[1]);
+    const docSnap = await getDoc(docRef);
+    if (!docSnap.exists()) return;
+    
+    const expenses = docSnap.data().expenses || [];
+    const updatedExpenses = expenses.map(e => {
+      if (e.id === expenseId) {
+        return { ...e, status: "Rejected" };
+      }
+      return e;
+    });
+    
+    await updateDoc(docRef, {
+      expenses: updatedExpenses,
+      updatedAt: serverTimestamp()
+    });
+  };
+
+  try {
+    await runUpdate(["expenses", "general"]);
+  } catch (e) {}
+  try {
+    await runUpdate(["users", "__site_expenses__"]);
+  } catch (e) {}
 }
 
 export async function getNotifications(userId) {
@@ -2406,14 +2799,48 @@ export async function saveApprovalRequest(approvalData) {
 
 export async function getUsersByRole(role) {
   const db = getDb();
-  const q = query(
-    collection(db, "users"),
-    where("role", "==", role)
-  );
-  const snap = await getDocs(q);
+  let targetColl = "users";
+  let mapFields = false;
+  
+  if (role === "super_admin" || role === "superadmin") {
+    targetColl = "superAdmins";
+  } else if (role === "admin") {
+    targetColl = "admins";
+  } else if (role === "site_engineer" || role === "engineer") {
+    targetColl = "siteEngineers";
+    mapFields = true;
+  }
+  
+  let snap;
+  try {
+    snap = await getDocs(collection(db, targetColl));
+  } catch (e) {
+    const q = query(collection(db, "users"), where("role", "==", role));
+    snap = await getDocs(q);
+    mapFields = false;
+  }
+  
+  // Fallback to legacy if the collection was empty (e.g. before migration)
+  if (snap.empty && targetColl !== "users") {
+    const q = query(collection(db, "users"), where("role", "==", role));
+    snap = await getDocs(q);
+    mapFields = false;
+  }
+  
   const list = [];
   snap.forEach(d => {
-    list.push({ id: d.id, ...d.data() });
+    const data = d.data();
+    if (mapFields) {
+      list.push({ 
+        id: d.id, 
+        uid: d.id,
+        fullName: data.name || data.fullName || "", 
+        phoneNumber: data.phone || data.phoneNumber || "", 
+        ...data 
+      });
+    } else {
+      list.push({ id: d.id, uid: d.id, ...data });
+    }
   });
   return list;
 }
@@ -2611,7 +3038,10 @@ export async function syncApprovalsFromLegacy() {
     }
   }
 
-  const expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
+  let expensesDoc = await getDoc(doc(db, "expenses", "general"));
+  if (!expensesDoc.exists()) {
+    expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
+  }
   if (expensesDoc.exists()) {
     const expenses = expensesDoc.data().expenses || [];
     for (const exp of expenses) {

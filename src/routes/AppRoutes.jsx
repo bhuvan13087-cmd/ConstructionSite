@@ -67,10 +67,10 @@ export default function AppRoutes() {
       <Route 
         path="*" 
         element={
-          user 
-            ? (userProfile?.role === "super_admin" || userProfile?.role === "superadmin"
+          user && userProfile
+            ? (userProfile.role === "super_admin" || userProfile.role === "superadmin"
                 ? <Navigate to="/superadmin" replace />
-                : (userProfile?.role === "admin" 
+                : (userProfile.role === "admin" 
                     ? <Navigate to="/admin" replace /> 
                     : <Navigate to="/engineer" replace />))
             : <Navigate to="/login" replace />

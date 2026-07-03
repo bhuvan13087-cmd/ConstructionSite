@@ -291,7 +291,7 @@ export default function AdminDashboard() {
             <Building2 size={17} />
           </div>
           <span className="dash-kpi-label">Total Sites</span>
-          <span className="dash-kpi-value">{metrics.totalSites}</span>
+          <span className="dash-kpi-value">{sites.length}</span>
           <span className="dash-kpi-sub">{totalAssignedProjects} assigned</span>
         </div>
 
@@ -300,7 +300,7 @@ export default function AdminDashboard() {
             <HardHat size={17} />
           </div>
           <span className="dash-kpi-label">Active Engineers</span>
-          <span className="dash-kpi-value">{metrics.activeEngineers}</span>
+          <span className="dash-kpi-value">{engineers.filter(e => e.status === "active").length}</span>
           <span className="dash-kpi-sub">Site personnel</span>
         </div>
 

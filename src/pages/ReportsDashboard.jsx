@@ -426,10 +426,12 @@ export default function ReportsDashboard() {
 
       if (site.status === "Completed") {
         completedCount++;
-      } else if (site.status === "Delayed" || isSiteDelayed(site)) {
-        delayedCount++;
-      } else {
+      } else if (site.status !== "Planning") {
         activeCount++;
+      }
+
+      if (isSiteDelayed(site)) {
+        delayedCount++;
       }
     });
 

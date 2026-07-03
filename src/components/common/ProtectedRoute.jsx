@@ -28,7 +28,9 @@ export default function ProtectedRoute({ allowedRoles = ["admin"] }) {
     if (user.email === "admin@gmail.com" && allowedRoles.includes("admin")) {
       return <Outlet />;
     }
-    return <Loading show={true} text="Verifying Profile..." />;
+    // Force logout if profile is missing for a regular user to prevent infinite loading/unauthorized access
+    logout();
+    return <Navigate to="/login" replace />;
   }
 
   if (userProfile.status !== "active") {

@@ -4,13 +4,16 @@ import {
   signOut, 
   onAuthStateChanged,
   sendPasswordResetEmail,
-  updatePassword
+  updatePassword,
+  setPersistence,
+  browserSessionPersistence
 } from "firebase/auth";
 import { getFirebaseAuth, getSecondaryAuth } from "./config";
 
 // Sign in with email and password (main App)
 export async function signIn(email, password) {
   const auth = getFirebaseAuth();
+  await setPersistence(auth, browserSessionPersistence);
   return signInWithEmailAndPassword(auth, email, password);
 }
 

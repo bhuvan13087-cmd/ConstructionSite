@@ -17,8 +17,10 @@ export function AuthProvider({ children }) {
       return;
     }
 
-    // Force sign out immediately if there is no active session flag in localStorage
-    const isSessionActive = localStorage.getItem("is_session_active") === "true";
+    // Force sign out immediately if there is no active session flag in sessionStorage or localStorage
+    const isSessionActive = 
+      sessionStorage.getItem("is_session_active") === "true" ||
+      localStorage.getItem("is_session_active") === "true";
     
     const handleAuth = async () => {
       if (!isSessionActive) {
@@ -40,9 +42,11 @@ export function AuthProvider({ children }) {
     const unsubscribe = onAuthChange(async (firebaseUser) => {
       setLoading(true);
       
-      const currentSessionActive = localStorage.getItem("is_session_active") === "true";
+      const currentSessionActive = 
+        sessionStorage.getItem("is_session_active") === "true" ||
+        localStorage.getItem("is_session_active") === "true";
+
       if (firebaseUser && currentSessionActive) {
-        setUser(firebaseUser);
         try {
           let profile = await getUserProfile(firebaseUser.uid);
           if (!profile && firebaseUser.email === "admin@gmail.com") {
@@ -58,6 +62,19 @@ export function AuthProvider({ children }) {
             await createUserProfile(firebaseUser.uid, adminProfile);
             profile = await getUserProfile(firebaseUser.uid);
           }
+
+          if (!profile || profile.status !== "active") {
+            // Force sign out invalid or inactive users immediately
+            await signOutUser();
+            setUser(null);
+            setUserProfile(null);
+            localStorage.removeItem("is_session_active");
+            sessionStorage.removeItem("is_session_active");
+            setLoading(false);
+            return;
+          }
+
+          setUser(firebaseUser);
           setUserProfile(profile);
           
           // Centralized audit logging for successful logins
@@ -77,6 +94,7 @@ export function AuthProvider({ children }) {
           }
         } catch (err) {
           console.error("Auth Listener Error fetching profile:", err);
+          setUser(null);
           setUserProfile(null);
         }
       } else {
@@ -108,6 +126,8 @@ export function AuthProvider({ children }) {
     }
     localStorage.removeItem("is_session_active");
     localStorage.removeItem("is_logged_in");
+    sessionStorage.removeItem("is_session_active");
+    sessionStorage.removeItem("is_logged_in");
     await signOutUser();
     setUser(null);
     setUserProfile(null);
