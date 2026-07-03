@@ -506,19 +506,24 @@ export async function createSite(siteName, clientName, location, startDate, expe
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
+  const latVal = latitude !== null && latitude !== "" ? Number(latitude) : null;
+  const lngVal = longitude !== null && longitude !== "" ? Number(longitude) : null;
+
   await setDoc(newSiteRef, {
     siteName,
     clientName,
     location,
     assignedAddress: location,
+    formattedAddress: location, // Task 6 formattedAddress field
     startDate,
     expectedEndDate,
     status,
-    latitude: latitude !== null && latitude !== "" ? Number(latitude) : null,
-    longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
+    latitude: latVal,
+    longitude: lngVal,
     googlePlaceId: googlePlaceId || null,
+    placeId: googlePlaceId || null, // Task 6 placeId field
     radius: Number(radius) || 50,
-    locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
+    locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     ...(adminId ? { createdByAdmin: adminId } : {}),
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
@@ -531,18 +536,23 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
 
+  const latVal = latitude !== null && latitude !== "" ? Number(latitude) : null;
+  const lngVal = longitude !== null && longitude !== "" ? Number(longitude) : null;
+
   await updateDoc(siteDocRef, {
     siteName,
     clientName,
     location,
     assignedAddress: location,
+    formattedAddress: location, // Task 6 formattedAddress field
     startDate,
     expectedEndDate,
     status,
-    latitude: latitude !== null && latitude !== "" ? Number(latitude) : null,
-    longitude: longitude !== null && longitude !== "" ? Number(longitude) : null,
+    latitude: latVal,
+    longitude: lngVal,
     googlePlaceId: googlePlaceId || null,
-    locationStatus: (latitude !== null && latitude !== "" && longitude !== null && longitude !== "") ? "Verified" : "Not Set",
+    placeId: googlePlaceId || null, // Task 6 placeId field
+    locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     radius: Number(radius) || 50,
     updatedAt: serverTimestamp()
   });
