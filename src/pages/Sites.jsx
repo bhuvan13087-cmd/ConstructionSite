@@ -380,6 +380,12 @@ export default function Sites() {
       return;
     }
 
+    // Capture Google Maps API authentication errors (Task 5 / Task 7 verification checks)
+    window.gm_authFailure = () => {
+      console.error("Google Maps API authentication failed: billing is not configured, or Maps JS/Places/Geocoding APIs are disabled on your Google Cloud Console.");
+      setMapsLoadError(true);
+    };
+
     const scriptId = "google-maps-api-script";
     let script = document.getElementById(scriptId);
     if (!script) {
