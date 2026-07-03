@@ -310,223 +310,205 @@ export default function Sites() {
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
 
-  // Leaflet States & Refs
-  const [isLeafletLoaded, setIsLeafletLoaded] = useState(false);
+  // Google Maps States & Refs
+  const [isMapsLoaded, setIsMapsLoaded] = useState(false);
+  const [mapsLoadError, setMapsLoadError] = useState(false);
   const mapDivRef = useRef(null);
-  const leafletMapInstanceRef = useRef(null);
-  const leafletMarkerInstanceRef = useRef(null);
-  const searchTimeoutRef = useRef(null);
-  const [searchSuggestions, setSearchSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [isSearching, setIsSearching] = useState(false);
-  const [mapType, setMapType] = useState("roadmap");
-  const leafletLayersRef = useRef({});
+  const autocompleteInputRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerInstanceRef = useRef(null);
+  const autocompleteInstanceRef = useRef(null);
 
-  // Load Leaflet API script & stylesheet
+  // Parsed Address State (Task 4)
+  const [addressStreet, setAddressStreet] = useState("");
+  const [addressArea, setAddressArea] = useState("");
+  const [addressLocality, setAddressLocality] = useState("");
+  const [addressCity, setAddressCity] = useState("");
+  const [addressDistrict, setAddressDistrict] = useState("");
+  const [addressState, setAddressState] = useState("");
+  const [addressPinCode, setAddressPinCode] = useState("");
+
+  const parseAddressComponents = (components) => {
+    let street = "";
+    let area = "";
+    let locality = "";
+    let city = "";
+    let district = "";
+    let state = "";
+    let pinCode = "";
+
+    if (components && Array.isArray(components)) {
+      components.forEach(c => {
+        const types = c.types;
+        if (types.includes("route")) {
+          street = c.long_name;
+        } else if (types.includes("sublocality_level_1") || types.includes("neighborhood")) {
+          area = c.long_name;
+        } else if (types.includes("sublocality_level_2") || types.includes("locality")) {
+          locality = c.long_name;
+        } else if (types.includes("administrative_area_level_3")) {
+          city = c.long_name;
+        } else if (types.includes("administrative_area_level_2")) {
+          district = c.long_name;
+        } else if (types.includes("administrative_area_level_1")) {
+          state = c.long_name;
+        } else if (types.includes("postal_code")) {
+          pinCode = c.long_name;
+        }
+      });
+    }
+
+    setAddressStreet(street);
+    setAddressArea(area);
+    setAddressLocality(locality);
+    setAddressCity(city || locality);
+    setAddressDistrict(district);
+    setAddressState(state);
+    setAddressPinCode(pinCode);
+  };
+
+  // Load Google Maps API script dynamically
   useEffect(() => {
-    if (window.L) {
-      setIsLeafletLoaded(true);
+    if (window.google && window.google.maps) {
+      setIsMapsLoaded(true);
       return;
     }
-    
-    // Load CSS
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-    document.head.appendChild(link);
+    const apiKey = firebaseConfig.apiKey;
+    if (!apiKey) {
+      console.error("Google Maps API Key is not set in firebaseConfig.");
+      setMapsLoadError(true);
+      return;
+    }
 
-    // Load JS
-    const script = document.createElement("script");
-    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-    script.async = true;
-    script.onload = () => setIsLeafletLoaded(true);
-    document.head.appendChild(script);
+    const scriptId = "google-maps-api-script";
+    let script = document.getElementById(scriptId);
+    if (!script) {
+      script = document.createElement("script");
+      script.id = scriptId;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+      script.async = true;
+      script.defer = true;
+      document.head.appendChild(script);
+    }
+
+    const handleLoad = () => setIsMapsLoaded(true);
+    const handleError = () => setMapsLoadError(true);
+
+    script.addEventListener("load", handleLoad);
+    script.addEventListener("error", handleError);
+
+    return () => {
+      if (script) {
+        script.removeEventListener("load", handleLoad);
+        script.removeEventListener("error", handleError);
+      }
+    };
   }, []);
 
-  // Initialize Leaflet Map in Modal
+  // Initialize Map inside Modal
   useEffect(() => {
-    if (!showFormModal || !isLeafletLoaded || !mapDivRef.current || !window.L) return;
+    if (!showFormModal || !isMapsLoaded || !mapDivRef.current || !window.google || !window.google.maps) return;
 
-    const initialLat = Number(formLatitude) || 11.1271; // Tamil Nadu center default
-    const initialLng = Number(formLongitude) || 78.6569;
+    // Centered at Chennai, Tamil Nadu for optimal local centering
+    const initialLat = Number(formLatitude) || 13.0827; 
+    const initialLng = Number(formLongitude) || 80.2707;
     const hasCoords = !!formLatitude && !!formLongitude;
 
-    // Destroy existing map instance
-    if (leafletMapInstanceRef.current) {
-      leafletMapInstanceRef.current.remove();
-      leafletMapInstanceRef.current = null;
-    }
-
-    // Create map instance
-    const map = window.L.map(mapDivRef.current, {
+    const mapOptions = {
+      center: { lat: initialLat, lng: initialLng },
+      zoom: hasCoords ? 19 : 8,
+      mapTypeId: window.google.maps.MapTypeId.ROADMAP,
+      mapTypeControl: true,
+      mapTypeControlOptions: {
+        style: window.google.maps.MapTypeControlStyle.HORIZONTAL_BAR,
+        position: window.google.maps.ControlPosition.TOP_RIGHT
+      },
       zoomControl: true,
-      attributionControl: true
-    }).setView([initialLat, initialLng], hasCoords ? 18 : 8);
-    leafletMapInstanceRef.current = map;
-
-    // Define Tile Layers
-    const roadmapLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-    });
-
-    const satelliteLayer = window.L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-      maxZoom: 19,
-      attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community'
-    });
-
-    leafletLayersRef.current = {
-      roadmap: roadmapLayer,
-      satellite: satelliteLayer
+      streetViewControl: false,
+      fullscreenControl: true
     };
 
-    // Add selected layer
-    if (mapType === "satellite") {
-      satelliteLayer.addTo(map);
-    } else {
-      roadmapLayer.addTo(map);
-    }
+    const map = new window.google.maps.Map(mapDivRef.current, mapOptions);
+    mapInstanceRef.current = map;
 
-    // Custom CSS-based pulse marker icon (avoiding broken assets paths)
-    const customIcon = window.L.divIcon({
-      html: `
-        <div style="position: relative; display: flex; justify-content: center; align-items: center; width: 34px; height: 34px;">
-          <div style="position: absolute; width: 28px; height: 28px; background-color: rgba(249, 115, 22, 0.2); border-radius: 50%; animation: ping 1.5s infinite;"></div>
-          <div style="position: absolute; display: flex; justify-content: center; align-items: center; width: 22px; height: 22px; background-color: var(--primary-600); border: 2.5px solid white; border-radius: 50%; box-shadow: 0 2px 6px rgba(0,0,0,0.35);">
-            <div style="width: 7px; height: 7px; background-color: white; border-radius: 50%;"></div>
-          </div>
-        </div>
-        <style>
-          @keyframes ping {
-            0% { transform: scale(0.8); opacity: 1; }
-            100% { transform: scale(1.8); opacity: 0; }
-          }
-        </style>
-      `,
-      className: "custom-leaflet-marker",
-      iconSize: [34, 34],
-      iconAnchor: [17, 17]
-    });
-
-    // Create marker
-    const marker = window.L.marker([initialLat, initialLng], {
+    const marker = new window.google.maps.Marker({
+      position: { lat: initialLat, lng: initialLng },
+      map: map,
       draggable: true,
-      icon: customIcon
-    }).addTo(map);
-    leafletMarkerInstanceRef.current = marker;
+      title: "Construction Site Location",
+      animation: window.google.maps.Animation.DROP
+    });
+    markerInstanceRef.current = marker;
 
-    // Helper for reverse geocoding via Nominatim
-    const reverseGeocode = async (lat, lng) => {
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`, {
-          headers: {
-            'Accept-Language': 'en',
-            'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0'
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data && data.display_name) {
-            setFormLocation(data.display_name);
-            setFormPlaceId(data.osm_id ? String(data.osm_id) : "");
-          }
+    // Autocomplete Search Configuration (Task 1)
+    if (autocompleteInputRef.current) {
+      const autocomplete = new window.google.maps.places.Autocomplete(autocompleteInputRef.current, {
+        fields: ["geometry", "formatted_address", "place_id", "name", "address_components"],
+        componentRestrictions: { country: "in" }
+      });
+      autocompleteInstanceRef.current = autocomplete;
+
+      autocomplete.addListener("place_changed", () => {
+        const place = autocomplete.getPlace();
+        if (place.geometry && place.geometry.location) {
+          const loc = place.geometry.location;
+          const latVal = loc.lat();
+          const lngVal = loc.lng();
+          
+          setFormLatitude(latVal);
+          setFormLongitude(lngVal);
+          setFormLocation(place.formatted_address || place.name || "");
+          setFormPlaceId(place.place_id || "");
+          parseAddressComponents(place.address_components);
+
+          map.setCenter(loc);
+          map.setZoom(19);
+          marker.setPosition(loc);
         }
-      } catch (e) {
-        console.warn("Reverse geocode failed:", e);
-      }
+      });
+    }
+
+    // Geocode helper via official Geocoding Service (Task 4)
+    const geocodePosition = (latLng) => {
+      const geocoder = new window.google.maps.Geocoder();
+      geocoder.geocode({ location: latLng }, (results, status) => {
+        if (status === window.google.maps.GeocoderStatus.OK && results && results[0]) {
+          setFormLocation(results[0].formatted_address);
+          setFormPlaceId(results[0].place_id || "");
+          parseAddressComponents(results[0].address_components);
+        } else {
+          setFormLocation(`Lat: ${latLng.lat().toFixed(6)}, Lng: ${latLng.lng().toFixed(6)}`);
+          setFormPlaceId("");
+          parseAddressComponents([]);
+        }
+      });
     };
 
-    // Marker drag end
-    marker.on("dragend", () => {
-      const position = marker.getLatLng();
-      setFormLatitude(position.lat);
-      setFormLongitude(position.lng);
-      reverseGeocode(position.lat, position.lng);
+    // Geocode default position components if updating an existing site
+    if (hasCoords) {
+      geocodePosition({ lat: initialLat, lng: initialLng });
+    }
+
+    // Draggable adjustments event (Task 3)
+    window.google.maps.event.addListener(marker, "dragend", () => {
+      const pos = marker.getPosition();
+      const latVal = pos.lat();
+      const lngVal = pos.lng();
+      setFormLatitude(latVal);
+      setFormLongitude(lngVal);
+      geocodePosition(pos);
     });
 
-    // Map click
-    map.on("click", (e) => {
-      const position = e.latlng;
-      marker.setLatLng(position);
-      setFormLatitude(position.lat);
-      setFormLongitude(position.lng);
-      reverseGeocode(position.lat, position.lng);
+    // Map click fine alignment click event
+    map.addListener("click", (e) => {
+      const latLng = e.latLng;
+      marker.setPosition(latLng);
+      setFormLatitude(latLng.lat());
+      setFormLongitude(latLng.lng());
+      geocodePosition(latLng);
     });
 
-    // Invalidate size to load tiles correctly inside modal
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 250);
-
-  }, [showFormModal, isLeafletLoaded]);
-
-  // Autocomplete search handlers
-  const handleSearchChange = (e) => {
-    const val = e.target.value;
-    setFormLocation(val);
-
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-
-    if (!val.trim() || val.length < 3) {
-      setSearchSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    setIsSearching(true);
-    searchTimeoutRef.current = setTimeout(async () => {
-      try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(val)}&limit=5&addressdetails=1`, {
-          headers: {
-            'Accept-Language': 'en',
-            'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0'
-          }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setSearchSuggestions(data || []);
-          setShowSuggestions(true);
-        }
-      } catch (err) {
-        console.warn("Suggestions search error:", err);
-      } finally {
-        setIsSearching(false);
-      }
-    }, 500);
-  };
-
-  const handleSelectSuggestion = (s) => {
-    const latVal = Number(s.lat);
-    const lngVal = Number(s.lon);
-    
-    setFormLatitude(latVal);
-    setFormLongitude(lngVal);
-    setFormLocation(s.display_name);
-    setFormPlaceId(s.osm_id ? String(s.osm_id) : "");
-    setShowSuggestions(false);
-
-    if (leafletMapInstanceRef.current && leafletMarkerInstanceRef.current) {
-      leafletMapInstanceRef.current.setView([latVal, lngVal], 19);
-      leafletMarkerInstanceRef.current.setLatLng([latVal, lngVal]);
-    }
-  };
-
-  const handleToggleMapType = (type) => {
-    setMapType(type);
-    const map = leafletMapInstanceRef.current;
-    const layers = leafletLayersRef.current;
-    if (!map || !layers) return;
-
-    if (type === "satellite") {
-      if (layers.roadmap) map.removeLayer(layers.roadmap);
-      if (layers.satellite) layers.satellite.addTo(map);
-    } else {
-      if (layers.satellite) map.removeLayer(layers.satellite);
-      if (layers.roadmap) layers.roadmap.addTo(map);
-    }
-  };
+  }, [showFormModal, isMapsLoaded]);
 
 
   const showToast = (message, type = "info") => {
@@ -910,109 +892,34 @@ export default function Sites() {
             </div>
           </div>
 
-          <div className="form-group" style={{ position: "relative" }}>
+          <div className="form-group">
             <label htmlFor="site-search">Google Maps Location Picker</label>
-            <div className="input-wrapper" style={{ marginBottom: "10px" }}>
-              <MapPin className="input-icon" size={16} />
-              <input 
-                type="text" 
-                id="site-search" 
-                placeholder="Type to search location on map..." 
-                value={formLocation}
-                onChange={handleSearchChange}
-                required 
-              />
-              {isSearching && (
-                <div style={{
-                  position: "absolute",
-                  right: "12px",
-                  top: "50%",
-                  transform: "translateY(-50%)",
-                  width: "16px",
-                  height: "16px",
-                  border: "2px solid #e2e8f0",
-                  borderTopColor: "var(--primary-600)",
-                  borderRadius: "50%",
-                  animation: "leaflet-spin 0.8s linear infinite"
-                }} />
-              )}
-            </div>
 
-            {showSuggestions && searchSuggestions.length > 0 && (
-              <div style={{
-                position: "absolute",
-                top: "100%",
-                left: 0,
-                right: 0,
-                backgroundColor: "#ffffff",
-                border: "1px solid var(--border-color)",
-                borderRadius: "8px",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                zIndex: 9999,
-                maxHeight: "180px",
-                overflowY: "auto",
-                marginTop: "4px"
-              }}>
-                {searchSuggestions.map((s, idx) => (
-                  <div 
-                    key={idx}
-                    onClick={() => handleSelectSuggestion(s)}
-                    style={{
-                      padding: "8px 12px",
-                      fontSize: "12px",
-                      color: "var(--primary-900)",
-                      cursor: "pointer",
-                      borderBottom: idx < searchSuggestions.length - 1 ? "1px solid var(--primary-50)" : "none",
-                      textAlign: "left",
-                      lineHeight: "1.4"
-                    }}
-                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
-                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-                  >
-                    {s.display_name}
-                  </div>
-                ))}
+            {mapsLoadError && (
+              <div style={{ backgroundColor: "var(--danger-50)", border: "1.5px dashed var(--danger-300)", borderRadius: "8px", padding: "12px", color: "var(--danger-700)", fontSize: "12px", marginBottom: "12px", textAlign: "left" }}>
+                ⚠️ <strong>Google Maps Load Error</strong>: The Google Maps JavaScript API failed to load. Please verify that:
+                <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                  <li>Billing is enabled on your Google Cloud Platform project.</li>
+                  <li>The <strong>Maps JavaScript API</strong>, <strong>Places API</strong>, and <strong>Geocoding API</strong> are enabled.</li>
+                  <li>Your API Key is valid and unrestricted.</li>
+                </ul>
+                <button type="button" onClick={() => window.location.reload()} style={{ marginTop: "8px", padding: "5px 10px", fontSize: "11px", backgroundColor: "var(--danger-600)", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "700" }}>Retry Loading</button>
               </div>
             )}
-            
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "12px", marginBottom: "8px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Map Control</span>
-              <div style={{ display: "flex", gap: "4px" }}>
-                <button
-                  type="button"
-                  onClick={() => handleToggleMapType("roadmap")}
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: "700",
-                    padding: "3px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid var(--border-color)",
-                    backgroundColor: mapType === "roadmap" ? "var(--primary-600)" : "#ffffff",
-                    color: mapType === "roadmap" ? "#ffffff" : "var(--text-muted)",
-                    cursor: "pointer"
-                  }}
-                >
-                  Map View
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleMapType("satellite")}
-                  style={{
-                    fontSize: "10px",
-                    fontWeight: "700",
-                    padding: "3px 8px",
-                    borderRadius: "4px",
-                    border: "1px solid var(--border-color)",
-                    backgroundColor: mapType === "satellite" ? "var(--primary-600)" : "#ffffff",
-                    color: mapType === "satellite" ? "#ffffff" : "var(--text-muted)",
-                    cursor: "pointer"
-                  }}
-                >
-                  Satellite View
-                </button>
-              </div>
-            </div>
 
+            <div className="input-wrapper" style={{ marginBottom: "12px" }}>
+              <MapPin className="input-icon" size={16} />
+              <input 
+                ref={autocompleteInputRef}
+                type="text" 
+                id="site-search" 
+                placeholder="Search site name, street, area, city, landmark or full address..." 
+                value={formLocation}
+                onChange={(e) => setFormLocation(e.target.value)}
+                required 
+              />
+            </div>
+            
             <div 
               ref={mapDivRef} 
               style={{ 
@@ -1021,11 +928,11 @@ export default function Sites() {
                 borderRadius: "8px", 
                 border: "1px solid var(--border-color)", 
                 marginBottom: "12px",
-                zIndex: 1
+                backgroundColor: "#f1f5f9"
               }} 
             />
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "6px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="form-group" style={{ margin: 0 }}>
                 <label style={{ fontSize: "11px", fontWeight: "700", display: "block", marginBottom: "4px" }}>Selected Latitude</label>
                 <input 
@@ -1063,15 +970,36 @@ export default function Sites() {
                 />
               </div>
             </div>
+
+            {/* Parsed Address Breakdown Display (Task 4) */}
+            {(addressStreet || addressArea || addressLocality || addressCity || addressDistrict || addressState || addressPinCode) && (
+              <div style={{ 
+                textAlign: "left", 
+                backgroundColor: "#f8fafc", 
+                padding: "12px", 
+                borderRadius: "8px", 
+                border: "1px solid #e2e8f0", 
+                fontSize: "12px",
+                marginBottom: "12px"
+              }}>
+                <div style={{ fontWeight: "700", color: "var(--primary-900)", marginBottom: "8px", fontSize: "12px" }}>
+                  📍 Google Geocoder Parsed Address Components:
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px" }}>
+                  <div><strong style={{ color: "#64748b" }}>Street Name:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressStreet || "N/A"}</span></div>
+                  <div><strong style={{ color: "#64748b" }}>Area:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressArea || "N/A"}</span></div>
+                  <div><strong style={{ color: "#64748b" }}>Locality:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressLocality || "N/A"}</span></div>
+                  <div><strong style={{ color: "#64748b" }}>City:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressCity || "N/A"}</span></div>
+                  <div><strong style={{ color: "#64748b" }}>District:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressDistrict || "N/A"}</span></div>
+                  <div><strong style={{ color: "#64748b" }}>State:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressState || "N/A"}</span></div>
+                  <div style={{ gridColumn: "span 2" }}><strong style={{ color: "#64748b" }}>PIN Code:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressPinCode || "N/A"}</span></div>
+                </div>
+              </div>
+            )}
+
             <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "4px", marginBottom: "12px" }}>
-              💡 <em>Tip: Drag the pin or click on the map to fine-tune the exact location.</em>
+              💡 <em>Tip: You can use the top-right Map/Satellite toggler. Drag the pin or click on the map to fine-tune the exact location.</em>
             </span>
-            <style>{`
-              @keyframes leaflet-spin {
-                0% { transform: translateY(-50%) rotate(0deg); }
-                100% { transform: translateY(-50%) rotate(360deg); }
-              }
-            `}</style>
           </div>
 
 
