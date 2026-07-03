@@ -297,6 +297,22 @@ service cloud.firestore {
     match /documents/{docId} {
       allow read, write: if isActiveUser();
     }
+
+    match /activityLogs/{logId} {
+      allow read, write: if isActiveUser();
+    }
+
+    match /activities/{activityId} {
+      allow read, write: if isActiveUser();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isActiveUser();
+    }
+
+    match /approvals/{approvalId} {
+      allow read, write: if isActiveUser();
+    }
     
   }
 }

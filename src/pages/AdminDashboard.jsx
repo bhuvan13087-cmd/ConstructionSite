@@ -2,14 +2,13 @@ import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
 import { 
-  getDashboardMetrics, 
-  getSites, 
-  getSiteEngineers, 
-  getActivityLogs, 
-  getSystemActivities, 
-  getCentralApprovals,
-  getAllDocuments
-} from "../services/firebaseService";
+  onSnapshot, 
+  collection, 
+  query, 
+  where, 
+  limit 
+} from "firebase/firestore";
+import { getFirebaseDb } from "../firebase/config";
 import { 
   MapPin, 
   Users, 
@@ -34,22 +33,26 @@ import { Link } from "react-router-dom";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
-  const [metrics, setMetrics] = useState({
-    totalSites: 0,
-    activeEngineers: 0,
-    attendanceToday: 0,
-    totalMaterials: 0,
-    activeWorkers: 0
-  });
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
+  const [attendanceTodayCount, setAttendanceTodayCount] = useState(0);
+  const [totalMaterialsCount, setTotalMaterialsCount] = useState(0);
+  const [activeWorkersCount, setActiveWorkersCount] = useState(0);
   const [activityLogs, setActivityLogs] = useState([]);
   const [systemActivities, setSystemActivities] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [documents, setDocuments] = useState([]);
   
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+
+  const metrics = {
+    totalSites: sites.length,
+    activeEngineers: engineers.filter(e => e.status === "active").length,
+    attendanceToday: attendanceTodayCount,
+    totalMaterials: totalMaterialsCount,
+    activeWorkers: activeWorkersCount
+  };
 
   // Timeline Filter States
   const [filterSite, setFilterSite] = useState("");
@@ -63,45 +66,170 @@ export default function AdminDashboard() {
     }, 4000);
   };
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      
-      const [
-        counts, 
-        fetchedSites, 
-        fetchedEngineers, 
-        fetchedLogs, 
-        fetchedSysLogs, 
-        fetchedApprovals,
-        fetchedDocs
-      ] = await Promise.all([
-        getDashboardMetrics(),
-        getSites(),
-        getSiteEngineers(),
-        getActivityLogs(),
-        getSystemActivities(),
-        getCentralApprovals(),
-        getAllDocuments()
-      ]);
-      
-      setMetrics(counts);
-      setSites(fetchedSites);
-      setEngineers(fetchedEngineers);
-      setActivityLogs(fetchedLogs);
-      setSystemActivities(fetchedSysLogs);
-      setApprovals(fetchedApprovals);
-      setDocuments(fetchedDocs);
-    } catch (err) {
-      console.error("Dashboard loading error:", err);
-      showToast(`Failed to load metrics: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
+    const db = getFirebaseDb();
+    setLoading(true);
+
+    let sitesLoaded = false;
+    let engineersLoaded = false;
+
+    const checkLoadingComplete = () => {
+      if (sitesLoaded && engineersLoaded) {
+        setLoading(false);
+      }
+    };
+
+    // 1. Sites Listener
+    const unsubSites = onSnapshot(collection(db, "sites"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setSites(list);
+      sitesLoaded = true;
+      checkLoadingComplete();
+    }, (err) => {
+      console.error("Sites listener error:", err);
+      sitesLoaded = true;
+      checkLoadingComplete();
+    });
+
+    // 2. Engineers Listener (with legacy fallback)
+    let unsubLegacyEngineers = null;
+    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
+      if (snapshot.empty) {
+        if (unsubLegacyEngineers) unsubLegacyEngineers();
+        const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
+        unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
+          const list = [];
+          legacySnap.forEach(docSnap => {
+            const data = docSnap.data();
+            list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+          });
+          setEngineers(list);
+          engineersLoaded = true;
+          checkLoadingComplete();
+        }, (err) => {
+          console.error("Legacy engineers listener error:", err);
+          engineersLoaded = true;
+          checkLoadingComplete();
+        });
+      } else {
+        if (unsubLegacyEngineers) {
+          unsubLegacyEngineers();
+          unsubLegacyEngineers = null;
+        }
+        const list = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+        });
+        setEngineers(list);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      }
+    }, (err) => {
+      console.warn("siteEngineers listener error, falling back to legacy users:", err);
+      if (unsubLegacyEngineers) unsubLegacyEngineers();
+      const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
+      unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
+        const list = [];
+        legacySnap.forEach(docSnap => {
+          const data = docSnap.data();
+          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+        });
+        setEngineers(list);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      }, (e) => {
+        console.error("Fallback engineers listener error:", e);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      });
+    });
+
+    // 3. Attendance Today Listener
+    const todayStr = new Date().toISOString().split("T")[0];
+    const qAttendance = query(collection(db, "attendance"), where("date", "==", todayStr));
+    const unsubAttendance = onSnapshot(qAttendance, (snapshot) => {
+      setAttendanceTodayCount(snapshot.size);
+    }, (err) => {
+      console.error("Attendance today listener error:", err);
+    });
+
+    // 4. Materials Listener
+    const unsubMaterials = onSnapshot(collection(db, "materials"), (snapshot) => {
+      setTotalMaterialsCount(snapshot.size);
+    }, (err) => {
+      console.error("Materials listener error:", err);
+    });
+
+    // 5. Workers Listener
+    const qWorkers = query(collection(db, "workers"), where("status", "==", "active"));
+    const unsubWorkers = onSnapshot(qWorkers, (snapshot) => {
+      setActiveWorkersCount(snapshot.size);
+    }, (err) => {
+      console.error("Workers listener error:", err);
+    });
+
+    // 6. Activity Logs Listener (limit 50, sorted in-memory desc)
+    const qLogs = query(collection(db, "activityLogs"), limit(50));
+    const unsubLogs = onSnapshot(qLogs, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setActivityLogs(list);
+    }, (err) => {
+      console.error("ActivityLogs listener error:", err);
+    });
+
+    // 7. System Activities Listener (limit 50, sorted in-memory desc)
+    const qSys = query(collection(db, "activities"), limit(50));
+    const unsubSys = onSnapshot(qSys, (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setSystemActivities(list);
+    }, (err) => {
+      console.error("System activities listener error:", err);
+    });
+
+    // 8. Approvals Listener
+    const unsubApprovals = onSnapshot(collection(db, "approvals"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setApprovals(list);
+    }, (err) => {
+      console.error("Approvals listener error:", err);
+    });
+
+    // 9. Documents Listener
+    const unsubDocuments = onSnapshot(collection(db, "documents"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setDocuments(list);
+    }, (err) => {
+      console.error("Documents listener error:", err);
+    });
+
+    return () => {
+      unsubSites();
+      unsubEngineers();
+      if (unsubLegacyEngineers) unsubLegacyEngineers();
+      unsubAttendance();
+      unsubMaterials();
+      unsubWorkers();
+      unsubLogs();
+      unsubSys();
+      unsubApprovals();
+      unsubDocuments();
+    };
   }, []);
 
   // Map engineers by ID for quick lookups
