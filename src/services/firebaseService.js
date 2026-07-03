@@ -523,6 +523,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
     googlePlaceId: googlePlaceId || null,
     placeId: googlePlaceId || null, // Task 6 placeId field
     siteLocationName: siteLocationName || "", // Requirement 4 siteLocationName
+    locationName: siteLocationName || "", // Task 7.9 locationName field
     radius: Number(radius) || 50,
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     ...(adminId ? { createdByAdmin: adminId } : {}),
@@ -554,6 +555,7 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     googlePlaceId: googlePlaceId || null,
     placeId: googlePlaceId || null, // Task 6 placeId field
     siteLocationName: siteLocationName || "", // Requirement 4 siteLocationName
+    locationName: siteLocationName || "", // Task 7.9 locationName field
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     radius: Number(radius) || 50,
     updatedAt: serverTimestamp()

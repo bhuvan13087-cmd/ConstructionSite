@@ -498,10 +498,18 @@ export default function Sites() {
             const firstPart = results[0].formatted_address.split(",")[0];
             setFormLocationName(firstPart);
           }
-        } else {
-          // Requirement 7 - Friendly error message on failure
+        } else if (status === window.google.maps.GeocoderStatus.ZERO_RESULTS) {
+          // Requirement 4 - Only show friendly message on ZERO_RESULTS
           setFormLocation("Unable to fetch address. Please move the marker or search again.");
           setFormLocationName("");
+          setFormPlaceId("");
+          parseAddressComponents([]);
+        } else {
+          // For other errors (like OVER_QUERY_LIMIT, REQUEST_DENIED, etc.), fall back to coordinates readout
+          const latVal = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
+          const lngVal = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
+          setFormLocation(`Lat: ${Number(latVal).toFixed(6)}, Lng: ${Number(lngVal).toFixed(6)}`);
+          setFormLocationName("Pinpointed Location");
           setFormPlaceId("");
           parseAddressComponents([]);
         }
