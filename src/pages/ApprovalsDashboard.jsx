@@ -1,11 +1,16 @@
 import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import { 
-  getSiteEngineers,
-  getCentralApprovals,
   resolveApprovalRequest,
   syncApprovalsFromLegacy
 } from "../services/firebaseService";
+import { 
+  onSnapshot,
+  collection,
+  query,
+  where
+} from "firebase/firestore";
+import { getFirebaseDb } from "../firebase/config";
 import { useAuth } from "../context/AuthContext";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -48,29 +53,106 @@ export default function ApprovalsDashboard() {
     }, 4000);
   };
 
-  const loadData = async () => {
-    setLoading(true);
-    try {
-      // Perform legacy database synchronization first
-      await syncApprovalsFromLegacy();
-      
-      const [fetchedEngineers, fetchedApprovals] = await Promise.all([
-        getSiteEngineers(),
-        getCentralApprovals()
-      ]);
-      setEngineers(fetchedEngineers);
-      setAllRequests(fetchedApprovals);
-    } catch (err) {
-      console.error("Failed to load approvals data:", err);
-      showToast("Failed to fetch database logs.", "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
-  }, []);
+    const db = getFirebaseDb();
+    setLoading(true);
+
+    const runLegacySync = async () => {
+      try {
+        await syncApprovalsFromLegacy();
+      } catch (e) {
+        console.warn("Legacy sync warning:", e);
+      }
+    };
+    runLegacySync();
+
+    let engineersLoaded = false;
+    let approvalsLoaded = false;
+
+    const checkLoadingComplete = () => {
+      if (engineersLoaded && approvalsLoaded) {
+        setLoading(false);
+      }
+    };
+
+    let unsubLegacyEngineers = null;
+    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
+      if (snapshot.empty) {
+        if (unsubLegacyEngineers) unsubLegacyEngineers();
+        const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
+        unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
+          const list = [];
+          legacySnap.forEach(docSnap => {
+            const data = docSnap.data();
+            list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+          });
+          setEngineers(list);
+          engineersLoaded = true;
+          checkLoadingComplete();
+        }, (err) => {
+          console.error("Legacy engineers listener error:", err);
+          engineersLoaded = true;
+          checkLoadingComplete();
+        });
+      } else {
+        if (unsubLegacyEngineers) {
+          unsubLegacyEngineers();
+          unsubLegacyEngineers = null;
+        }
+        const list = [];
+        snapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+        });
+        setEngineers(list);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      }
+    }, (err) => {
+      console.warn("siteEngineers listener error, falling back to legacy users:", err);
+      if (unsubLegacyEngineers) unsubLegacyEngineers();
+      const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
+      unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
+        const list = [];
+        legacySnap.forEach(docSnap => {
+          const data = docSnap.data();
+          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
+        });
+        setEngineers(list);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      }, (e) => {
+        console.error("Fallback engineers listener error:", e);
+        engineersLoaded = true;
+        checkLoadingComplete();
+      });
+    });
+
+    const unsubApprovals = onSnapshot(collection(db, "approvals"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      list.sort((a, b) => {
+        const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const tB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return tB - tA;
+      });
+      setAllRequests(list);
+      approvalsLoaded = true;
+      checkLoadingComplete();
+    }, (err) => {
+      console.error("Approvals listener error:", err);
+      approvalsLoaded = true;
+      checkLoadingComplete();
+    });
+
+    return () => {
+      unsubEngineers();
+      if (unsubLegacyEngineers) unsubLegacyEngineers();
+      unsubApprovals();
+    };
+  }, [userProfile]);
 
   // Calculate Metrics
   const pendingCount = allRequests.filter(r => r.status === "pending" || r.status === "Pending").length;
@@ -97,7 +179,6 @@ export default function ApprovalsDashboard() {
     try {
       await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request approved successfully.`, "success");
-      await loadData();
     } catch (err) {
       console.error("Approve failed:", err);
       showToast(`Approval failed: ${err.message}`, "error");
@@ -112,7 +193,6 @@ export default function ApprovalsDashboard() {
     try {
       await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request rejected.`, "info");
-      await loadData();
     } catch (err) {
       console.error("Reject failed:", err);
       showToast(`Rejection failed: ${err.message}`, "error");
@@ -157,7 +237,6 @@ export default function ApprovalsDashboard() {
               Centralized interface to review and resolve all site requisitions, general expense payments, leaves, and configurations.
             </p>
           </div>
-          <Button variant="outline" size="sm" onClick={loadData}>Reload Data</Button>
         </div>
 
         {/* Metrics Grid */}

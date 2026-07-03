@@ -76,22 +76,6 @@ export function AuthProvider({ children }) {
 
           setUser(firebaseUser);
           setUserProfile(profile);
-          
-          // Centralized audit logging for successful logins
-          try {
-            await logSystemActivity(
-              firebaseUser.uid,
-              profile?.fullName || firebaseUser.email,
-              profile?.role || "user",
-              "",
-              "",
-              "Login",
-              `${profile?.fullName || firebaseUser.email} logged in successfully`,
-              "Auth"
-            );
-          } catch (e) {
-            console.error("Audit log failed for login:", e);
-          }
         } catch (err) {
           console.error("Auth Listener Error fetching profile:", err);
           setUser(null);
@@ -108,22 +92,6 @@ export function AuthProvider({ children }) {
   }, [configured]);
 
   const logout = async () => {
-    if (user && userProfile) {
-      try {
-        await logSystemActivity(
-          user.uid,
-          userProfile.fullName || user.email,
-          userProfile.role || "user",
-          "",
-          "",
-          "Logout",
-          `${userProfile.fullName || user.email} logged out`,
-          "Auth"
-        );
-      } catch (err) {
-        console.error("Audit log failed for logout:", err);
-      }
-    }
     localStorage.removeItem("is_session_active");
     localStorage.removeItem("is_logged_in");
     sessionStorage.removeItem("is_session_active");

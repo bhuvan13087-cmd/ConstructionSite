@@ -3038,11 +3038,20 @@ export async function syncApprovalsFromLegacy() {
     }
   }
 
-  let expensesDoc = await getDoc(doc(db, "expenses", "general"));
-  if (!expensesDoc.exists()) {
-    expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
+  let expensesDoc = null;
+  try {
+    expensesDoc = await getDoc(doc(db, "expenses", "general"));
+  } catch (e) {
+    console.warn("Error getting general expenses:", e);
   }
-  if (expensesDoc.exists()) {
+  if (!expensesDoc || !expensesDoc.exists()) {
+    try {
+      expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
+    } catch (e) {
+      console.warn("Error getting legacy site expenses:", e);
+    }
+  }
+  if (expensesDoc && expensesDoc.exists()) {
     const expenses = expensesDoc.data().expenses || [];
     for (const exp of expenses) {
       if (exp.status === "Pending" || exp.status === "pending") {
