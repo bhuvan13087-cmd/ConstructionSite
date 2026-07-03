@@ -450,7 +450,6 @@ export default function Sites() {
     // Autocomplete Search Configuration (Task 1)
     if (autocompleteInputRef.current) {
       const inputEl = autocompleteInputRef.current;
-      map.controls[window.google.maps.ControlPosition.TOP_LEFT].push(inputEl);
       
       const autocomplete = new window.google.maps.places.Autocomplete(inputEl, {
         fields: ["geometry", "formatted_address", "place_id", "name", "address_components"],
@@ -979,30 +978,45 @@ export default function Sites() {
               </div>
             )}
 
-            {/* Google Places Autocomplete Input box pushed inside Map controls overlay */}
-            <input 
-              ref={autocompleteInputRef}
-              type="text" 
-              placeholder="Search site name, street, city, landmark or address..." 
-              style={{
-                boxSizing: "border-box",
-                border: "1px solid transparent",
-                width: "300px",
-                height: "38px",
-                marginTop: "10px",
-                marginLeft: "10px",
-                padding: "0 12px",
-                borderRadius: "4px",
-                boxShadow: "0 2px 6px rgba(0, 0, 0, 0.25)",
-                fontSize: "14px",
-                outline: "none",
-                textOverflow: "ellipsis",
-                backgroundColor: "#ffffff",
-                color: "#1e293b",
-                fontWeight: "500",
-                display: isMapsLoaded ? "block" : "none"
-              }}
-            />
+            <div style={{ position: "relative", width: "100%", height: "300px", marginBottom: "12px" }}>
+              {/* Google Places Autocomplete Input box overlay */}
+              <input 
+                ref={autocompleteInputRef}
+                type="text" 
+                placeholder="Search site name, street, city, landmark or address..." 
+                style={{
+                  position: "absolute",
+                  top: "10px",
+                  left: "10px",
+                  boxSizing: "border-box",
+                  border: "1px solid #cbd5e1",
+                  width: "calc(100% - 20px)",
+                  maxWidth: "320px",
+                  height: "38px",
+                  padding: "0 12px",
+                  borderRadius: "4px",
+                  boxShadow: "0 2px 6px rgba(0, 0, 0, 0.25)",
+                  fontSize: "14px",
+                  outline: "none",
+                  textOverflow: "ellipsis",
+                  backgroundColor: "#ffffff",
+                  color: "#1e293b",
+                  fontWeight: "500",
+                  zIndex: 10,
+                  display: isMapsLoaded ? "block" : "none"
+                }}
+              />
+              <div 
+                ref={mapDivRef} 
+                style={{ 
+                  width: "100%", 
+                  height: "100%", 
+                  borderRadius: "8px", 
+                  border: "1px solid var(--border-color)", 
+                  backgroundColor: "#f1f5f9"
+                }} 
+              />
+            </div>
 
             {formLocation && (
               <div style={{ marginTop: "4px", marginBottom: "12px", padding: "12px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "left" }}>
@@ -1012,18 +1026,6 @@ export default function Sites() {
                 </div>
               </div>
             )}
-            
-            <div 
-              ref={mapDivRef} 
-              style={{ 
-                width: "100%", 
-                height: "300px", 
-                borderRadius: "8px", 
-                border: "1px solid var(--border-color)", 
-                marginBottom: "12px",
-                backgroundColor: "#f1f5f9"
-              }} 
-            />
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="form-group" style={{ margin: 0 }}>

@@ -5798,4 +5798,10 @@ body:has(.landing-page-container) {
   }
 }
 
+/* Google Places Autocomplete Dropdown overlay positioning fix inside modals */
+.pac-container {
+  z-index: 999999 !important;
+  pointer-events: auto !important;
+}
+
 
