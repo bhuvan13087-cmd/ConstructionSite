@@ -373,7 +373,7 @@ export default function Sites() {
       setIsMapsLoaded(true);
       return;
     }
-    const apiKey = firebaseConfig.apiKey;
+    const apiKey = firebaseConfig.googleMapsApiKey || firebaseConfig.apiKey;
     if (!apiKey) {
       console.error("Google Maps API Key is not set in firebaseConfig.");
       setMapsLoadError(true);

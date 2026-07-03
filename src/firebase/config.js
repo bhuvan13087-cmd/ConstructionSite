@@ -10,6 +10,7 @@ import { firebaseConfig as importedConfig } from "../../env";
 
 export const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY || importedConfig?.apiKey,
+  googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || importedConfig?.googleMapsApiKey || importedConfig?.apiKey,
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || importedConfig?.authDomain,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || importedConfig?.projectId,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || importedConfig?.storageBucket,
