@@ -28,8 +28,6 @@ import {
   reverseGeocodeLatLng,
   getEngineerAttendanceHistory,
   updateEngineerPasswordInDb,
-  logActivity,
-  getTodayActivityLogsForEngineer,
   getLabourMaster,
   getMaterialMaster,
   logMaterialUsage,
@@ -195,8 +193,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
   const [allSitesAttendance, setAllSitesAttendance] = useState([]);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
-  const [todayActivityLogs, setTodayActivityLogs] = useState([]);
-  const [activitySubmitting, setActivitySubmitting] = useState(false);
   
   const getLastAttendanceForSite = (siteId) => {
     if (!allSitesAttendance || allSitesAttendance.length === 0) {
@@ -289,6 +285,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [deviceCoords, setDeviceCoords] = useState(null); // { latitude, longitude }
   const [locationError, setLocationError] = useState("");
   const [attendanceMode, setAttendanceMode] = useState("checkin"); // "checkin" or "checkout"
+  const [hasAutoChecked, setHasAutoChecked] = useState(false);
   const [notifications, setNotifications] = useState([]);
 
   // Camera WebRTC States
@@ -437,8 +434,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }
         }
 
-        // Fetch today's check-in attendance
-        const attendance = await getTodayAttendance(engineerId, todayStr, currentActiveId);
+        // Fetch today's check-in attendance across all sites
+        const attendance = await getTodayAttendance(engineerId, todayStr);
         setTodayAttendance(attendance);
         
         // Fetch site photos (site-segregated)
@@ -458,8 +455,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         try {
           const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
           const [ge, lp, lh] = await Promise.all([
-            getGeneralExpenses(),
-            getLabourPayments(adminId),
+            getGeneralExpenses(currentActiveId),
+            getLabourPayments(adminId, currentActiveId),
             getLabourDailyCountsSummary(currentActiveId)
           ]);
           setGeneralExpenses(ge);
@@ -469,13 +466,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           console.error("Failed to load financials:", e);
         }
 
-        // Fetch today's activity logs (entry/exit) for the engineer
-        try {
-          const logs = await getTodayActivityLogsForEngineer(engineerId, todayStr);
-          setTodayActivityLogs(logs);
-        } catch (e) {
-          console.error("Failed to load activity logs:", e);
-        }
+
 
         // Fetch notifications for the engineer
         try {
@@ -516,6 +507,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setSavedSiteLocation(null);
     }
   }, [assignedSites, activeSiteId]);
+
+  // Reset auto-check when active site changes
+  useEffect(() => {
+    setHasAutoChecked(false);
+  }, [activeSiteId]);
+
+  // Automatic Location Request when Attendance is opened
+  useEffect(() => {
+    if (tab === "attendance" && activeSiteId && savedSiteLocation && !todayAttendance && !hasAutoChecked) {
+      setHasAutoChecked(true);
+      handlePreCaptureCheck();
+    }
+  }, [tab, activeSiteId, savedSiteLocation, todayAttendance, hasAutoChecked]);
+
+  // Clean up and reset verification state when navigating away from the attendance tab
+  useEffect(() => {
+    if (tab !== "attendance") {
+      handleResetVerification();
+      setAttendanceMode("checkin");
+    }
+  }, [tab]);
 
   // Close combobox suggestions when clicking outside
   useEffect(() => {
@@ -800,32 +812,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  const handleLogActivity = async (type) => {
-    if (!activeSiteId) {
-      showToast("Please select an active worksite first.", "error");
-      return;
-    }
-    setActivitySubmitting(true);
-    
-    try {
-      const coords = await getDeviceLocation();
-      const lat = coords.latitude;
-      const lng = coords.longitude;
-      
-      const geocode = await reverseGeocodeLatLng(lat, lng);
-      const engineerId = userProfile.uid || userProfile.id || "";
-      
-      await logActivity(engineerId, activeSiteId, type, lat, lng, geocode.fullAddress);
-      
-      showToast(`Logged site ${type === "entry" ? "Entry" : "Exit"} successfully`, "success");
-      await loadDashboardData();
-    } catch (err) {
-      console.error("Log activity error:", err);
-      showToast(err.message || `Failed to log ${type}`, "error");
-    } finally {
-      setActivitySubmitting(false);
-    }
-  };
+
 
   const handlePreCaptureCheck = async () => {
     setLocationError("");
@@ -957,6 +944,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setPhotoAddress("");
     setLocationCheckStatus("unchecked");
     setDeviceCoords(null);
+    setAttendanceMode("checkin");
   };
 
   const startWebRTCCamera = async (facingMode) => {
@@ -1060,35 +1048,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
 
-      if (attendanceMode === "checkout") {
-        if (!todayAttendance?.id) {
-          throw new Error("No check-in record found for today to check out from.");
-        }
-        await markCheckOut(
-          todayAttendance.id,
-          lat,
-          lng,
-          accuracy,
-          verificationDetails?.capturedAddress || "",
-          attendancePhotoPreview,
-          distance
-        );
-        showToast(`Checked out successfully from ${site.siteName}!`, "success");
-      } else {
-        await markAttendance(
-          engineerId, 
-          activeSiteId, 
-          todayStr, 
-          lat, 
-          lng, 
-          accuracy,
-          verificationDetails?.capturedAddress || "",
-          attendancePhotoPreview, 
-          "verified",
-          distance
-        );
-        showToast(`Checked in present at ${site.siteName}!`, "success");
-      }
+      await markAttendance(
+        engineerId, 
+        activeSiteId, 
+        todayStr, 
+        lat, 
+        lng, 
+        accuracy,
+        verificationDetails?.capturedAddress || "",
+        attendancePhotoPreview, 
+        "verified",
+        distance
+      );
+      showToast(`Checked in present at ${site.siteName}!`, "success");
 
       handleResetVerification();
 
@@ -1976,14 +1948,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <div className="mobile-attendance-left">
             <span className="mobile-attendance-status-label">Your Attendance Status</span>
             <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
-              {todayAttendance 
-                ? (todayAttendance.checkOutTime ? '✓ Shift Completed' : '✓ Checked In Present')
-                : '✗ Not Checked In Yet'}
+              {todayAttendance ? '✓ Checked In Present' : '✗ Not Checked In Yet'}
             </div>
             {todayAttendance && (
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Check-In: {todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}
-                {todayAttendance.checkOutTime && ` | Check-Out: ${todayAttendance.checkOutTime}`}
+                Check-In: {todayAttendance.time || "Today"}
               </span>
             )}
           </div>
@@ -1997,19 +1966,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               className="mobile-attendance-btn"
             >
               Check In
-            </button>
-          )}
-          {todayAttendance && !todayAttendance.checkOutTime && (
-            <button 
-              type="button" 
-              onClick={() => {
-                setAttendanceMode("checkout");
-                navigate("/engineer/attendance");
-              }} 
-              className="mobile-attendance-btn"
-              style={{ backgroundColor: "var(--danger-600)" }}
-            >
-              Check Out
             </button>
           )}
         </div>
@@ -2029,109 +1985,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         )}
 
-        {/* Entry / Exit Activity Logging */}
-        {currentSite && (
-          <div className="mobile-attendance-card" style={{ flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <Activity size={18} style={{ color: "var(--accent-600)" }} />
-                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site Entry / Exit Logging</span>
-              </div>
-              <Badge status="default">Separated Log</Badge>
-            </div>
-            
-            <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
-              Record your entry and exit events for tracking active site operations. This does not affect attendance calculations.
-            </p>
-            
-            <div style={{ display: "flex", gap: "12px", marginTop: "4px" }}>
-              <button 
-                type="button" 
-                disabled={activitySubmitting}
-                onClick={() => handleLogActivity("entry")} 
-                style={{ 
-                  flex: 1, 
-                  backgroundColor: "var(--success-600)", 
-                  color: "#ffffff", 
-                  border: "none", 
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: "13px", 
-                  fontWeight: "800", 
-                  padding: "12px 10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
-                  cursor: "pointer",
-                  opacity: activitySubmitting ? 0.7 : 1
-                }}
-              >
-                <ArrowRightCircle size={16} /> Log Entry
-              </button>
-              <button 
-                type="button" 
-                disabled={activitySubmitting}
-                onClick={() => handleLogActivity("exit")} 
-                style={{ 
-                  flex: 1, 
-                  backgroundColor: "var(--danger-600)", 
-                  color: "#ffffff", 
-                  border: "none", 
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: "13px", 
-                  fontWeight: "800", 
-                  padding: "12px 10px",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "6px",
-                  cursor: "pointer",
-                  opacity: activitySubmitting ? 0.7 : 1
-                }}
-              >
-                <ArrowLeftCircle size={16} /> Log Exit
-              </button>
-            </div>
 
-            {/* Today's logged activities for this site */}
-            {todayActivityLogs && todayActivityLogs.some(log => log.siteId === activeSiteId) && (
-              <div style={{ marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)", display: "block", marginBottom: "6px" }}>
-                  Today's Logs ({currentSite.siteName})
-                </span>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  {todayActivityLogs
-                    .filter(log => log.siteId === activeSiteId)
-                    .map((log, idx) => (
-                      <div key={log.id || idx} style={{ 
-                        display: "flex", 
-                        justifyContent: "space-between", 
-                        alignItems: "center", 
-                        backgroundColor: "#f8fafc", 
-                        padding: "6px 10px", 
-                        borderRadius: "6px",
-                        fontSize: "12px"
-                      }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <span style={{ 
-                            fontWeight: "800", 
-                            color: log.type === "entry" ? "var(--success-600)" : "var(--danger-600)",
-                            textTransform: "uppercase"
-                          }}>
-                            {log.type}
-                          </span>
-                          <span style={{ color: "#64748b", fontWeight: "500" }}>at {log.time}</span>
-                        </div>
-                        <span style={{ color: "var(--primary-900)", fontWeight: "600", maxWidth: "160px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={log.address}>
-                          {log.address}
-                        </span>
-                      </div>
-                    ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Quick Actions Grid */}
         <div style={{ marginTop: "8px" }}>
@@ -2155,22 +2009,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <span className="mobile-action-title">Check In</span>
             </button>
 
-            {/* Check Out Action */}
-            <button 
-              type="button"
-              className="mobile-action-card attendance"
-              onClick={() => {
-                setAttendanceMode("checkout");
-                navigate("/engineer/attendance");
-              }}
-              disabled={!todayAttendance || !!todayAttendance.checkOutTime}
-              style={{ opacity: (!todayAttendance || todayAttendance.checkOutTime) ? 0.5 : 1, border: "none", cursor: (!todayAttendance || todayAttendance.checkOutTime) ? "not-allowed" : "pointer" }}
-            >
-              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--danger-50)", color: "var(--danger-700)" }}>
-                <LogOut size={20} />
-              </div>
-              <span className="mobile-action-title">Check Out</span>
-            </button>
 
             {/* Add Progress */}
             <button 
@@ -2342,10 +2180,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </div>
             <div>
               <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>
-                {todayAttendance.checkOutTime ? "Shift Completed Successfully" : "Check-In Confirmed"}
+                Check-In Confirmed
               </h4>
               <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
-                {todayAttendance.checkOutTime ? "You have checked in and checked out for today's work shift." : "You are marked present at the construction site today."}
+                You are marked present at the construction site today.
               </p>
             </div>
             
@@ -2363,61 +2201,22 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             }}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-muted)" }}>Worksite:</span>
-                <strong style={{ color: "var(--primary-900)" }}>{currentSite?.siteName}</strong>
+                <strong style={{ color: "var(--primary-900)" }}>
+                  {(() => {
+                    const checkInSite = assignedSites.find(s => s.id === todayAttendance.siteId);
+                    return checkInSite ? checkInSite.siteName : currentSite?.siteName || "Assigned Site";
+                  })()}
+                </strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-muted)" }}>Check-In Time:</span>
-                <strong style={{ color: "var(--primary-900)" }}>{todayAttendance.checkInTime || todayAttendance.timestamp || "Today"}</strong>
+                <strong style={{ color: "var(--primary-900)" }}>{todayAttendance.time || "Today"}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-muted)" }}>Check-In GPS:</span>
                 <strong style={{ color: "var(--primary-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.gpsLocationAddress || (todayAttendance.latitude ? `${Number(todayAttendance.latitude).toFixed(4)}, ${Number(todayAttendance.longitude).toFixed(4)}` : "Verified Boundary")}</strong>
               </div>
             </div>
-
-            {todayAttendance.checkOutTime ? (
-              <div style={{
-                width: "100%",
-                backgroundColor: "var(--danger-50)",
-                borderRadius: "8px",
-                border: "1px solid var(--danger-100)",
-                padding: "12px",
-                textAlign: "left",
-                display: "flex",
-                flexDirection: "column",
-                gap: "8px",
-                fontSize: "12px"
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--danger-700)" }}>Check-Out:</span>
-                  <strong style={{ color: "var(--danger-900)" }}>Checked Out</strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--danger-700)" }}>Check-Out Time:</span>
-                  <strong style={{ color: "var(--danger-900)" }}>
-                    {todayAttendance.checkOutTime?.seconds
-                      ? new Date(todayAttendance.checkOutTime.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : new Date(todayAttendance.checkOutTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                  </strong>
-                </div>
-                <div style={{ display: "flex", justifyContent: "space-between" }}>
-                  <span style={{ color: "var(--danger-700)" }}>Check-Out GPS:</span>
-                  <strong style={{ color: "var(--danger-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.checkOutAddress || (todayAttendance.checkOutLatitude ? `${Number(todayAttendance.checkOutLatitude).toFixed(4)}, ${Number(todayAttendance.checkOutLongitude).toFixed(4)}` : "Verified Boundary")}</strong>
-                </div>
-              </div>
-            ) : (
-              <button
-                type="button"
-                className="mobile-btn-large"
-                onClick={() => {
-                  setAttendanceMode("checkout");
-                  handlePreCaptureCheck();
-                }}
-                style={{ width: "100%", backgroundColor: "var(--danger-600)", color: "#ffffff", border: "none" }}
-              >
-                <LogOut size={16} /> Check Out of Shift
-              </button>
-            )}
 
             {todayAttendance.photoUrl && (
               <div style={{ width: "100%", height: "160px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)" }}>
@@ -2678,7 +2477,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         className="mobile-btn-large success"
                         style={{ flex: 1.5 }}
                       >
-                        {attendanceSubmitting ? "Submitting..." : "Submit Present"}
+                        {attendanceSubmitting ? "Submitting..." : attendanceMode === "checkout" ? "Submit Check Out" : "Submit Present"}
                       </button>
                     </div>
                   </div>

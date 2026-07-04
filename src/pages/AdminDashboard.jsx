@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
 import { 
@@ -35,16 +35,30 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
-  const [attendanceTodayCount, setAttendanceTodayCount] = useState(0);
-  const [totalMaterialsCount, setTotalMaterialsCount] = useState(0);
-  const [activeWorkersCount, setActiveWorkersCount] = useState(0);
-  const [activityLogs, setActivityLogs] = useState([]);
+  const [rawAttendanceToday, setRawAttendanceToday] = useState([]);
+  const [rawMaterials, setRawMaterials] = useState([]);
+  const [rawWorkers, setRawWorkers] = useState([]);
   const [systemActivities, setSystemActivities] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [documents, setDocuments] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+
+  const attendanceTodayCount = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    return rawAttendanceToday.filter(record => siteIds.has(record.siteId)).length;
+  }, [sites, rawAttendanceToday]);
+
+  const totalMaterialsCount = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    return rawMaterials.filter(m => siteIds.has(m.siteId)).length;
+  }, [sites, rawMaterials]);
+
+  const activeWorkersCount = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    return rawWorkers.filter(w => siteIds.has(w.siteId) || w.adminId === user?.uid).length;
+  }, [sites, rawWorkers, user]);
 
   const metrics = {
     totalSites: sites.length,
@@ -159,14 +173,22 @@ export default function AdminDashboard() {
     const todayStr = new Date().toISOString().split("T")[0];
     const qAttendance = query(collection(db, "attendance"), where("date", "==", todayStr));
     const unsubAttendance = onSnapshot(qAttendance, (snapshot) => {
-      setAttendanceTodayCount(snapshot.size);
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setRawAttendanceToday(list);
     }, (err) => {
       console.error("Attendance today listener error:", err);
     });
 
     // 4. Materials Listener
     const unsubMaterials = onSnapshot(collection(db, "materials"), (snapshot) => {
-      setTotalMaterialsCount(snapshot.size);
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setRawMaterials(list);
     }, (err) => {
       console.error("Materials listener error:", err);
     });
@@ -174,22 +196,15 @@ export default function AdminDashboard() {
     // 5. Workers Listener
     const qWorkers = query(collection(db, "workers"), where("status", "==", "active"));
     const unsubWorkers = onSnapshot(qWorkers, (snapshot) => {
-      setActiveWorkersCount(snapshot.size);
-    }, (err) => {
-      console.error("Workers listener error:", err);
-    });
-
-    // 6. Activity Logs Listener (limit 50, sorted in-memory desc)
-    const qLogs = query(collection(db, "activityLogs"), limit(50));
-    const unsubLogs = onSnapshot(qLogs, (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, ...docSnap.data() });
       });
-      setActivityLogs(list);
+      setRawWorkers(list);
     }, (err) => {
-      console.error("ActivityLogs listener error:", err);
+      console.error("Workers listener error:", err);
     });
+
 
     // 7. System Activities Listener (limit 50, sorted in-memory desc)
     const qSys = query(collection(db, "activities"), limit(50));
@@ -232,7 +247,7 @@ export default function AdminDashboard() {
       unsubAttendance();
       unsubMaterials();
       unsubWorkers();
-      unsubLogs();
+
       unsubSys();
       unsubApprovals();
       unsubDocuments();
@@ -330,21 +345,6 @@ export default function AdminDashboard() {
   });
 
   // Combine site entry/exit logs with module system activities
-  const mappedLogs = activityLogs.map(l => ({
-    id: l.id,
-    type: l.type, // "entry" or "exit"
-    engineerId: l.engineerId,
-    engineerName: engineersMap[l.engineerId] || "Unknown Engineer",
-    siteId: l.siteId,
-    siteName: sites.find(s => s.id === l.siteId)?.siteName || "Unknown Site",
-    date: l.date,
-    time: l.time,
-    description: `Clocked ${l.type.toUpperCase()} at ${sites.find(s => s.id === l.siteId)?.siteName || "Site"}`,
-    details: l.address || "No address resolved",
-    timestamp: l.timestamp,
-    isSystem: false
-  }));
-
   const mappedSys = systemActivities.map(s => ({
     id: s.id,
     type: s.actionType,
@@ -363,7 +363,7 @@ export default function AdminDashboard() {
     moduleType: s.moduleType
   }));
 
-  const combinedTimeline = [...mappedLogs, ...mappedSys]
+  const combinedTimeline = [...mappedSys]
     .sort((a, b) => {
       const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
       const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
@@ -467,10 +467,10 @@ export default function AdminDashboard() {
       </div>
 
       {/* ── MIDDLE: Two-Column Layout ── */}
-      <div style={{ display: "flex", gap: "20px", alignItems: "start", marginBottom: "20px" }}>
+      <div className="admin-dashboard-main-grid">
 
         {/* Left Column — Projects Table (2/3 width) */}
-        <div style={{ flex: "2 1 560px", display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
           <div className="dash-section-label"><span>Projects &amp; Assignments</span></div>
 
@@ -558,7 +558,7 @@ export default function AdminDashboard() {
         </div>
 
         {/* Right Column — Alerts + Docs (1/3 width) */}
-        <div style={{ flex: "1 1 280px", display: "flex", flexDirection: "column", gap: "16px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
           {/* Alerts Panel */}
           {alerts.length > 0 && (

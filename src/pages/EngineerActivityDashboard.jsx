@@ -7,14 +7,12 @@ import Loading from "../components/common/Loading";
 import { 
   getSiteEngineers,
   getSites,
-  getActivityLogsForEngineer,
   getDailyUpdatesForEngineer,
   getSitePhotos,
   getEngineerAttendanceHistory,
   getEngineerAttendanceAndLeaveStats,
   getEngineerLeaves
 } from "../services/firebaseService";
-import { pairActivityLogs } from "../services/businessLogic";
 import { 
   ArrowLeft, 
   User, 
@@ -34,7 +32,6 @@ import {
 export default function EngineerActivityDashboard({ engineerId, onBack }) {
   const [engineer, setEngineer] = useState(null);
   const [sites, setSites] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -43,7 +40,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
 
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
-  const [activeSubTab, setActiveSubTab] = useState("activity");
+  const [activeSubTab, setActiveSubTab] = useState("attendance");
 
   // Filters State
   const [siteFilter, setSiteFilter] = useState("");
@@ -75,14 +72,12 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
 
       // Fetch other engineer logs in parallel
       const [
-        logs,
         progress,
         pts,
         attend,
         engStats,
         engLeaves
       ] = await Promise.all([
-        getActivityLogsForEngineer(engineerId),
         getDailyUpdatesForEngineer(engineerId),
         getSitePhotos(engineerId),
         getEngineerAttendanceHistory(engineerId),
@@ -90,7 +85,6 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
         getEngineerLeaves(engineerId)
       ]);
 
-      setActivityLogs(logs);
       setProgressUpdates(progress);
       setPhotos(pts);
       setAttendance(attend);
@@ -119,19 +113,6 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
 
   if (!engineer) return null;
 
-  // Process activity logs using unified business logic service
-  const processActivityLogs = (logsList) => {
-    return pairActivityLogs(logsList);
-  };
-
-  const rawProcessedActivities = processActivityLogs(activityLogs);
-
-  // Apply filters on logs, progress updates, and photos
-  const filteredActivities = rawProcessedActivities.filter(act => {
-    const matchesSite = !siteFilter || act.siteId === siteFilter;
-    const matchesDate = !dateFilter || act.date === dateFilter;
-    return matchesSite && matchesDate;
-  });
 
   const filteredProgress = progressUpdates.filter(up => {
     const matchesSite = !siteFilter || up.siteId === siteFilter;
@@ -162,17 +143,8 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
     siteActivitySummary[assignedId] = {
       siteName: siteObj ? siteObj.siteName : `Site (ID: ${assignedId})`,
       status: siteObj ? siteObj.status : "Planning",
-      entries: 0,
-      exits: 0,
       daysAttended: 0
     };
-  });
-
-  activityLogs.forEach(log => {
-    if (siteActivitySummary[log.siteId]) {
-      if (log.type === "entry") siteActivitySummary[log.siteId].entries += 1;
-      if (log.type === "exit") siteActivitySummary[log.siteId].exits += 1;
-    }
   });
 
   attendance.forEach(att => {
@@ -182,10 +154,9 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
   });
 
   const subTabs = [
-    { id: "activity", label: "Activity Logs & Durations", icon: Clock },
+    { id: "attendance", label: "Attendance Marks", icon: ClipboardCheck },
     { id: "progress", label: "Progress Reports", icon: FileText },
-    { id: "photos", label: "Uploaded Photos", icon: Camera },
-    { id: "attendance", label: "Attendance Marks", icon: ClipboardCheck }
+    { id: "photos", label: "Uploaded Photos", icon: Camera }
   ];
 
   return (
@@ -395,112 +366,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
           {/* Sub-Tab Contents */}
           <div>
             
-            {/* 1. Sub-Tab: Activity Logs */}
-            {activeSubTab === "activity" && (
-              <Card title="Captured Entries, Exits, and Durations">
-                {filteredActivities.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
-                    No matching activity logs registered for this query.
-                  </p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                    {filteredActivities.map((act) => {
-                      const siteObj = sites.find(s => s.id === act.siteId);
-                      const siteName = siteObj ? siteObj.siteName : "Unknown Site";
-                      const isPaired = !!act.entryTime;
 
-                      if (isPaired) {
-                        return (
-                          <div key={act.id} style={{
-                            padding: "16px",
-                            backgroundColor: "var(--success-50)",
-                            border: "1px solid var(--success-200)",
-                            borderRadius: "8px",
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "10px"
-                          }}>
-                            {/* Header */}
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px dashed var(--success-200)", paddingBottom: "6px" }}>
-                              <span style={{ fontSize: "13.5px", fontWeight: "800", color: "var(--success-800)" }}>{siteName}</span>
-                              <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }} className="font-mono">{act.date}</span>
-                            </div>
-                            
-                            {/* Timestamps */}
-                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-                              <div>
-                                <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Entry Time</span>
-                                <strong style={{ fontSize: "13.5px", color: "var(--primary-900)" }} className="font-mono">{act.entryTime}</strong>
-                              </div>
-                              <div>
-                                <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", display: "block" }}>Exit Time</span>
-                                <strong style={{ fontSize: "13.5px", color: "var(--primary-900)" }} className="font-mono">{act.exitTime}</strong>
-                              </div>
-                            </div>
-
-                            {/* Addresses */}
-                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                                <strong>Entry Address:</strong> {act.entryAddress || "Resolved GPS"}
-                              </span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                                <strong>Exit Address:</strong> {act.exitAddress || "Resolved GPS"}
-                              </span>
-                            </div>
-
-                            {/* Duration Indicator */}
-                            <div style={{ 
-                              display: "flex", 
-                              alignItems: "center", 
-                              gap: "6px", 
-                              backgroundColor: "#ffffff", 
-                              padding: "6px 12px", 
-                              borderRadius: "6px", 
-                              border: "1px solid var(--success-100)",
-                              marginTop: "4px",
-                              alignSelf: "flex-start"
-                            }}>
-                              <Clock size={14} style={{ color: "var(--success-700)" }} />
-                              <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--success-700)" }}>
-                                Working Duration: {act.duration || "N/A"}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // Unpaired logs
-                      const isEntry = act.type === "entry_only";
-                      return (
-                        <div key={act.id} style={{
-                          padding: "14px",
-                          backgroundColor: isEntry ? "var(--warning-50)" : "rgba(239, 68, 68, 0.02)",
-                          border: `1px solid ${isEntry ? "var(--warning-200)" : "var(--danger-200)"}`,
-                          borderRadius: "8px",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "6px"
-                        }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <strong style={{ fontSize: "13px", color: isEntry ? "var(--warning-800)" : "var(--danger-600)", textTransform: "uppercase" }}>
-                              {isEntry ? "Entry (No exit logged)" : "Exit (No entry logged)"}
-                            </strong>
-                            <span style={{ fontSize: "12px", color: "var(--text-muted)" }} className="font-mono">{act.date} {act.time}</span>
-                          </div>
-                          <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>
-                            Site: {siteName}
-                          </span>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                            Address: {act.address || "GPS captured"}
-                          </span>
-                        </div>
-                      );
-
-                    })}
-                  </div>
-                )}
-              </Card>
-            )}
 
             {/* 2. Sub-Tab: Progress Reports */}
             {activeSubTab === "progress" && (

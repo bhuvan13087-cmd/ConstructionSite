@@ -12,7 +12,9 @@ import {
   arrayUnion,
   arrayRemove,
   deleteField,
-  deleteDoc
+  deleteDoc,
+  onSnapshot,
+  runTransaction
 } from "firebase/firestore";
 import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
@@ -62,6 +64,47 @@ export async function getUserProfile(uid) {
     return { uid, id: uid, ...userDoc.data() };
   }
   return null;
+}
+
+// Real-time subscription to user profile changes
+export function subscribeToUserProfile(uid, callback) {
+  const db = getDb();
+  
+  // Listen to users collection document in real-time
+  const userRef = doc(db, "users", uid);
+  return onSnapshot(userRef, async (snap) => {
+    if (snap.exists()) {
+      callback({ uid, id: uid, ...snap.data() });
+    } else {
+      // Fallback one-time resolution for legacy/other collections
+      try {
+        const engRef = doc(db, "siteEngineers", uid);
+        const engSnap = await getDoc(engRef);
+        if (engSnap.exists()) {
+          const data = engSnap.data();
+          callback({ uid, id: uid, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data });
+          return;
+        }
+        
+        const admRef = doc(db, "admins", uid);
+        const admSnap = await getDoc(admRef);
+        if (admSnap.exists()) {
+          callback({ uid, id: uid, ...admSnap.data() });
+          return;
+        }
+
+        const saRef = doc(db, "superAdmins", uid);
+        const saSnap = await getDoc(saRef);
+        if (saSnap.exists()) {
+          callback({ uid, id: uid, ...saSnap.data() });
+          return;
+        }
+      } catch (e) {
+        console.error("subscribeToUserProfile fallback resolution error:", e);
+      }
+      callback(null);
+    }
+  });
 }
 
 // Create a user profile (e.g. for Admin or Engineer)
@@ -792,10 +835,47 @@ export async function reverseGeocodeLatLng(lat, lng) {
 // Delete site document
 export async function deleteSite(siteId) {
   const db = getDb();
-  const siteDocRef = doc(db, "sites", siteId);
-  const batch = writeBatch(db);
-  batch.delete(siteDocRef);
-  await batch.commit();
+  
+  // 1. Fetch active assignments for this site
+  const assignmentsColl = collection(db, "siteAssignments");
+  const q = query(
+    assignmentsColl,
+    where("siteId", "==", siteId),
+    where("status", "==", "active")
+  );
+  const snap = await getDocs(q);
+  
+  // 2. Perform validation inside Firestore transaction and delete if valid
+  await runTransaction(db, async (transaction) => {
+    if (!snap.empty) {
+      for (const docSnap of snap.docs) {
+        const data = docSnap.data();
+        const engineerId = data.engineerId;
+        
+        // Fetch engineer profile within the transaction to check status
+        const engineerRef = doc(db, "siteEngineers", engineerId);
+        const engineerDoc = await transaction.get(engineerRef);
+        let engineerData = null;
+        if (engineerDoc.exists()) {
+          engineerData = engineerDoc.data();
+        } else {
+          const userRef = doc(db, "users", engineerId);
+          const userDoc = await transaction.get(userRef);
+          if (userDoc.exists()) {
+            engineerData = userDoc.data();
+          }
+        }
+        
+        if (engineerData && engineerData.status === "active") {
+          throw new Error("Cannot delete site: This site is currently assigned to active Site Engineers.");
+        }
+      }
+    }
+    
+    // Atomically delete the site
+    const siteDocRef = doc(db, "sites", siteId);
+    transaction.delete(siteDocRef);
+  });
 }
 
 // Load metric counts for Admin Dashboard
@@ -916,17 +996,29 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
 // Mark attendance
 export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, accuracy, address, photoUrl = "", verificationStatus = "verified", distance = null) {
   const db = getDb();
-  const existing = await getTodayAttendance(engineerId, dateStr, siteId);
+  // Duplicate check across any site for the day
+  const existing = await getTodayAttendance(engineerId, dateStr);
   if (existing) {
-    throw new Error("Attendance already marked for today.");
+    throw new Error("Attendance already recorded for today.");
   }
   
+  // Format local date and time:
+  const now = new Date();
+  let hours = now.getHours();
+  const minutes = now.getMinutes();
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const minStr = minutes < 10 ? '0' + minutes : minutes;
+  const timeStr = `${hours}:${minStr} ${ampm}`;
+
   const newAttendanceRef = doc(collection(db, "attendance"));
   await setDoc(newAttendanceRef, {
     userId: engineerId,
     engineerId: engineerId, // compatibility
     siteId,
     date: dateStr,
+    time: timeStr,
     latitude: Number(latitude),
     longitude: Number(longitude),
     gpsAccuracy: Number(accuracy) || null,
@@ -2047,73 +2139,7 @@ export async function getEngineerAttendanceHistory(engineerId) {
   return records;
 }
 
-// Log engineer site entry/exit activity
-export async function logActivity(engineerId, siteId, type, latitude, longitude, address) {
-  const db = getDb();
-  
-  // Format local date and time:
-  const now = new Date();
-  const dateStr = now.toISOString().split("T")[0]; // YYYY-MM-DD
-  
-  let hours = now.getHours();
-  const minutes = now.getMinutes();
-  const ampm = hours >= 12 ? 'PM' : 'AM';
-  hours = hours % 12;
-  hours = hours ? hours : 12; // the hour '0' should be '12'
-  const minStr = minutes < 10 ? '0' + minutes : minutes;
-  const timeStr = `${hours}:${minStr} ${ampm}`;
 
-  const activityRef = doc(collection(db, "activityLogs"));
-  await setDoc(activityRef, {
-    engineerId,
-    siteId,
-    type, // "entry" or "exit"
-    date: dateStr,
-    time: timeStr,
-    latitude: Number(latitude),
-    longitude: Number(longitude),
-    address: address || "",
-    timestamp: serverTimestamp()
-  });
-}
-
-// Get all activity logs (ordered by timestamp desc)
-export async function getActivityLogs() {
-  const db = getDb();
-  const logsQuery = query(collection(db, "activityLogs"));
-  const querySnapshot = await getDocs(logsQuery);
-  const logs = [];
-  querySnapshot.forEach((doc) => {
-    logs.push({ id: doc.id, ...doc.data() });
-  });
-  logs.sort((a, b) => {
-    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-    return tB - tA;
-  });
-  return logs;
-}
-
-// Get activity logs for a specific engineer for today
-export async function getTodayActivityLogsForEngineer(engineerId, dateStr) {
-  const db = getDb();
-  const q = query(
-    collection(db, "activityLogs"),
-    where("engineerId", "==", engineerId),
-    where("date", "==", dateStr)
-  );
-  const querySnapshot = await getDocs(q);
-  const logs = [];
-  querySnapshot.forEach((doc) => {
-    logs.push({ id: doc.id, ...doc.data() });
-  });
-  logs.sort((a, b) => {
-    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-    return tA - tB;
-  });
-  return logs;
-}
 
 // Get all attendance records for a given site
 export async function getAttendanceForSite(siteId) {
@@ -2174,39 +2200,6 @@ export async function getPhotosForSite(siteId) {
   });
 }
 
-// Get engineer activity logs for a site
-export async function getActivityLogsForSite(siteId) {
-  const db = getDb();
-  const q = query(collection(db, "activityLogs"), where("siteId", "==", siteId));
-  const snap = await getDocs(q);
-  const logs = [];
-  snap.forEach(docSnap => {
-    logs.push({ id: docSnap.id, ...docSnap.data() });
-  });
-  logs.sort((a, b) => {
-    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-    return tB - tA;
-  });
-  return logs;
-}
-
-// Get engineer activity logs for an engineer (history)
-export async function getActivityLogsForEngineer(engineerId) {
-  const db = getDb();
-  const q = query(collection(db, "activityLogs"), where("engineerId", "==", engineerId));
-  const snap = await getDocs(q);
-  const logs = [];
-  snap.forEach(docSnap => {
-    logs.push({ id: docSnap.id, ...docSnap.data() });
-  });
-  logs.sort((a, b) => {
-    const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-    const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-    return tB - tA;
-  });
-  return logs;
-}
 
 // Update existing material records
 export async function updateMaterial(materialId, materialData) {
@@ -2374,23 +2367,30 @@ export async function saveLabourMaster(categories, history, adminId = null) {
 // Get admin-scoped labour payments.
 // If adminId is provided, reads from "__labour_payments___{adminId}".
 // Falls back to global for legacy compatibility.
-export async function getLabourPayments(adminId = null) {
+export async function getLabourPayments(adminId = null, siteId = null) {
   const db = getDb();
+  let paymentsList = [];
   // Try admin-scoped doc first
   if (adminId) {
     const scopedRef = doc(db, "users", `__labour_payments__${adminId}`);
     const scopedSnap = await getDoc(scopedRef);
     if (scopedSnap.exists()) {
-      return scopedSnap.data().payments || [];
+      paymentsList = scopedSnap.data().payments || [];
     }
   }
-  // Fallback to global document
-  const docRef = doc(db, "users", "__labour_payments__");
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return docSnap.data().payments || [];
+  if (paymentsList.length === 0) {
+    // Fallback to global document
+    const docRef = doc(db, "users", "__labour_payments__");
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      paymentsList = docSnap.data().payments || [];
+    }
   }
-  return [];
+
+  if (siteId) {
+    return paymentsList.filter(p => p.siteId === siteId);
+  }
+  return paymentsList;
 }
 
 // Save admin-scoped labour payment.
@@ -2497,24 +2497,31 @@ export async function logMaterialPayment(materialId, paymentData) {
   });
 }
 
-export async function getGeneralExpenses() {
+export async function getGeneralExpenses(siteId = null) {
   const db = getDb();
+  let expensesList = [];
   try {
     const docRef = doc(db, "expenses", "general");
     const docSnap = await getDoc(docRef);
     if (docSnap.exists() && docSnap.data().expenses) {
-      return docSnap.data().expenses || [];
+      expensesList = docSnap.data().expenses || [];
     }
   } catch (e) {}
 
-  try {
-    const docRef = doc(db, "users", "__site_expenses__");
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      return docSnap.data().expenses || [];
-    }
-  } catch (e) {}
-  return [];
+  if (expensesList.length === 0) {
+    try {
+      const docRef = doc(db, "users", "__site_expenses__");
+      const docSnap = await getDoc(docRef);
+      if (docSnap.exists()) {
+        expensesList = docSnap.data().expenses || [];
+      }
+    } catch (e) {}
+  }
+
+  if (siteId) {
+    return expensesList.filter(g => g.siteId === siteId);
+  }
+  return expensesList;
 }
 
 export async function saveGeneralExpense(expenseData) {

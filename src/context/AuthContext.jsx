@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { onAuthChange, signOutUser } from "../firebase/auth";
-import { getUserProfile, createUserProfile, logSystemActivity } from "../services/firebaseService";
+import { getUserProfile, createUserProfile, logSystemActivity, subscribeToUserProfile } from "../services/firebaseService";
 import { isFirebaseConfigured } from "../firebase/config";
 
 const AuthContext = createContext(null);
@@ -39,56 +39,70 @@ export function AuthProvider({ children }) {
       handleAuth();
     }
 
-    const unsubscribe = onAuthChange(async (firebaseUser) => {
+    let unsubProfile = null;
+    const unsubscribe = onAuthChange((firebaseUser) => {
       setLoading(true);
+      if (unsubProfile) {
+        unsubProfile();
+        unsubProfile = null;
+      }
       
       const currentSessionActive = 
         sessionStorage.getItem("is_session_active") === "true" ||
         localStorage.getItem("is_session_active") === "true";
 
       if (firebaseUser && currentSessionActive) {
-        try {
-          let profile = await getUserProfile(firebaseUser.uid);
-          if (!profile && firebaseUser.email === "admin@gmail.com") {
-            // Auto-provision admin user profile in Firestore if it doesn't exist
-            const adminProfile = {
-              fullName: "Admin",
-              username: "admin",
-              role: "admin",
-              status: "active",
-              email: firebaseUser.email,
-              isFirstLogin: false
-            };
-            await createUserProfile(firebaseUser.uid, adminProfile);
-            profile = await getUserProfile(firebaseUser.uid);
-          }
+        unsubProfile = subscribeToUserProfile(firebaseUser.uid, async (profile) => {
+          try {
+            if (!profile && firebaseUser.email === "admin@gmail.com") {
+              // Auto-provision admin user profile in Firestore if it doesn't exist
+              const adminProfile = {
+                fullName: "Admin",
+                username: "admin",
+                role: "admin",
+                status: "active",
+                email: firebaseUser.email,
+                isFirstLogin: false
+              };
+              await createUserProfile(firebaseUser.uid, adminProfile);
+              return;
+            }
 
-          if (!profile || profile.status !== "active") {
-            // Force sign out invalid or inactive users immediately
-            await signOutUser();
+            if (!profile || profile.status !== "active") {
+              // Force sign out invalid or inactive users immediately
+              if (unsubProfile) {
+                unsubProfile();
+                unsubProfile = null;
+              }
+              await signOutUser();
+              setUser(null);
+              setUserProfile(null);
+              localStorage.removeItem("is_session_active");
+              sessionStorage.removeItem("is_session_active");
+              setLoading(false);
+              return;
+            }
+
+            setUser(firebaseUser);
+            setUserProfile(profile);
+          } catch (err) {
+            console.error("Auth Listener Error fetching profile:", err);
             setUser(null);
             setUserProfile(null);
-            localStorage.removeItem("is_session_active");
-            sessionStorage.removeItem("is_session_active");
-            setLoading(false);
-            return;
           }
-
-          setUser(firebaseUser);
-          setUserProfile(profile);
-        } catch (err) {
-          console.error("Auth Listener Error fetching profile:", err);
-          setUser(null);
-          setUserProfile(null);
-        }
+          setLoading(false);
+        });
       } else {
         setUser(null);
         setUserProfile(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribe();
+      if (unsubProfile) unsubProfile();
+    };
   }, [configured]);
 
   const logout = async () => {

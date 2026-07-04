@@ -307,12 +307,13 @@ export default function SiteEngineers() {
               <th>Phone Number</th>
               <th>Status</th>
               <th>Assigned Sites</th>
+              <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredEngineers.length === 0 ? (
               <tr>
-                <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                   No site engineers found. Click "Add Engineer" to register one.
                 </td>
               </tr>
@@ -369,6 +370,26 @@ export default function SiteEngineers() {
                     </td>
                     <td>
                       <Badge status="pending">{sitesCount} Sites</Badge>
+                    </td>
+                    <td>
+                      <div style={{ display: "flex", gap: "8px" }}>
+                        <button 
+                          onClick={() => handleOpenEditModal(eng)} 
+                          className="btn-icon" 
+                          title="Edit Profile"
+                          style={{ color: "var(--primary-600)", background: "none", border: "none", cursor: "pointer", padding: "4px" }}
+                        >
+                          <Edit3 size={15} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteEngineer(eng)} 
+                          className="btn-icon" 
+                          title="Delete Engineer"
+                          style={{ color: "var(--danger-500)", background: "none", border: "none", cursor: "pointer", padding: "4px" }}
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );

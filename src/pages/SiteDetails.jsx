@@ -13,7 +13,6 @@ import {
   getAttendanceForSite, 
   getDailyUpdatesForSite, 
   getPhotosForSite, 
-  getActivityLogsForSite,
   updateMaterial,
   deleteMaterial
 } from "../services/firebaseService";
@@ -45,7 +44,6 @@ export default function SiteDetails({ siteId, onBack }) {
   const [attendance, setAttendance] = useState([]);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [photos, setPhotos] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -58,7 +56,7 @@ export default function SiteDetails({ siteId, onBack }) {
   const [deliveryFilter, setDeliveryFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [labourDateFilter, setLabourDateFilter] = useState("");
-  const [attendanceTypeFilter, setAttendanceTypeFilter] = useState("all"); // "all", "attendance", "activity"
+
 
   // Material Edit Modal State
   const [selectedMaterialForEdit, setSelectedMaterialForEdit] = useState(null);
@@ -164,15 +162,13 @@ export default function SiteDetails({ siteId, onBack }) {
         labour,
         attend,
         progress,
-        pts,
-        logs
+        pts
       ] = await Promise.all([
         getMaterialsDetailed(siteId),
         getLabourDailyCountsSummary(siteId),
         getAttendanceForSite(siteId),
         getDailyUpdatesForSite(siteId),
-        getPhotosForSite(siteId),
-        getActivityLogsForSite(siteId)
+        getPhotosForSite(siteId)
       ]);
 
       setMaterials(mats);
@@ -180,7 +176,6 @@ export default function SiteDetails({ siteId, onBack }) {
       setAttendance(attend);
       setProgressUpdates(progress);
       setPhotos(pts);
-      setActivityLogs(logs);
 
     } catch (err) {
       console.error("Error loading site details:", err);
@@ -964,124 +959,48 @@ export default function SiteDetails({ siteId, onBack }) {
             =================================================================== */}
         {activeTab === "attendance" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-            {/* Filter Sub Bar */}
-            <div style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--border-color)", paddingBottom: "12px" }}>
-              <Button 
-                variant={attendanceTypeFilter === "all" ? "primary" : "outline"} 
-                size="sm"
-                onClick={() => setAttendanceTypeFilter("all")}
-              >
-                All Timelines
-              </Button>
-              <Button 
-                variant={attendanceTypeFilter === "activity" ? "primary" : "outline"} 
-                size="sm"
-                onClick={() => setAttendanceTypeFilter("activity")}
-              >
-                Entry / Exit Activities
-              </Button>
-              <Button 
-                variant={attendanceTypeFilter === "attendance" ? "primary" : "outline"} 
-                size="sm"
-                onClick={() => setAttendanceTypeFilter("attendance")}
-              >
-                Daily Attendance Marks
-              </Button>
-            </div>
-
-            {/* Split layout or timelines based on filter */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-              
-              {/* Activity Timeline */}
-              {(attendanceTypeFilter === "all" || attendanceTypeFilter === "activity") && (
-                <Card title="Engineer Entry / Exit Log History">
-                  {activityLogs.length === 0 ? (
-                    <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No entry/exit activity logged for this site.</p>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "16px", paddingLeft: "10px", borderLeft: "2px solid var(--border-color)", marginLeft: "8px" }}>
-                      {activityLogs.map((log, index) => {
-                        const isEntry = log.type === "entry";
-                        const eng = engineers.find(e => e.id === log.engineerId) || { fullName: `Engineer (ID: ${log.engineerId})` };
-                        return (
-                          <div key={log.id || index} style={{ position: "relative", paddingLeft: "14px" }}>
-                            <div style={{
-                              position: "absolute",
-                              left: "-21px",
-                              top: "4px",
-                              width: "10px",
-                              height: "10px",
-                              borderRadius: "50%",
-                              backgroundColor: isEntry ? "var(--success-500)" : "var(--danger-500)",
-                              border: "2px solid #ffffff",
-                              boxShadow: "0 0 0 2px " + (isEntry ? "var(--success-100)" : "var(--danger-100)")
-                            }} />
-                            <div style={{ fontSize: "12px", color: "var(--text-muted)", display: "flex", justifyContent: "space-between" }}>
-                              <strong style={{ color: isEntry ? "var(--success-600)" : "var(--danger-600)", textTransform: "uppercase" }}>
-                                {isEntry ? "Entry" : "Exit"}
-                              </strong>
-                              <span className="font-mono">{log.date} {log.time}</span>
-                            </div>
-                            <span style={{ fontSize: "13.5px", fontWeight: "700", color: "var(--primary-900)", display: "block", marginTop: "2px" }}>
-                              {eng.fullName}
-                            </span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "2px" }}>
-                              Resolved Address: {log.address || "Unknown coordinates"}
-                            </span>
+            <Card title="Engineer Attendance Records">
+              {attendance.length === 0 ? (
+                <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No attendance submissions found for this site.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {attendance.map((record, index) => {
+                    const eng = engineers.find(e => e.id === record.engineerId) || { fullName: `Engineer (ID: ${record.engineerId})` };
+                    return (
+                      <div key={record.id || index} style={{
+                        padding: "12px",
+                        borderRadius: "8px",
+                        backgroundColor: "var(--primary-50)",
+                        border: "1px solid var(--border-color)",
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: "12px"
+                      }}>
+                        {record.photoUrl && (
+                          <img 
+                            src={record.photoUrl} 
+                            alt="Selfie Verification" 
+                            style={{ width: "40px", height: "40px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--border-color)" }} 
+                          />
+                        )}
+                        <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, gap: "2px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
+                            <Badge status="success">Present</Badge>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </Card>
+                          <span style={{ fontSize: "11.5px", fontWeight: "600", color: "var(--primary-750)" }} className="font-mono">
+                            Date: {record.date} ({record.time || "--"})
+                          </span>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                            Address: {record.address || "GPS Captured"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               )}
-
-              {/* Attendance Log */}
-              {(attendanceTypeFilter === "all" || attendanceTypeFilter === "attendance") && (
-                <Card title="Engineer Attendance Records">
-                  {attendance.length === 0 ? (
-                    <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No attendance submissions found for this site.</p>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                      {attendance.map((record, index) => {
-                        const eng = engineers.find(e => e.id === record.engineerId) || { fullName: `Engineer (ID: ${record.engineerId})` };
-                        return (
-                          <div key={record.id || index} style={{
-                            padding: "12px",
-                            borderRadius: "8px",
-                            backgroundColor: "var(--primary-50)",
-                            border: "1px solid var(--border-color)",
-                            display: "flex",
-                            alignItems: "flex-start",
-                            gap: "12px"
-                          }}>
-                            {record.photoUrl && (
-                              <img 
-                                src={record.photoUrl} 
-                                alt="Selfie Verification" 
-                                style={{ width: "40px", height: "40px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--border-color)" }} 
-                              />
-                            )}
-                            <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, gap: "2px" }}>
-                              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
-                                <Badge status="success">Present</Badge>
-                              </div>
-                              <span style={{ fontSize: "11.5px", fontWeight: "600", color: "var(--primary-750)" }} className="font-mono">
-                                Date: {record.date} ({record.time || "--"})
-                              </span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                                Address: {record.address || "GPS Captured"}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </Card>
-              )}
-
-            </div>
+            </Card>
           </div>
         )}
 

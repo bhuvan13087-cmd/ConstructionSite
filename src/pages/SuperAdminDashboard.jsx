@@ -1,4 +1,6 @@
 import React, { useState, useEffect } from "react";
+import { onSnapshot, collection, query, where } from "firebase/firestore";
+import { getFirebaseDb } from "../firebase/config";
 import Layout from "../components/layout/Layout";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
@@ -11,7 +13,6 @@ import {
   getMaterialsDetailed,
   getLabourDailyCountsSummary,
   getAllLeaves,
-  getActivityLogs,
   approveLeave,
   rejectLeave,
   approveSiteLocation,
@@ -69,7 +70,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const [engineers, setEngineers] = useState([]);
   const [materials, setMaterials] = useState([]);
   const [leaves, setLeaves] = useState([]);
-  const [activityLogs, setActivityLogs] = useState([]);
+
   const [allDprs, setAllDprs] = useState([]);
   const [labourMaster, setLabourMaster] = useState({ categories: {}, history: [] });
   const [generalExpenses, setGeneralExpenses] = useState([]);
@@ -90,72 +91,136 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     }, 4000);
   };
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [fetchedSites, fetchedEngineers, fetchedLeaves, fetchedLogs, fetchedMaterials, fetchedLabourMaster, fetchedGeneralExpenses, fetchedLabourPayments, fetchedSysActivities, fetchedApprovals, fetchedDocs] = await Promise.all([
-        getSites(),
-        getSiteEngineers(),
-        getAllLeaves(),
-        getActivityLogs(),
-        getMaterialsDetailed(),
-        getLabourMaster(),
-        getGeneralExpenses(),
-        getLabourPayments(),
-        getSystemActivities(),
-        getCentralApprovals(),
-        getAllDocuments()
-      ]);
-
-      setSites(fetchedSites);
-      setEngineers(fetchedEngineers);
-      setLeaves(fetchedLeaves);
-      setActivityLogs(fetchedLogs);
-      setMaterials(fetchedMaterials);
-      setLabourMaster(fetchedLabourMaster);
-      setGeneralExpenses(fetchedGeneralExpenses);
-      setLabourPayments(fetchedLabourPayments);
-      setSystemActivities(fetchedSysActivities);
-      setApprovals(fetchedApprovals);
-      setDocuments(fetchedDocs);
-
-      if (fetchedSites.length > 0) {
-        setSelectedSiteId(fetchedSites[0].id);
-      }
-
-      // Fetch DPRs & Labor history for each site in parallel to build financial/progress maps
-      const dprsPromises = fetchedSites.map(s => getDailyUpdatesForSite(s.id));
-      const laborPromises = fetchedSites.map(s => getLabourDailyCountsSummary(s.id));
-      
-      const dprsResults = await Promise.all(dprsPromises);
-      const laborResults = await Promise.all(laborPromises);
-
-      const combinedDprs = [];
-      dprsResults.forEach((siteDprs, index) => {
-        const siteId = fetchedSites[index].id;
-        siteDprs.forEach(d => {
-          combinedDprs.push({ ...d, siteId });
-        });
-      });
-      setAllDprs(combinedDprs);
-
-      const laborMap = {};
-      laborResults.forEach((history, index) => {
-        const siteId = fetchedSites[index].id;
-        laborMap[siteId] = history;
-      });
-      setLaborHistoryMap(laborMap);
-
-    } catch (err) {
-      console.error("Super Admin dashboard load error:", err);
-      showToast(`Failed to load system records: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadData();
+    const db = getFirebaseDb();
+
+    // 1. Sites Listener
+    const unsubSites = onSnapshot(collection(db, "sites"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setSites(list);
+      if (list.length > 0) {
+        setSelectedSiteId(prev => prev || list[0].id);
+      }
+      setLoading(false);
+    }, (err) => {
+      console.error("Sites listener error:", err);
+      setLoading(false);
+    });
+
+    // 2. Engineers Listener
+    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
+      if (snapshot.empty) {
+        // fallback
+        const q = query(collection(db, "users"), where("role", "==", "site_engineer"));
+        onSnapshot(q, (snap) => {
+          const list = [];
+          snap.forEach(d => {
+            list.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", ...d.data() });
+          });
+          setEngineers(list);
+        });
+        return;
+      }
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, uid: docSnap.id, fullName: docSnap.data().name || docSnap.data().fullName || "", ...docSnap.data() });
+      });
+      setEngineers(list);
+    }, (err) => {
+      // fallback
+      const q = query(collection(db, "users"), where("role", "==", "site_engineer"));
+      onSnapshot(q, (snap) => {
+        const list = [];
+        snap.forEach(d => {
+          list.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", ...d.data() });
+        });
+        setEngineers(list);
+      });
+    });
+
+    // 3. Materials Listener
+    const unsubMaterials = onSnapshot(collection(db, "materials"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setMaterials(list);
+    });
+
+    // 4. Reports (DPRs) Listener
+    const unsubReports = onSnapshot(collection(db, "reports"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setAllDprs(list);
+    });
+
+    // 5. Labour Daily Counts Listener
+    const unsubLabour = onSnapshot(collection(db, "labourDailyCount"), (snapshot) => {
+      const map = {};
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        const sId = data.siteId;
+        if (sId) {
+          if (!map[sId]) map[sId] = [];
+          map[sId].push({ id: docSnap.id, ...data });
+        }
+      });
+      setLaborHistoryMap(map);
+    });
+
+    // 6. Approvals Listener
+    const unsubApprovals = onSnapshot(collection(db, "approvals"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setApprovals(list);
+    });
+
+    // 7. Documents Listener
+    const unsubDocs = onSnapshot(collection(db, "documents"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setDocuments(list);
+    });
+
+    // Central load for static / metadata entities
+    const loadStaticData = async () => {
+      try {
+        const [fetchedLeaves, fetchedLabourMaster, fetchedGeneralExpenses, fetchedLabourPayments, fetchedSysActivities] = await Promise.all([
+          getAllLeaves(),
+          getLabourMaster(),
+          getGeneralExpenses(),
+          getLabourPayments(),
+          getSystemActivities()
+        ]);
+        setLeaves(fetchedLeaves);
+        setLabourMaster(fetchedLabourMaster);
+        setGeneralExpenses(fetchedGeneralExpenses);
+        setLabourPayments(fetchedLabourPayments);
+        setSystemActivities(fetchedSysActivities);
+      } catch (err) {
+        console.error("Static data load error:", err);
+      }
+    };
+    loadStaticData();
+
+    return () => {
+      unsubSites();
+      unsubEngineers();
+      unsubMaterials();
+      unsubReports();
+      unsubLabour();
+      unsubApprovals();
+      unsubDocs();
+    };
   }, []);
 
   if (loading) {
@@ -323,19 +388,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       });
     }
 
-    const mappedLogs = activityLogs.map(l => ({
-      id: l.id,
-      type: l.type,
-      engineerName: engineersMap[l.engineerId] || 'Site Engineer',
-      siteName: sites.find(s => s.id === l.siteId)?.siteName || 'Unknown Site',
-      date: l.date,
-      time: l.time,
-      description: `Clocked ${l.type.toUpperCase()} at ${sites.find(s => s.id === l.siteId)?.siteName || 'Site'}`,
-      details: l.address,
-      timestamp: l.timestamp,
-      isSystem: false
-    }));
-
     const mappedSys = systemActivities.map(s => ({
       id: s.id,
       type: s.actionType,
@@ -351,7 +403,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       isSystem: true
     }));
 
-    const combinedTimeline = [...mappedLogs, ...mappedSys]
+    const combinedTimeline = [...mappedSys]
       .sort((a, b) => {
         const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
         const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
@@ -432,7 +484,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* ── MIDDLE: 3-Column ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr 1fr", gap: "20px", alignItems: "start" }}>
+        <div className="sa-dashboard-main-grid">
 
           {/* Progress Ring */}
           <Card title="Overall Progress">
@@ -580,9 +632,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const renderSiteMonitoring = () => {
     const selectedSite = sites.find(s => s.id === selectedSiteId);
     
-    // Resolve engineers and activity logs for selected site
+    // Resolve engineers and details for selected site
     const siteEngineers = selectedSite?.assignedEngineers?.map(uid => engineersMap[uid] || "Unknown Engineer") || [];
-    const siteActivities = activityLogs.filter(log => log.siteId === selectedSiteId);
     const siteDprs = allDprs.filter(d => d.siteId === selectedSiteId);
     const siteLabour = laborHistoryMap[selectedSiteId] || [];
     const siteMaterials = materials.filter(m => m.siteId === selectedSiteId);
