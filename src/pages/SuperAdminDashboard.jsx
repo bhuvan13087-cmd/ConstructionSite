@@ -786,34 +786,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             </Card>
 
-            {/* Selected site activities list */}
-            <Card title={`Recent Site Operations Timeline (${selectedSite.siteName})`}>
-              {siteActivities.length === 0 ? (
-                <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "20px" }}>No recent entry exit logs on record.</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {siteActivities.slice(0, 5).map((log, idx) => (
-                    <div key={idx} style={{ display: "flex", flexDirection: "column", gap: "6px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <span style={{ fontWeight: "700", fontSize: "13px", color: "var(--primary-900)" }}>
-                          {engineersMap[log.engineerId] || "Site Engineer"}
-                        </span>
-                        <Badge status={log.type === "entry" ? "success" : "pending"} style={{ fontSize: "10px", padding: "2px 6px" }}>
-                          {log.type.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", color: "var(--text-muted)" }}>
-                        <span style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap", maxWidth: "160px" }} title={log.address}>
-                          {log.address || "No address"}
-                        </span>
-                        <span className="font-mono">{log.date} {log.time}</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </Card>
-
           </div>
         )}
 
