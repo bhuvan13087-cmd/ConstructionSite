@@ -315,58 +315,8 @@ export default function Sites() {
   const [isMapsLoaded, setIsMapsLoaded] = useState(false);
   const [mapsLoadError, setMapsLoadError] = useState(false);
   const mapDivRef = useRef(null);
-  const autocompleteInputRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerInstanceRef = useRef(null);
-  const autocompleteInstanceRef = useRef(null);
-
-  // Parsed Address State (Task 4)
-  const [addressStreet, setAddressStreet] = useState("");
-  const [addressArea, setAddressArea] = useState("");
-  const [addressLocality, setAddressLocality] = useState("");
-  const [addressCity, setAddressCity] = useState("");
-  const [addressDistrict, setAddressDistrict] = useState("");
-  const [addressState, setAddressState] = useState("");
-  const [addressPinCode, setAddressPinCode] = useState("");
-
-  const parseAddressComponents = (components) => {
-    let street = "";
-    let area = "";
-    let locality = "";
-    let city = "";
-    let district = "";
-    let state = "";
-    let pinCode = "";
-
-    if (components && Array.isArray(components)) {
-      components.forEach(c => {
-        const types = c.types;
-        if (types.includes("route")) {
-          street = c.long_name;
-        } else if (types.includes("sublocality_level_1") || types.includes("neighborhood")) {
-          area = c.long_name;
-        } else if (types.includes("sublocality_level_2") || types.includes("locality")) {
-          locality = c.long_name;
-        } else if (types.includes("administrative_area_level_3")) {
-          city = c.long_name;
-        } else if (types.includes("administrative_area_level_2")) {
-          district = c.long_name;
-        } else if (types.includes("administrative_area_level_1")) {
-          state = c.long_name;
-        } else if (types.includes("postal_code")) {
-          pinCode = c.long_name;
-        }
-      });
-    }
-
-    setAddressStreet(street);
-    setAddressArea(area);
-    setAddressLocality(locality);
-    setAddressCity(city || locality);
-    setAddressDistrict(district);
-    setAddressState(state);
-    setAddressPinCode(pinCode);
-  };
 
   // Load Google Maps API script dynamically
   useEffect(() => {
@@ -381,9 +331,9 @@ export default function Sites() {
       return;
     }
 
-    // Capture Google Maps API authentication errors (Task 5 / Task 7 verification checks)
+    // Capture Google Maps API authentication errors
     window.gm_authFailure = () => {
-      console.error("Google Maps API authentication failed: billing is not configured, or Maps JS/Places/Geocoding APIs are disabled on your Google Cloud Console.");
+      console.error("Google Maps API authentication failed: billing is not configured, or Maps JS APIs are disabled on your Google Cloud Console.");
       setMapsLoadError(true);
     };
 
@@ -392,7 +342,7 @@ export default function Sites() {
     if (!script) {
       script = document.createElement("script");
       script.id = scriptId;
-      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=places`;
+      script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}`;
       script.async = true;
       script.defer = true;
       document.head.appendChild(script);
@@ -447,123 +397,21 @@ export default function Sites() {
     });
     markerInstanceRef.current = marker;
 
-    // Autocomplete Search Configuration (Task 1)
-    if (autocompleteInputRef.current) {
-      const inputEl = autocompleteInputRef.current;
-      
-      const autocomplete = new window.google.maps.places.Autocomplete(inputEl, {
-        fields: ["geometry", "formatted_address", "place_id", "name", "address_components"],
-        componentRestrictions: { country: "in" }
-      });
-      autocompleteInstanceRef.current = autocomplete;
-
-      autocomplete.addListener("place_changed", () => {
-        const place = autocomplete.getPlace();
-        if (place.geometry && place.geometry.location) {
-          const loc = place.geometry.location;
-          const latVal = loc.lat();
-          const lngVal = loc.lng();
-          
-          setFormLatitude(latVal);
-          setFormLongitude(lngVal);
-          setFormLocation(place.formatted_address || place.name || "");
-          setFormLocationName(place.name || ""); // Save the name (siteLocationName)
-          setFormPlaceId(place.place_id || "");
-          parseAddressComponents(place.address_components);
-
-          map.setCenter(loc);
-          map.setZoom(19);
-          marker.setPosition(loc);
-        }
-      });
-    }
-
-    // Geocode helper via official Geocoding Service (Task 4)
-    const geocodePosition = (latLng) => {
-      const geocoder = new window.google.maps.Geocoder();
-      geocoder.geocode({ location: latLng }, (results, status) => {
-        if (status === window.google.maps.GeocoderStatus.OK && results && results[0]) {
-          const addr = results[0].formatted_address;
-          setFormLocation(addr);
-          if (autocompleteInputRef.current) {
-            autocompleteInputRef.current.value = addr;
-          }
-          setFormPlaceId(results[0].place_id || "");
-          parseAddressComponents(results[0].address_components);
-          
-          // Get the siteLocationName (establishment or first address part)
-          const estComponent = results[0].address_components.find(c => 
-            c.types.includes("establishment") || 
-            c.types.includes("point_of_interest") || 
-            c.types.includes("premise") ||
-            c.types.includes("sublocality_level_1")
-          );
-          if (estComponent) {
-            setFormLocationName(estComponent.long_name);
-          } else {
-            const firstPart = addr.split(",")[0];
-            setFormLocationName(firstPart);
-          }
-        } else if (status === window.google.maps.GeocoderStatus.ZERO_RESULTS) {
-          // Requirement 4 - Only show friendly message on ZERO_RESULTS
-          const errMsg = "Unable to fetch address. Please move the marker or search again.";
-          setFormLocation(errMsg);
-          if (autocompleteInputRef.current) {
-            autocompleteInputRef.current.value = "";
-          }
-          setFormLocationName("");
-          setFormPlaceId("");
-          parseAddressComponents([]);
-        } else {
-          // For other errors (like OVER_QUERY_LIMIT, REQUEST_DENIED, etc.), fall back to coordinates readout
-          const latVal = typeof latLng.lat === 'function' ? latLng.lat() : latLng.lat;
-          const lngVal = typeof latLng.lng === 'function' ? latLng.lng() : latLng.lng;
-          const coordStr = `Lat: ${Number(latVal).toFixed(6)}, Lng: ${Number(lngVal).toFixed(6)}`;
-          setFormLocation(coordStr);
-          if (autocompleteInputRef.current) {
-            autocompleteInputRef.current.value = coordStr;
-          }
-          setFormLocationName("Pinpointed Location");
-          setFormPlaceId("");
-          parseAddressComponents([]);
-        }
-      });
-    };
-
-    // Geocode default position components if updating an existing site
-    if (hasCoords) {
-      geocodePosition({ lat: initialLat, lng: initialLng });
-    }
-
-    let dragGeocodeTimeout = null;
-
-    // Real-time dragging updates (Requirement 6)
+    // Real-time dragging updates
     window.google.maps.event.addListener(marker, "drag", () => {
       const pos = marker.getPosition();
       const latVal = pos.lat();
       const lngVal = pos.lng();
       setFormLatitude(latVal);
       setFormLongitude(lngVal);
-      setFormLocation("Fetching address...");
-      
-      if (dragGeocodeTimeout) {
-        clearTimeout(dragGeocodeTimeout);
-      }
-      dragGeocodeTimeout = setTimeout(() => {
-        geocodePosition(pos);
-      }, 350);
     });
 
     window.google.maps.event.addListener(marker, "dragend", () => {
-      if (dragGeocodeTimeout) {
-        clearTimeout(dragGeocodeTimeout);
-      }
       const pos = marker.getPosition();
       const latVal = pos.lat();
       const lngVal = pos.lng();
       setFormLatitude(latVal);
       setFormLongitude(lngVal);
-      geocodePosition(pos);
     });
 
     // Map click fine alignment click event
@@ -572,7 +420,6 @@ export default function Sites() {
       marker.setPosition(latLng);
       setFormLatitude(latLng.lat());
       setFormLongitude(latLng.lng());
-      geocodePosition(latLng);
     });
 
   }, [showFormModal, isMapsLoaded]);
@@ -964,14 +811,29 @@ export default function Sites() {
           </div>
 
           <div className="form-group">
-            <label htmlFor="site-search">Google Maps Location Picker</label>
+            <label htmlFor="site-location">Location / Address</label>
+            <div className="input-wrapper">
+              <MapPin className="input-icon" size={16} />
+              <input 
+                type="text" 
+                id="site-location" 
+                placeholder="E.g., 123 Greenwood St, Chennai" 
+                value={formLocation}
+                onChange={(e) => setFormLocation(e.target.value)}
+                required 
+              />
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label>Google Maps Location Picker</label>
 
             {mapsLoadError && (
               <div style={{ backgroundColor: "var(--danger-50)", border: "1.5px dashed var(--danger-300)", borderRadius: "8px", padding: "12px", color: "var(--danger-700)", fontSize: "12px", marginBottom: "12px", textAlign: "left" }}>
                 ⚠️ <strong>Google Maps Load Error</strong>: The Google Maps JavaScript API failed to load. Please verify that:
                 <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
                   <li>Billing is enabled on your Google Cloud Platform project.</li>
-                  <li>The <strong>Maps JavaScript API</strong>, <strong>Places API</strong>, and <strong>Geocoding API</strong> are enabled.</li>
+                  <li>The <strong>Maps JavaScript API</strong> is enabled.</li>
                   <li>Your API Key is valid and unrestricted.</li>
                 </ul>
                 <button type="button" onClick={() => window.location.reload()} style={{ marginTop: "8px", padding: "5px 10px", fontSize: "11px", backgroundColor: "var(--danger-600)", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "700" }}>Retry Loading</button>
@@ -979,33 +841,6 @@ export default function Sites() {
             )}
 
             <div style={{ position: "relative", width: "100%", height: "300px", marginBottom: "12px" }}>
-              {/* Google Places Autocomplete Input box overlay */}
-              <input 
-                ref={autocompleteInputRef}
-                type="text" 
-                placeholder="Search site name, street, city, landmark or address..." 
-                style={{
-                  position: "absolute",
-                  top: "10px",
-                  left: "10px",
-                  boxSizing: "border-box",
-                  border: "1px solid #cbd5e1",
-                  width: "calc(100% - 20px)",
-                  maxWidth: "320px",
-                  height: "38px",
-                  padding: "0 12px",
-                  borderRadius: "4px",
-                  boxShadow: "0 2px 6px rgba(0, 0, 0, 0.25)",
-                  fontSize: "14px",
-                  outline: "none",
-                  textOverflow: "ellipsis",
-                  backgroundColor: "#ffffff",
-                  color: "#1e293b",
-                  fontWeight: "500",
-                  zIndex: 10,
-                  display: isMapsLoaded ? "block" : "none"
-                }}
-              />
               <div 
                 ref={mapDivRef} 
                 style={{ 
@@ -1017,15 +852,6 @@ export default function Sites() {
                 }} 
               />
             </div>
-
-            {formLocation && (
-              <div style={{ marginTop: "4px", marginBottom: "12px", padding: "12px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "left" }}>
-                <div style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginBottom: "4px", letterSpacing: "0.5px" }}>Selected Location</div>
-                <div style={{ fontSize: "13px", color: "#1e293b", fontWeight: "600", whiteSpace: "pre-line", lineHeight: "1.5" }}>
-                  {formLocationName ? `${formLocationName},\n` : ""}{formLocation.split(", ").join(",\n")}
-                </div>
-              </div>
-            )}
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", marginBottom: "12px" }}>
               <div className="form-group" style={{ margin: 0 }}>
@@ -1065,32 +891,6 @@ export default function Sites() {
                 />
               </div>
             </div>
-
-            {/* Parsed Address Breakdown Display (Task 4) */}
-            {(addressStreet || addressArea || addressLocality || addressCity || addressDistrict || addressState || addressPinCode) && (
-              <div style={{ 
-                textAlign: "left", 
-                backgroundColor: "#f8fafc", 
-                padding: "12px", 
-                borderRadius: "8px", 
-                border: "1px solid #e2e8f0", 
-                fontSize: "12px",
-                marginBottom: "12px"
-              }}>
-                <div style={{ fontWeight: "700", color: "var(--primary-900)", marginBottom: "8px", fontSize: "12px" }}>
-                  📍 Google Geocoder Parsed Address Components:
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px" }}>
-                  <div><strong style={{ color: "#64748b" }}>Street Name:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressStreet || "N/A"}</span></div>
-                  <div><strong style={{ color: "#64748b" }}>Area:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressArea || "N/A"}</span></div>
-                  <div><strong style={{ color: "#64748b" }}>Locality:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressLocality || "N/A"}</span></div>
-                  <div><strong style={{ color: "#64748b" }}>City:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressCity || "N/A"}</span></div>
-                  <div><strong style={{ color: "#64748b" }}>District:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressDistrict || "N/A"}</span></div>
-                  <div><strong style={{ color: "#64748b" }}>State:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressState || "N/A"}</span></div>
-                  <div style={{ gridColumn: "span 2" }}><strong style={{ color: "#64748b" }}>PIN Code:</strong> <span style={{ fontWeight: 600, color: "#1e293b" }}>{addressPinCode || "N/A"}</span></div>
-                </div>
-              </div>
-            )}
 
             <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "4px", marginBottom: "12px" }}>
               💡 <em>Tip: You can use the top-right Map/Satellite toggler. Drag the pin or click on the map to fine-tune the exact location.</em>
