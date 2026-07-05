@@ -18,7 +18,7 @@ import {
   addDoc,
   orderBy
 } from "firebase/firestore";
-import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
+import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
@@ -2534,7 +2534,13 @@ export async function getLabourMaster(adminId = null) {
     };
   });
 
-  const docKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    try {
+      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
+  }
+  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "__labour_master__";
   const historyRef = doc(db, "users", docKey);
   const historySnap = await getDoc(historyRef);
   const history = historySnap.exists() ? (historySnap.data().history || []) : [];
@@ -2567,8 +2573,18 @@ export async function createLabourCategory(categoryData) {
     status: "Active"
   });
 
-  // Log history
-  const logKey = "__labour_master__";
+  // Verify Firestore document is actually written before proceeding
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    throw new Error("Failed to verify newly created Labour Category document in Firestore.");
+  }
+
+  // Log history under the correct admin-scoped document to avoid reserved ID errors
+  let adminId = null;
+  try {
+    adminId = getFirebaseAuth().currentUser?.uid || null;
+  } catch (e) {}
+  const logKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
   const logRef = doc(db, "users", logKey);
   const logSnap = await getDoc(logRef);
   const history = logSnap.exists() ? (logSnap.data().history || []) : [];
@@ -2605,9 +2621,13 @@ export async function updateLabourCategory(categoryId, categoryData) {
 
   await updateDoc(docRef, updates);
 
-  // Log history if wage changed
+  // Log history if wage changed under correct admin-scoped document to avoid reserved ID errors
   if (categoryData.salaryAmount !== undefined && Number(categoryData.salaryAmount) !== Number(oldData.salaryAmount)) {
-    const logKey = "__labour_master__";
+    let adminId = null;
+    try {
+      adminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
+    const logKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
     const logRef = doc(db, "users", logKey);
     const logSnap = await getDoc(logRef);
     const history = logSnap.exists() ? (logSnap.data().history || []) : [];
@@ -2631,7 +2651,13 @@ export async function deleteLabourCategory(categoryId) {
 // Save admin-scoped labour master categories (retained for compatibility/history updates).
 export async function saveLabourMaster(categories, history, adminId = null) {
   const db = getDb();
-  const docKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    try {
+      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
+  }
+  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "__labour_master__";
   const docRef = doc(db, "users", docKey);
   await setDoc(docRef, {
     history,

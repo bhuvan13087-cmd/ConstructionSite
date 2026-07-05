@@ -143,6 +143,7 @@ export default function AdminLabour() {
   // -------------------------------------------------------------
   const handleCreateCategory = async (e) => {
     e.preventDefault();
+    if (submitting) return; // Prevent duplicate submissions
     const nameClean = newCatName.trim();
     const wageNum = Number(newCatWage);
     
@@ -177,6 +178,7 @@ export default function AdminLabour() {
       setNewCatWage("");
       await loadData();
     } catch (err) {
+      console.error("Labour category creation failed:", err);
       showToast(`Failed to create category: ${err.message}`, "error");
     } finally {
       setSubmitting(false);
@@ -387,7 +389,11 @@ export default function AdminLabour() {
               </select>
             </div>
 
-            <Button type="submit" style={{ marginTop: "10px", backgroundColor: "var(--primary-800)" }}>
+            <Button 
+              type="submit" 
+              style={{ marginTop: "10px", backgroundColor: "var(--primary-800)" }}
+              isLoading={submitting}
+            >
               Create Category
             </Button>
           </form>
