@@ -419,49 +419,57 @@ export default function AdminDashboard() {
       )}
 
       {/* ── TOP: Compact KPI Bar ── */}
-      <div className="dash-kpi-bar" style={{ marginBottom: "20px" }}>
+      <div className="dash-kpi-bar" style={{ marginBottom: "24px" }}>
 
         <div className="dash-kpi-item">
           <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
-            <Building2 size={17} />
+            <Building2 size={20} />
           </div>
-          <span className="dash-kpi-label">Total Sites</span>
-          <span className="dash-kpi-value">{sites.length}</span>
-          <span className="dash-kpi-sub">{totalAssignedProjects} assigned</span>
+          <div className="dash-kpi-info">
+            <span className="dash-kpi-label">Total Sites</span>
+            <span className="dash-kpi-value">{sites.length}</span>
+            <span className="dash-kpi-sub">{totalAssignedProjects} assigned</span>
+          </div>
         </div>
 
         <div className="dash-kpi-item">
           <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "#10b981" }}>
-            <HardHat size={17} />
+            <HardHat size={20} />
           </div>
-          <span className="dash-kpi-label">Active Engineers</span>
-          <span className="dash-kpi-value">{engineers.filter(e => e.status === "active").length}</span>
-          <span className="dash-kpi-sub">Site personnel</span>
+          <div className="dash-kpi-info">
+            <span className="dash-kpi-label">Active Engineers</span>
+            <span className="dash-kpi-value">{engineers.filter(e => e.status === "active").length}</span>
+            <span className="dash-kpi-sub">Site personnel</span>
+          </div>
         </div>
 
         <div className="dash-kpi-item">
           <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "#f97316" }}>
-            <Users size={17} />
+            <Users size={20} />
           </div>
-          <span className="dash-kpi-label">Workforce &amp; Materials</span>
-          <span className="dash-kpi-value">{metrics.attendanceToday}</span>
-          <span className="dash-kpi-sub">{metrics.activeWorkers} workers active · {metrics.totalMaterials} logged</span>
+          <div className="dash-kpi-info">
+            <span className="dash-kpi-label">Workforce &amp; Materials</span>
+            <span className="dash-kpi-value">{metrics.attendanceToday}</span>
+            <span className="dash-kpi-sub">{metrics.activeWorkers} workers active · {metrics.totalMaterials} logged</span>
+          </div>
         </div>
 
         <div className="dash-kpi-item" style={{ backgroundColor: pendingCount > 0 ? "hsl(38,90%,97%)" : undefined }}>
           <div className="dash-kpi-icon" style={{ backgroundColor: pendingCount > 0 ? "rgba(234,179,8,0.12)" : "rgba(16,185,129,0.08)", color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>
-            <ClipboardCheck size={17} />
+            <ClipboardCheck size={20} />
           </div>
-          <span className="dash-kpi-label">Pending Approvals</span>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-            <span className="dash-kpi-value" style={{ color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{pendingCount}</span>
-            {pendingCount > 0 && (
-              <span className="badge badge-danger" style={{ fontSize: "9px", padding: "1px 5px", lineHeight: "1" }}>Action</span>
-            )}
+          <div className="dash-kpi-info">
+            <span className="dash-kpi-label">Pending Approvals</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className="dash-kpi-value" style={{ color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{pendingCount}</span>
+              {pendingCount > 0 && (
+                <span className="badge badge-danger" style={{ fontSize: "9px", padding: "1px 5px", lineHeight: "1" }}>Action</span>
+              )}
+            </div>
+            <Link to="/admin/approvals" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", marginTop: "2px", textDecoration: "none" }}>
+              Review <ArrowRight size={10} />
+            </Link>
           </div>
-          <Link to="/admin/approvals" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", marginTop: "2px", textDecoration: "none" }}>
-            Review <ArrowRight size={10} />
-          </Link>
         </div>
 
       </div>

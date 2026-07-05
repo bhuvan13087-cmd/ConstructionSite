@@ -5607,40 +5607,51 @@ body:has(.landing-page-container) {
    DASHBOARD LAYOUT UTILITIES
    ========================================================================== */
 
-/* --- Compact KPI Stat Bar --- */
+/* --- Compact KPI Stat Grid --- */
 .dash-kpi-bar {
-  display: flex;
-  align-items: stretch;
-  background: #ffffff;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+  overflow: visible;
+  margin-bottom: 24px;
 }
 
 .dash-kpi-item {
-  flex: 1;
+  background: #ffffff;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 16px;
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  padding: 10px 14px;
-  gap: 3px;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
   position: relative;
-  transition: background var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  overflow: hidden;
 }
 
 .dash-kpi-item:hover {
-  background: var(--primary-50);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+  border-color: var(--primary-200);
+  background: #ffffff;
 }
 
 .dash-kpi-item + .dash-kpi-item::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 14px;
-  bottom: 14px;
-  width: 1px;
-  background-color: var(--border-color);
+  display: none;
+}
+
+.dash-kpi-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+  text-align: left;
 }
 
 .dash-kpi-label {
@@ -5668,13 +5679,14 @@ body:has(.landing-page-container) {
 }
 
 .dash-kpi-icon {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 6px;
+  margin-bottom: 0;
+  flex-shrink: 0;
 }
 
 /* --- Section Label Divider --- */
@@ -5783,18 +5795,11 @@ body:has(.landing-page-container) {
   color: var(--danger-600) !important;
 }
 
-/* Responsive: stack KPI bar on narrow screens */
+/* Responsive: stack KPI grid on narrow screens */
 @media (max-width: 768px) {
   .dash-kpi-bar {
-    flex-direction: column;
-  }
-  .dash-kpi-item + .dash-kpi-item::before {
-    top: 0;
-    left: 14px;
-    right: 14px;
-    bottom: auto;
-    width: auto;
-    height: 1px;
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 }
 

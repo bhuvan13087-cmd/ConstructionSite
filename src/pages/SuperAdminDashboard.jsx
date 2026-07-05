@@ -421,64 +421,76 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
           <div className="dash-kpi-item">
             <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
-              <Building2 size={17} />
+              <Building2 size={20} />
             </div>
-            <span className="dash-kpi-label">Total Sites</span>
-            <span className="dash-kpi-value">{overallMetrics.totalSites}</span>
-            <span className="dash-kpi-sub">
-              <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} active</span>
-              {" · "}
-              <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.completedSites} done</span>
-            </span>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Total Sites</span>
+              <span className="dash-kpi-value">{overallMetrics.totalSites}</span>
+              <span className="dash-kpi-sub">
+                <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} active</span>
+                {" · "}
+                <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.completedSites} done</span>
+              </span>
+            </div>
           </div>
 
           <div className="dash-kpi-item">
             <div className="dash-kpi-icon" style={{ backgroundColor: overallMetrics.delayedSites > 0 ? "rgba(239,68,68,0.1)" : "rgba(16,185,129,0.08)", color: overallMetrics.delayedSites > 0 ? "var(--danger-600)" : "var(--success-600)" }}>
-              <AlertTriangle size={17} />
+              <AlertTriangle size={20} />
             </div>
-            <span className="dash-kpi-label">Schedule Delays</span>
-            <span className="dash-kpi-value" style={{ color: overallMetrics.delayedSites > 0 ? "var(--danger-600)" : "var(--success-600)" }}>{overallMetrics.delayedSites}</span>
-            <span className="dash-kpi-sub">{overallMetrics.delayedSites > 0 ? "Attention required" : "All on track"}</span>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Schedule Delays</span>
+              <span className="dash-kpi-value" style={{ color: overallMetrics.delayedSites > 0 ? "var(--danger-600)" : "var(--success-600)" }}>{overallMetrics.delayedSites}</span>
+              <span className="dash-kpi-sub">{overallMetrics.delayedSites > 0 ? "Attention required" : "All on track"}</span>
+            </div>
           </div>
 
           <div className="dash-kpi-item">
             <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "var(--success-600)" }}>
-              <TrendingUp size={17} />
+              <TrendingUp size={20} />
             </div>
-            <span className="dash-kpi-label">Payments Received</span>
-            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</span>
-            <span className="dash-kpi-sub">of {formatINR(overallMetrics.totalProjectValue)} budget</span>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Payments Received</span>
+              <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</span>
+              <span className="dash-kpi-sub">of {formatINR(overallMetrics.totalProjectValue)} budget</span>
+            </div>
           </div>
 
           <div className="dash-kpi-item">
             <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "#f97316" }}>
-              <DollarSign size={17} />
+              <DollarSign size={20} />
             </div>
-            <span className="dash-kpi-label">Total Expenses</span>
-            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalExpenses)}</span>
-            <span className="dash-kpi-sub" style={{ color: "var(--warning-600)" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Total Expenses</span>
+              <span className="dash-kpi-value" style={{ fontSize: "18px" }}>{formatINR(overallMetrics.totalExpenses)}</span>
+              <span className="dash-kpi-sub" style={{ color: "var(--warning-600)" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
+            </div>
           </div>
 
           <div className={`dash-kpi-item sa-net-card ${isProfit ? "profit" : "deficit"}`}>
             <div className="dash-kpi-icon">
-              {isProfit ? <TrendingUp size={17} /> : <TrendingDown size={17} />}
+              {isProfit ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
             </div>
-            <span className="dash-kpi-label">Net Position</span>
-            <span className="dash-kpi-value" style={{ fontSize: "18px" }}>
-              {isProfit ? "+" : ""}{formatINR(netPosition)}
-            </span>
-            <span className="dash-kpi-sub">{isProfit ? "Profit margin" : "Deficit"}</span>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Net Position</span>
+              <span className="dash-kpi-value" style={{ fontSize: "18px" }}>
+                {isProfit ? "+" : ""}{formatINR(netPosition)}
+              </span>
+              <span className="dash-kpi-sub">{isProfit ? "Profit margin" : "Deficit"}</span>
+            </div>
           </div>
 
           <div className="dash-kpi-item">
             <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(139,92,246,0.08)", color: "#8b5cf6" }}>
-              <Layers size={17} />
+              <Layers size={20} />
             </div>
-            <span className="dash-kpi-label">Project Records</span>
-            <span className="dash-kpi-value">{documents.length}</span>
-            <Link to="/superadmin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", textDecoration: "none" }}>
-              {pendingDocs.length} pending <ArrowRight size={10} />
-            </Link>
+            <div className="dash-kpi-info">
+              <span className="dash-kpi-label">Project Records</span>
+              <span className="dash-kpi-value">{documents.length}</span>
+              <Link to="/superadmin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", textDecoration: "none" }}>
+                {pendingDocs.length} pending <ArrowRight size={10} />
+              </Link>
+            </div>
           </div>
 
         </div>
