@@ -510,26 +510,7 @@ export default function AdminLabour() {
             </div>
           </Card>
 
-          {/* Salary changes history logs */}
-          <Card title="Wage Rate Adjustments & Updates History">
-            {labourMaster.history.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center" }}>No salary adjustments on record.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "250px", overflowY: "auto" }}>
-                {labourMaster.history.map((log, idx) => (
-                  <div key={idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: "6px", fontSize: "12.5px" }}>
-                    <div>
-                      <strong>{getLabourDisplayName(log.categoryName)}</strong>: Wage rate adjusted from <s>₹{log.oldSalary}</s> to <strong>₹{log.newSalary}</strong>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "end", fontSize: "11px", color: "var(--text-muted)" }}>
-                      <span>Changed by: {log.changedBy}</span>
-                      <span className="font-mono">{log.changedDate}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
+
 
         </div>
 
