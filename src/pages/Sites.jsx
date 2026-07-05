@@ -318,8 +318,7 @@ export default function Sites() {
   const mapInstanceRef = useRef(null);
   const markerInstanceRef = useRef(null);
 
-  // Address Search State
-  const [searchingAddress, setSearchingAddress] = useState(false);
+
 
   // Load Google Maps API script dynamically
   useEffect(() => {
@@ -438,44 +437,7 @@ export default function Sites() {
     };
   }, [showFormModal, isMapsLoaded]);
 
-  // Geocode input address and pin/center map
-  const handleSearchAddress = async () => {
-    if (!formLocation.trim()) return;
-    setSearchingAddress(true);
-    try {
-      const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(formLocation)}&limit=1&cb=${Date.now()}`);
-      if (res.ok) {
-        const data = await res.json();
-        if (data && data.length > 0) {
-          const lat = parseFloat(data[0].lat);
-          const lon = parseFloat(data[0].lon);
-          const displayName = data[0].display_name;
-          
-          setFormLatitude(lat.toFixed(6));
-          setFormLongitude(lon.toFixed(6));
-          setFormLocationName(displayName);
 
-          // Update Google Map coordinates and zoom
-          if (isMapsLoaded && mapInstanceRef.current && markerInstanceRef.current && window.google) {
-            const newPos = new window.google.maps.LatLng(lat, lon);
-            mapInstanceRef.current.setCenter(newPos);
-            mapInstanceRef.current.setZoom(17);
-            markerInstanceRef.current.setPosition(newPos);
-          }
-          showToast("Location found and pinned on map!", "success");
-        } else {
-          showToast("Could not find this address. Please enter a more specific location.", "error");
-        }
-      } else {
-        showToast("Address lookup failed. Please pin manually.", "error");
-      }
-    } catch (err) {
-      console.warn("Geocoding failed:", err);
-      showToast("Error searching address. Please try again or pin manually.", "error");
-    } finally {
-      setSearchingAddress(false);
-    }
-  };
 
 
   const showToast = (message, type = "info") => {
@@ -865,41 +827,16 @@ export default function Sites() {
 
           <div className="form-group">
             <label htmlFor="site-location">Location / Address</label>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <div className="input-wrapper" style={{ flex: 1 }}>
-                <MapPin className="input-icon" size={16} />
-                <input 
-                  type="text" 
-                  id="site-location" 
-                  placeholder="E.g., 123 Greenwood St, Chennai" 
-                  value={formLocation}
-                  onChange={(e) => setFormLocation(e.target.value)}
-                  required 
-                />
-              </div>
-              <button
-                type="button"
-                onClick={handleSearchAddress}
-                disabled={searchingAddress || !formLocation.trim()}
-                style={{
-                  padding: "0 16px",
-                  backgroundColor: "var(--primary-600)",
-                  color: "#fff",
-                  border: "none",
-                  borderRadius: "var(--radius-md)",
-                  cursor: searchingAddress || !formLocation.trim() ? "not-allowed" : "pointer",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  minWidth: "110px",
-                  opacity: searchingAddress || !formLocation.trim() ? 0.6 : 1,
-                  transition: "background-color 0.2s"
-                }}
-              >
-                {searchingAddress ? "Searching..." : "Find on Map"}
-              </button>
+            <div className="input-wrapper">
+              <MapPin className="input-icon" size={16} />
+              <input 
+                type="text" 
+                id="site-location" 
+                placeholder="E.g., 123 Greenwood St, Chennai" 
+                value={formLocation}
+                onChange={(e) => setFormLocation(e.target.value)}
+                required 
+              />
             </div>
           </div>
 
