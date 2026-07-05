@@ -2514,7 +2514,7 @@ export async function getLabourMaster(adminId = null) {
       resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
     } catch (e) {}
   }
-  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "__labour_master__";
+  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
   const historyRef = doc(db, "users", docKey);
   const historySnap = await getDoc(historyRef);
   const history = historySnap.exists() ? (historySnap.data().history || []) : [];
@@ -2558,7 +2558,7 @@ export async function createLabourCategory(categoryData) {
   try {
     adminId = getFirebaseAuth().currentUser?.uid || null;
   } catch (e) {}
-  const logKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+  const logKey = adminId ? `__labour_master__${adminId}` : "labour_master_global";
   const logRef = doc(db, "users", logKey);
   const logSnap = await getDoc(logRef);
   const history = logSnap.exists() ? (logSnap.data().history || []) : [];
@@ -2601,7 +2601,7 @@ export async function updateLabourCategory(categoryId, categoryData) {
     try {
       adminId = getFirebaseAuth().currentUser?.uid || null;
     } catch (e) {}
-    const logKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+    const logKey = adminId ? `__labour_master__${adminId}` : "labour_master_global";
     const logRef = doc(db, "users", logKey);
     const logSnap = await getDoc(logRef);
     const history = logSnap.exists() ? (logSnap.data().history || []) : [];
@@ -2631,7 +2631,7 @@ export async function saveLabourMaster(categories, history, adminId = null) {
       resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
     } catch (e) {}
   }
-  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "__labour_master__";
+  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
   const docRef = doc(db, "users", docKey);
   await setDoc(docRef, {
     history,
@@ -2676,9 +2676,17 @@ export function subscribeLabourCategories(onUpdate) {
 export async function getLabourPayments(adminId = null, siteId = null) {
   const db = getDb();
   let paymentsList = [];
+  
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    try {
+      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
+  }
+
   // Try admin-scoped doc first
-  if (adminId) {
-    const scopedRef = doc(db, "users", `__labour_payments__${adminId}`);
+  if (resolvedAdminId) {
+    const scopedRef = doc(db, "users", `__labour_payments__${resolvedAdminId}`);
     const scopedSnap = await getDoc(scopedRef);
     if (scopedSnap.exists()) {
       paymentsList = scopedSnap.data().payments || [];
@@ -2686,7 +2694,7 @@ export async function getLabourPayments(adminId = null, siteId = null) {
   }
   if (paymentsList.length === 0) {
     // Fallback to global document
-    const docRef = doc(db, "users", "__labour_payments__");
+    const docRef = doc(db, "users", "labour_payments_global");
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       paymentsList = docSnap.data().payments || [];
@@ -2703,7 +2711,15 @@ export async function getLabourPayments(adminId = null, siteId = null) {
 // If adminId provided, writes to "__labour_payments___{adminId}".
 export async function saveLabourPayment(paymentData, adminId = null) {
   const db = getDb();
-  const docKey = adminId ? `__labour_payments__${adminId}` : "__labour_payments__";
+  
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    try {
+      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
+  }
+
+  const docKey = resolvedAdminId ? `__labour_payments__${resolvedAdminId}` : "labour_payments_global";
   const docRef = doc(db, "users", docKey);
   const docSnap = await getDoc(docRef);
   
