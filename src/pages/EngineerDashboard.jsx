@@ -3522,93 +3522,99 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         {/* Workforce headcounts */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <span className="mobile-form-label">Worker Headcounts</span>
-          {categories.map(cat => {
-            const catEntries = labourEntries.filter(e => e.categoryId === cat.id);
-            const currentVal = catEntries.length;
-            const emojis = {
-              Mason: "👷",
-              Helper: "🧱",
-              Electrician: "🔧",
-              Plumber: "🚰",
-              Painter: "🖌️",
-              Other: "📋"
-            };
-            const emoji = emojis[cat.name] || "🔨";
-            
-            return (
-              <div key={cat.id} className="mobile-labour-card" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                  <div className="mobile-labour-info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "20px" }}>{emoji}</span>
-                    <span className="mobile-labour-name" style={{ fontWeight: "700" }}>{getLabourDisplayName(cat.name)}</span>
-                  </div>
-                  
-                  <div className="counter-control" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <button
-                      type="button"
-                      className="counter-btn"
-                      onClick={() => handleDecrementLabour(cat.id)}
-                      disabled={currentVal === 0}
-                      style={{ opacity: currentVal === 0 ? 0.5 : 1 }}
-                    >
-                      <Minus size={14} />
-                    </button>
-                    <span style={{ fontWeight: "800", fontSize: "15px", width: "30px", textAlign: "center" }}>{currentVal}</span>
-                    <button
-                      type="button"
-                      className="counter-btn"
-                      onClick={() => handleIncrementLabour(cat)}
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* List of numbered entries for this category */}
-                {catEntries.length > 0 && (
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px", paddingLeft: "28px" }}>
-                    {catEntries.map((entry, index) => (
-                      <span
-                        key={index}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: "6px",
-                          backgroundColor: "var(--primary-50)",
-                          color: "var(--primary-800)",
-                          padding: "4px 10px",
-                          borderRadius: "16px",
-                          fontSize: "12.5px",
-                          fontWeight: "600",
-                          border: "1px solid var(--primary-100)"
-                        }}
+          {categories.length === 0 ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "14px" }}>
+              No Labour Categories Found
+            </div>
+          ) : (
+            categories.map(cat => {
+              const catEntries = labourEntries.filter(e => e.categoryId === cat.id);
+              const currentVal = catEntries.length;
+              const emojis = {
+                Mason: "👷",
+                Helper: "🧱",
+                Electrician: "🔧",
+                Plumber: "🚰",
+                Painter: "🖌️",
+                Other: "📋"
+              };
+              const emoji = emojis[cat.name] || "🔨";
+              
+              return (
+                <div key={cat.id} className="mobile-labour-card" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                    <div className="mobile-labour-info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "20px" }}>{emoji}</span>
+                      <span className="mobile-labour-name" style={{ fontWeight: "700" }}>{getLabourDisplayName(cat.name)}</span>
+                    </div>
+                    
+                    <div className="counter-control" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <button
+                        type="button"
+                        className="counter-btn"
+                        onClick={() => handleDecrementLabour(cat.id)}
+                        disabled={currentVal === 0}
+                        style={{ opacity: currentVal === 0 ? 0.5 : 1 }}
                       >
-                        {entry.displayName}
-                        <button
-                          type="button"
-                          onClick={() => handleRemoveSpecificEntry(entry)}
+                        <Minus size={14} />
+                      </button>
+                      <span style={{ fontWeight: "800", fontSize: "15px", width: "30px", textAlign: "center" }}>{currentVal}</span>
+                      <button
+                        type="button"
+                        className="counter-btn"
+                        onClick={() => handleIncrementLabour(cat)}
+                      >
+                        <Plus size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* List of numbered entries for this category */}
+                  {catEntries.length > 0 && (
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px", paddingLeft: "28px" }}>
+                      {catEntries.map((entry, index) => (
+                        <span
+                          key={index}
                           style={{
-                            background: "none",
-                            border: "none",
-                            color: "var(--danger-500)",
-                            cursor: "pointer",
-                            padding: 0,
                             display: "inline-flex",
                             alignItems: "center",
-                            fontSize: "14px",
-                            lineHeight: 1
+                            gap: "6px",
+                            backgroundColor: "var(--primary-50)",
+                            color: "var(--primary-800)",
+                            padding: "4px 10px",
+                            borderRadius: "16px",
+                            fontSize: "12.5px",
+                            fontWeight: "600",
+                            border: "1px solid var(--primary-100)"
                           }}
-                          title="Remove entry"
                         >
-                          &times;
-                        </button>
-                      </span>
-                    ))}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                          {entry.displayName}
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveSpecificEntry(entry)}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "var(--danger-500)",
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "inline-flex",
+                              alignItems: "center",
+                              fontSize: "14px",
+                              lineHeight: 1
+                            }}
+                            title="Remove entry"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
         </div>
 
         {/* Workforce Total Count */}

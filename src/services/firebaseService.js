@@ -2494,32 +2494,6 @@ export async function getLabourMaster(adminId = null) {
     // Falls back to unordered if indexing is not complete yet
     snap = await getDocs(collRef);
   }
-  
-  if (snap.empty) {
-    const defaults = [
-      { name: "Mason", salaryAmount: 800, salaryType: "Daily" },
-      { name: "Helper", salaryAmount: 500, salaryType: "Daily" },
-      { name: "Electrician", salaryAmount: 700, salaryType: "Daily" },
-      { name: "Plumber", salaryAmount: 700, salaryType: "Daily" },
-      { name: "Painter", salaryAmount: 700, salaryType: "Daily" }
-    ];
-    for (const d of defaults) {
-      await addDoc(collRef, {
-        name: d.name,
-        salaryAmount: d.salaryAmount,
-        salaryType: d.salaryType,
-        createdBy: "System",
-        createdTime: serverTimestamp(),
-        status: "Active"
-      });
-    }
-    // Re-fetch after initializing
-    try {
-      snap = await getDocs(query(collRef, orderBy("createdTime", "asc")));
-    } catch (e) {
-      snap = await getDocs(collRef);
-    }
-  }
 
   const categories = {};
   snap.forEach(d => {

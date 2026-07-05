@@ -415,88 +415,96 @@ export default function AdminLabour() {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.keys(labourMaster.categories).map(key => {
-                    const catObj = labourMaster.categories[key];
-                    const isEditing = editingCatKey === key;
-                    
-                    return (
-                      <tr key={key}>
-                        <td style={{ fontWeight: "700" }}>{getLabourDisplayName(catObj.name)}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                          {isEditing ? (
-                            <input
-                              type="number"
-                              value={editingWage}
-                              onChange={(e) => setEditingWage(e.target.value)}
-                              style={{ width: "80px", padding: "4px 8px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
-                            />
-                          ) : (
-                            `₹${catObj.wage}`
-                          )}
-                        </td>
-                        <td>{catObj.type}</td>
-                        <td>
-                          <Badge status={catObj.status === "Active" ? "success" : "pending"}>
-                            {catObj.status}
-                          </Badge>
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }}>
+                  {Object.keys(labourMaster.categories).length === 0 ? (
+                    <tr>
+                      <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px", fontWeight: "600" }}>
+                        No Labour Categories Found
+                      </td>
+                    </tr>
+                  ) : (
+                    Object.keys(labourMaster.categories).map(key => {
+                      const catObj = labourMaster.categories[key];
+                      const isEditing = editingCatKey === key;
+                      
+                      return (
+                        <tr key={key}>
+                          <td style={{ fontWeight: "700" }}>{getLabourDisplayName(catObj.name)}</td>
+                          <td style={{ textAlign: "right", fontFamily: "monospace" }}>
                             {isEditing ? (
-                              <>
-                                <Button size="sm" onClick={() => handleUpdateWage(key)} style={{ backgroundColor: "var(--success-600)", color: "#ffffff", padding: "2px 8px" }}>
-                                  Save
-                                </Button>
-                                <Button size="sm" variant="outline" onClick={() => setEditingCatKey(null)} style={{ padding: "2px 8px" }}>
-                                  Cancel
-                                </Button>
-                              </>
+                              <input
+                                type="number"
+                                value={editingWage}
+                                onChange={(e) => setEditingWage(e.target.value)}
+                                style={{ width: "80px", padding: "4px 8px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                              />
                             ) : (
-                              <>
-                                <button
-                                  onClick={() => {
-                                    setEditingCatKey(key);
-                                    setEditingWage(catObj.wage);
-                                  }}
-                                  className="btn-icon btn-edit-action"
-                                  title="Edit wage"
-                                  style={{ padding: "4px", display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer" }}
-                                >
-                                  <Edit2 size={14} />
-                                </button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleToggleCategoryStatus(key)}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "2px 6px",
-                                    borderColor: catObj.status === "Active" ? "var(--danger-200)" : "var(--success-200)",
-                                    color: catObj.status === "Active" ? "var(--danger-600)" : "var(--success-600)"
-                                  }}
-                                >
-                                  {catObj.status === "Active" ? "Deactivate" : "Activate"}
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleDeleteCategory(key)}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "2px 6px",
-                                    borderColor: "var(--danger-200)",
-                                    color: "var(--danger-600)"
-                                  }}
-                                >
-                                  Delete
-                                </Button>
-                              </>
+                              `₹${catObj.wage}`
                             )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                          <td>{catObj.type}</td>
+                          <td>
+                            <Badge status={catObj.status === "Active" ? "success" : "pending"}>
+                              {catObj.status}
+                            </Badge>
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }}>
+                              {isEditing ? (
+                                <>
+                                  <Button size="sm" onClick={() => handleUpdateWage(key)} style={{ backgroundColor: "var(--success-600)", color: "#ffffff", padding: "2px 8px" }}>
+                                    Save
+                                  </Button>
+                                  <Button size="sm" variant="outline" onClick={() => setEditingCatKey(null)} style={{ padding: "2px 8px" }}>
+                                    Cancel
+                                  </Button>
+                                </>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCatKey(key);
+                                      setEditingWage(catObj.wage);
+                                    }}
+                                    className="btn-icon btn-edit-action"
+                                    title="Edit wage"
+                                    style={{ padding: "4px", display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer" }}
+                                  >
+                                    <Edit2 size={14} />
+                                  </button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleToggleCategoryStatus(key)}
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "2px 6px",
+                                      borderColor: catObj.status === "Active" ? "var(--danger-200)" : "var(--success-200)",
+                                      color: catObj.status === "Active" ? "var(--danger-600)" : "var(--success-600)"
+                                    }}
+                                  >
+                                    {catObj.status === "Active" ? "Deactivate" : "Activate"}
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => handleDeleteCategory(key)}
+                                    style={{
+                                      fontSize: "11px",
+                                      padding: "2px 6px",
+                                      borderColor: "var(--danger-200)",
+                                      color: "var(--danger-600)"
+                                    }}
+                                  >
+                                    Delete
+                                  </Button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
