@@ -318,12 +318,6 @@ export default function Sites() {
   const mapInstanceRef = useRef(null);
   const markerInstanceRef = useRef(null);
 
-  // Leaflet Fallback States & Refs
-  const [isLeafletLoaded, setIsLeafletLoaded] = useState(false);
-  const [leafletLoadError, setLeafletLoadError] = useState(false);
-  const leafletMapInstanceRef = useRef(null);
-  const leafletMarkerInstanceRef = useRef(null);
-
   // Address Search State
   const [searchingAddress, setSearchingAddress] = useState(false);
 
@@ -374,7 +368,7 @@ export default function Sites() {
 
   // Initialize Map inside Modal (Google Maps version)
   useEffect(() => {
-    if (!showFormModal || !isMapsLoaded || mapsLoadError || !mapDivRef.current || !window.google || !window.google.maps) return;
+    if (!showFormModal || !isMapsLoaded || !mapDivRef.current || !window.google || !window.google.maps) return;
 
     // Clear any previous elements in map div to prevent duplicate or conflicting maps
     mapDivRef.current.innerHTML = "";
@@ -442,123 +436,7 @@ export default function Sites() {
       }
       mapInstanceRef.current = null;
     };
-  }, [showFormModal, isMapsLoaded, mapsLoadError]);
-
-  // Load Leaflet dynamically when Google Maps fails
-  useEffect(() => {
-    if (!mapsLoadError) return;
-
-    if (window.L) {
-      setIsLeafletLoaded(true);
-      return;
-    }
-
-    const cssId = "leaflet-css";
-    let cssLink = document.getElementById(cssId);
-    if (!cssLink) {
-      cssLink = document.createElement("link");
-      cssLink.id = cssId;
-      cssLink.rel = "stylesheet";
-      cssLink.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
-      document.head.appendChild(cssLink);
-    }
-
-    const scriptId = "leaflet-script";
-    let script = document.getElementById(scriptId);
-    if (!script) {
-      script = document.createElement("script");
-      script.id = scriptId;
-      script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-      script.async = true;
-      document.head.appendChild(script);
-    }
-
-    const handleLoad = () => setIsLeafletLoaded(true);
-    const handleError = () => setLeafletLoadError(true);
-
-    script.addEventListener("load", handleLoad);
-    script.addEventListener("error", handleError);
-
-    return () => {
-      if (script) {
-        script.removeEventListener("load", handleLoad);
-        script.removeEventListener("error", handleError);
-      }
-    };
-  }, [mapsLoadError]);
-
-  // Initialize Leaflet fallback Map inside Modal
-  useEffect(() => {
-    if (!showFormModal || !mapsLoadError || !isLeafletLoaded || !mapDivRef.current || !window.L) return;
-
-    // Clear any previous map elements/overlays inside the div
-    mapDivRef.current.innerHTML = "";
-
-    const L = window.L;
-    const initialLat = Number(formLatitude) || 13.0827;
-    const initialLng = Number(formLongitude) || 80.2707;
-    const hasCoords = !!formLatitude && !!formLongitude;
-
-    // Initialize Leaflet map
-    const map = L.map(mapDivRef.current).setView([initialLat, initialLng], hasCoords ? 18 : 8);
-    leafletMapInstanceRef.current = map;
-
-    // Add OpenStreetMap tiles
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      maxZoom: 19,
-      attribution: '© OpenStreetMap'
-    }).addTo(map);
-
-    // Custom pin icon style matching default leaflet setup
-    const customIcon = L.icon({
-      iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
-      shadowUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
-      iconSize: [25, 41],
-      iconAnchor: [12, 41],
-      popupAnchor: [1, -34],
-      shadowSize: [41, 41]
-    });
-
-    const marker = L.marker([initialLat, initialLng], {
-      draggable: true,
-      icon: customIcon
-    }).addTo(map);
-    leafletMarkerInstanceRef.current = marker;
-
-    // Drag handlers
-    marker.on("drag", () => {
-      const pos = marker.getLatLng();
-      setFormLatitude(Number(pos.lat).toFixed(6));
-      setFormLongitude(Number(pos.lng).toFixed(6));
-    });
-
-    marker.on("dragend", () => {
-      const pos = marker.getLatLng();
-      setFormLatitude(Number(pos.lat).toFixed(6));
-      setFormLongitude(Number(pos.lng).toFixed(6));
-    });
-
-    // Map click handlers
-    map.on("click", (e) => {
-      const pos = e.latlng;
-      marker.setLatLng(pos);
-      setFormLatitude(Number(pos.lat).toFixed(6));
-      setFormLongitude(Number(pos.lng).toFixed(6));
-    });
-
-    // Solve grey tiles or incorrect viewport computation in dynamic modal
-    setTimeout(() => {
-      map.invalidateSize();
-    }, 250);
-
-    return () => {
-      if (leafletMapInstanceRef.current) {
-        leafletMapInstanceRef.current.remove();
-        leafletMapInstanceRef.current = null;
-        leafletMarkerInstanceRef.current = null;
-      }
-    };
-  }, [showFormModal, mapsLoadError, isLeafletLoaded]);
+  }, [showFormModal, isMapsLoaded]);
 
   // Geocode input address and pin/center map
   const handleSearchAddress = async () => {
@@ -577,16 +455,12 @@ export default function Sites() {
           setFormLongitude(lon.toFixed(6));
           setFormLocationName(displayName);
 
-          // Update active map coordinates and zoom
-          if (!mapsLoadError && isMapsLoaded && mapInstanceRef.current && markerInstanceRef.current && window.google) {
+          // Update Google Map coordinates and zoom
+          if (isMapsLoaded && mapInstanceRef.current && markerInstanceRef.current && window.google) {
             const newPos = new window.google.maps.LatLng(lat, lon);
             mapInstanceRef.current.setCenter(newPos);
             mapInstanceRef.current.setZoom(17);
             markerInstanceRef.current.setPosition(newPos);
-          } else if (mapsLoadError && isLeafletLoaded && leafletMapInstanceRef.current && leafletMarkerInstanceRef.current && window.L) {
-            const newPos = [lat, lon];
-            leafletMapInstanceRef.current.setView(newPos, 17);
-            leafletMarkerInstanceRef.current.setLatLng(newPos);
           }
           showToast("Location found and pinned on map!", "success");
         } else {
@@ -1033,9 +907,14 @@ export default function Sites() {
             <label>Google Maps Location Picker</label>
 
             {mapsLoadError && (
-              <div style={{ backgroundColor: "var(--primary-50)", border: "1.5px dashed var(--primary-300)", borderRadius: "8px", padding: "12px", color: "var(--primary-800)", fontSize: "12.5px", marginBottom: "12px", textAlign: "left" }}>
-                ℹ️ <strong>OpenStreetMap Fallback Active</strong>: Google Maps failed to load (please check GCP billing/API key restrictions). 
-                We have automatically loaded <strong>OpenStreetMap</strong> so you can still search and select location coordinates.
+              <div style={{ backgroundColor: "var(--danger-50)", border: "1.5px dashed var(--danger-300)", borderRadius: "8px", padding: "12px", color: "var(--danger-700)", fontSize: "12px", marginBottom: "12px", textAlign: "left" }}>
+                ⚠️ <strong>Google Maps Load Error</strong>: The Google Maps JavaScript API failed to load. Please verify that:
+                <ul style={{ margin: "4px 0 0 16px", padding: 0 }}>
+                  <li>Billing is enabled on your Google Cloud Platform project.</li>
+                  <li>The <strong>Maps JavaScript API</strong> is enabled.</li>
+                  <li>Your API Key is valid and unrestricted.</li>
+                </ul>
+                <button type="button" onClick={() => window.location.reload()} style={{ marginTop: "8px", padding: "5px 10px", fontSize: "11px", backgroundColor: "var(--danger-600)", color: "#fff", border: "none", borderRadius: "4px", cursor: "pointer", fontWeight: "700" }}>Retry Loading</button>
               </div>
             )}
 
