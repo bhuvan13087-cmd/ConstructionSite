@@ -7,9 +7,12 @@ import {
   updateWorkerStatus,
   getLabourDailyCountsSummary,
   getLabourMaster,
-  saveLabourMaster,
   getLabourPayments,
-  saveLabourPayment
+  saveLabourPayment,
+  createLabourCategory,
+  updateLabourCategory,
+  deleteLabourCategory,
+  subscribeLabourCategories
 } from "../services/firebaseService";
 import {
   getLabourDisplayName,
@@ -126,6 +129,13 @@ export default function AdminLabour() {
 
   useEffect(() => {
     loadData();
+    const unsubscribe = subscribeLabourCategories((categoriesMap) => {
+      setLabourMaster(prev => ({
+        ...prev,
+        categories: categoriesMap
+      }));
+    });
+    return () => unsubscribe();
   }, []);
 
   // -------------------------------------------------------------
@@ -145,38 +155,26 @@ export default function AdminLabour() {
       return;
     }
     
-    // Check duplication
-    if (labourMaster.categories[nameClean]) {
+    // Check duplication case-insensitively
+    const duplicate = Object.values(labourMaster.categories).some(
+      cat => cat.name.trim().toLowerCase() === nameClean.toLowerCase()
+    );
+    if (duplicate) {
       showToast("Category name already registered.", "error");
       return;
     }
 
     setSubmitting(true);
     try {
-      const updatedCats = {
-        ...labourMaster.categories,
-        [nameClean]: {
-          wage: wageNum,
-          type: newCatType,
-          status: "Active"
-        }
-      };
-
-      const newHistoryLog = {
-        categoryName: nameClean,
-        oldSalary: 0,
-        newSalary: wageNum,
-        changedDate: new Date().toISOString().split("T")[0],
-        changedBy: userProfile?.fullName || "Admin"
-      };
-
-      const updatedHistory = [newHistoryLog, ...labourMaster.history];
-      
-      await saveLabourMaster(updatedCats, updatedHistory, userProfile?.uid || userProfile?.id || null);
+      await createLabourCategory({
+        name: nameClean,
+        salaryAmount: wageNum,
+        salaryType: newCatType,
+        createdBy: userProfile?.fullName || "Admin"
+      });
       showToast(`Labour category ${nameClean} created!`, "success");
       setNewCatName("");
       setNewCatWage("");
-      
       await loadData();
     } catch (err) {
       showToast(`Failed to create category: ${err.message}`, "error");
@@ -194,30 +192,13 @@ export default function AdminLabour() {
 
     setSubmitting(true);
     try {
-      const oldWage = labourMaster.categories[catKey].wage;
-      const updatedCats = {
-        ...labourMaster.categories,
-        [catKey]: {
-          ...labourMaster.categories[catKey],
-          wage: newWageNum
-        }
-      };
-
-      const newHistoryLog = {
-        categoryName: catKey,
-        oldSalary: oldWage,
-        newSalary: newWageNum,
-        changedDate: new Date().toISOString().split("T")[0],
-        changedBy: userProfile?.fullName || "Admin"
-      };
-
-      const updatedHistory = [newHistoryLog, ...labourMaster.history];
-      
-      await saveLabourMaster(updatedCats, updatedHistory, userProfile?.uid || userProfile?.id || null);
-      showToast(`Wage rate updated for ${catKey}.`, "success");
+      await updateLabourCategory(catKey, {
+        salaryAmount: newWageNum,
+        updatedBy: userProfile?.fullName || "Admin"
+      });
+      showToast(`Wage rate updated successfully.`, "success");
       setEditingCatKey(null);
       setEditingWage("");
-      
       await loadData();
     } catch (err) {
       showToast(`Failed to update wage: ${err.message}`, "error");
@@ -230,22 +211,18 @@ export default function AdminLabour() {
     const current = labourMaster.categories[catKey];
     const newStatus = current.status === "Active" ? "Inactive" : "Active";
     
-    if (["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(catKey) && newStatus === "Inactive") {
-      if (!confirm(`Are you sure you want to disable core category "${catKey}"?`)) return;
+    if (["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(current.name) && newStatus === "Inactive") {
+      if (!confirm(`Are you sure you want to disable core category "${current.name}"?`)) return;
     }
 
     setSubmitting(true);
     try {
-      const updatedCats = {
-        ...labourMaster.categories,
-        [catKey]: {
-          ...current,
-          status: newStatus
-        }
-      };
-      
-      await saveLabourMaster(updatedCats, labourMaster.history, userProfile?.uid || userProfile?.id || null);
-      showToast(`Category "${catKey}" set to ${newStatus}.`, "info");
+      await updateLabourCategory(catKey, {
+        salaryAmount: current.wage,
+        status: newStatus,
+        updatedBy: userProfile?.fullName || "Admin"
+      });
+      showToast(`Category "${current.name}" set to ${newStatus}.`, "info");
       await loadData();
     } catch (err) {
       showToast(`Status update failed: ${err.message}`, "error");
@@ -253,6 +230,23 @@ export default function AdminLabour() {
       setSubmitting(false);
     }
   };
+
+  const handleDeleteCategory = async (catKey) => {
+    const current = labourMaster.categories[catKey];
+    if (!confirm(`Are you sure you want to permanently delete category "${current.name}"?`)) return;
+
+    setSubmitting(true);
+    try {
+      await deleteLabourCategory(catKey);
+      showToast(`Category "${current.name}" deleted successfully.`, "success");
+      await loadData();
+    } catch (err) {
+      showToast(`Category deletion failed: ${err.message}`, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
 
   // -------------------------------------------------------------
   // TAB 2: LABOUR ASSIGNMENTS HANDLERS
@@ -421,7 +415,7 @@ export default function AdminLabour() {
                     
                     return (
                       <tr key={key}>
-                        <td style={{ fontWeight: "700" }}>{getLabourDisplayName(key)}</td>
+                        <td style={{ fontWeight: "700" }}>{getLabourDisplayName(catObj.name)}</td>
                         <td style={{ textAlign: "right", fontFamily: "monospace" }}>
                           {isEditing ? (
                             <input
@@ -441,7 +435,7 @@ export default function AdminLabour() {
                           </Badge>
                         </td>
                         <td>
-                          <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                          <div style={{ display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }}>
                             {isEditing ? (
                               <>
                                 <Button size="sm" onClick={() => handleUpdateWage(key)} style={{ backgroundColor: "var(--success-600)", color: "#ffffff", padding: "2px 8px" }}>
@@ -460,7 +454,7 @@ export default function AdminLabour() {
                                   }}
                                   className="btn-icon btn-edit-action"
                                   title="Edit wage"
-                                  style={{ padding: "4px" }}
+                                  style={{ padding: "4px", display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer" }}
                                 >
                                   <Edit2 size={14} />
                                 </button>
@@ -476,6 +470,19 @@ export default function AdminLabour() {
                                   }}
                                 >
                                   {catObj.status === "Active" ? "Deactivate" : "Activate"}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleDeleteCategory(key)}
+                                  style={{
+                                    fontSize: "11px",
+                                    padding: "2px 6px",
+                                    borderColor: "var(--danger-200)",
+                                    color: "var(--danger-600)"
+                                  }}
+                                >
+                                  Delete
                                 </Button>
                               </>
                             )}

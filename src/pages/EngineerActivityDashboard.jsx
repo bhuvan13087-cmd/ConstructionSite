@@ -9,6 +9,7 @@ import {
   getSites,
   getDailyUpdatesForEngineer,
   getSitePhotos,
+  formatPhotoTimestamp,
   getEngineerAttendanceHistory,
   getEngineerAttendanceAndLeaveStats,
   getEngineerLeaves
@@ -420,9 +421,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "12px" }}>
                     {filteredPhotos.map((photo, idx) => {
                       const siteObj = sites.find(s => s.id === photo.siteId);
-                      const dateStr = photo.capturedAt?.seconds 
-                        ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
-                        : (photo.capturedAt ? new Date(photo.capturedAt).toLocaleDateString() : "--");
+                      const { date, time } = formatPhotoTimestamp(photo.uploadedAt || photo.capturedAt);
 
                       return (
                         <div key={photo.id || idx} style={{
@@ -435,14 +434,20 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
                             <img 
                               src={photo.imageUrl} 
                               alt="Engineer field upload" 
+                              onError={(e) => {
+                                e.target.src = "https://images.unsplash.com/photo-1581094288338-2314dddb7eed?auto=format&fit=crop&w=400&q=80";
+                              }}
                               style={{ width: "100%", height: "120px", objectFit: "cover" }}
                             />
                           </a>
                           <div style={{ padding: "8px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                            <strong style={{ fontSize: "11.5px", color: "var(--primary-900)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {siteObj ? siteObj.siteName : "Inspection Photo"}
+                            <strong style={{ fontSize: "11.5px", color: "var(--primary-900)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={photo.siteName || (siteObj ? siteObj.siteName : "Inspection Photo")}>
+                              {photo.siteName || (siteObj ? siteObj.siteName : "Inspection Photo")}
                             </strong>
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{dateStr}</span>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{date} at {time}</span>
+                            {photo.photoType && (
+                              <span style={{ fontSize: "9px", color: "var(--accent-600)", fontWeight: "600" }}>{photo.photoType}</span>
+                            )}
                           </div>
                         </div>
                       );

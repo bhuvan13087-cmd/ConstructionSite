@@ -8,6 +8,7 @@ import {
   markCheckOut,
   saveSitePhoto,
   getSitePhotos,
+  subscribePhotosForSite,
   saveDailyProgressReport,
   getDailyUpdatesForEngineer,
   calculateDistanceMeters,
@@ -16,6 +17,9 @@ import {
   saveLabourDailyCounts,
   getLabourDailyCounts,
   getLabourDailyCountsHistory,
+  getLabourDailyEntries,
+  saveLabourDailyEntries,
+  subscribeLabourCategories,
   getEngineerAttendanceAndLeaveStats,
   logEngineerLeave,
   getEngineerLeaves,
@@ -262,7 +266,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Mock GPS controls removed for production
 
   // Dynamic Labour Categories
-  const [categories, setCategories] = useState(["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"]);
+  const [categories, setCategories] = useState([]);
+  const [labourEntries, setLabourEntries] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState("");
 
   // Form inputs states
@@ -438,9 +443,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const attendance = await getTodayAttendance(engineerId, todayStr);
         setTodayAttendance(attendance);
         
-        // Fetch site photos (site-segregated)
-        const photos = await getSitePhotos(engineerId, currentActiveId);
-        setSitePhotos(photos);
+
         
         // Fetch daily updates (site-segregated)
         const updates = await getDailyUpdatesForEngineer(engineerId, currentActiveId);
@@ -484,10 +487,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Sync data on component mount, profile changes, and active site switches
   useEffect(() => {
     loadDashboardData();
   }, [userProfile, activeSiteId]);
+
+  useEffect(() => {
+    if (!activeSiteId) {
+      setSitePhotos([]);
+      return;
+    }
+    const unsubscribe = subscribePhotosForSite(activeSiteId, (photos) => {
+      setSitePhotos(photos);
+    });
+    return () => unsubscribe();
+  }, [activeSiteId]);
 
   // Load saved location for active site
   useEffect(() => {
@@ -555,85 +568,66 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   }, [tab]);
 
-  // Load labour & material master categories on mount
+  // Subscribe to active categories in real-time
   useEffect(() => {
-    const loadMasterData = async () => {
+    const unsubscribe = subscribeLabourCategories((categoriesMap) => {
+      const activeCats = Object.keys(categoriesMap)
+        .filter(id => categoriesMap[id].status === "Active")
+        .map(id => ({
+          id,
+          name: categoriesMap[id].name,
+          wage: categoriesMap[id].wage,
+          type: categoriesMap[id].type
+        }));
+      setCategories(activeCats);
+    });
+
+    const loadMaterials = async () => {
       try {
-        // Derive adminId from the engineer's assigned sites (for admin-scoped labour master)
-        const engineerId = userProfile?.uid || userProfile?.id || "";
-        let adminId = null;
-        try {
-          const sites = await getAssignedSitesForEngineer(engineerId);
-          if (sites.length > 0 && sites[0].createdByAdmin) {
-            adminId = sites[0].createdByAdmin;
-          }
-        } catch (e) {
-          console.warn("Could not determine adminId for labour master:", e);
-        }
-        const [labourMaster, mm] = await Promise.all([
-          getLabourMaster(adminId),
-          getMaterialMaster()
-        ]);
-        
-        const activeCats = Object.keys(labourMaster.categories).filter(c => labourMaster.categories[c].status === "Active");
-        if (activeCats.length > 0) {
-          setCategories(activeCats);
-          setCountsMap(current => {
-            const updated = {};
-            activeCats.forEach(cat => {
-              updated[cat] = current[cat] || 0;
-            });
-            return updated;
-          });
-        }
-        
+        const mm = await getMaterialMaster();
         setMaterialMaster(mm);
       } catch (err) {
-        console.error("Failed to load master categories:", err);
+        console.error("Failed to load material master:", err);
       }
     };
-    loadMasterData();
+    loadMaterials();
+
+    return () => unsubscribe();
   }, []);
 
-  // Sync labour counts & historical summary whenever active site or select date changes
+  // Sync labour entries & historical summary whenever active site or select date changes
   useEffect(() => {
-    const fetchLabourCountsAndHistory = async () => {
+    const fetchLabourDataAndHistory = async () => {
       if (!activeSiteId || !labourDate) return;
       setLabourHistoryLoading(true);
       try {
-        const counts = await getLabourDailyCounts(activeSiteId, labourDate);
+        const entries = await getLabourDailyEntries(activeSiteId, labourDate);
+        setLabourEntries(entries);
+        
         const hist = await getLabourDailyCountsHistory(activeSiteId);
         setLabourHistory(hist);
-
-        // Incorporate custom categories present in fetched data
-        setCategories(prev => {
-          const newCats = [...prev];
-          Object.keys(counts).forEach(cat => {
-            if (!newCats.includes(cat)) {
-              newCats.push(cat);
-            }
-          });
-
-          // Build updated counts map with fallback to zero
-          setCountsMap(current => {
-            const updated = {};
-            newCats.forEach(cat => {
-              updated[cat] = counts[cat] || 0;
-            });
-            return updated;
-          });
-
-          return newCats;
-        });
       } catch (err) {
         console.error("Labour statistics load error:", err);
       } finally {
         setLabourHistoryLoading(false);
       }
     };
-
-    fetchLabourCountsAndHistory();
+    fetchLabourDataAndHistory();
   }, [activeSiteId, labourDate]);
+
+  // Derive countsMap automatically from labourEntries
+  useEffect(() => {
+    const newCounts = {};
+    categories.forEach(cat => {
+      newCounts[cat.name] = 0;
+    });
+    labourEntries.forEach(entry => {
+      const cat = categories.find(c => c.id === entry.categoryId);
+      const catName = cat ? cat.name : (entry.categoryName || "Other");
+      newCounts[catName] = (newCounts[catName] || 0) + 1;
+    });
+    setCountsMap(newCounts);
+  }, [labourEntries, categories]);
 
   // Handle local photo files base64 parsing with automatic canvas compression
   const handleFileChange = (e, setFile, setPreview) => {
@@ -1046,7 +1040,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const accuracy = deviceCoords.accuracy || 10;
       const distance = verificationDetails?.distance !== undefined ? verificationDetails.distance : null;
 
-      await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng);
+      await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng, "Attendance");
 
       await markAttendance(
         engineerId, 
@@ -1290,17 +1284,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setLabourSaving(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
-      
-      // Filter out any undefined categories and map countsMap cleanly
-      const submitMap = {};
-      categories.forEach(cat => {
-        submitMap[cat] = Number(countsMap[cat]) || 0;
-      });
-
-      await saveLabourDailyCounts(activeSiteId, engineerId, labourDate, submitMap);
+      await saveLabourDailyEntries(activeSiteId, engineerId, labourDate, labourEntries);
       showToast(`Labour counts updated successfully for ${labourDate}!`, "success");
       
-      // Refresh historical logs
       const hist = await getLabourDailyCountsHistory(activeSiteId);
       setLabourHistory(hist);
     } catch (err) {
@@ -1311,59 +1297,45 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Add custom category type
-  const handleAddLabourCategory = (e) => {
-    e.preventDefault();
-    const cleanName = newCategoryName.trim();
-    if (!cleanName) {
-      showToast("Please specify a category label.", "error");
-      return;
-    }
-    
-    // Capitalize category name nicely
-    const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-
-    if (categories.includes(formattedName)) {
-      showToast("Category type already exists.", "error");
-      return;
-    }
-
-    const updated = [...categories, formattedName];
-    setCategories(updated);
-    setCountsMap(prev => ({
-      ...prev,
-      [formattedName]: 0
-    }));
-    
-    // Save to LocalStorage for user persistence
-    localStorage.setItem("labour_categories", JSON.stringify(updated));
-    setNewCategoryName("");
-    showToast(`Added category: ${formattedName}. You can now input attendance count.`, "success");
+  const handleIncrementLabour = (category) => {
+    setLabourEntries(prev => {
+      const catEntries = prev.filter(e => e.categoryId === category.id);
+      
+      let nextNum = 1;
+      if (catEntries.length > 0) {
+        const numbers = catEntries.map(e => {
+          const parts = e.displayName.split(" ");
+          const num = parseInt(parts[parts.length - 1], 10);
+          return isNaN(num) ? 0 : num;
+        });
+        nextNum = Math.max(...numbers) + 1;
+      }
+      
+      const newEntry = {
+        categoryId: category.id,
+        categoryName: category.name,
+        displayName: `${category.name} ${nextNum}`,
+        siteId: activeSiteId,
+        engineerId: userProfile?.uid || userProfile?.id || "",
+        date: labourDate
+      };
+      
+      return [...prev, newEntry];
+    });
   };
 
-  // Delete/hide custom category
-  const handleDeleteLabourCategory = (categoryName) => {
-    if (["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(categoryName)) {
-      showToast("Cannot remove core labour categories.", "error");
-      return;
-    }
-    if (confirm(`Remove custom category "${categoryName}"? This hides it from inputs (saved counts remain in database).`)) {
-      const updated = categories.filter(c => c !== categoryName);
-      setCategories(updated);
-      setCountsMap(prev => {
-        const copy = { ...prev };
-        delete copy[categoryName];
-        return copy;
-      });
-      localStorage.setItem("labour_categories", JSON.stringify(updated));
-      showToast(`Removed category "${categoryName}" from active tracker list.`, "success");
-    }
+  const handleDecrementLabour = (categoryId) => {
+    setLabourEntries(prev => {
+      const catEntries = prev.filter(e => e.categoryId === categoryId);
+      if (catEntries.length === 0) return prev;
+      
+      const lastEntry = catEntries[catEntries.length - 1];
+      return prev.filter(e => e !== lastEntry);
+    });
   };
 
-  const handleOtherLabourInteract = (intendedCount) => {
-    setLabourSpecifyText("");
-    setPendingLabourCount(intendedCount);
-    setShowLabourSpecifyModal(true);
+  const handleRemoveSpecificEntry = (entryToRemove) => {
+    setLabourEntries(prev => prev.filter(e => e !== entryToRemove));
   };
 
   // 4. Save Material Receipt
@@ -1459,7 +1431,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         );
       }
 
-      await saveSitePhoto(engineerId, activeSiteId, sitePhotoPreview, userLat, userLng);
+      await saveSitePhoto(engineerId, activeSiteId, sitePhotoPreview, userLat, userLng, "Site Photo");
       showToast("Geotagged site photo uploaded to feed!", "success");
 
       setSitePhotoFile(null);
@@ -1495,8 +1467,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const site = assignedSites.find(s => s.id === activeSiteId);
         const lat = site ? Number(site.latitude) : 28.5355;
         const lng = site ? Number(site.longitude) : 77.3910;
-        await saveSitePhoto(engineerId, activeSiteId, progressPhotoPreview, lat, lng);
-        photoIds.push("progress_log_attached_photo");
+        const photoId = await saveSitePhoto(engineerId, activeSiteId, progressPhotoPreview, lat, lng, "Progress Photo");
+        photoIds.push(photoId);
       }
 
       // Format description to store work completed, issues, notes in same string
@@ -3551,7 +3523,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <span className="mobile-form-label">Worker Headcounts</span>
           {categories.map(cat => {
-            const currentVal = countsMap[cat] || 0;
+            const catEntries = labourEntries.filter(e => e.categoryId === cat.id);
+            const currentVal = catEntries.length;
             const emojis = {
               Mason: "👷",
               Helper: "🧱",
@@ -3560,131 +3533,82 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               Painter: "🖌️",
               Other: "📋"
             };
-            const emoji = emojis[cat] || "🔨";
-            const isCore = ["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(cat);
+            const emoji = emojis[cat.name] || "🔨";
             
             return (
-              <div key={cat} className="mobile-labour-card">
-                <div className="mobile-labour-info">
-                  <span style={{ fontSize: "20px" }}>{emoji}</span>
-                  <div>
-                    <span className="mobile-labour-name">{getLabourDisplayName(cat)}</span>
-                    {!isCore && (
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteLabourCategory(cat)}
-                        style={{
-                          marginLeft: "8px",
-                          background: "none",
-                          border: "none",
-                          color: "var(--danger-500)",
-                          fontSize: "11px",
-                          cursor: "pointer",
-                          textDecoration: "underline",
-                          padding: 0
-                        }}
-                      >
-                        Remove
-                      </button>
-                    )}
+              <div key={cat.id} className="mobile-labour-card" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
+                  <div className="mobile-labour-info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <span style={{ fontSize: "20px" }}>{emoji}</span>
+                    <span className="mobile-labour-name" style={{ fontWeight: "700" }}>{getLabourDisplayName(cat.name)}</span>
+                  </div>
+                  
+                  <div className="counter-control" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <button
+                      type="button"
+                      className="counter-btn"
+                      onClick={() => handleDecrementLabour(cat.id)}
+                      disabled={currentVal === 0}
+                      style={{ opacity: currentVal === 0 ? 0.5 : 1 }}
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span style={{ fontWeight: "800", fontSize: "15px", width: "30px", textAlign: "center" }}>{currentVal}</span>
+                    <button
+                      type="button"
+                      className="counter-btn"
+                      onClick={() => handleIncrementLabour(cat)}
+                    >
+                      <Plus size={14} />
+                    </button>
                   </div>
                 </div>
-                
-                <div className="counter-control">
-                  <button
-                    type="button"
-                    className="counter-btn"
-                    onClick={() => setCountsMap(prev => ({ ...prev, [cat]: Math.max(0, currentVal - 1) }))}
-                  >
-                    <Minus size={14} />
-                  </button>
-                  <input
-                    type="number"
-                    value={currentVal}
-                    onChange={(e) => {
-                      const val = Math.max(0, parseInt(e.target.value, 10) || 0);
-                      if (cat === "Other" && val > 0) {
-                        handleOtherLabourInteract(val);
-                      } else {
-                        setCountsMap(prev => ({ ...prev, [cat]: val }));
-                      }
-                    }}
-                    className="counter-value"
-                    style={{
-                      width: "44px",
-                      border: "none",
-                      textAlign: "center",
-                      fontWeight: "800",
-                      fontSize: "15px",
-                      color: "var(--primary-950)",
-                      background: "transparent",
-                      outline: "none",
-                      padding: 0,
-                      margin: 0
-                    }}
-                  />
-                  <button
-                    type="button"
-                    className="counter-btn"
-                    onClick={() => {
-                      if (cat === "Other") {
-                        handleOtherLabourInteract(currentVal + 1);
-                      } else {
-                        setCountsMap(prev => ({ ...prev, [cat]: currentVal + 1 }));
-                      }
-                    }}
-                  >
-                    <Plus size={14} />
-                  </button>
-                </div>
+
+                {/* List of numbered entries for this category */}
+                {catEntries.length > 0 && (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px", paddingLeft: "28px" }}>
+                    {catEntries.map((entry, index) => (
+                      <span
+                        key={index}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          backgroundColor: "var(--primary-50)",
+                          color: "var(--primary-800)",
+                          padding: "4px 10px",
+                          borderRadius: "16px",
+                          fontSize: "12.5px",
+                          fontWeight: "600",
+                          border: "1px solid var(--primary-100)"
+                        }}
+                      >
+                        {entry.displayName}
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSpecificEntry(entry)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            color: "var(--danger-500)",
+                            cursor: "pointer",
+                            padding: 0,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            fontSize: "14px",
+                            lineHeight: 1
+                          }}
+                          title="Remove entry"
+                        >
+                          &times;
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
             );
           })}
-        </div>
-
-        {/* Add custom trade category */}
-        <div style={{
-          backgroundColor: "#ffffff",
-          border: "1px solid var(--border-color)",
-          borderRadius: "var(--radius-md)",
-          padding: "16px",
-          boxShadow: "var(--shadow-sm)",
-          marginTop: "8px"
-        }}>
-          <span className="mobile-form-label">Add Custom Worker Type</span>
-          <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
-            <input
-              type="text"
-              placeholder="E.g. Welder, Carpenter"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              style={{
-                flex: 1,
-                padding: "8px 12px",
-                border: "1px solid var(--border-color)",
-                borderRadius: "var(--radius-sm)",
-                fontSize: "13px",
-                outline: "none",
-                margin: 0
-              }}
-            />
-            <button
-              type="button"
-              onClick={handleAddLabourCategory}
-              style={{
-                padding: "8px 16px",
-                backgroundColor: "var(--accent-50)",
-                color: "var(--accent-700)",
-                border: "1px solid var(--accent-200)",
-                borderRadius: "var(--radius-sm)",
-                fontSize: "13px",
-                fontWeight: "700",
-                cursor: "pointer"
-              }}
-            >
-              Add
-            </button>
-          </div>
         </div>
 
         {/* Workforce Total Count */}
@@ -3894,16 +3818,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           {/* Photo gallery */}
           <div>
             <span className="mobile-form-label" style={{ marginBottom: "8px", display: "block" }}>Inspection Photo Gallery</span>
-            {sitePhotos.filter(p => p.siteId === activeSiteId).length === 0 ? (
+            {sitePhotos.length === 0 ? (
               <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No photos uploaded for this site yet.</p>
               </div>
             ) : (
               <div className="mobile-photo-grid">
-                {sitePhotos.filter(p => p.siteId === activeSiteId).map(photo => (
+                {sitePhotos.map(photo => (
                   <div key={photo.id} className="mobile-photo-card" style={{ position: "relative", borderRadius: "10px", overflow: "hidden" }}>
                     <a href={photo.imageUrl} target="_blank" rel="noopener noreferrer">
-                      <img src={photo.imageUrl} alt="Progress inspection" className="mobile-photo-img" style={{ height: "120px" }} />
+                      <img 
+                        src={photo.imageUrl} 
+                        alt="Progress inspection" 
+                        onError={(e) => {
+                          e.target.src = "https://images.unsplash.com/photo-1581094288338-2314dddb7eed?auto=format&fit=crop&w=400&q=80";
+                        }}
+                        className="mobile-photo-img" 
+                        style={{ height: "120px", objectFit: "cover", width: "100%" }} 
+                      />
                     </a>
                     {photo.engineerId === currentEngineerId && (
                       <button 
@@ -3931,13 +3863,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         <Trash2 size={14} />
                       </button>
                     )}
-                    <div className="mobile-photo-info" style={{ padding: "10px" }}>
-                      <span className="mobile-photo-time">
-                        {photo.capturedAt?.seconds 
-                          ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
-                          : new Date(photo.capturedAt).toLocaleDateString()}
+                    <div className="mobile-photo-info" style={{ padding: "10px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span className="mobile-photo-time" style={{ fontWeight: "700" }}>
+                        {photo.createdDate} at {photo.createdTime}
                       </span>
-                      <div className="mobile-photo-loc" style={{ fontSize: "11px", fontWeight: "700" }}>GPS: {Number(photo.latitude).toFixed(4)}, {Number(photo.longitude).toFixed(4)}</div>
+                      <div className="mobile-photo-loc" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                        GPS: {Number(photo.latitude).toFixed(4)}, {Number(photo.longitude).toFixed(4)}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -4327,89 +4259,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       )}
 
       <div className="mobile-app-frame">
-        {/* Site Location Setup Modal has been removed as coordinates are managed by Admins */}
-
-        {/* Specify Labour Category Modal */}
-        <Modal
-          isOpen={showLabourSpecifyModal}
-          onClose={() => {
-            setLabourSpecifyText("");
-            setShowLabourSpecifyModal(false);
-          }}
-          title="Specify Labour Category"
-          maxWidth="360px"
-        >
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5" }}>
-              Please enter the trade or type for this worker headcount (e.g. Welder, Carpenter).
-            </p>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span className="mobile-form-label" style={{ marginBottom: 0 }}>Labour Type <span style={{ color: "var(--danger-500)" }}>*</span></span>
-              <input
-                type="text"
-                placeholder="E.g. Welder, Carpenter"
-                value={labourSpecifyText}
-                onChange={(e) => setLabourSpecifyText(e.target.value)}
-                required
-                style={{
-                  width: "100%",
-                  padding: "12px 14px",
-                  border: "1.5px solid var(--construction-orange)",
-                  borderRadius: "var(--radius-md)",
-                  fontSize: "14px",
-                  outline: "none",
-                  backgroundColor: "#f8fafc"
-                }}
-              />
-            </div>
-
-            <div style={{ display: "flex", gap: "10px", marginTop: "4px" }}>
-              <Button
-                type="button"
-                variant="outline"
-                style={{ flex: 1, padding: "12px 10px", fontSize: "13px" }}
-                onClick={() => {
-                  setLabourSpecifyText("");
-                  setShowLabourSpecifyModal(false);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                type="button"
-                style={{ flex: 1.5, padding: "12px 10px", fontSize: "13px" }}
-                onClick={() => {
-                  const cleanName = labourSpecifyText.trim();
-                  if (!cleanName) {
-                    showToast("Please specify the labour type.", "error");
-                    return;
-                  }
-                  const formattedName = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
-                  
-                  // Update categories
-                  setCategories(prev => {
-                    const updated = prev.includes(formattedName) ? prev : [...prev, formattedName];
-                    localStorage.setItem("labour_categories", JSON.stringify(updated));
-                    return updated;
-                  });
-
-                  // Update countsMap
-                  setCountsMap(prev => ({
-                    ...prev,
-                    [formattedName]: (prev[formattedName] || 0) + pendingLabourCount,
-                    Other: 0
-                  }));
-
-                  setShowLabourSpecifyModal(false);
-                  showToast(`Added custom labour category: ${formattedName} with count ${pendingLabourCount}`, "success");
-                }}
-              >
-                Save Trade
-              </Button>
-            </div>
-          </div>
-        </Modal>
+        {/* Specify Labour Category Modal removed since categories sync directly from the master collection */}
 
         {/* Full Viewport WebRTC Camera Overlay */}
         {cameraActive && (

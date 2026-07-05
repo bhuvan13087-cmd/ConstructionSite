@@ -285,6 +285,30 @@ service cloud.firestore {
       );
     }
 
+    match /labourCategories/{categoryId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /siteLabourEntries/{entryId} {
+      allow read: if isAdmin() || (
+        isActiveUser() && (
+          resource == null || 
+          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && resource.data.siteId in getSiteEngineerData().assignedSites)
+        )
+      );
+      allow write: if isAdmin() || (
+        isActiveUser() && 
+        (
+          ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (getUserData().role == 'site_engineer' || getUserData().role == 'engineer')) && request.resource.data.siteId in getUserData().assignedSites) ||
+          (isSiteEngineer() && request.resource.data.siteId in getSiteEngineerData().assignedSites)
+        ) &&
+        request.resource.data.engineerId == request.auth.uid
+      );
+    }
+
+
     match /leaves/{leaveId} {
       allow read, write: if isActiveUser();
     }

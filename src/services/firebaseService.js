@@ -14,7 +14,9 @@ import {
   deleteField,
   deleteDoc,
   onSnapshot,
-  runTransaction
+  runTransaction,
+  addDoc,
+  orderBy
 } from "firebase/firestore";
 import { getFirebaseDb, getSecondaryAuth } from "../firebase/config";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
@@ -1048,18 +1050,90 @@ export async function markCheckOut(attendanceId, latitude, longitude, accuracy, 
   });
 }
 
+// Helper to format Firestore timestamp/date into DD/MM/YYYY and hh:mm AM/PM
+export function formatPhotoTimestamp(timestamp) {
+  if (!timestamp) return { date: "--", time: "--" };
+  
+  let dateObj;
+  if (timestamp.toDate && typeof timestamp.toDate === "function") {
+    dateObj = timestamp.toDate();
+  } else if (timestamp.seconds !== undefined) {
+    dateObj = new Date(timestamp.seconds * 1000);
+  } else {
+    dateObj = new Date(timestamp);
+  }
+  
+  if (isNaN(dateObj.getTime())) {
+    return { date: "--", time: "--" };
+  }
+  
+  // Format Date: DD/MM/YYYY
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const year = dateObj.getFullYear();
+  const dateStr = `${day}/${month}/${year}`;
+  
+  // Format Time: hh:mm AM/PM
+  let hours = dateObj.getHours();
+  const minutes = String(dateObj.getMinutes()).padStart(2, '0');
+  const ampm = hours >= 12 ? 'PM' : 'AM';
+  hours = hours % 12;
+  hours = hours ? hours : 12; // the hour '0' should be '12'
+  const hoursStr = String(hours).padStart(2, '0');
+  const timeStr = `${hoursStr}:${minutes} ${ampm}`;
+  
+  return {
+    date: dateStr,
+    time: timeStr
+  };
+}
+
 // Save site photo
-export async function saveSitePhoto(engineerId, siteId, imageUrl, latitude, longitude) {
+export async function saveSitePhoto(engineerId, siteId, imageUrl, latitude, longitude, photoType = "Site Photo") {
   const db = getDb();
+  
+  // Retrieve site details
+  let siteName = "Unknown Site";
+  try {
+    const siteSnap = await getDoc(doc(db, "sites", siteId));
+    if (siteSnap.exists()) {
+      siteName = siteSnap.data().siteName || "Unknown Site";
+    }
+  } catch (e) {
+    console.error("Failed to retrieve site name for photo:", e);
+  }
+  
+  // Retrieve engineer details
+  let engineerName = "Unknown Engineer";
+  try {
+    const engSnap = await getDoc(doc(db, "siteEngineers", engineerId));
+    if (engSnap.exists()) {
+      engineerName = engSnap.data().name || "Unknown Engineer";
+    } else {
+      const userSnap = await getDoc(doc(db, "users", engineerId));
+      if (userSnap.exists()) {
+        engineerName = userSnap.data().fullName || userSnap.data().name || "Unknown Engineer";
+      }
+    }
+  } catch (e) {
+    console.error("Failed to retrieve engineer name for photo:", e);
+  }
+
   const newPhotoRef = doc(collection(db, "sitePhotos"));
   await setDoc(newPhotoRef, {
     engineerId,
+    engineerName,
     siteId,
+    siteName,
     imageUrl,
     latitude,
     longitude,
-    capturedAt: serverTimestamp()
+    uploadedAt: serverTimestamp(),
+    capturedAt: serverTimestamp(), // Keep for backwards compatibility
+    photoType
   });
+  
+  return newPhotoRef.id;
 }
 
 // Get photos captured by the engineer (optionally filtered by siteId)
@@ -1080,12 +1154,55 @@ export async function getSitePhotos(engineerId, siteId = null) {
   
   const photos = [];
   snap.forEach(doc => {
-    photos.push({ id: doc.id, ...doc.data() });
+    const data = doc.data();
+    const timestamp = data.uploadedAt || data.capturedAt;
+    const { date, time } = formatPhotoTimestamp(timestamp);
+    photos.push({ 
+      id: doc.id, 
+      ...data,
+      createdDate: date,
+      createdTime: time
+    });
   });
   return photos.sort((a, b) => {
-    const timeA = a.capturedAt?.seconds || (a.capturedAt ? new Date(a.capturedAt).getTime() : 0);
-    const timeB = b.capturedAt?.seconds || (b.capturedAt ? new Date(b.capturedAt).getTime() : 0);
+    const timeA = a.uploadedAt?.seconds || (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0);
+    const timeB = b.uploadedAt?.seconds || (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0);
     return timeB - timeA;
+  });
+}
+
+// Subscribe to site photos in real-time
+export function subscribePhotosForSite(siteId, onUpdate) {
+  const db = getDb();
+  const q = query(
+    collection(db, "sitePhotos"),
+    where("siteId", "==", siteId)
+  );
+  
+  return onSnapshot(q, (snapshot) => {
+    const photos = [];
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      const timestamp = data.uploadedAt || data.capturedAt;
+      const { date, time } = formatPhotoTimestamp(timestamp);
+      photos.push({
+        id: docSnap.id,
+        ...data,
+        createdDate: date,
+        createdTime: time
+      });
+    });
+    
+    // Sort descending by uploadedAt/capturedAt
+    photos.sort((a, b) => {
+      const timeA = a.uploadedAt?.seconds || (a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0);
+      const timeB = b.uploadedAt?.seconds || (b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0);
+      return timeB - timeA;
+    });
+    
+    onUpdate(photos);
+  }, (error) => {
+    console.error("subscribePhotosForSite failed:", error);
   });
 }
 
@@ -1680,63 +1797,131 @@ export async function getLabourAttendanceSummary(siteId) {
 // DAILY LABOUR COUNTS SERVICES (COUNT-BASED SYSTEM)
 // ==========================================================================
 
-// Save daily category counts for workers (idempotent writes using deterministic IDs)
-export async function saveLabourDailyCounts(siteId, engineerId, dateStr, countsMap) {
+// Fetch individual site labour entries for a specific site and date
+export async function getLabourDailyEntries(siteId, dateStr) {
   const db = getDb();
-  const batch = writeBatch(db);
+  const q = query(
+    collection(db, "siteLabourEntries"),
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  const snap = await getDocs(q);
+  const entries = [];
+  snap.forEach(d => {
+    entries.push({
+      id: d.id,
+      ...d.data()
+    });
+  });
+  return entries;
+}
+
+// Save daily site labour entries for a specific site, date, and engineer (idempotent writes using clear-and-set)
+export async function saveLabourDailyEntries(siteId, engineerId, dateStr, entries) {
+  const db = getDb();
   
-  const categories = Object.keys(countsMap);
-  for (const category of categories) {
-    const docId = `${siteId}_${dateStr}_${category}`;
-    const docRef = doc(db, "labourDailyCount", docId);
-    const count = Number(countsMap[category]) || 0;
-    
-    batch.set(docRef, {
+  // 1. Delete existing entries for this site and date
+  const q = query(
+    collection(db, "siteLabourEntries"),
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  const snap = await getDocs(q);
+  const batch = writeBatch(db);
+  snap.forEach(d => {
+    batch.delete(d.ref);
+  });
+  
+  // 2. Add new entries
+  entries.forEach(entry => {
+    const newRef = doc(collection(db, "siteLabourEntries"));
+    batch.set(newRef, {
       siteId,
       engineerId,
       date: dateStr,
-      category,
-      count,
+      categoryId: entry.categoryId,
+      displayName: entry.displayName,
       createdAt: serverTimestamp()
     });
-  }
+  });
   
   await batch.commit();
+}
+
+// Save daily category counts for workers (retained/adapted for compatibility)
+export async function saveLabourDailyCounts(siteId, engineerId, dateStr, countsMap) {
+  const db = getDb();
+  
+  // Fetch active categories first to find category ID
+  const catsSnap = await getDocs(collection(db, "labourCategories"));
+  const categories = [];
+  catsSnap.forEach(d => {
+    categories.push({ id: d.id, name: d.data().name });
+  });
+
+  const entries = [];
+  Object.keys(countsMap).forEach(categoryName => {
+    const count = Number(countsMap[categoryName]) || 0;
+    const cat = categories.find(c => c.name.toLowerCase() === categoryName.toLowerCase());
+    if (cat && count > 0) {
+      for (let i = 1; i <= count; i++) {
+        entries.push({
+          categoryId: cat.id,
+          displayName: `${cat.name} ${i}`
+        });
+      }
+    }
+  });
+
+  await saveLabourDailyEntries(siteId, engineerId, dateStr, entries);
 }
 
 // Fetch worker counts for a specific site and date
 export async function getLabourDailyCounts(siteId, dateStr) {
   const db = getDb();
-  const countsColl = collection(db, "labourDailyCount");
+  
+  // Fetch master categories to map IDs to names
+  const catsSnap = await getDocs(collection(db, "labourCategories"));
+  const catMap = {};
+  const counts = {};
+  catsSnap.forEach(d => {
+    const name = d.data().name;
+    catMap[d.id] = name;
+    counts[name] = 0;
+  });
+
   const q = query(
-    countsColl,
+    collection(db, "siteLabourEntries"),
     where("siteId", "==", siteId),
     where("date", "==", dateStr)
   );
-  
   const snap = await getDocs(q);
-  const counts = {};
-  // Pre-populate with 0 for all categories
-  const categories = ["Mason", "Helper", "Painter", "Plumber", "Electrician", "Other"];
-  categories.forEach(cat => {
-    counts[cat] = 0;
-  });
-  
   snap.forEach(d => {
     const data = d.data();
-    counts[data.category] = Number(data.count) || 0;
+    const catName = catMap[data.categoryId] || "Other";
+    counts[catName] = (counts[catName] || 0) + 1;
   });
+  
   return counts;
 }
 
 // Fetch historical daily counts list for Site Engineer Dashboard and Admin Auditing
 export async function getLabourDailyCountsHistory(siteId) {
   const db = getDb();
-  const countsColl = collection(db, "labourDailyCount");
-  const q = query(countsColl, where("siteId", "==", siteId));
+  
+  // Fetch master categories to map IDs to names
+  const catsSnap = await getDocs(collection(db, "labourCategories"));
+  const catMap = {};
+  catsSnap.forEach(d => {
+    catMap[d.id] = d.data().name;
+  });
+
+  const q = query(
+    collection(db, "siteLabourEntries"),
+    where("siteId", "==", siteId)
+  );
   const snap = await getDocs(q);
   
-  // Group by date to show a clean list of dates with counts
   const historyMap = {};
   snap.forEach(d => {
     const data = d.data();
@@ -1744,19 +1929,20 @@ export async function getLabourDailyCountsHistory(siteId) {
     if (!historyMap[date]) {
       historyMap[date] = { date, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0, engineerId: data.engineerId || "" };
     }
-    const categoryKey = data.category === "Mason" ? "Masons" :
-                        data.category === "Helper" ? "Helpers" :
-                        data.category === "Painter" ? "Painters" :
-                        data.category === "Plumber" ? "Plumbers" :
-                        data.category === "Electrician" ? "Electricians" : "Others";
     
-    const countVal = Number(data.count) || 0;
+    const catName = catMap[data.categoryId] || "Other";
+    const categoryKey = catName === "Mason" ? "Masons" :
+                        catName === "Helper" ? "Helpers" :
+                        catName === "Painter" ? "Painters" :
+                        catName === "Plumber" ? "Plumbers" :
+                        catName === "Electrician" ? "Electricians" : "Others";
+    
     if (categoryKey === "Others") {
-      historyMap[date].Others += countVal;
+      historyMap[date].Others += 1;
     } else {
-      historyMap[date][categoryKey] = countVal;
+      historyMap[date][categoryKey] = (historyMap[date][categoryKey] || 0) + 1;
     }
-    historyMap[date].total += countVal;
+    historyMap[date].total += 1;
   });
   
   return Object.values(historyMap).sort((a, b) => b.date.localeCompare(a.date));
@@ -2089,12 +2275,10 @@ export async function deleteMaterial(materialId) {
   await batch.commit();
 }
 
-// Delete daily labour counts for a site and date
 export async function deleteLabourDailyCounts(siteId, dateStr) {
   const db = getDb();
-  const countsColl = collection(db, "labourDailyCount");
   const q = query(
-    countsColl,
+    collection(db, "siteLabourEntries"),
     where("siteId", "==", siteId),
     where("date", "==", dateStr)
   );
@@ -2299,68 +2483,190 @@ export async function rejectMaterialLog(materialId) {
 // ==========================================================================
 
 // Get admin-scoped labour master categories.
-// If adminId provided, reads from "__labour_master___{adminId}".
-// Falls back to global "__labour_master__" for legacy compatibility.
 export async function getLabourMaster(adminId = null) {
   const db = getDb();
-  const defaults = {
-    "Mason": { wage: 800, type: "Daily", status: "Active" },
-    "Helper": { wage: 500, type: "Daily", status: "Active" },
-    "Carpenter": { wage: 700, type: "Daily", status: "Active" },
-    "Electrician": { wage: 700, type: "Daily", status: "Active" },
-    "Plumber": { wage: 700, type: "Daily", status: "Active" },
-    "Painter": { wage: 700, type: "Daily", status: "Active" },
-    "Other": { wage: 600, type: "Daily", status: "Active" }
-  };
-
-  // Try admin-scoped doc first if adminId is given
-  if (adminId) {
-    const scopedDocRef = doc(db, "users", `__labour_master__${adminId}`);
-    const scopedSnap = await getDoc(scopedDocRef);
-    if (scopedSnap.exists()) {
-      const data = scopedSnap.data();
-      return {
-        categories: { ...defaults, ...(data.categories || {}) },
-        history: data.history || []
-      };
+  
+  const collRef = collection(db, "labourCategories");
+  let snap;
+  try {
+    snap = await getDocs(query(collRef, orderBy("createdTime", "asc")));
+  } catch (e) {
+    // Falls back to unordered if indexing is not complete yet
+    snap = await getDocs(collRef);
+  }
+  
+  if (snap.empty) {
+    const defaults = [
+      { name: "Mason", salaryAmount: 800, salaryType: "Daily" },
+      { name: "Helper", salaryAmount: 500, salaryType: "Daily" },
+      { name: "Electrician", salaryAmount: 700, salaryType: "Daily" },
+      { name: "Plumber", salaryAmount: 700, salaryType: "Daily" },
+      { name: "Painter", salaryAmount: 700, salaryType: "Daily" }
+    ];
+    for (const d of defaults) {
+      await addDoc(collRef, {
+        name: d.name,
+        salaryAmount: d.salaryAmount,
+        salaryType: d.salaryType,
+        createdBy: "System",
+        createdTime: serverTimestamp(),
+        status: "Active"
+      });
+    }
+    // Re-fetch after initializing
+    try {
+      snap = await getDocs(query(collRef, orderBy("createdTime", "asc")));
+    } catch (e) {
+      snap = await getDocs(collRef);
     }
   }
 
-  // Fallback to global document for legacy data
-  const docRef = doc(db, "users", "__labour_master__");
-  const docSnap = await getDoc(docRef);
+  const categories = {};
+  snap.forEach(d => {
+    const data = d.data();
+    categories[d.id] = {
+      name: data.name,
+      wage: Number(data.salaryAmount) || 0,
+      type: data.salaryType,
+      status: data.status,
+      createdBy: data.createdBy,
+      createdTime: data.createdTime
+    };
+  });
+
+  const docKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
+  const historyRef = doc(db, "users", docKey);
+  const historySnap = await getDoc(historyRef);
+  const history = historySnap.exists() ? (historySnap.data().history || []) : [];
+
+  return {
+    categories,
+    history
+  };
+}
+
+// Create a new labour category document in the master collection.
+export async function createLabourCategory(categoryData) {
+  const db = getDb();
+  const nameClean = categoryData.name.trim();
   
-  if (docSnap.exists()) {
-    const data = docSnap.data();
-    const mergedCategories = { ...defaults, ...(data.categories || {}) };
-    return {
-      categories: mergedCategories,
-      history: data.history || []
+  // Check for duplicates case-insensitively
+  const collRef = collection(db, "labourCategories");
+  const snap = await getDocs(collRef);
+  const duplicate = snap.docs.some(docSnap => docSnap.data().name.trim().toLowerCase() === nameClean.toLowerCase());
+  if (duplicate) {
+    throw new Error("Category name already exists.");
+  }
+
+  const docRef = await addDoc(collRef, {
+    name: nameClean,
+    salaryType: categoryData.salaryType,
+    salaryAmount: Number(categoryData.salaryAmount) || 0,
+    createdBy: categoryData.createdBy || "Admin",
+    createdTime: serverTimestamp(),
+    status: "Active"
+  });
+
+  // Log history
+  const logKey = "__labour_master__";
+  const logRef = doc(db, "users", logKey);
+  const logSnap = await getDoc(logRef);
+  const history = logSnap.exists() ? (logSnap.data().history || []) : [];
+  const newLog = {
+    categoryName: nameClean,
+    oldSalary: 0,
+    newSalary: Number(categoryData.salaryAmount) || 0,
+    changedDate: new Date().toISOString().split("T")[0],
+    changedBy: categoryData.createdBy || "Admin"
+  };
+  await setDoc(logRef, { history: [newLog, ...history] }, { merge: true });
+
+  return docRef.id;
+}
+
+// Update a labour category document in the master collection.
+export async function updateLabourCategory(categoryId, categoryData) {
+  const db = getDb();
+  const docRef = doc(db, "labourCategories", categoryId);
+  const docSnap = await getDoc(docRef);
+  if (!docSnap.exists()) {
+    throw new Error("Category does not exist.");
+  }
+  const oldData = docSnap.data();
+
+  const updates = {};
+  if (categoryData.salaryAmount !== undefined) {
+    updates.salaryAmount = Number(categoryData.salaryAmount) || 0;
+  }
+  if (categoryData.status !== undefined) {
+    updates.status = categoryData.status;
+  }
+  updates.updatedTime = serverTimestamp();
+
+  await updateDoc(docRef, updates);
+
+  // Log history if wage changed
+  if (categoryData.salaryAmount !== undefined && Number(categoryData.salaryAmount) !== Number(oldData.salaryAmount)) {
+    const logKey = "__labour_master__";
+    const logRef = doc(db, "users", logKey);
+    const logSnap = await getDoc(logRef);
+    const history = logSnap.exists() ? (logSnap.data().history || []) : [];
+    const newLog = {
+      categoryName: oldData.name,
+      oldSalary: Number(oldData.salaryAmount) || 0,
+      newSalary: Number(categoryData.salaryAmount) || 0,
+      changedDate: new Date().toISOString().split("T")[0],
+      changedBy: categoryData.updatedBy || "Admin"
     };
-  } else {
-    // Initialise the document (global or scoped)
-    const targetRef = adminId ? doc(db, "users", `__labour_master__${adminId}`) : docRef;
-    await setDoc(targetRef, {
-      categories: defaults,
-      history: []
-    });
-    return {
-      categories: defaults,
-      history: []
-    };
+    await setDoc(logRef, { history: [newLog, ...history] }, { merge: true });
   }
 }
 
-// Save admin-scoped labour master categories.
-// If adminId provided, writes to "__labour_master___{adminId}".
+// Delete a labour category document from the master collection.
+export async function deleteLabourCategory(categoryId) {
+  const db = getDb();
+  await deleteDoc(doc(db, "labourCategories", categoryId));
+}
+
+// Save admin-scoped labour master categories (retained for compatibility/history updates).
 export async function saveLabourMaster(categories, history, adminId = null) {
   const db = getDb();
   const docKey = adminId ? `__labour_master__${adminId}` : "__labour_master__";
   const docRef = doc(db, "users", docKey);
   await setDoc(docRef, {
-    categories,
     history,
     updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+// Real-time synchronization subscription for labour categories
+export function subscribeLabourCategories(onUpdate) {
+  const db = getDb();
+  const collRef = collection(db, "labourCategories");
+  
+  let q;
+  try {
+    q = query(collRef, orderBy("createdTime", "asc"));
+  } catch (e) {
+    q = collRef;
+  }
+  
+  return onSnapshot(q, (snapshot) => {
+    const categories = {};
+    snapshot.forEach(docSnap => {
+      const data = docSnap.data();
+      categories[docSnap.id] = {
+        name: data.name,
+        wage: Number(data.salaryAmount) || 0,
+        type: data.salaryType,
+        status: data.status,
+        createdBy: data.createdBy,
+        createdTime: data.createdTime
+      };
+    });
+    onUpdate(categories);
+  }, (error) => {
+    console.error("subscribeLabourCategories failed:", error);
   });
 }
 

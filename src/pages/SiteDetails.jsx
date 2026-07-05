@@ -12,7 +12,7 @@ import {
   getLabourDailyCountsSummary, 
   getAttendanceForSite, 
   getDailyUpdatesForSite, 
-  getPhotosForSite, 
+  subscribePhotosForSite, 
   updateMaterial,
   deleteMaterial
 } from "../services/firebaseService";
@@ -161,21 +161,18 @@ export default function SiteDetails({ siteId, onBack }) {
         mats,
         labour,
         attend,
-        progress,
-        pts
+        progress
       ] = await Promise.all([
         getMaterialsDetailed(siteId),
         getLabourDailyCountsSummary(siteId),
         getAttendanceForSite(siteId),
-        getDailyUpdatesForSite(siteId),
-        getPhotosForSite(siteId)
+        getDailyUpdatesForSite(siteId)
       ]);
 
       setMaterials(mats);
       setLabourHistory(labour);
       setAttendance(attend);
       setProgressUpdates(progress);
-      setPhotos(pts);
 
     } catch (err) {
       console.error("Error loading site details:", err);
@@ -187,6 +184,14 @@ export default function SiteDetails({ siteId, onBack }) {
 
   useEffect(() => {
     loadData();
+  }, [siteId]);
+
+  useEffect(() => {
+    if (!siteId) return;
+    const unsubscribe = subscribePhotosForSite(siteId, (pts) => {
+      setPhotos(pts);
+    });
+    return () => unsubscribe();
   }, [siteId]);
 
   if (loading) {
@@ -1204,10 +1209,7 @@ export default function SiteDetails({ siteId, onBack }) {
                 }}>
                   {photos.map((photo, index) => {
                     const eng = engineers.find(e => e.id === photo.engineerId) || { fullName: `Engineer (ID: ${photo.engineerId})` };
-                    const dateStr = photo.capturedAt?.seconds 
-                      ? new Date(photo.capturedAt.seconds * 1000).toLocaleDateString()
-                      : (photo.capturedAt ? new Date(photo.capturedAt).toLocaleDateString() : "--");
-
+                    
                     return (
                       <div key={photo.id || index} style={{
                         borderRadius: "8px",
@@ -1220,13 +1222,28 @@ export default function SiteDetails({ siteId, onBack }) {
                           <img 
                             src={photo.imageUrl} 
                             alt={`Site visual upload ${index + 1}`}
+                            onError={(e) => {
+                              e.target.src = "https://images.unsplash.com/photo-1581094288338-2314dddb7eed?auto=format&fit=crop&w=400&q=80";
+                            }}
                             style={{ width: "100%", height: "150px", objectFit: "cover" }}
                           />
                         </a>
-                        <div style={{ padding: "10px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-750)" }}>{eng.fullName}</span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{dateStr}</span>
+                        <div style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)" }}>
+                              Uploaded By: {photo.engineerName || eng.fullName}
+                            </span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                              Site: {photo.siteName || site?.siteName || "Unknown"}
+                            </span>
+                            {photo.photoType && (
+                              <span style={{ fontSize: "10px", color: "var(--accent-600)", fontWeight: "600" }}>
+                                Type: {photo.photoType}
+                              </span>
+                            )}
+                          </div>
+                          <div style={{ borderTop: "1px solid var(--border-color)", paddingTop: "6px", fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>
+                            {photo.createdDate} at {photo.createdTime}
                           </div>
                         </div>
                       </div>
