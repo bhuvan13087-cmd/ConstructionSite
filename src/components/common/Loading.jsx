@@ -1,12 +1,12 @@
 import React from "react";
 
-export default function Loading({ show = false, text = "Loading..." }) {
+export default function Loading({ show = false }) {
   if (!show) return null;
 
   return (
     <div id="global-loader" className="global-loader">
       <div className="loader-spinner"></div>
-      <p id="loader-text">{text}</p>
+      <p id="loader-text">Loading...</p>
     </div>
   );
 }

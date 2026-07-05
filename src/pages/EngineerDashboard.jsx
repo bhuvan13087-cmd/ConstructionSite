@@ -1916,7 +1916,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* Attendance checklist widget */}
-        <div className="mobile-attendance-card" style={{ height: "auto", padding: "16px" }}>
+        <div className={`mobile-attendance-card ${todayAttendance ? 'checked' : 'unchecked'}`} style={{ height: "auto", padding: "16px" }}>
           <div className="mobile-attendance-left">
             <span className="mobile-attendance-status-label">Your Attendance Status</span>
             <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
