@@ -192,8 +192,19 @@ service cloud.firestore {
     }
 
     match /attendance/{attendanceId} {
-      // Allow active users to read and write attendance
-      allow read, write: if isActiveUser();
+      allow read: if isAdmin() || (
+        isActiveUser() && (
+          resource == null || 
+          resource.data.engineerId == request.auth.uid || 
+          resource.data.userId == request.auth.uid
+        )
+      );
+      allow write: if isAdmin() || (
+        isActiveUser() && (
+          (resource == null && (request.resource.data.engineerId == request.auth.uid || request.resource.data.userId == request.auth.uid)) ||
+          (resource != null && (resource.data.engineerId == request.auth.uid || resource.data.userId == request.auth.uid))
+        )
+      );
     }
 
     match /sitePhotos/{photoId} {

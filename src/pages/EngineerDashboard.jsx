@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import Layout from "../components/layout/Layout";
 import { useAuth } from "../context/AuthContext";
 import { 
+  getSites,
   getAssignedSitesForEngineer, 
   getTodayAttendance,
   markAttendance,
@@ -87,7 +88,8 @@ import {
   EyeOff,
   ArrowRightCircle,
   ArrowLeftCircle,
-  DollarSign
+  DollarSign,
+  History
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -197,6 +199,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
   const [allSitesAttendance, setAllSitesAttendance] = useState([]);
   const [showLocationDetails, setShowLocationDetails] = useState(false);
+  const [allSites, setAllSites] = useState([]);
+  const [historyFilter, setHistoryFilter] = useState("this-week");
+  const [customStartDate, setCustomStartDate] = useState(new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0]);
+  const [customEndDate, setCustomEndDate] = useState(new Date().toISOString().split("T")[0]);
+  const [selectedRecord, setSelectedRecord] = useState(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   
   const getLastAttendanceForSite = (siteId) => {
     if (!allSitesAttendance || allSitesAttendance.length === 0) {
@@ -403,6 +411,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       // Load assigned construction sites
       const filteredSites = await getAssignedSitesForEngineer(engineerId);
       setAssignedSites(filteredSites);
+
+      // Load all sites for lookup
+      try {
+        const sites = await getSites();
+        setAllSites(sites);
+      } catch (err) {
+        console.error("Failed to load all sites:", err);
+      }
 
       // Fetch personal stats, leaves, and attendance history
       try {
@@ -1864,6 +1880,607 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     );
   };
 
+  // Attendance History Helpers and Views
+  const getTodayStr = () => new Date().toISOString().split("T")[0];
+
+  const getDatesForThisWeek = () => {
+    const dates = [];
+    const todayStr = getTodayStr();
+    const todayParts = todayStr.split("-");
+    const today = new Date(Date.UTC(parseInt(todayParts[0], 10), parseInt(todayParts[1], 10) - 1, parseInt(todayParts[2], 10)));
+    
+    const currentDay = today.getUTCDay(); // 0 is Sunday, 1 is Monday...
+    const distanceToMonday = currentDay === 0 ? 6 : currentDay - 1;
+    
+    const monday = new Date(today);
+    monday.setUTCDate(today.getUTCDate() - distanceToMonday);
+    
+    let current = new Date(monday);
+    while (current <= today) {
+      dates.push(current.toISOString().split("T")[0]);
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    return dates.reverse();
+  };
+
+  const getDatesForThisMonth = () => {
+    const dates = [];
+    const todayStr = getTodayStr();
+    const todayParts = todayStr.split("-");
+    const today = new Date(Date.UTC(parseInt(todayParts[0], 10), parseInt(todayParts[1], 10) - 1, parseInt(todayParts[2], 10)));
+    
+    const startOfMonth = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    
+    let current = new Date(startOfMonth);
+    while (current <= today) {
+      dates.push(current.toISOString().split("T")[0]);
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    return dates.reverse();
+  };
+
+  const getDatesForCustomRange = (startStr, endStr) => {
+    if (!startStr || !endStr) return [];
+    const dates = [];
+    const startParts = startStr.split("-");
+    const endParts = endStr.split("-");
+    
+    const start = new Date(Date.UTC(parseInt(startParts[0], 10), parseInt(startParts[1], 10) - 1, parseInt(startParts[2], 10)));
+    const end = new Date(Date.UTC(parseInt(endParts[0], 10), parseInt(endParts[1], 10) - 1, parseInt(endParts[2], 10)));
+    
+    const todayStr = getTodayStr();
+    const todayParts = todayStr.split("-");
+    const today = new Date(Date.UTC(parseInt(todayParts[0], 10), parseInt(todayParts[1], 10) - 1, parseInt(todayParts[2], 10)));
+    
+    const cappedEnd = end > today ? today : end;
+    if (start > cappedEnd) return [];
+
+    let current = new Date(start);
+    while (current <= cappedEnd) {
+      dates.push(current.toISOString().split("T")[0]);
+      current.setUTCDate(current.getUTCDate() + 1);
+    }
+    return dates.reverse();
+  };
+
+  const getStatusTheme = (status) => {
+    switch (status) {
+      case "Present":
+        return {
+          bg: "#f0fdf4",
+          border: "1px solid #bbf7d0",
+          color: "#15803d",
+          badgeBg: "#dcfce7",
+          badgeColor: "#166534",
+          statusText: "Present"
+        };
+      case "Leave":
+        return {
+          bg: "#fff7ed",
+          border: "1px solid #fed7aa",
+          color: "#c2410c",
+          badgeBg: "#ffedd5",
+          badgeColor: "#9a3412",
+          statusText: "Leave"
+        };
+      case "Absent":
+      default:
+        return {
+          bg: "#fef2f2",
+          border: "1px solid #fecaca",
+          color: "#b91c1c",
+          badgeBg: "#fee2e2",
+          badgeColor: "#991b1b",
+          statusText: "Absent"
+        };
+    }
+  };
+
+  const formatToIndianDate = (dateStr, timestamp) => {
+    if (timestamp) {
+      let dateObj;
+      if (timestamp.toDate && typeof timestamp.toDate === "function") {
+        dateObj = timestamp.toDate();
+      } else if (timestamp.seconds !== undefined) {
+        dateObj = new Date(timestamp.seconds * 1000);
+      } else {
+        dateObj = new Date(timestamp);
+      }
+      if (!isNaN(dateObj.getTime())) {
+        return dateObj.toLocaleDateString('en-IN', {
+          timeZone: 'Asia/Kolkata',
+          day: '2-digit',
+          month: '2-digit',
+          year: 'numeric'
+        }).replace(/\//g, '/');
+      }
+    }
+    
+    if (dateStr) {
+      const parts = dateStr.split("-");
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+    }
+    return dateStr || "--";
+  };
+
+  const formatToIndianTime = (timestamp) => {
+    if (!timestamp) return { date: "--", time: "--" };
+    
+    let dateObj;
+    if (timestamp.toDate && typeof timestamp.toDate === "function") {
+      dateObj = timestamp.toDate();
+    } else if (timestamp.seconds !== undefined) {
+      dateObj = new Date(timestamp.seconds * 1000);
+    } else {
+      dateObj = new Date(timestamp);
+    }
+    
+    if (isNaN(dateObj.getTime())) {
+      return { date: "--", time: "--" };
+    }
+
+    const timeStr = dateObj.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true
+    });
+
+    return { time: timeStr };
+  };
+
+  const getEntryTime = (record) => {
+    if (!record) return "--";
+    if (record.time) return record.time;
+    if (record.timestamp) {
+      const local = formatToIndianTime(record.timestamp);
+      return local.time;
+    }
+    return "--";
+  };
+
+  const renderHistoryDetailsModalContent = () => {
+    if (!selectedRecord) return null;
+    const { dateStr, status, attRecord, leaveRecord, siteName, radiusStatus, displayDate } = selectedRecord;
+    const theme = getStatusTheme(status);
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px" }}>
+        <div style={{
+          padding: "12px",
+          borderRadius: "8px",
+          backgroundColor: theme.bg,
+          border: theme.border,
+          textAlign: "center"
+        }}>
+          <span style={{
+            fontSize: "14px",
+            fontWeight: "800",
+            color: theme.badgeColor,
+            textTransform: "uppercase",
+            letterSpacing: "0.5px"
+          }}>
+            {theme.statusText}
+          </span>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Date</span>
+            <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }}>{displayDate}</span>
+          </div>
+
+          {status === "Present" && attRecord && (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Entry Time</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }}>{getEntryTime(attRecord)}</span>
+              </div>
+              
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Assigned Site</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }}>{siteName}</span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>GPS Coordinates</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)", fontFamily: "monospace" }}>
+                  {attRecord.latitude?.toFixed(6)}, {attRecord.longitude?.toFixed(6)}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>GPS Accuracy</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }}>
+                  {attRecord.gpsAccuracy ? `${attRecord.gpsAccuracy}m` : "N/A"}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>GPS Verification Status</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--success-600)" }}>
+                  Verified
+                </span>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>50m Radius Verification</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: radiusStatus.includes("Failed") ? "var(--danger-600)" : "var(--success-600)" }}>
+                  {radiusStatus}
+                </span>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Captured Location Address</span>
+                <span style={{ fontSize: "12px", color: "var(--primary-900)", lineHeight: "1.4" }}>
+                  {attRecord.address || "No address logged."}
+                </span>
+              </div>
+
+              {attRecord.photoUrl && (
+                <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px" }}>
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Attendance Photo</span>
+                  <div style={{ width: "100%", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", height: "240px" }}>
+                    <a href={attRecord.photoUrl} target="_blank" rel="noopener noreferrer">
+                      <img 
+                        src={attRecord.photoUrl} 
+                        alt="Attendance" 
+                        style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                      />
+                    </a>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {status === "Leave" && leaveRecord && (
+            <>
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>Reason for Leave</span>
+                <span style={{ fontSize: "13px", color: "var(--primary-900)", lineHeight: "1.4" }}>
+                  {leaveRecord.reason || "Personal Leave"}
+                </span>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
+                <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>GPS Verification</span>
+                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--text-muted)" }}>N/A (Approved Leave)</span>
+              </div>
+            </>
+          )}
+
+          {status === "Absent" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "12.5px", color: "var(--danger-600)", fontWeight: "600", lineHeight: "1.4" }}>
+                No check-in or approved leave was recorded for this date.
+              </span>
+            </div>
+          )}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            setIsHistoryModalOpen(false);
+            setSelectedRecord(null);
+          }}
+          className="mobile-btn-large primary"
+          style={{ width: "100%", marginTop: "12px" }}
+        >
+          Close Details
+        </button>
+      </div>
+    );
+  };
+
+  const renderAttendanceHistoryView = () => {
+    let datesList = [];
+    const todayStr = getTodayStr();
+    
+    if (historyFilter === "today") {
+      datesList = [todayStr];
+    } else if (historyFilter === "this-week") {
+      datesList = getDatesForThisWeek();
+    } else if (historyFilter === "this-month") {
+      datesList = getDatesForThisMonth();
+    } else if (historyFilter === "custom") {
+      datesList = getDatesForCustomRange(customStartDate, customEndDate);
+    }
+    
+    const attendanceMap = new Map(allSitesAttendance.map(r => [r.date, r]));
+    const approvedLeaveDates = new Set(loggedLeaves.filter(l => l.status === "approved").map(l => l.date));
+    const leavesMap = new Map(loggedLeaves.map(l => [l.date, l]));
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        
+        <div style={{
+          display: "flex",
+          backgroundColor: "var(--primary-100)",
+          borderRadius: "8px",
+          padding: "4px",
+          gap: "4px"
+        }}>
+          {["today", "this-week", "this-month", "custom"].map(f => (
+            <button
+              key={f}
+              type="button"
+              onClick={() => setHistoryFilter(f)}
+              style={{
+                flex: 1,
+                padding: "8px 4px",
+                borderRadius: "6px",
+                fontSize: "12px",
+                fontWeight: "700",
+                border: "none",
+                cursor: "pointer",
+                backgroundColor: historyFilter === f ? "#ffffff" : "transparent",
+                color: historyFilter === f ? "var(--primary-900)" : "var(--text-muted)",
+                boxShadow: historyFilter === f ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all 0.2s"
+              }}
+            >
+              {f === "today" ? "Today" : f === "this-week" ? "This Week" : f === "this-month" ? "This Month" : "Custom"}
+            </button>
+          ))}
+        </div>
+
+        {historyFilter === "custom" && (
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: "10px",
+            backgroundColor: "#ffffff",
+            padding: "12px",
+            borderRadius: "8px",
+            border: "1px solid var(--border-color)"
+          }}>
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>Start Date</label>
+              <input
+                type="date"
+                value={customStartDate}
+                max={todayStr}
+                onChange={(e) => setCustomStartDate(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "6px",
+                  fontSize: "12px"
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>End Date</label>
+              <input
+                type="date"
+                value={customEndDate}
+                max={todayStr}
+                onChange={(e) => setCustomEndDate(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px",
+                  border: "1px solid var(--border-color)",
+                  borderRadius: "6px",
+                  fontSize: "12px"
+                }}
+              />
+            </div>
+          </div>
+        )}
+
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: "8px",
+          backgroundColor: "var(--primary-900)",
+          color: "#ffffff",
+          padding: "12px",
+          borderRadius: "12px",
+          textAlign: "center"
+        }}>
+          {(() => {
+            let presentCount = 0;
+            let leaveCount = 0;
+            let absentCount = 0;
+            
+            datesList.forEach(d => {
+              if (attendanceMap.has(d)) presentCount++;
+              else if (approvedLeaveDates.has(d)) leaveCount++;
+              else absentCount++;
+            });
+
+            return (
+              <>
+                <div>
+                  <span style={{ fontSize: "10px", opacity: 0.8, display: "block", textTransform: "uppercase" }}>Present</span>
+                  <strong style={{ fontSize: "18px", fontWeight: "800", color: "#86efac" }}>{presentCount}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: "10px", opacity: 0.8, display: "block", textTransform: "uppercase" }}>Leave</span>
+                  <strong style={{ fontSize: "18px", fontWeight: "800", color: "#fcd34d" }}>{leaveCount}</strong>
+                </div>
+                <div>
+                  <span style={{ fontSize: "10px", opacity: 0.8, display: "block", textTransform: "uppercase" }}>Absent</span>
+                  <strong style={{ fontSize: "18px", fontWeight: "800", color: "#fca5a5" }}>{absentCount}</strong>
+                </div>
+              </>
+            );
+          })()}
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {datesList.length === 0 ? (
+            <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>
+              No dates in the selected range.
+            </div>
+          ) : (
+            datesList.map(dateStr => {
+              const attRecord = attendanceMap.get(dateStr);
+              const isApprovedLeave = approvedLeaveDates.has(dateStr);
+              const leaveRecord = leavesMap.get(dateStr);
+              
+              let status = "Absent";
+              if (attRecord) {
+                status = "Present";
+              } else if (isApprovedLeave) {
+                status = "Leave";
+              }
+              
+              const theme = getStatusTheme(status);
+              const displayDate = formatToIndianDate(dateStr, attRecord?.timestamp);
+              const siteObj = attRecord ? allSites.find(s => s.id === attRecord.siteId) : null;
+              const siteName = siteObj ? siteObj.siteName : (attRecord ? "Registered Site" : "--");
+              
+              let radiusStatus = "--";
+              let radiusColor = "var(--text-muted)";
+              if (status === "Present" && attRecord) {
+                const distance = attRecord.distance;
+                if (distance !== undefined && distance !== null) {
+                  if (distance <= 50) {
+                    radiusStatus = `Within 50m (${Math.round(distance)}m)`;
+                    radiusColor = "var(--success-600)";
+                  } else {
+                    radiusStatus = `Outside 50m (${Math.round(distance)}m)`;
+                    radiusColor = "var(--danger-600)";
+                  }
+                } else {
+                  if (siteObj && siteObj.latitude && siteObj.longitude && attRecord.latitude && attRecord.longitude) {
+                    const dist = calculateDistanceMeters(
+                      Number(siteObj.latitude),
+                      Number(siteObj.longitude),
+                      attRecord.latitude,
+                      attRecord.longitude
+                    );
+                    if (dist <= 50) {
+                      radiusStatus = `Within 50m (${Math.round(dist)}m)`;
+                      radiusColor = "var(--success-600)";
+                    } else {
+                      radiusStatus = `Outside 50m (${Math.round(dist)}m)`;
+                      radiusColor = "var(--danger-600)";
+                    }
+                  } else {
+                    radiusStatus = "Verified (Legacy)";
+                    radiusColor = "var(--success-600)";
+                  }
+                }
+              }
+
+              return (
+                <div 
+                  key={dateStr}
+                  onClick={() => {
+                    setSelectedRecord({ dateStr, status, attRecord, leaveRecord, siteName, radiusStatus, displayDate });
+                    setIsHistoryModalOpen(true);
+                  }}
+                  style={{
+                    backgroundColor: theme.bg,
+                    border: theme.border,
+                    borderRadius: "12px",
+                    padding: "16px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    cursor: "pointer",
+                    boxShadow: "var(--shadow-sm)",
+                    transition: "transform 0.15s ease",
+                  }}
+                  className="attendance-history-card"
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <strong style={{ fontSize: "14px", color: "var(--primary-900)", display: "block" }}>
+                        {displayDate}
+                      </strong>
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                        {status === "Present" ? `Site: ${siteName}` : status === "Leave" ? "Leave Approved" : "Absent / No Activity"}
+                      </span>
+                    </div>
+                    <span style={{
+                      padding: "4px 10px",
+                      borderRadius: "50px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      backgroundColor: theme.badgeBg,
+                      color: theme.badgeColor,
+                      textTransform: "uppercase"
+                    }}>
+                      {theme.statusText}
+                    </span>
+                  </div>
+
+                  {status === "Present" && attRecord && (
+                    <div style={{
+                      display: "flex",
+                      gap: "12px",
+                      alignItems: "center",
+                      borderTop: "1px solid var(--border-color)",
+                      paddingTop: "10px",
+                      marginTop: "4px"
+                    }}>
+                      {attRecord.photoUrl ? (
+                        <div style={{ width: "40px", height: "40px", borderRadius: "6px", overflow: "hidden", border: "1px solid var(--border-color)", flexShrink: 0 }}>
+                          <img src={attRecord.photoUrl} alt="Attendance" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        </div>
+                      ) : (
+                        <div style={{ width: "40px", height: "40px", borderRadius: "6px", backgroundColor: "var(--primary-100)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                          <Camera size={16} style={{ color: "var(--primary-600)" }} />
+                        </div>
+                      )}
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
+                            Checked In: {getEntryTime(attRecord)}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "2px" }}>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "2px" }}>
+                            <MapPin size={10} /> {attRecord.latitude?.toFixed(4)}, {attRecord.longitude?.toFixed(4)}
+                          </span>
+                          <span style={{ fontSize: "11px", color: radiusColor, fontWeight: "600" }}>
+                            Radius: {radiusStatus}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {status === "Leave" && leaveRecord && (
+                    <div style={{
+                      borderTop: "1px solid var(--border-color)",
+                      paddingTop: "8px",
+                      fontSize: "11.5px",
+                      color: "var(--text-muted)",
+                      marginTop: "4px"
+                    }}>
+                      <strong>Reason:</strong> {leaveRecord.reason || "Personal Leave"}
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        <Modal
+          isOpen={isHistoryModalOpen}
+          onClose={() => {
+            setIsHistoryModalOpen(false);
+            setSelectedRecord(null);
+          }}
+          title="Attendance Record Details"
+          maxWidth="420px"
+        >
+          {selectedRecord && renderHistoryDetailsModalContent()}
+        </Modal>
+
+      </div>
+    );
+  };
+
   // Mobile UI Render Views
   const renderHomeView = () => {
     return (
@@ -1927,6 +2544,25 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 Check-In: {todayAttendance.time || "Today"}
               </span>
             )}
+            <button
+              type="button"
+              onClick={() => navigate("/engineer/attendance-history")}
+              style={{
+                background: "none",
+                border: "none",
+                color: "var(--primary-700)",
+                fontSize: "11.5px",
+                fontWeight: "700",
+                cursor: "pointer",
+                padding: 0,
+                marginTop: "8px",
+                display: "flex",
+                alignItems: "center",
+                gap: "4px"
+              }}
+            >
+              <History size={12} /> View Attendance History →
+            </button>
           </div>
           {!todayAttendance && savedSiteLocation && (
             <button 
@@ -3757,6 +4393,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <p className="dashboard-card-desc">Log holiday requests and audit leaves summary stats.</p>
             </button>
 
+            <button type="button" className="dashboard-card" onClick={() => navigate("/engineer/attendance-history")}>
+              <div className="dashboard-card-icon-wrapper photos" style={{ backgroundColor: "var(--primary-50)", color: "var(--primary-700)" }}>
+                <History size={22} />
+              </div>
+              <h4 className="dashboard-card-title">Attendance History</h4>
+              <p className="dashboard-card-desc">View your historical attendance, status, and GPS metrics.</p>
+            </button>
+
             <button type="button" className="dashboard-card" onClick={() => logout()}>
               <div className="dashboard-card-icon-wrapper logout">
                 <LogOut size={22} />
@@ -4395,6 +5039,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             <HardHat size={20} style={{ color: "var(--accent-600)" }} />
             <h3 style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>
               {tab === "attendance" ? "Attendance" : 
+               tab === "attendance-history" ? "My Attendance History" :
                tab === "material" ? "Materials" : 
                tab === "labour" ? "Workforce" : 
                tab === "expenses" ? "Financials & Expenses" : 
@@ -4453,6 +5098,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         {/* Scrollable View Content */}
         <div className="mobile-app-content">
           {tab === "attendance" && renderAttendanceView()}
+          {tab === "attendance-history" && renderAttendanceHistoryView()}
           {tab === "material" && renderMaterialView()}
           {tab === "labour" && renderLabourView()}
           {tab === "expenses" && renderExpensesView()}
@@ -4508,7 +5154,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
           <button 
             type="button" 
-            className={`mobile-nav-btn ${["more", "photos", "progress", "profile"].includes(tab) ? "active" : ""}`}
+            className={`mobile-nav-btn ${["more", "photos", "progress", "profile", "attendance-history"].includes(tab) ? "active" : ""}`}
             onClick={() => navigate("/engineer/more")}
           >
             <div className="mobile-nav-indicator">

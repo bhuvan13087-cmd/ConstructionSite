@@ -2,7 +2,7 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { hasPermission } from "../../services/businessLogic";
-import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen } from "lucide-react";
+import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History } from "lucide-react";
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
 
@@ -206,6 +206,15 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <LayoutDashboard size={18} />
               <span>Dashboard Overview</span>
+            </NavLink>
+
+            <NavLink 
+              to="/engineer/attendance-history" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <History size={18} />
+              <span>Attendance History</span>
             </NavLink>
 
             <NavLink 
