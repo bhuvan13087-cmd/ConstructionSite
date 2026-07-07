@@ -520,23 +520,29 @@ export function calculateLabourFinancials(siteId, labourHistory = [], labourMast
   let totalCost = 0;
   
   labourHistory.forEach(row => {
-    Object.keys(row).forEach(key => {
-      if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
-      
-      let masterKey = key;
-      if (key === "Masons") masterKey = "Mason";
-      if (key === "Helpers") masterKey = "Helper";
-      if (key === "Painters") masterKey = "Painter";
-      if (key === "Plumbers") masterKey = "Plumber";
-      if (key === "Electricians") masterKey = "Electrician";
-      if (key === "Others") masterKey = "Other";
-      
-      const count = Number(row[key]) || 0;
-      const rateObj = labourMaster[masterKey] || { wage: 500 }; 
-      const rate = Number(rateObj.wage) || 0;
-      
-      totalCost += count * rate;
-    });
+    if (row.memberId !== undefined) {
+      // New member-level attendance record
+      totalCost += (Number(row.wage) || 0) * (Number(row.units) || 0);
+    } else {
+      // Legacy headcount logic
+      Object.keys(row).forEach(key => {
+        if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
+        
+        let masterKey = key;
+        if (key === "Masons") masterKey = "Mason";
+        if (key === "Helpers") masterKey = "Helper";
+        if (key === "Painters") masterKey = "Painter";
+        if (key === "Plumbers") masterKey = "Plumber";
+        if (key === "Electricians") masterKey = "Electrician";
+        if (key === "Others") masterKey = "Other";
+        
+        const count = Number(row[key]) || 0;
+        const rateObj = labourMaster[masterKey] || { wage: 500 }; 
+        const rate = Number(rateObj.wage) || 0;
+        
+        totalCost += count * rate;
+      });
+    }
   });
   
   const sitePayments = paymentsList.filter(p => p.siteId === siteId);
@@ -639,9 +645,12 @@ export function generateWeeklyReportFromDprs(dprs = []) {
  * Consolidates all expenses and payouts across materials, labour, and general expenses for a site.
  */
 export function getSiteExpenseLedger(site, materials = [], labourHistory = [], generalExpenses = [], labourPayments = [], labourMaster = {}) {
-  // 1. Budget Hash
-  const siteSeed = site.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const budget = (50 + (siteSeed % 50)) * 100000;
+  // 1. Budget retrieve (with fallback to hash for backward compatibility)
+  let budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : null;
+  if (budget === null || isNaN(budget)) {
+    const siteSeed = site.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    budget = (50 + (siteSeed % 50)) * 100000;
+  }
 
   const expenses = [];
   const payments = [];
@@ -732,46 +741,65 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
     }
   });
 
-  // Compile labour expenses from headcounts
+  // Compile labour expenses from headcounts and member-level attendance records
   const siteLabour = labourHistory.filter(l => l.siteId === site.id);
   siteLabour.forEach(l => {
-    let dayCost = 0;
-    Object.keys(l).forEach(key => {
-      if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
-      let masterKey = key;
-      if (key === "Masons") masterKey = "Mason";
-      if (key === "Helpers") masterKey = "Helper";
-      if (key === "Painters") masterKey = "Painter";
-      if (key === "Plumbers") masterKey = "Plumber";
-      if (key === "Electricians") masterKey = "Electrician";
-      if (key === "Others") masterKey = "Other";
-
-      const count = Number(l[key]) || 0;
-      const rateObj = labourMaster[masterKey] || {};
-      let rate = Number(rateObj.wage);
-      if (isNaN(rate)) {
-        if (masterKey === "Mason") rate = 800;
-        else if (masterKey === "Helper") rate = 500;
-        else if (masterKey === "Electrician") rate = 700;
-        else if (masterKey === "Plumber") rate = 700;
-        else if (masterKey === "Painter") rate = 700;
-        else rate = 600;
+    if (l.memberId !== undefined) {
+      // New member-level attendance record
+      const cost = (Number(l.wage) || 0) * (Number(l.units) || 0);
+      labourExpenseTotal += cost;
+      if (cost > 0) {
+        expenses.push({
+          id: l.id || `labour_${l.memberId}_${l.date}`,
+          type: "Expense",
+          category: "Labour Expense",
+          name: `${l.memberName} (${l.categoryName || 'Worker'})`,
+          date: l.date,
+          amount: cost,
+          description: `Labour Attendance: ${l.units} day(s) @ ₹${l.wage}/day`,
+          status: "Approved"
+        });
       }
-      dayCost += count * rate;
-    });
+    } else {
+      // Legacy headcount logic
+      let dayCost = 0;
+      Object.keys(l).forEach(key => {
+        if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
+        let masterKey = key;
+        if (key === "Masons") masterKey = "Mason";
+        if (key === "Helpers") masterKey = "Helper";
+        if (key === "Painters") masterKey = "Painter";
+        if (key === "Plumbers") masterKey = "Plumber";
+        if (key === "Electricians") masterKey = "Electrician";
+        if (key === "Others") masterKey = "Other";
 
-    labourExpenseTotal += dayCost;
-    if (dayCost > 0) {
-      expenses.push({
-        id: l.id || `labour_${l.date}`,
-        type: "Expense",
-        category: "Labour Expense",
-        name: `${l.total || 0} Workers Headcount`,
-        date: l.date,
-        amount: dayCost,
-        description: "Daily payroll accrual",
-        status: "Approved"
+        const count = Number(l[key]) || 0;
+        const rateObj = labourMaster[masterKey] || {};
+        let rate = Number(rateObj.wage);
+        if (isNaN(rate)) {
+          if (masterKey === "Mason") rate = 800;
+          else if (masterKey === "Helper") rate = 500;
+          else if (masterKey === "Electrician") rate = 700;
+          else if (masterKey === "Plumber") rate = 700;
+          else if (masterKey === "Painter") rate = 700;
+          else rate = 600;
+        }
+        dayCost += count * rate;
       });
+
+      labourExpenseTotal += dayCost;
+      if (dayCost > 0) {
+        expenses.push({
+          id: l.id || `labour_legacy_${l.date}`,
+          type: "Expense",
+          category: "Labour Expense",
+          name: `${l.total || 0} Workers Headcount (Legacy)`,
+          date: l.date,
+          amount: dayCost,
+          description: "Daily payroll headcount accrual",
+          status: "Approved"
+        });
+      }
     }
   });
 

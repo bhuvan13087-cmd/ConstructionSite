@@ -310,6 +310,7 @@ export default function Sites() {
   const [formStartDate, setFormStartDate] = useState("");
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
+  const [formBudget, setFormBudget] = useState("");
 
   // Google Maps States & Refs
   const [isMapsLoaded, setIsMapsLoaded] = useState(false);
@@ -492,6 +493,7 @@ export default function Sites() {
     setFormStartDate("");
     setFormExpectedEndDate("");
     setFormStatus("Planning");
+    setFormBudget("");
     setShowFormModal(true);
   };
 
@@ -508,6 +510,7 @@ export default function Sites() {
     setFormStartDate(site.startDate || "");
     setFormExpectedEndDate(site.expectedEndDate || "");
     setFormStatus(site.status || "Planning");
+    setFormBudget(site.budget !== undefined && site.budget !== null ? site.budget.toString() : "");
     setShowFormModal(true);
   };
 
@@ -533,6 +536,16 @@ export default function Sites() {
     }
     if (new Date(formExpectedEndDate) < new Date(formStartDate)) {
       showToast("Expected End Date cannot be before Start Date.", "error");
+      return;
+    }
+
+    const budgetNum = Number(formBudget);
+    if (!formBudget.toString().trim()) {
+      showToast("Site Budget is required.", "error");
+      return;
+    }
+    if (isNaN(budgetNum) || budgetNum <= 0) {
+      showToast("Site Budget must be a positive numeric value.", "error");
       return;
     }
 
@@ -563,7 +576,8 @@ export default function Sites() {
           50,
           adminId,
           formPlaceId,
-          formLocationName.trim()
+          formLocationName.trim(),
+          budgetNum
         );
         showToast("Construction Site added successfully.", "success");
         setShowFormModal(false);
@@ -581,7 +595,8 @@ export default function Sites() {
           formLatitude,
           formLongitude,
           formPlaceId,
-          formLocationName.trim()
+          formLocationName.trim(),
+          budgetNum
         );
         showToast("Construction Site updated successfully.", "success");
         setShowFormModal(false);
@@ -726,6 +741,7 @@ export default function Sites() {
               <th>Location</th>
               <th>Start Date</th>
               <th>Expected End Date</th>
+              <th style={{ textAlign: "right" }}>Total Budget</th>
               <th>Status</th>
               <th className="text-right">Actions</th>
             </tr>
@@ -733,7 +749,7 @@ export default function Sites() {
           <tbody>
             {filteredSites.length === 0 ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                   No construction sites found. Click "Add Site" to register one.
                 </td>
               </tr>
@@ -759,6 +775,9 @@ export default function Sites() {
                     </td>
                     <td className="font-mono">{site.startDate || "--"}</td>
                     <td className="font-mono">{site.expectedEndDate || "--"}</td>
+                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                      {site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--"}
+                    </td>
                     <td>
                       <Badge status={site.status || "Planning"} />
                     </td>
@@ -941,6 +960,21 @@ export default function Sites() {
                   required 
                 />
               </div>
+            </div>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="site-budget">Site Budget (₹)</label>
+            <div className="input-wrapper">
+              <span className="input-icon" style={{ display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "700", opacity: 0.6, fontSize: "14px" }}>₹</span>
+              <input 
+                type="number" 
+                id="site-budget" 
+                placeholder="E.g., 2500000" 
+                value={formBudget}
+                onChange={(e) => setFormBudget(e.target.value)}
+                required 
+              />
             </div>
           </div>
 

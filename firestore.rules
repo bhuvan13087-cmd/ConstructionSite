@@ -319,6 +319,16 @@ service cloud.firestore {
       );
     }
 
+    match /labourTeams/{teamId} {
+      allow read: if isActiveUser();
+      allow write: if isAdmin();
+    }
+
+    match /labourMemberAttendance/{attendanceId} {
+      allow read, write: if isActiveUser();
+    }
+
+
 
     match /leaves/{leaveId} {
       allow read, write: if isActiveUser();

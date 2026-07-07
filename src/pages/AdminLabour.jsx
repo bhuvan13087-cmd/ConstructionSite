@@ -2,17 +2,20 @@ import React, { useState, useEffect } from "react";
 import Layout from "../components/layout/Layout";
 import {
   getSites,
-  getWorkers,
-  addWorker,
-  updateWorkerStatus,
   getLabourDailyCountsSummary,
-  getLabourMaster,
   getLabourPayments,
   saveLabourPayment,
-  createLabourCategory,
-  updateLabourCategory,
-  deleteLabourCategory,
-  subscribeLabourCategories
+  getLabourTeams,
+  subscribeLabourTeams,
+  createLabourTeam,
+  updateLabourTeam,
+  deleteLabourTeam,
+  addLabourCategoryToTeam,
+  updateLabourCategoryInTeam,
+  deleteLabourCategoryFromTeam,
+  addLabourMemberToCategory,
+  updateLabourMemberInCategory,
+  deleteLabourMemberFromCategory
 } from "../services/firebaseService";
 import {
   getLabourDisplayName,
@@ -20,17 +23,16 @@ import {
 } from "../services/businessLogic";
 import {
   Users,
-  MapPin,
   Plus,
   Edit2,
-  ListFilter,
   DollarSign,
   Calendar,
   AlertCircle,
-  Clock,
-  History,
   FileText,
-  UserPlus
+  UserPlus,
+  Trash2,
+  Save,
+  X
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -53,15 +55,29 @@ export default function AdminLabour() {
   const [labourMaster, setLabourMaster] = useState({ categories: {}, history: [] });
   const [payments, setPayments] = useState([]);
   const [allLabourHistory, setAllLabourHistory] = useState({}); // siteId -> history
-  
-  // Tab 1: Master Form states
+
+  // New Team Master states
+  const [teams, setTeams] = useState([]);
+  const [selectedTeamId, setSelectedTeamId] = useState("");
+  const [selectedCategoryId, setSelectedCategoryId] = useState("");
+  const [newTeamName, setNewTeamName] = useState("");
+  const [editingTeamId, setEditingTeamId] = useState(null);
+  const [editingTeamName, setEditingTeamName] = useState("");
+
   const [newCatName, setNewCatName] = useState("");
   const [newCatWage, setNewCatWage] = useState("");
   const [newCatType, setNewCatType] = useState("Daily");
   const [editingCatKey, setEditingCatKey] = useState(null);
   const [editingWage, setEditingWage] = useState("");
 
-  // Tab 2: Assignment Form states
+  const [newMemberId, setNewMemberId] = useState("");
+  const [newMemberName, setNewMemberName] = useState("");
+  const [newMemberSalary, setNewMemberSalary] = useState("");
+  const [editingMemberId, setEditingMemberId] = useState(null);
+  const [editingMemberName, setEditingMemberName] = useState("");
+  const [editingMemberSalary, setEditingMemberSalary] = useState("");
+  
+  // Tab 2: Assignment Form states (retained for backward compatibility or placeholder)
   const [newWorkerName, setNewWorkerName] = useState("");
   const [newWorkerPhone, setNewWorkerPhone] = useState("");
   const [newWorkerCategory, setNewWorkerCategory] = useState("");
@@ -86,29 +102,67 @@ export default function AdminLabour() {
     try {
       setLoading(true);
       const adminId = userProfile?.uid || userProfile?.id || null;
-      const [fetchedSites, fetchedWorkers, fetchedMaster, fetchedPayments] = await Promise.all([
+      const [fetchedSites, fetchedTeams, fetchedPayments] = await Promise.all([
         getSites(adminId),
-        getWorkers(null, adminId),
-        getLabourMaster(adminId),
+        getLabourTeams(adminId),
         getLabourPayments(adminId)
       ]);
 
       setSites(fetchedSites);
-      setWorkers(fetchedWorkers);
-      setLabourMaster(fetchedMaster);
+      setTeams(fetchedTeams);
       setPayments(fetchedPayments);
+
+      // Flatten teams members to populate legacy workers state for backward compatibility/reporting
+      const flattenedWorkers = [];
+      fetchedTeams.forEach(team => {
+        if (team.categories) {
+          Object.keys(team.categories).forEach(catId => {
+            const cat = team.categories[catId];
+            if (cat.members) {
+              Object.keys(cat.members).forEach(memberId => {
+                const mem = cat.members[memberId];
+                flattenedWorkers.push({
+                  id: mem.memberId,
+                  workerName: mem.name,
+                  category: cat.name,
+                  categoryName: cat.name,
+                  phoneNumber: "",
+                  joiningDate: "--",
+                  status: "active",
+                  teamId: team.id,
+                  teamName: team.teamName,
+                  salary: mem.salary
+                });
+              });
+            }
+          });
+        }
+      });
+      setWorkers(flattenedWorkers);
+
+      // Populate categories map for fallback logic in calculations
+      const categoriesMap = {};
+      fetchedTeams.forEach(team => {
+        if (team.categories) {
+          Object.keys(team.categories).forEach(catId => {
+            const cat = team.categories[catId];
+            categoriesMap[cat.name] = {
+              name: cat.name,
+              wage: cat.baseWage,
+              type: cat.paymentType,
+              status: "Active"
+            };
+          });
+        }
+      });
+      setLabourMaster({ categories: categoriesMap, history: [] });
 
       if (fetchedSites.length > 0) {
         setPaymentSiteId(fetchedSites[0].id);
         setNewWorkerSiteId(fetchedSites[0].id);
       }
-      
-      const activeCats = Object.keys(fetchedMaster.categories).filter(c => fetchedMaster.categories[c].status === "Active");
-      if (activeCats.length > 0) {
-        setNewWorkerCategory(activeCats[0]);
-      }
 
-      // Fetch labor daily histories for all sites to do financial calculations
+      // Fetch labor daily histories (both legacy headcounts & new member attendance logs)
       const historyPromises = fetchedSites.map(s => getLabourDailyCountsSummary(s.id));
       const histories = await Promise.all(historyPromises);
       
@@ -128,214 +182,282 @@ export default function AdminLabour() {
   };
 
   useEffect(() => {
+    const adminId = userProfile?.uid || userProfile?.id || null;
     loadData();
-    const unsubscribe = subscribeLabourCategories((categoriesMap) => {
-      setLabourMaster(prev => ({
-        ...prev,
-        categories: categoriesMap
-      }));
-    });
+    const unsubscribe = subscribeLabourTeams((teamsList) => {
+      setTeams(teamsList);
+      
+      // Update workers state when teams change in real-time
+      const flattenedWorkers = [];
+      teamsList.forEach(team => {
+        if (team.categories) {
+          Object.keys(team.categories).forEach(catId => {
+            const cat = team.categories[catId];
+            if (cat.members) {
+              Object.keys(cat.members).forEach(memberId => {
+                const mem = cat.members[memberId];
+                flattenedWorkers.push({
+                  id: mem.memberId,
+                  workerName: mem.name,
+                  category: cat.name,
+                  categoryName: cat.name,
+                  phoneNumber: "",
+                  joiningDate: "--",
+                  status: "active",
+                  teamId: team.id,
+                  teamName: team.teamName,
+                  salary: mem.salary
+                });
+              });
+            }
+          });
+        }
+      });
+      setWorkers(flattenedWorkers);
+
+      // Re-map categories
+      const categoriesMap = {};
+      teamsList.forEach(team => {
+        if (team.categories) {
+          Object.keys(team.categories).forEach(catId => {
+            const cat = team.categories[catId];
+            categoriesMap[cat.name] = {
+              name: cat.name,
+              wage: cat.baseWage,
+              type: cat.paymentType,
+              status: "Active"
+            };
+          });
+        }
+      });
+      setLabourMaster({ categories: categoriesMap, history: [] });
+    }, adminId);
     return () => unsubscribe();
-  }, []);
+  }, [userProfile]);
 
   // -------------------------------------------------------------
-  // TAB 1: LABOUR MASTER HANDLERS
+  // TEAM HANDLERS
   // -------------------------------------------------------------
-  const handleCreateCategory = async (e) => {
+  const handleCreateTeam = async (e) => {
     e.preventDefault();
-    if (submitting) return; // Prevent duplicate submissions
-    const nameClean = newCatName.trim();
-    const wageNum = Number(newCatWage);
-    
-    if (!nameClean) {
-      showToast("Category label cannot be empty.", "error");
+    if (!newTeamName.trim()) {
+      showToast("Team Name cannot be empty.", "error");
       return;
     }
-    if (isNaN(wageNum) || wageNum <= 0) {
-      showToast("Please enter a valid wage amount.", "error");
-      return;
-    }
-    
-    // Check duplication case-insensitively
-    const duplicate = Object.values(labourMaster.categories).some(
-      cat => cat.name.trim().toLowerCase() === nameClean.toLowerCase()
-    );
-    if (duplicate) {
-      showToast("Category name already registered.", "error");
-      return;
-    }
-
     setSubmitting(true);
     try {
-      await createLabourCategory({
-        name: nameClean,
-        salaryAmount: wageNum,
-        salaryType: newCatType,
-        createdBy: userProfile?.fullName || "Admin"
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      await createLabourTeam(newTeamName.trim(), adminId);
+      showToast(`Labour Team "${newTeamName}" created successfully!`, "success");
+      setNewTeamName("");
+      await loadData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleRenameTeam = async (teamId) => {
+    if (!editingTeamName.trim()) {
+      showToast("Team Name cannot be empty.", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      await updateLabourTeam(teamId, editingTeamName.trim(), adminId);
+      showToast("Team renamed successfully.", "success");
+      setEditingTeamId(null);
+      setEditingTeamName("");
+      await loadData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteTeam = async (teamId, name) => {
+    if (!confirm(`Are you sure you want to permanently delete Team "${name}"? This will delete all its categories and members.`)) return;
+    setSubmitting(true);
+    try {
+      await deleteLabourTeam(teamId);
+      showToast(`Team "${name}" deleted.`, "success");
+      if (selectedTeamId === teamId) {
+        setSelectedTeamId("");
+        setSelectedCategoryId("");
+      }
+      await loadData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  // -------------------------------------------------------------
+  // CATEGORY HANDLERS
+  // -------------------------------------------------------------
+  const handleAddCategory = async (e) => {
+    e.preventDefault();
+    if (!selectedTeamId) {
+      showToast("Please select a Labour Team first.", "error");
+      return;
+    }
+    const name = newCatName.trim();
+    const wage = Number(newCatWage);
+    if (!name) {
+      showToast("Category Name is required.", "error");
+      return;
+    }
+    if (isNaN(wage) || wage <= 0) {
+      showToast("Base Wage must be a positive number.", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await addLabourCategoryToTeam(selectedTeamId, {
+        name,
+        paymentType: newCatType,
+        baseWage: wage
       });
-      showToast(`Labour category ${nameClean} created!`, "success");
+      showToast(`Category "${name}" added to selected Team.`, "success");
       setNewCatName("");
       setNewCatWage("");
       await loadData();
     } catch (err) {
-      console.error("Labour category creation failed:", err);
-      showToast(`Failed to create category: ${err.message}`, "error");
+      showToast(err.message, "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleUpdateWage = async (catKey) => {
-    const newWageNum = Number(editingWage);
-    if (isNaN(newWageNum) || newWageNum <= 0) {
-      showToast("Specify a valid wage rate.", "error");
+  const handleUpdateCategoryWage = async (catId) => {
+    const wage = Number(editingWage);
+    if (isNaN(wage) || wage <= 0) {
+      showToast("Wage rate must be a positive number.", "error");
       return;
     }
-
+    const team = teams.find(t => t.id === selectedTeamId);
+    if (!team) return;
+    const cat = team.categories[catId];
     setSubmitting(true);
     try {
-      await updateLabourCategory(catKey, {
-        salaryAmount: newWageNum,
-        updatedBy: userProfile?.fullName || "Admin"
+      await updateLabourCategoryInTeam(selectedTeamId, catId, {
+        paymentType: cat.paymentType,
+        baseWage: wage
       });
-      showToast(`Wage rate updated successfully.`, "success");
+      showToast("Category wage updated.", "success");
       setEditingCatKey(null);
       setEditingWage("");
       await loadData();
     } catch (err) {
-      showToast(`Failed to update wage: ${err.message}`, "error");
+      showToast(err.message, "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleToggleCategoryStatus = async (catKey) => {
-    const current = labourMaster.categories[catKey];
-    const newStatus = current.status === "Active" ? "Inactive" : "Active";
-    
-    if (["Mason", "Helper", "Electrician", "Plumber", "Painter", "Other"].includes(current.name) && newStatus === "Inactive") {
-      if (!confirm(`Are you sure you want to disable core category "${current.name}"?`)) return;
-    }
-
+  const handleDeleteCategoryFromTeam = async (catId, catName) => {
+    if (!confirm(`Are you sure you want to permanently delete Category "${catName}"? This will delete all its members immediately.`)) return;
     setSubmitting(true);
     try {
-      await updateLabourCategory(catKey, {
-        salaryAmount: current.wage,
-        status: newStatus,
-        updatedBy: userProfile?.fullName || "Admin"
-      });
-      showToast(`Category "${current.name}" set to ${newStatus}.`, "info");
+      await deleteLabourCategoryFromTeam(selectedTeamId, catId);
+      showToast(`Category "${catName}" deleted.`, "success");
+      if (selectedCategoryId === catId) {
+        setSelectedCategoryId("");
+      }
       await loadData();
     } catch (err) {
-      showToast(`Status update failed: ${err.message}`, "error");
+      showToast(err.message, "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const handleDeleteCategory = async (catKey) => {
-    const current = labourMaster.categories[catKey];
-    if (!confirm(`Are you sure you want to permanently delete category "${current.name}"?`)) return;
-
-    setSubmitting(true);
-    try {
-      await deleteLabourCategory(catKey);
-      showToast(`Category "${current.name}" deleted successfully.`, "success");
-      await loadData();
-    } catch (err) {
-      showToast(`Category deletion failed: ${err.message}`, "error");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-
   // -------------------------------------------------------------
-  // TAB 2: LABOUR ASSIGNMENTS HANDLERS
+  // MEMBER HANDLERS
   // -------------------------------------------------------------
-  const handleAssignWorker = async (e) => {
+  const handleAddMember = async (e) => {
     e.preventDefault();
-    const name = newWorkerName.trim();
-    const phone = newWorkerPhone.trim();
-    
-    if (!name || !phone) {
-      showToast("Please fill in worker name and phone number.", "error");
+    if (!selectedTeamId || !selectedCategoryId) {
+      showToast("Please select a Team and Category first.", "error");
       return;
     }
-
-    setSubmitting(true);
-    try {
-      await addWorker({
-        siteId: newWorkerSiteId,
-        engineerId: userProfile?.uid || userProfile?.id || "admin",
-        adminId: userProfile?.uid || userProfile?.id || null,
-        workerName: name,
-        category: newWorkerCategory,
-        phoneNumber: phone,
-        joiningDate: newWorkerJoinDate,
-        status: "active"
-      });
-
-      showToast(`Assigned worker ${name} successfully!`, "success");
-      setNewWorkerName("");
-      setNewWorkerPhone("");
-      await loadData();
-    } catch (err) {
-      showToast(`Worker assignment failed: ${err.message}`, "error");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  const handleToggleWorkerStatus = async (w) => {
-    const nextStatus = w.status === "active" ? "inactive" : "active";
-    if (!confirm(`Toggle status of ${w.workerName} to ${nextStatus}?`)) return;
-    
-    setSubmitting(true);
-    try {
-      await updateWorkerStatus(w.id, nextStatus);
-      showToast(`${w.workerName} status updated.`, "success");
-      await loadData();
-    } catch (err) {
-      showToast(`Deactivation failed: ${err.message}`, "error");
-    } finally {
-      setSubmitting(false);
-    }
-  };
-
-  // -------------------------------------------------------------
-  // TAB 3: SALARY PAYMENTS HANDLERS
-  // -------------------------------------------------------------
-  const handleLogPayment = async (e) => {
-    e.preventDefault();
-    const amountNum = Number(paymentAmount);
-    
-    if (isNaN(amountNum) || amountNum <= 0) {
-      showToast("Please specify a valid payment amount.", "error");
+    const memId = newMemberId.trim();
+    const name = newMemberName.trim();
+    const salary = Number(newMemberSalary);
+    if (!memId) {
+      showToast("Member ID is required.", "error");
       return;
     }
-
-    const site = sites.find(s => s.id === paymentSiteId);
-    if (!site) return;
-
+    if (!name) {
+      showToast("Member Name is required.", "error");
+      return;
+    }
+    if (isNaN(salary) || salary <= 0) {
+      showToast("Salary/Wage must be a positive number.", "error");
+      return;
+    }
     setSubmitting(true);
     try {
-      await saveLabourPayment({
-        siteId: paymentSiteId,
-        amount: amountNum,
-        date: paymentDate,
-        reference: paymentReference.trim(),
-        notes: paymentNotes.trim(),
-        loggedBy: userProfile?.fullName || "Admin"
-      }, userProfile?.uid || userProfile?.id || null);
-
-      showToast(`Salary payment of ${amountNum} logged for ${site.siteName}!`, "success");
-      setPaymentAmount("");
-      setPaymentReference("");
-      setPaymentNotes("");
+      const adminId = userProfile?.uid || userProfile?.id || null;
+      await addLabourMemberToCategory(selectedTeamId, selectedCategoryId, {
+        memberId: memId,
+        name,
+        salary
+      }, adminId);
+      showToast(`Member "${name}" registered successfully!`, "success");
+      setNewMemberId("");
+      setNewMemberName("");
+      setNewMemberSalary("");
       await loadData();
     } catch (err) {
-      showToast(`Payment logging failed: ${err.message}`, "error");
+      showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleUpdateMember = async (memberId) => {
+    const name = editingMemberName.trim();
+    const salary = Number(editingMemberSalary);
+    if (!name) {
+      showToast("Name is required.", "error");
+      return;
+    }
+    if (isNaN(salary) || salary <= 0) {
+      showToast("Salary must be a positive number.", "error");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await updateLabourMemberInCategory(selectedTeamId, selectedCategoryId, memberId, {
+        name,
+        salary
+      });
+      showToast("Member details updated.", "success");
+      setEditingMemberId(null);
+      setEditingMemberName("");
+      setEditingMemberSalary("");
+      await loadData();
+    } catch (err) {
+      showToast(err.message, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleDeleteMember = async (memberId, name) => {
+    if (!confirm(`Are you sure you want to delete member "${name}"?`)) return;
+    setSubmitting(true);
+    try {
+      await deleteLabourMemberFromCategory(selectedTeamId, selectedCategoryId, memberId);
+      showToast(`Member "${name}" removed.`, "success");
+      await loadData();
+    } catch (err) {
+      showToast(err.message, "error");
     } finally {
       setSubmitting(false);
     }
@@ -345,173 +467,427 @@ export default function AdminLabour() {
   // RENDERS
   // -------------------------------------------------------------
   const renderMasterTab = () => {
+    const selectedTeam = teams.find(t => t.id === selectedTeamId);
+    const selectedCategory = selectedTeam?.categories?.[selectedCategoryId];
+
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 2fr", gap: "24px", alignItems: "start" }}>
         
-        {/* Category Add Form */}
-        <Card title="Register New Labour Category" subtitle="Define standard wages and categories.">
-          <form onSubmit={handleCreateCategory} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="cat-name" style={{ fontSize: "12.5px", fontWeight: "700" }}>Category Label (English)</label>
+        {/* Left Column: Teams List & Creation */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <Card title="Labour Teams" subtitle="Group and manage labor workforces">
+            <form onSubmit={handleCreateTeam} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
               <input
-                id="cat-name"
                 type="text"
-                placeholder="e.g. Carpenter"
-                value={newCatName}
-                onChange={(e) => setNewCatName(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
+                placeholder="New Team Name"
+                value={newTeamName}
+                onChange={(e) => setNewTeamName(e.target.value)}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
               />
-            </div>
-            
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="cat-wage" style={{ fontSize: "12.5px", fontWeight: "700" }}>Default Daily Wage (₹)</label>
-              <input
-                id="cat-wage"
-                type="number"
-                placeholder="e.g. 700"
-                value={newCatWage}
-                onChange={(e) => setNewCatWage(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
-            </div>
+              <Button type="submit" size="sm" style={{ backgroundColor: "var(--primary-800)" }}>
+                <Plus size={16} />
+              </Button>
+            </form>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="cat-type" style={{ fontSize: "12.5px", fontWeight: "700" }}>Salary Cycle Type</label>
-              <select
-                id="cat-type"
-                value={newCatType}
-                onChange={(e) => setNewCatType(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff" }}
-              >
-                <option value="Daily">Daily Wages</option>
-                <option value="Weekly">Weekly Cycle</option>
-                <option value="Monthly">Monthly Fixed</option>
-              </select>
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {teams.length === 0 ? (
+                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontSize: "13px" }}>
+                  No Labour Teams configured.
+                </div>
+              ) : (
+                teams.map(team => {
+                  const isSelected = selectedTeamId === team.id;
+                  const isEditing = editingTeamId === team.id;
+
+                  return (
+                    <div
+                      key={team.id}
+                      onClick={() => {
+                        if (!isEditing) {
+                          setSelectedTeamId(team.id);
+                          setSelectedCategoryId("");
+                        }
+                      }}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "8px",
+                        border: isSelected ? "2px solid var(--primary-600)" : "1px solid var(--border-color)",
+                        backgroundColor: isSelected ? "var(--primary-50)" : "#ffffff",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {isEditing ? (
+                        <div style={{ display: "flex", gap: "6px", width: "100%", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={editingTeamName}
+                            onChange={(e) => setEditingTeamName(e.target.value)}
+                            style={{ flex: 1, padding: "4px 8px", fontSize: "13px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                          />
+                          <button
+                            onClick={() => handleRenameTeam(team.id)}
+                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "4px" }}
+                          >
+                            <Save size={15} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingTeamId(null);
+                              setEditingTeamName("");
+                            }}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px" }}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: "flex", flexDirection: "column" }}>
+                            <span style={{ fontWeight: "700", color: isSelected ? "var(--primary-900)" : "var(--text-main)" }}>
+                              {team.teamName}
+                            </span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                              {Object.keys(team.categories || {}).length} Categories
+                            </span>
+                          </div>
+                          
+                          <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => {
+                                setEditingTeamId(team.id);
+                                setEditingTeamName(team.teamName);
+                              }}
+                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTeam(team.id, team.teamName)}
+                              style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
+          </Card>
+        </div>
 
-            <Button 
-              type="submit" 
-              style={{ marginTop: "10px", backgroundColor: "var(--primary-800)" }}
-              isLoading={submitting}
-            >
-              Create Category
-            </Button>
-          </form>
-        </Card>
-
+        {/* Right Column: Categories and Members details */}
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          {/* Categories list */}
-          <Card title="Active & Configured Labour Master Categories" variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Labour Category</th>
-                    <th style={{ textAlign: "right" }}>Wage rate</th>
-                    <th>Billing Cycle</th>
-                    <th>Status</th>
-                    <th style={{ textAlign: "center" }}>Operations</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(labourMaster.categories).length === 0 ? (
-                    <tr>
-                      <td colSpan="5" style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px", fontWeight: "600" }}>
-                        No Labour Categories Found
-                      </td>
-                    </tr>
-                  ) : (
-                    Object.keys(labourMaster.categories).map(key => {
-                      const catObj = labourMaster.categories[key];
-                      const isEditing = editingCatKey === key;
-                      
-                      return (
-                        <tr key={key}>
-                          <td style={{ fontWeight: "700" }}>{getLabourDisplayName(catObj.name)}</td>
-                          <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                            {isEditing ? (
-                              <input
-                                type="number"
-                                value={editingWage}
-                                onChange={(e) => setEditingWage(e.target.value)}
-                                style={{ width: "80px", padding: "4px 8px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
-                              />
-                            ) : (
-                              `₹${catObj.wage}`
-                            )}
-                          </td>
-                          <td>{catObj.type}</td>
-                          <td>
-                            <Badge status={catObj.status === "Active" ? "success" : "pending"}>
-                              {catObj.status}
-                            </Badge>
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", gap: "8px", justifyContent: "center", alignItems: "center" }}>
-                              {isEditing ? (
-                                <>
-                                  <Button size="sm" onClick={() => handleUpdateWage(key)} style={{ backgroundColor: "var(--success-600)", color: "#ffffff", padding: "2px 8px" }}>
-                                    Save
-                                  </Button>
-                                  <Button size="sm" variant="outline" onClick={() => setEditingCatKey(null)} style={{ padding: "2px 8px" }}>
-                                    Cancel
-                                  </Button>
-                                </>
+          {selectedTeam ? (
+            <>
+              {/* Category configuration inside selected Team */}
+              <Card 
+                title={`Categories in "${selectedTeam.teamName}"`} 
+                subtitle="Select a category to view/register members."
+              >
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px", alignItems: "start" }}>
+                  
+                  {/* Category List */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {!selectedTeam.categories || Object.keys(selectedTeam.categories).length === 0 ? (
+                      <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                        No categories configured for this team yet. Add one on the right.
+                      </div>
+                    ) : (
+                      Object.keys(selectedTeam.categories).map(catId => {
+                        const cat = selectedTeam.categories[catId];
+                        const isCatSelected = selectedCategoryId === catId;
+                        const isEditingCat = editingCatKey === catId;
+
+                        return (
+                          <div
+                            key={catId}
+                            onClick={() => {
+                              if (!isEditingCat) {
+                                setSelectedCategoryId(catId);
+                              }
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: "6px",
+                              border: isCatSelected ? "1.5px solid var(--primary-600)" : "1px solid var(--border-color)",
+                              backgroundColor: isCatSelected ? "var(--primary-50)" : "#fdfdfd",
+                              cursor: "pointer",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center"
+                            }}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                              <span style={{ fontWeight: "700", fontSize: "13.5px" }}>{cat.name}</span>
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                                Cycle: {cat.paymentType} | Base: ₹{cat.baseWage}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "8px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                              {isEditingCat ? (
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="number"
+                                    value={editingWage}
+                                    placeholder="Wage"
+                                    onChange={(e) => setEditingWage(e.target.value)}
+                                    style={{ width: "70px", padding: "4px 6px", fontSize: "12px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                                  />
+                                  <button
+                                    onClick={() => handleUpdateCategoryWage(catId)}
+                                    style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <Save size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCatKey(null);
+                                      setEditingWage("");
+                                    }}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
                               ) : (
                                 <>
                                   <button
                                     onClick={() => {
-                                      setEditingCatKey(key);
-                                      setEditingWage(catObj.wage);
+                                      setEditingCatKey(catId);
+                                      setEditingWage(cat.baseWage);
                                     }}
-                                    className="btn-icon btn-edit-action"
-                                    title="Edit wage"
-                                    style={{ padding: "4px", display: "inline-flex", alignItems: "center", background: "none", border: "none", cursor: "pointer" }}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
                                   >
-                                    <Edit2 size={14} />
+                                    <Edit2 size={12} />
                                   </button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleToggleCategoryStatus(key)}
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "2px 6px",
-                                      borderColor: catObj.status === "Active" ? "var(--danger-200)" : "var(--success-200)",
-                                      color: catObj.status === "Active" ? "var(--danger-600)" : "var(--success-600)"
-                                    }}
+                                  <button
+                                    onClick={() => handleDeleteCategoryFromTeam(catId, cat.name)}
+                                    style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
                                   >
-                                    {catObj.status === "Active" ? "Deactivate" : "Activate"}
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() => handleDeleteCategory(key)}
-                                    style={{
-                                      fontSize: "11px",
-                                      padding: "2px 6px",
-                                      borderColor: "var(--danger-200)",
-                                      color: "var(--danger-600)"
-                                    }}
-                                  >
-                                    Delete
-                                  </Button>
+                                    <Trash2 size={12} />
+                                  </button>
                                 </>
                               )}
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
 
+                  {/* Add Category Form */}
+                  <form onSubmit={handleAddCategory} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
+                    <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Add Category</h5>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Category Label</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Mason, Painter"
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Base Wage (₹)</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 700"
+                        value={newCatWage}
+                        onChange={(e) => setNewCatWage(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Cycle Type</label>
+                      <select
+                        value={newCatType}
+                        onChange={(e) => setNewCatType(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", fontSize: "13px", backgroundColor: "#ffffff" }}
+                      >
+                        <option value="Daily">Daily</option>
+                        <option value="Weekly">Weekly</option>
+                        <option value="Monthly">Monthly</option>
+                      </select>
+                    </div>
+                    <Button type="submit" size="sm" style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                      Add Category
+                    </Button>
+                  </form>
+                </div>
+              </Card>
 
+              {/* Members configuration inside selected Category */}
+              {selectedCategory ? (
+                <Card 
+                  title={`Members in "${selectedCategory.name}"`}
+                  subtitle={`Manage registered team members`}
+                >
+                  <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: "20px", alignItems: "start" }}>
+                    
+                    {/* Members List Table */}
+                    <div style={{ overflowX: "auto" }}>
+                      {!selectedCategory.members || Object.keys(selectedCategory.members).length === 0 ? (
+                        <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                          No members registered in this category. Register one on the right.
+                        </div>
+                      ) : (
+                        <table className="data-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr>
+                              <th>ID</th>
+                              <th>Name</th>
+                              <th style={{ textAlign: "right" }}>Wage/Salary</th>
+                              <th style={{ textAlign: "center" }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.values(selectedCategory.members).map(member => {
+                              const isEditingMem = editingMemberId === member.memberId;
+                              return (
+                                <tr key={member.memberId}>
+                                  <td className="font-mono" style={{ fontSize: "12px" }}>{member.memberId}</td>
+                                  <td>
+                                    {isEditingMem ? (
+                                      <input
+                                        type="text"
+                                        value={editingMemberName}
+                                        onChange={(e) => setEditingMemberName(e.target.value)}
+                                        style={{ width: "90px", padding: "4px", fontSize: "12px" }}
+                                      />
+                                    ) : (
+                                      <span style={{ fontWeight: "700" }}>{member.name}</span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                                    {isEditingMem ? (
+                                      <input
+                                        type="number"
+                                        value={editingMemberSalary}
+                                        onChange={(e) => setEditingMemberSalary(e.target.value)}
+                                        style={{ width: "70px", padding: "4px", fontSize: "12px", textAlign: "right" }}
+                                      />
+                                    ) : (
+                                      `₹${member.salary}`
+                                    )}
+                                  </td>
+                                  <td>
+                                    <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+                                      {isEditingMem ? (
+                                        <>
+                                          <button
+                                            onClick={() => handleUpdateMember(member.memberId)}
+                                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer" }}
+                                          >
+                                            <Save size={13} />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setEditingMemberId(null);
+                                              setEditingMemberName("");
+                                              setEditingMemberSalary("");
+                                            }}
+                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+                                          >
+                                            <X size={13} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => {
+                                              setEditingMemberId(member.memberId);
+                                              setEditingMemberName(member.name);
+                                              setEditingMemberSalary(member.salary);
+                                            }}
+                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+                                          >
+                                            <Edit2 size={12} />
+                                          </button>
+                                          <button
+                                            onClick={() => handleDeleteMember(member.memberId, member.name)}
+                                            style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer" }}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
 
+                    {/* Add Member Form */}
+                    <form onSubmit={handleAddMember} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
+                      <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Register Member</h5>
+                      
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Labour Member ID</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. L001"
+                          value={newMemberId}
+                          onChange={(e) => setNewMemberId(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Full Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Ramesh Kumar"
+                          value={newMemberName}
+                          onChange={(e) => setNewMemberName(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Specific Wage/Salary (₹)</label>
+                        <input
+                          type="number"
+                          placeholder={`Default: ${selectedCategory.baseWage}`}
+                          value={newMemberSalary}
+                          onChange={(e) => setNewMemberSalary(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <Button type="submit" size="sm" icon={UserPlus} style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                        Register Member
+                      </Button>
+                    </form>
+                  </div>
+                </Card>
+              ) : (
+                <Card>
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontStyle: "italic", fontSize: "13px" }}>
+                    Select a category from the card above to register or view its members.
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card>
+              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "48px", fontSize: "14px", fontWeight: "600" }}>
+                Please select a Labour Team from the left panel to configure its categories and workers.
+              </div>
+            </Card>
+          )}
         </div>
 
       </div>
@@ -519,161 +895,60 @@ export default function AdminLabour() {
   };
 
   const renderAssignmentsTab = () => {
-    // Group active workers by site
-    const workersBySite = {};
-    sites.forEach(s => {
-      workersBySite[s.id] = { siteName: s.siteName, list: [] };
-    });
-    
-    workers.forEach(w => {
-      if (workersBySite[w.siteId]) {
-        workersBySite[w.siteId].list.push(w);
-      }
-    });
-
-    const activeCategories = Object.keys(labourMaster.categories).filter(c => labourMaster.categories[c].status === "Active");
-
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
         
-        {/* Assign worker form */}
-        <Card title="Assign Trade Workers to Site">
-          <form onSubmit={handleAssignWorker} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="worker-name" style={{ fontSize: "12.5px", fontWeight: "700" }}>Worker Full Name</label>
-              <input
-                id="worker-name"
-                type="text"
-                placeholder="e.g. Ramesh Kumar"
-                value={newWorkerName}
-                onChange={(e) => setNewWorkerName(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="worker-phone" style={{ fontSize: "12.5px", fontWeight: "700" }}>Mobile Number</label>
-              <input
-                id="worker-phone"
-                type="text"
-                placeholder="e.g. +91 9876543210"
-                value={newWorkerPhone}
-                onChange={(e) => setNewWorkerPhone(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="worker-cat" style={{ fontSize: "12.5px", fontWeight: "700" }}>Labour Category</label>
-                <select
-                  id="worker-cat"
-                  value={newWorkerCategory}
-                  onChange={(e) => setNewWorkerCategory(e.target.value)}
-                  style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff" }}
-                >
-                  {activeCategories.map(cat => (
-                    <option key={cat} value={cat}>{getLabourDisplayName(cat)}</option>
-                  ))}
-                </select>
+        <Card title="Company Labour Registry Lookup" subtitle="Hierarchical breakdown of all registered Labour Teams, Categories and Members.">
+          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+            {teams.length === 0 ? (
+              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                No Labour Teams configured in the Master tab.
               </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="worker-date" style={{ fontSize: "12.5px", fontWeight: "700" }}>Assignment Date</label>
-                <input
-                  id="worker-date"
-                  type="date"
-                  value={newWorkerJoinDate}
-                  onChange={(e) => setNewWorkerJoinDate(e.target.value)}
-                  style={{ padding: "9px", borderRadius: "6px", border: "1px solid var(--border-color)" }}
-                />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="worker-site" style={{ fontSize: "12.5px", fontWeight: "700" }}>Assign Construction Site</label>
-              <select
-                id="worker-site"
-                value={newWorkerSiteId}
-                onChange={(e) => setNewWorkerSiteId(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff" }}
-              >
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
-            </div>
-
-            <Button type="submit" icon={UserPlus} style={{ marginTop: "10px", backgroundColor: "var(--primary-800)" }}>
-              Assign Worker
-            </Button>
-          </form>
-        </Card>
-
-        {/* Site Groupings list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          {sites.map(site => {
-            const siteData = workersBySite[site.id];
-            if (!siteData) return null;
-            
-            return (
-              <Card key={site.id} title={`Active Labor Assignments: ${site.siteName}`} subtitle={`Headcounts and wage details`}>
-                {siteData.list.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontStyle: "italic", margin: "10px 0" }}>No workers currently assigned to this site.</p>
-                ) : (
-                  <div style={{ overflowX: "auto" }}>
-                    <table className="data-table" style={{ margin: 0 }}>
-                      <thead>
-                        <tr>
-                          <th>Worker Name</th>
-                          <th>Category</th>
-                          <th>Assigned Date</th>
-                          <th style={{ textAlign: "right" }}>Wage Rate</th>
-                          <th>Status</th>
-                          <th style={{ textAlign: "center" }}>Action</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {siteData.list.map(w => {
-                          const rateObj = labourMaster.categories[w.category] || { wage: 500 };
+            ) : (
+              teams.map(team => {
+                const cats = team.categories ? Object.values(team.categories) : [];
+                return (
+                  <div key={team.id} style={{ border: "1px solid var(--border-color)", borderRadius: "8px", padding: "20px", backgroundColor: "#fcfcfc" }}>
+                    <h3 style={{ margin: "0 0 16px 0", color: "var(--primary-900)", fontWeight: "800", fontSize: "18px", borderBottom: "1.5px solid var(--border-color)", paddingBottom: "8px" }}>
+                      {team.teamName}
+                    </h3>
+                    {cats.length === 0 ? (
+                      <p style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", margin: 0 }}>No categories registered inside this team.</p>
+                    ) : (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                        {cats.map(cat => {
+                          const membersList = cat.members ? Object.values(cat.members) : [];
                           return (
-                            <tr key={w.id}>
-                              <td style={{ fontWeight: "700" }}>{w.workerName}</td>
-                              <td>{getLabourDisplayName(w.category)}</td>
-                              <td className="font-mono">{w.joiningDate}</td>
-                              <td style={{ textAlign: "right", fontFamily: "monospace" }}>₹{rateObj.wage}</td>
-                              <td>
-                                <Badge status={w.status === "active" ? "success" : "pending"}>
-                                  {w.status || "active"}
-                                </Badge>
-                              </td>
-                              <td style={{ textAlign: "center" }}>
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleToggleWorkerStatus(w)}
-                                  style={{
-                                    fontSize: "11px",
-                                    padding: "2px 6px",
-                                    borderColor: w.status === "active" ? "var(--danger-200)" : "var(--success-200)",
-                                    color: w.status === "active" ? "var(--danger-600)" : "var(--success-600)"
-                                  }}
-                                >
-                                  {w.status === "active" ? "Deactivate" : "Activate"}
-                                </Button>
-                              </td>
-                            </tr>
+                            <div key={cat.id} style={{ marginLeft: "12px", borderLeft: "2px solid var(--primary-200)", paddingLeft: "16px" }}>
+                              <h4 style={{ margin: "0 0 8px 0", color: "var(--primary-700)", fontWeight: "700", fontSize: "14.5px" }}>
+                                {cat.name} <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-muted)" }}>(Base Wage: ₹{cat.baseWage} / Cycle: {cat.paymentType})</span>
+                              </h4>
+                              {membersList.length === 0 ? (
+                                <p style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "12px", margin: 0 }}>No workers registered in this category.</p>
+                              ) : (
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+                                  {membersList.map(m => (
+                                    <div key={m.memberId} style={{ padding: "8px 12px", borderRadius: "6px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                      <div style={{ display: "flex", flexDirection: "column" }}>
+                                        <span style={{ fontWeight: "700", fontSize: "12.5px" }}>{m.name}</span>
+                                        <span style={{ fontSize: "10.5px", fontFamily: "monospace", color: "var(--text-muted)" }}>ID: {m.memberId}</span>
+                                      </div>
+                                      <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--success-700)", fontFamily: "monospace" }}>₹{m.salary}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
                           );
                         })}
-                      </tbody>
-                    </table>
+                      </div>
+                    )}
                   </div>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-
+                );
+              })
+            )}
+          </div>
+        </Card>
       </div>
     );
   };

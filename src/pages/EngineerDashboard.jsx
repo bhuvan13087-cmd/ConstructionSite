@@ -17,6 +17,10 @@ import {
   getMaterialsDetailed,
   saveLabourDailyCounts,
   getLabourDailyCounts,
+  saveLabourMemberAttendance,
+  getLabourMemberAttendance,
+  getLabourTeams,
+  subscribeLabourTeams,
   getLabourDailyCountsHistory,
   getLabourDailyEntries,
   saveLabourDailyEntries,
@@ -324,6 +328,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [showLabourSpecifyModal, setShowLabourSpecifyModal] = useState(false);
   const [labourSpecifyText, setLabourSpecifyText] = useState("");
   const [pendingLabourCount, setPendingLabourCount] = useState(1);
+  const [labourTeams, setLabourTeams] = useState([]);
+  const [selectedLabourTeamId, setSelectedLabourTeamId] = useState("");
+  const [memberAttendanceUnits, setMemberAttendanceUnits] = useState({});
 
   // 3. Material Received fields
   const [materialName, setMaterialName] = useState("");
@@ -506,6 +513,53 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   useEffect(() => {
     loadDashboardData();
   }, [userProfile, activeSiteId]);
+
+  useEffect(() => {
+    if (!activeSiteId || !labourDate) return;
+    const fetchExisting = async () => {
+      try {
+        const records = await getLabourMemberAttendance(activeSiteId, labourDate);
+        const map = {};
+        records.forEach(r => {
+          map[r.memberId] = r.units;
+        });
+        setMemberAttendanceUnits(map);
+      } catch (err) {
+        console.error("Failed to load existing member attendance:", err);
+      }
+    };
+    fetchExisting();
+  }, [activeSiteId, labourDate]);
+
+  useEffect(() => {
+    if (!activeSiteId) {
+      setLabourTeams([]);
+      return;
+    }
+    
+    // Find active site to get the admin ID
+    const currentSite = assignedSites.find(s => s.id === activeSiteId) || allSites.find(s => s.id === activeSiteId);
+    const adminId = currentSite?.createdByAdmin || null;
+    if (!adminId) {
+      setLabourTeams([]);
+      return;
+    }
+    
+    const unsubscribe = subscribeLabourTeams((teamsList) => {
+      setLabourTeams(teamsList);
+      // Auto-select first team if none selected or if selected team no longer exists
+      if (teamsList.length > 0) {
+        setSelectedLabourTeamId(prev => {
+          const exists = teamsList.some(t => t.id === prev);
+          return exists ? prev : teamsList[0].id;
+        });
+      } else {
+        setSelectedLabourTeamId("");
+      }
+    }, adminId);
+    
+    return () => unsubscribe();
+  }, [activeSiteId, assignedSites, allSites]);
 
   useEffect(() => {
     if (!activeSiteId) {
@@ -1282,32 +1336,46 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // 3. Save Labour Counts Attendance
+  // 3. Save Labour Counts Attendance (Member-level Team Attendance)
   const handleSaveLabourCounts = async (e) => {
-    if (e) e.preventDefault();
-    if (!activeSiteId) {
-      showToast("Please select active construction site.", "error");
-      return;
-    }
-    if (!labourDate) {
-      showToast("Please choose daily record date.", "error");
-      return;
-    }
-    if (!confirm(`Are you sure you want to save the daily labour attendance counts for ${labourDate}?`)) {
-      return;
-    }
-
+    if (e && e.preventDefault) e.preventDefault();
+    if (labourSaving) return;
     setLabourSaving(true);
     try {
-      const engineerId = userProfile.uid || userProfile.id || "";
-      await saveLabourDailyEntries(activeSiteId, engineerId, labourDate, labourEntries);
-      showToast(`Labour counts updated successfully for ${labourDate}!`, "success");
+      const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
+      if (!selectedTeam) {
+        showToast("No team selected.", "error");
+        return;
+      }
       
-      const hist = await getLabourDailyCountsHistory(activeSiteId);
-      setLabourHistory(hist);
+      const list = [];
+      if (selectedTeam.categories) {
+        Object.values(selectedTeam.categories).forEach(cat => {
+          if (cat.members) {
+            Object.values(cat.members).forEach(m => {
+              const units = Number(memberAttendanceUnits[m.memberId]) || 0;
+              if (units > 0) {
+                list.push({
+                  teamId: selectedTeam.id,
+                  teamName: selectedTeam.teamName,
+                  categoryId: cat.id,
+                  categoryName: cat.name,
+                  memberId: m.memberId,
+                  memberName: m.name,
+                  units: units,
+                  wage: Number(m.salary)
+                });
+              }
+            });
+          }
+        });
+      }
+
+      await saveLabourMemberAttendance(activeSiteId, currentEngineerId, labourDate, list);
+      showToast("Labour attendance saved successfully!", "success");
+      await loadDashboardData();
     } catch (err) {
-      console.error("Labour sync failed:", err);
-      showToast(`Sync failed: ${err.message}`, "error");
+      showToast(err.message, "error");
     } finally {
       setLabourSaving(false);
     }
@@ -4116,13 +4184,57 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     );
   };
 
+
   const renderLabourView = () => {
+    const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
+    const teamCategories = selectedTeam?.categories ? Object.values(selectedTeam.categories) : [];
+    
+    // Filter categories that actually exist and are not empty
+    const activeCategories = teamCategories.filter(cat => cat.members && Object.keys(cat.members).length > 0);
+
+    // Calculate dynamic team metrics
+    const totalCategories = activeCategories.length;
+    let totalLabourMembers = 0;
+    const wageCycles = [];
+    const baseWages = [];
+    
+    activeCategories.forEach(cat => {
+      if (cat.members) {
+        totalLabourMembers += Object.keys(cat.members).length;
+      }
+      if (cat.paymentType) wageCycles.push(cat.paymentType);
+      if (cat.baseWage) baseWages.push(cat.baseWage);
+    });
+    
+    const cycleStr = Array.from(new Set(wageCycles)).join(", ") || "Daily";
+    const wageStr = baseWages.length > 0 ? `₹${Math.min(...baseWages)} - ₹${Math.max(...baseWages)}` : "N/A";
+
+    const getCategoryIcon = (catName) => {
+      const name = (catName || "").toLowerCase();
+      if (name.includes("mason")) return HardHat;
+      if (name.includes("helper")) return Users;
+      if (name.includes("electrician")) return Sliders;
+      if (name.includes("plumber")) return Activity;
+      return Briefcase;
+    };
+
+    // Calculate total man-days present and unique workers present
+    let totalManDays = 0;
+    let totalWorkersCount = 0;
+    Object.values(memberAttendanceUnits).forEach(val => {
+      const u = Number(val) || 0;
+      if (u > 0) {
+        totalManDays += u;
+        totalWorkersCount += 1;
+      }
+    });
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         {/* Date Selector */}
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Count Date</span>
+            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Attendance Date</span>
             {assignedSites.length > 1 && (
               <select
                 value={activeSiteId}
@@ -4155,98 +4267,203 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         </div>
 
-        {/* Workforce headcounts */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <span className="mobile-form-label">Worker Headcounts</span>
-          {categories.length === 0 ? (
-            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "14px" }}>
-              No Labour Categories Found
+        {/* Team Selector */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+          <span className="mobile-form-label" style={{ margin: 0 }}>Select Labour Team</span>
+          <select
+            value={selectedLabourTeamId}
+            onChange={(e) => {
+              setSelectedLabourTeamId(e.target.value);
+              setMemberAttendanceUnits({});
+            }}
+            style={{
+              width: "100%",
+              padding: "12px 14px",
+              borderRadius: "10px",
+              border: "1px solid var(--border-color)",
+              backgroundColor: "#ffffff",
+              fontSize: "14px",
+              fontWeight: "600",
+              outline: "none",
+              boxShadow: "var(--shadow-xs)"
+            }}
+          >
+            <option value="">-- Choose Team --</option>
+            {labourTeams.map(t => (
+              <option key={t.id} value={t.id}>{t.teamName}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Dynamic Team Info Card (When a Team is selected) */}
+        {selectedLabourTeamId && selectedTeam && (
+          <div style={{
+            backgroundColor: "var(--primary-900)",
+            color: "#ffffff",
+            borderRadius: "14px",
+            padding: "20px",
+            boxShadow: "var(--shadow-md)",
+            background: "linear-gradient(135deg, var(--primary-900) 0%, var(--primary-950) 100%)",
+            border: "1px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "16px"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <span style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: "700", opacity: 0.75, letterSpacing: "0.5px" }}>Active Team Registry</span>
+                <h3 style={{ margin: "2px 0 0 0", fontSize: "22px", fontWeight: "800", color: "var(--accent-400)" }}>{selectedTeam.teamName}</h3>
+              </div>
+              <span className="badge" style={{ backgroundColor: "rgba(34, 197, 94, 0.2)", color: "#4ade80", border: "1px solid rgba(34, 197, 94, 0.3)", fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "12px" }}>
+                Live Firestore
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: "14px" }}>
+              <div>
+                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Categories</span>
+                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{totalCategories} Active Trades</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Registered Force</span>
+                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{totalLabourMembers} Workers</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Wage Cycle</span>
+                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{cycleStr}</strong>
+              </div>
+              <div>
+                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Base Wages</span>
+                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{wageStr}</strong>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Categories & Members list */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {!selectedLabourTeamId ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "13px" }}>
+              Please select a Labour Team to view workers
+            </div>
+          ) : activeCategories.length === 0 ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "13px" }}>
+              No active categories or workers configured for "{selectedTeam?.teamName}"
             </div>
           ) : (
-            categories.map(cat => {
-              const catEntries = labourEntries.filter(e => e.categoryId === cat.id);
-              const currentVal = catEntries.length;
-              const emojis = {
-                Mason: "👷",
-                Helper: "🧱",
-                Electrician: "🔧",
-                Plumber: "🚰",
-                Painter: "🖌️",
-                Other: "📋"
-              };
-              const emoji = emojis[cat.name] || "🔨";
-              
+            activeCategories.map(cat => {
+              const IconComponent = getCategoryIcon(cat.name);
+              const membersList = cat.members ? Object.values(cat.members) : [];
               return (
-                <div key={cat.id} className="mobile-labour-card" style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%" }}>
-                    <div className="mobile-labour-info" style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span style={{ fontSize: "20px" }}>{emoji}</span>
-                      <span className="mobile-labour-name" style={{ fontWeight: "700" }}>{getLabourDisplayName(cat.name)}</span>
+                <div key={cat.id} style={{
+                  backgroundColor: "#ffffff",
+                  borderRadius: "12px",
+                  border: "1px solid var(--border-color)",
+                  boxShadow: "var(--shadow-sm)",
+                  padding: "16px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "12px"
+                }}>
+                  {/* Category Header Card */}
+                  <div style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    borderBottom: "1px solid var(--border-color)",
+                    paddingBottom: "10px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <IconComponent size={20} style={{ color: "var(--primary-600)", marginRight: "8px" }} />
+                      <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>{cat.name}</h4>
                     </div>
-                    
-                    <div className="counter-control" style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <button
-                        type="button"
-                        className="counter-btn"
-                        onClick={() => handleDecrementLabour(cat.id)}
-                        disabled={currentVal === 0}
-                        style={{ opacity: currentVal === 0 ? 0.5 : 1 }}
-                      >
-                        <Minus size={14} />
-                      </button>
-                      <span style={{ fontWeight: "800", fontSize: "15px", width: "30px", textAlign: "center" }}>{currentVal}</span>
-                      <button
-                        type="button"
-                        className="counter-btn"
-                        onClick={() => handleIncrementLabour(cat)}
-                      >
-                        <Plus size={14} />
-                      </button>
-                    </div>
+                    <span className="badge badge-success" style={{
+                      fontSize: "11px",
+                      padding: "4px 8px",
+                      borderRadius: "20px",
+                      fontWeight: "800",
+                      backgroundColor: "var(--success-50)",
+                      color: "var(--success-700)",
+                      border: "none"
+                    }}>
+                      {membersList.length} {membersList.length === 1 ? "Worker" : "Workers"}
+                    </span>
                   </div>
 
-                  {/* List of numbered entries for this category */}
-                  {catEntries.length > 0 && (
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginTop: "4px", paddingLeft: "28px" }}>
-                      {catEntries.map((entry, index) => (
-                        <span
-                          key={index}
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            backgroundColor: "var(--primary-50)",
-                            color: "var(--primary-800)",
-                            padding: "4px 10px",
-                            borderRadius: "16px",
-                            fontSize: "12.5px",
-                            fontWeight: "600",
-                            border: "1px solid var(--primary-100)"
-                          }}
-                        >
-                          {entry.displayName}
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveSpecificEntry(entry)}
-                            style={{
-                              background: "none",
-                              border: "none",
-                              color: "var(--danger-500)",
-                              cursor: "pointer",
-                              padding: 0,
-                              display: "inline-flex",
-                              alignItems: "center",
-                              fontSize: "14px",
-                              lineHeight: 1
-                            }}
-                            title="Remove entry"
-                          >
-                            &times;
-                          </button>
-                        </span>
-                      ))}
-                    </div>
-                  )}
+                  {/* Members List */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {membersList.map(m => {
+                      const units = memberAttendanceUnits[m.memberId] || 0;
+                      return (
+                        <div key={m.memberId} style={{
+                          padding: "12px",
+                          borderRadius: "8px",
+                          backgroundColor: "var(--primary-50)",
+                          border: "1px solid var(--border-color)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px"
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                              <span style={{ fontWeight: "700", fontSize: "13.5px", color: "var(--primary-950)" }}>{m.name}</span>
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>
+                                ID: {m.memberId} · Wage: ₹{m.salary}
+                              </span>
+                            </div>
+                            <span style={{
+                              fontSize: "12px",
+                              fontWeight: "800",
+                              color: units > 0 ? "var(--success-700)" : "var(--text-muted)",
+                              backgroundColor: units > 0 ? "var(--success-50)" : "transparent",
+                              padding: "2px 8px",
+                              borderRadius: "6px"
+                            }}>
+                              {units > 0 ? `${units} Day` : "Absent"}
+                            </span>
+                          </div>
+
+                          {/* Attendance Selector Button Group */}
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+                            {[
+                              { val: 0, label: "Absent", activeColor: "#e2e8f0", activeTextColor: "#475569" },
+                              { val: 0.25, label: "0.25 Day", activeColor: "#fef08a", activeTextColor: "#854d0e" },
+                              { val: 0.5, label: "0.5 Day", activeColor: "#fed7aa", activeTextColor: "#9a3412" },
+                              { val: 1.0, label: "1.0 Day", activeColor: "#bbf7d0", activeTextColor: "#166534" }
+                            ].map(opt => {
+                              const isActive = units === opt.val;
+                              return (
+                                <button
+                                  key={opt.val}
+                                  type="button"
+                                  onClick={() => {
+                                    setMemberAttendanceUnits(prev => ({
+                                      ...prev,
+                                      [m.memberId]: opt.val
+                                    }));
+                                  }}
+                                  style={{
+                                    padding: "8px 2px",
+                                    borderRadius: "6px",
+                                    border: isActive ? "1px solid transparent" : "1px solid var(--border-color)",
+                                    fontSize: "11px",
+                                    fontWeight: "750",
+                                    cursor: "pointer",
+                                    backgroundColor: isActive ? opt.activeColor : "#ffffff",
+                                    color: isActive ? opt.activeTextColor : "var(--text-muted)",
+                                    transition: "all 0.15s ease",
+                                    boxShadow: isActive ? "var(--shadow-xs)" : "none"
+                                  }}
+                                >
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })
@@ -4254,33 +4471,37 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* Workforce Total Count */}
-        <div style={{
-          backgroundColor: "var(--primary-900)",
-          color: "#ffffff",
-          borderRadius: "var(--radius-md)",
-          padding: "16px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          boxShadow: "var(--shadow-md)",
-          marginTop: "16px"
-        }}>
-          <div>
-            <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Total Workers Present</span>
-            <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--accent-400)" }}>
-              {Object.values(countsMap).reduce((sum, val) => sum + (val || 0), 0)} Workers
-            </span>
+        {selectedLabourTeamId && activeCategories.length > 0 && (
+          <div style={{
+            backgroundColor: "var(--primary-900)",
+            color: "#ffffff",
+            borderRadius: "12px",
+            padding: "16px",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            boxShadow: "var(--shadow-md)",
+            marginTop: "16px",
+            background: "linear-gradient(135deg, var(--primary-900) 0%, var(--primary-950) 100%)",
+            border: "1px solid rgba(255,255,255,0.08)"
+          }}>
+            <div>
+              <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Wages / Attendance Accrued</span>
+              <span style={{ fontSize: "16px", fontWeight: "800", color: "var(--accent-400)" }}>
+                {totalManDays} Man-days ({totalWorkersCount} present)
+              </span>
+            </div>
+            <button
+              type="button"
+              className="mobile-attendance-btn"
+              style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
+              onClick={handleSaveLabourCounts}
+              disabled={labourSaving}
+            >
+              {labourSaving ? "Saving..." : "Save Attendance"}
+            </button>
           </div>
-          <button
-            type="button"
-            className="mobile-attendance-btn"
-            style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
-            onClick={handleSaveLabourCounts}
-            disabled={labourSaving}
-          >
-            {labourSaving ? "Saving..." : "Save Counts"}
-          </button>
-        </div>
+        )}
 
         {/* History logs */}
         <div style={{ marginTop: "24px" }}>

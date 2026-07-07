@@ -547,12 +547,20 @@ export async function getSites(adminId = null) {
 }
 
 // Create a new construction site document
-export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 50, adminId = null, googlePlaceId = null, siteLocationName = null) {
+export async function createSite(siteName, clientName, location, startDate, expectedEndDate, status, latitude = null, longitude = null, radius = 50, adminId = null, googlePlaceId = null, siteLocationName = null, budget = null) {
   const db = getDb();
   const newSiteRef = doc(collection(db, "sites"));
 
   const latVal = latitude !== null && latitude !== "" ? Number(latitude) : null;
   const lngVal = longitude !== null && longitude !== "" ? Number(longitude) : null;
+
+  const budgetNum = Number(budget);
+  if (budget === undefined || budget === null || budget === "") {
+    throw new Error("Site Budget is required.");
+  }
+  if (isNaN(budgetNum) || budgetNum <= 0) {
+    throw new Error("Site Budget must be a positive numeric value.");
+  }
 
   await setDoc(newSiteRef, {
     siteName,
@@ -570,6 +578,7 @@ export async function createSite(siteName, clientName, location, startDate, expe
     siteLocationName: siteLocationName || "", // Requirement 4 siteLocationName
     locationName: siteLocationName || "", // Task 7.9 locationName field
     radius: Number(radius) || 50,
+    budget: budgetNum,
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     ...(adminId ? { createdByAdmin: adminId } : {}),
     createdAt: serverTimestamp(),
@@ -579,12 +588,20 @@ export async function createSite(siteName, clientName, location, startDate, expe
 }
 
 // Update site details (including coordinates and googlePlaceId)
-export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 50, latitude = null, longitude = null, googlePlaceId = null, siteLocationName = null) {
+export async function updateSite(siteId, siteName, clientName, location, startDate, expectedEndDate, status, radius = 50, latitude = null, longitude = null, googlePlaceId = null, siteLocationName = null, budget = null) {
   const db = getDb();
   const siteDocRef = doc(db, "sites", siteId);
 
   const latVal = latitude !== null && latitude !== "" ? Number(latitude) : null;
   const lngVal = longitude !== null && longitude !== "" ? Number(longitude) : null;
+
+  const budgetNum = Number(budget);
+  if (budget === undefined || budget === null || budget === "") {
+    throw new Error("Site Budget is required.");
+  }
+  if (isNaN(budgetNum) || budgetNum <= 0) {
+    throw new Error("Site Budget must be a positive numeric value.");
+  }
 
   await updateDoc(siteDocRef, {
     siteName,
@@ -603,6 +620,7 @@ export async function updateSite(siteId, siteName, clientName, location, startDa
     locationName: siteLocationName || "", // Task 7.9 locationName field
     locationStatus: (latVal !== null && lngVal !== null) ? "Verified" : "Not Set",
     radius: Number(radius) || 50,
+    budget: budgetNum,
     updatedAt: serverTimestamp()
   });
 }
@@ -1909,25 +1927,26 @@ export async function getLabourDailyCounts(siteId, dateStr) {
 export async function getLabourDailyCountsHistory(siteId) {
   const db = getDb();
   
-  // Fetch master categories to map IDs to names
+  // 1. Fetch legacy category map for backward compatibility
   const catsSnap = await getDocs(collection(db, "labourCategories"));
   const catMap = {};
   catsSnap.forEach(d => {
     catMap[d.id] = d.data().name;
   });
 
-  const q = query(
+  // 2. Fetch legacy headcount entries
+  const qLegacy = query(
     collection(db, "siteLabourEntries"),
     where("siteId", "==", siteId)
   );
-  const snap = await getDocs(q);
+  const snapLegacy = await getDocs(qLegacy);
   
   const historyMap = {};
-  snap.forEach(d => {
+  snapLegacy.forEach(d => {
     const data = d.data();
     const date = data.date;
     if (!historyMap[date]) {
-      historyMap[date] = { date, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0, engineerId: data.engineerId || "" };
+      historyMap[date] = { date, siteId: data.siteId, Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, total: 0, engineerId: data.engineerId || "" };
     }
     
     const catName = catMap[data.categoryId] || "Other";
@@ -1945,7 +1964,24 @@ export async function getLabourDailyCountsHistory(siteId) {
     historyMap[date].total += 1;
   });
   
-  return Object.values(historyMap).sort((a, b) => b.date.localeCompare(a.date));
+  const legacyList = Object.values(historyMap);
+
+  // 3. Fetch new member-level attendance records
+  const qNew = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId)
+  );
+  const snapNew = await getDocs(qNew);
+  const newList = [];
+  snapNew.forEach(d => {
+    newList.push({ id: d.id, ...d.data() });
+  });
+
+  // 4. Combine both
+  const combined = [...legacyList, ...newList];
+  
+  // Sort descending by date
+  return combined.sort((a, b) => b.date.localeCompare(a.date));
 }
 
 // Aggregates counts by date to support the Admin Dashboard (aliased to getLabourDailyCountsHistory)
@@ -3674,6 +3710,374 @@ export async function deleteDocument(docId, userId, userName) {
     "Document",
     { documentId: docId }
   );
+}
+
+// ==========================================================================
+// CENTRAL LABOUR TEAM MASTER CRUD & MEMBER ATTENDANCE
+// ==========================================================================
+
+export async function createLabourTeam(teamName, adminId) {
+  const db = getDb();
+  const nameClean = teamName.trim();
+  if (!nameClean) {
+    throw new Error("Team Name cannot be empty.");
+  }
+
+  // Check for duplicate Team names inside the same company
+  const q = query(
+    collection(db, "labourTeams"),
+    where("adminId", "==", adminId)
+  );
+  const snap = await getDocs(q);
+  const duplicate = snap.docs.some(docSnap => docSnap.data().teamName.trim().toLowerCase() === nameClean.toLowerCase());
+  if (duplicate) {
+    throw new Error("Team name already exists in this company.");
+  }
+
+  const newTeamRef = doc(collection(db, "labourTeams"));
+  await setDoc(newTeamRef, {
+    teamName: nameClean,
+    adminId: adminId,
+    categories: {},
+    createdAt: serverTimestamp()
+  });
+  return newTeamRef.id;
+}
+
+export async function getLabourTeams(adminId = null) {
+  const db = getDb();
+  const collRef = collection(db, "labourTeams");
+  let snap;
+  if (adminId) {
+    snap = await getDocs(query(collRef, where("adminId", "==", adminId)));
+  } else {
+    snap = await getDocs(collRef);
+  }
+  const teams = [];
+  snap.forEach(d => {
+    teams.push({ id: d.id, ...d.data() });
+  });
+  return teams.sort((a, b) => (a.teamName || "").localeCompare(b.teamName || ""));
+}
+
+export function subscribeLabourTeams(onUpdate, adminId = null) {
+  const db = getDb();
+  const collRef = collection(db, "labourTeams");
+  const q = adminId ? query(collRef, where("adminId", "==", adminId)) : query(collRef);
+  
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    list.sort((a, b) => (a.teamName || "").localeCompare(b.teamName || ""));
+    onUpdate(list);
+  }, (err) => {
+    console.error("Labour teams subscription failed:", err);
+  });
+}
+
+export async function updateLabourTeam(teamId, teamName, adminId) {
+  const db = getDb();
+  const nameClean = teamName.trim();
+  if (!nameClean) {
+    throw new Error("Team Name cannot be empty.");
+  }
+
+  // Check for duplicates
+  const q = query(
+    collection(db, "labourTeams"),
+    where("adminId", "==", adminId)
+  );
+  const snap = await getDocs(q);
+  const duplicate = snap.docs.some(docSnap => docSnap.id !== teamId && docSnap.data().teamName.trim().toLowerCase() === nameClean.toLowerCase());
+  if (duplicate) {
+    throw new Error("Another team already has this name.");
+  }
+
+  const docRef = doc(db, "labourTeams", teamId);
+  await updateDoc(docRef, { teamName: nameClean });
+}
+
+export async function deleteLabourTeam(teamId) {
+  const db = getDb();
+  await deleteDoc(doc(db, "labourTeams", teamId));
+}
+
+export async function addLabourCategoryToTeam(teamId, categoryData) {
+  const db = getDb();
+  const teamRef = doc(db, "labourTeams", teamId);
+  
+  const nameClean = categoryData.name.trim();
+  if (!nameClean) {
+    throw new Error("Category Name cannot be empty.");
+  }
+  const baseWage = Number(categoryData.baseWage);
+  if (isNaN(baseWage) || baseWage <= 0) {
+    throw new Error("Base Wage must be a positive number.");
+  }
+  if (!["Daily", "Weekly", "Monthly"].includes(categoryData.paymentType)) {
+    throw new Error("Payment Type must be Daily, Weekly, or Monthly.");
+  }
+
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    
+    // Check if category name already exists in this team
+    const duplicate = Object.values(categories).some(cat => cat.name.toLowerCase() === nameClean.toLowerCase());
+    if (duplicate) {
+      throw new Error("Category name already exists in this team.");
+    }
+
+    const categoryId = `cat_${Date.now()}`;
+    categories[categoryId] = {
+      id: categoryId,
+      name: nameClean,
+      paymentType: categoryData.paymentType,
+      baseWage: baseWage,
+      members: {}
+    };
+
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function updateLabourCategoryInTeam(teamId, categoryId, categoryData) {
+  const db = getDb();
+  const teamRef = doc(db, "labourTeams", teamId);
+  const baseWage = Number(categoryData.baseWage);
+  if (isNaN(baseWage) || baseWage <= 0) {
+    throw new Error("Base Wage must be a positive number.");
+  }
+  if (!["Daily", "Weekly", "Monthly"].includes(categoryData.paymentType)) {
+    throw new Error("Payment Type must be Daily, Weekly, or Monthly.");
+  }
+
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    const category = categories[categoryId];
+    if (!category) {
+      throw new Error("Category does not exist.");
+    }
+
+    category.paymentType = categoryData.paymentType;
+    category.baseWage = baseWage;
+    
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function deleteLabourCategoryFromTeam(teamId, categoryId) {
+  const db = getDb();
+  const teamRef = doc(db, "labourTeams", teamId);
+
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    
+    delete categories[categoryId];
+    
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function addLabourMemberToCategory(teamId, categoryId, memberData, adminId) {
+  const db = getDb();
+  
+  const memberIdClean = memberData.memberId.toString().trim();
+  if (!memberIdClean) {
+    throw new Error("Labour Member ID cannot be empty.");
+  }
+  const nameClean = memberData.name.trim();
+  if (!nameClean) {
+    throw new Error("Labour Member Name cannot be empty.");
+  }
+  const salary = Number(memberData.salary);
+  if (isNaN(salary) || salary <= 0) {
+    throw new Error("Salary must be a positive number.");
+  }
+
+  // 1. Query all teams for this admin to verify memberId uniqueness
+  const q = query(collection(db, "labourTeams"), where("adminId", "==", adminId));
+  const snap = await getDocs(q);
+  
+  let duplicate = false;
+  snap.forEach(teamDoc => {
+    const data = teamDoc.data();
+    if (data.categories) {
+      Object.values(data.categories).forEach(cat => {
+        if (cat.members) {
+          const membersList = Object.values(cat.members);
+          if (membersList.some(m => m.memberId.toString().trim().toLowerCase() === memberIdClean.toLowerCase())) {
+            duplicate = true;
+          }
+        }
+      });
+    }
+  });
+
+  if (duplicate) {
+    throw new Error(`Labour Member ID "${memberIdClean}" already exists in the company.`);
+  }
+
+  // 2. Add the member
+  const teamRef = doc(db, "labourTeams", teamId);
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    const category = categories[categoryId];
+    if (!category) {
+      throw new Error("Category does not exist inside this Team.");
+    }
+    if (!category.members) {
+      category.members = {};
+    }
+    
+    category.members[memberIdClean] = {
+      memberId: memberIdClean,
+      name: nameClean,
+      salary: salary
+    };
+    
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function updateLabourMemberInCategory(teamId, categoryId, memberId, memberData) {
+  const db = getDb();
+  const teamRef = doc(db, "labourTeams", teamId);
+  
+  const nameClean = memberData.name.trim();
+  if (!nameClean) {
+    throw new Error("Labour Member Name cannot be empty.");
+  }
+  const salary = Number(memberData.salary);
+  if (isNaN(salary) || salary <= 0) {
+    throw new Error("Salary must be a positive number.");
+  }
+
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    const category = categories[categoryId];
+    if (!category || !category.members || !category.members[memberId]) {
+      throw new Error("Member does not exist.");
+    }
+
+    category.members[memberId].name = nameClean;
+    category.members[memberId].salary = salary;
+    
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function deleteLabourMemberFromCategory(teamId, categoryId, memberId) {
+  const db = getDb();
+  const teamRef = doc(db, "labourTeams", teamId);
+
+  await runTransaction(db, async (transaction) => {
+    const teamDoc = await transaction.get(teamRef);
+    if (!teamDoc.exists()) {
+      throw new Error("Labour Team does not exist.");
+    }
+    const data = teamDoc.data();
+    const categories = data.categories || {};
+    const category = categories[categoryId];
+    if (category && category.members) {
+      delete category.members[memberId];
+    }
+    
+    transaction.update(teamRef, { categories });
+  });
+}
+
+export async function saveLabourMemberAttendance(siteId, engineerId, dateStr, attendanceList) {
+  const db = getDb();
+  const batch = writeBatch(db);
+  
+  // First delete any existing new-format attendance logs for this site and date to keep it idempotent
+  const qExisting = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  const snapExisting = await getDocs(qExisting);
+  snapExisting.forEach(d => {
+    batch.delete(d.ref);
+  });
+  
+  for (const item of attendanceList) {
+    const docId = `${siteId}_${item.memberId}_${dateStr}`;
+    const docRef = doc(db, "labourMemberAttendance", docId);
+    
+    batch.set(docRef, {
+      siteId,
+      teamId: item.teamId,
+      teamName: item.teamName,
+      categoryId: item.categoryId,
+      categoryName: item.categoryName,
+      memberId: item.memberId,
+      memberName: item.memberName,
+      date: dateStr,
+      units: Number(item.units), // 1.0, 0.5, 0.25
+      wage: Number(item.wage), // wage at the time of recording
+      markedBy: engineerId,
+      createdAt: serverTimestamp()
+    });
+  }
+  
+  await batch.commit();
+}
+
+export async function getLabourMemberAttendance(siteId, dateStr) {
+  const db = getDb();
+  const q = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId),
+    where("date", "==", dateStr)
+  );
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(d => {
+    records.push({ id: d.id, ...d.data() });
+  });
+  return records;
+}
+
+export async function getLabourMemberAttendanceSummary(siteId) {
+  const db = getDb();
+  const q = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId)
+  );
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(d => {
+    records.push({ id: d.id, ...d.data() });
+  });
+  return records;
 }
 
 

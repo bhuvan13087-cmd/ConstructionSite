@@ -56,9 +56,8 @@ export default function AdminDashboard() {
   }, [sites, rawMaterials]);
 
   const activeWorkersCount = useMemo(() => {
-    const siteIds = new Set(sites.map(s => s.id));
-    return rawWorkers.filter(w => siteIds.has(w.siteId) || w.adminId === user?.uid).length;
-  }, [sites, rawWorkers, user]);
+    return rawWorkers.length;
+  }, [rawWorkers]);
 
   const metrics = {
     totalSites: sites.length,
@@ -193,16 +192,33 @@ export default function AdminDashboard() {
       console.error("Materials listener error:", err);
     });
 
-    // 5. Workers Listener
-    const qWorkers = query(collection(db, "workers"), where("status", "==", "active"));
-    const unsubWorkers = onSnapshot(qWorkers, (snapshot) => {
-      const list = [];
+    // 5. Teams Listener to fetch active workers from the centralized team master
+    const unsubWorkers = onSnapshot(collection(db, "labourTeams"), (snapshot) => {
+      const flattenedWorkers = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        const team = docSnap.data();
+        if (adminUid && team.adminId !== adminUid) return;
+        if (team.categories) {
+          Object.keys(team.categories).forEach(catId => {
+            const cat = team.categories[catId];
+            if (cat.members) {
+              Object.keys(cat.members).forEach(memberId => {
+                const mem = cat.members[memberId];
+                flattenedWorkers.push({
+                  id: mem.memberId,
+                  workerName: mem.name,
+                  category: cat.name,
+                  teamName: team.teamName,
+                  adminId: team.adminId
+                });
+              });
+            }
+          });
+        }
       });
-      setRawWorkers(list);
+      setRawWorkers(flattenedWorkers);
     }, (err) => {
-      console.error("Workers listener error:", err);
+      console.error("Labour teams listener error on Dashboard:", err);
     });
 
 
@@ -494,6 +510,7 @@ export default function AdminDashboard() {
                   <th>Project / Site Name</th>
                   <th>Assigned Engineer</th>
                   <th>Location</th>
+                  <th style={{ textAlign: "right" }}>Budget</th>
                   <th>Status</th>
                   <th>Created</th>
                 </tr>
@@ -501,7 +518,7 @@ export default function AdminDashboard() {
               <tbody>
                 {sites.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+                    <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
                       No registered construction sites or assignments found.
                     </td>
                   </tr>
@@ -550,6 +567,9 @@ export default function AdminDashboard() {
                             <MapPin size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
                             <span style={{ fontSize: "13px" }}>{site.location}</span>
                           </div>
+                        </td>
+                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                          {site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--"}
                         </td>
                         <td>
                           <Badge status={site.status || "Planning"} />
