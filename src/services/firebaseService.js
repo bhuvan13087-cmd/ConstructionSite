@@ -3577,7 +3577,7 @@ export async function syncApprovalsFromLegacy() {
 
 export async function getDocumentCategories() {
   const db = getDb();
-  const docRef = doc(db, "users", "__document_categories__");
+  const docRef = doc(db, "users", "document_categories");
   const docSnap = await getDoc(docRef);
   if (docSnap.exists() && docSnap.data().categoriesList) {
     return docSnap.data().categoriesList;
@@ -3587,7 +3587,7 @@ export async function getDocumentCategories() {
 
 export async function saveDocumentCategories(categoriesList) {
   const db = getDb();
-  const docRef = doc(db, "users", "__document_categories__");
+  const docRef = doc(db, "users", "document_categories");
   await setDoc(docRef, {
     categoriesList,
     updatedAt: serverTimestamp()
