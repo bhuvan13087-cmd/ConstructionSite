@@ -341,7 +341,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingValue, setEditingValue] = useState(1.0);
+  const [editingCount, setEditingCount] = useState(1);
+  const [editingType, setEditingType] = useState("Full Day");
+  const [attendanceSelections, setAttendanceSelections] = useState({});
+  const [savingRecordKeys, setSavingRecordKeys] = useState({});
   const [filterDate, setFilterDate] = useState("");
+  const [filterDateMode, setFilterDateMode] = useState("This Month");
   const [filterTeamId, setFilterTeamId] = useState("");
   const [filterCategory, setFilterCategory] = useState("");
   const [filterSearch, setFilterSearch] = useState("");
@@ -541,13 +546,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const loadedRows = records.map(r => ({
           id: r.id,
           categoryId: r.categoryId,
-          workerName: r.workerName,
-          attendanceValue: Number(r.attendanceValue),
+          workerCount: r.workerCount !== undefined ? Number(r.workerCount) : 1,
+          attendanceType: r.attendanceType || (Number(r.attendanceValue) === 0.5 ? "Half Day" : "Full Day"),
           dbId: r.id,
           isSaving: false,
-          isSaved: true,
-          lastSavedName: r.workerName,
-          lastSavedValue: Number(r.attendanceValue)
+          isSaved: true
         }));
         setAttendanceRows(loadedRows);
       } catch (err) {
@@ -1376,129 +1379,91 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Dynamic dynamic worker attendance handlers
-  const handleAddWorkerRow = (categoryId) => {
-    // Check if there is an empty workerName row under this category
-    const hasEmptyRow = attendanceRows.some(row => row.categoryId === categoryId && !row.workerName.trim());
-    if (hasEmptyRow) {
-      showToast("Please enter a name for the existing empty row first.", "error");
-      return;
-    }
-    const newRow = {
-      id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      categoryId,
-      workerName: "",
-      attendanceValue: 1.0, // Default Full Day
-      dbId: null,
-      isSaving: false,
-      isSaved: false,
-      lastSavedName: "",
-      lastSavedValue: null
-    };
-    setAttendanceRows(prev => [...prev, newRow]);
-  };
+  // Count-based worker attendance handlers
+  const handleCountChange = async (categoryId, attendanceType, increment) => {
+    const record = attendanceRows.find(r => r.categoryId === categoryId && r.attendanceType === attendanceType);
+    const currentCount = record ? Number(record.workerCount) || 0 : 0;
+    const newCount = Math.max(0, currentCount + increment);
 
-  const handleWorkerRowChange = (rowId, field, value) => {
-    setAttendanceRows(prev => prev.map(row => {
-      if (row.id !== rowId) return row;
-      const updated = { ...row, [field]: value };
-      
-      // If we modified attendanceValue and workerName is not empty, trigger auto-save immediately!
-      if (field === "attendanceValue" && updated.workerName.trim()) {
-        saveRowToFirestore(updated);
-      }
-      
-      return updated;
-    }));
-  };
+    if (newCount === currentCount) return;
 
-  const handleWorkerRowBlur = (rowId) => {
-    const row = attendanceRows.find(r => r.id === rowId);
-    if (row && row.workerName.trim()) {
-      saveRowToFirestore(row);
-    }
-  };
-
-  const handleDeleteWorkerRow = async (rowId) => {
-    const row = attendanceRows.find(r => r.id === rowId);
-    if (!row) return;
-
-    if (row.dbId) {
-      try {
-        setAttendanceRows(prev => prev.map(r => r.id === rowId ? { ...r, isSaving: true } : r));
-        await deleteLabourAttendanceRecord(row.dbId);
-        showToast("Worker attendance deleted successfully.", "success");
-      } catch (err) {
-        console.error("Failed to delete record:", err);
-        showToast("Failed to delete: " + err.message, "error");
-        setAttendanceRows(prev => prev.map(r => r.id === rowId ? { ...r, isSaving: false } : r));
-        return;
-      }
-    }
-    setAttendanceRows(prev => prev.filter(r => r.id !== rowId));
-  };
-
-  const saveRowToFirestore = async (row) => {
-    const workerNameClean = row.workerName.trim();
-    if (!workerNameClean) return;
-
-    // Check for duplicate worker attendance on the same date
-    const hasDuplicate = labourHistoryRecords.some(r => 
-      r.attendanceDate === labourDate &&
-      r.workerName.toLowerCase().trim() === workerNameClean.toLowerCase() &&
-      r.id !== row.dbId
-    );
-    if (hasDuplicate) {
-      showToast(`Worker "${workerNameClean}" already has an attendance record on this date.`, "error");
-      // Reset local saving state
-      setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: false, isSaved: false } : r));
-      return;
-    }
-
-    // Check if anything has actually changed since the last save
-    if (row.isSaved && workerNameClean === row.lastSavedName && Number(row.attendanceValue) === Number(row.lastSavedValue)) {
-      return;
-    }
-
-    // Temporarily mark as saving in local state
-    setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: true } : r));
+    const key = `${categoryId}_${attendanceType}`;
+    setSavingRecordKeys(prev => ({ ...prev, [key]: true }));
 
     try {
-      const dbId = await saveLabourAttendanceRecord(row.dbId, {
-        attendanceDate: labourDate,
-        siteId: activeSiteId,
-        teamId: selectedLabourTeamId,
-        categoryId: row.categoryId,
-        workerName: workerNameClean,
-        attendanceValue: Number(row.attendanceValue),
-        createdBy: currentEngineerId
-      });
+      if (newCount === 0) {
+        if (record && record.dbId) {
+          await deleteLabourAttendanceRecord(record.dbId);
+        }
+        setAttendanceRows(prev => prev.filter(r => !(r.categoryId === categoryId && r.attendanceType === attendanceType)));
+      } else {
+        const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
+          siteId: activeSiteId,
+          teamId: selectedLabourTeamId,
+          categoryId,
+          attendanceDate: labourDate,
+          workerCount: newCount,
+          attendanceType,
+          createdBy: currentEngineerId
+        });
 
-      setAttendanceRows(prev => prev.map(r => r.id === row.id ? {
-        ...r,
-        dbId,
-        isSaving: false,
-        isSaved: true,
-        lastSavedName: workerNameClean,
-        lastSavedValue: Number(row.attendanceValue)
-      } : r));
+        setAttendanceRows(prev => {
+          const exists = prev.some(r => r.categoryId === categoryId && r.attendanceType === attendanceType);
+          if (exists) {
+            return prev.map(r => (r.categoryId === categoryId && r.attendanceType === attendanceType) ? { ...r, workerCount: newCount, dbId, isSaved: true } : r);
+          } else {
+            return [...prev, { id: dbId, categoryId, workerCount: newCount, attendanceType, dbId, isSaved: true }];
+          }
+        });
+      }
     } catch (err) {
-      console.error("Auto-save failed:", err);
-      showToast("Auto-save failed: " + err.message, "error");
-      setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: false } : r));
+      console.error("Failed to sync attendance count:", err);
+      showToast("Sync failed: " + err.message, "error");
+    } finally {
+      setSavingRecordKeys(prev => ({ ...prev, [key]: false }));
     }
   };
 
   // Attendance History event handlers
   const handleStartEditHistoryRecord = (record) => {
     setEditingRecordId(record.id);
-    setEditingName(record.workerName);
-    setEditingValue(record.attendanceValue);
+    if (record.workerCount !== undefined) {
+      setEditingCount(record.workerCount);
+      setEditingType(record.attendanceType || "Full Day");
+    } else {
+      setEditingName(record.workerName);
+      setEditingValue(record.attendanceValue);
+    }
   };
 
   const handleSaveHistoryRecord = async (recordId) => {
     const record = labourHistoryRecords.find(r => r.id === recordId);
     if (!record) return;
+
+    if (record.workerCount !== undefined) {
+      const count = Number(editingCount);
+      if (isNaN(count) || count <= 0) {
+        showToast("Count must be greater than 0.", "error");
+        return;
+      }
+      try {
+        await saveLabourAttendanceRecord(recordId, {
+          attendanceDate: record.attendanceDate,
+          siteId: record.siteId,
+          teamId: record.teamId,
+          categoryId: record.categoryId,
+          workerCount: count,
+          attendanceType: editingType,
+          createdBy: record.createdBy || currentEngineerId
+        });
+        setEditingRecordId(null);
+        showToast("Attendance record updated successfully.", "success");
+      } catch (err) {
+        console.error("Failed to update record:", err);
+        showToast("Failed to update record: " + err.message, "error");
+      }
+      return;
+    }
 
     const workerNameClean = editingName.trim();
     if (!workerNameClean) {
@@ -1506,7 +1471,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    // Check for duplicate worker attendance on the same date
     const hasDuplicate = labourHistoryRecords.some(r => 
       r.attendanceDate === record.attendanceDate &&
       r.workerName.toLowerCase().trim() === workerNameClean.toLowerCase() &&
@@ -1517,7 +1481,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    // Check if nothing changed
     if (workerNameClean === record.workerName && Number(editingValue) === Number(record.attendanceValue)) {
       setEditingRecordId(null);
       return;
@@ -4539,178 +4502,185 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {teamCategories.map(cat => {
-                  const catRows = attendanceRows.filter(row => row.categoryId === cat.id);
+                  const currentType = attendanceSelections[cat.id] || "Full Day";
+                  const record = attendanceRows.find(r => r.categoryId === cat.id && r.attendanceType === currentType);
+                  const count = record ? record.workerCount : 0;
+                  const isSaving = savingRecordKeys[`${cat.id}_${currentType}`] || false;
                   
                   return (
                     <div key={cat.id} style={{
                       backgroundColor: "#ffffff",
                       borderRadius: "20px",
                       border: "1px solid #e7e0ec",
-                      padding: "16px",
-                      boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)"
+                      padding: "18px 20px",
+                      boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "14px"
                     }}>
                       {/* Category Header */}
                       <div style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        marginBottom: "12px",
                         borderBottom: "1px solid #e7e0ec",
                         paddingBottom: "8px"
                       }}>
-                        <span style={{
-                          fontSize: "16px",
-                          fontWeight: "700",
-                          color: "#1c1b1f"
-                        }}>
-                          {cat.name}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleAddWorkerRow(cat.id)}
-                          style={{
-                            backgroundColor: "#6750a4",
-                            color: "#ffffff",
-                            border: "none",
-                            borderRadius: "20px",
-                            padding: "6px 14px",
-                            fontSize: "12px",
-                            fontWeight: "700",
-                            cursor: "pointer",
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "6px",
-                            boxShadow: "0px 1px 2px rgba(0, 0, 0, 0.15)",
-                            transition: "all 0.2s ease"
-                          }}
-                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#533f8a"}
-                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#6750a4"}
-                        >
-                          <Plus size={14} /> Add Worker
-                        </button>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{
+                            fontSize: "16px",
+                            fontWeight: "750",
+                            color: "#1c1b1f"
+                          }}>
+                            {cat.name}
+                          </span>
+                          {isSaving && (
+                            <span style={{
+                              width: "14px",
+                              height: "14px",
+                              border: "2px solid #6750a4",
+                              borderTop: "2px solid transparent",
+                              borderRadius: "50%",
+                              animation: "spin 0.8s linear infinite",
+                              display: "inline-block"
+                            }} />
+                          )}
+                        </div>
                       </div>
 
-                      {/* Worker Rows */}
-                      {catRows.length === 0 ? (
-                        <div style={{
-                          textAlign: "center",
-                          padding: "12px",
-                          color: "#49454f",
-                          fontStyle: "italic",
-                          fontSize: "13px"
+                      {/* Count increment/decrement section */}
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "4px 0"
+                      }}>
+                        <span style={{
+                          fontSize: "14px",
+                          fontWeight: "700",
+                          color: "#49454f"
                         }}>
-                          No workers. Click "+ Add Worker" to add.
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                          {catRows.map((row) => (
-                            <div key={row.id} style={{
+                          Count : <span style={{ fontSize: "16px", color: "#1c1b1f", marginLeft: "4px" }}>{count}</span>
+                        </span>
+
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "12px"
+                        }}>
+                          {/* Decrement Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleCountChange(cat.id, currentType, -1)}
+                            disabled={count <= 0 || isSaving}
+                            style={{
+                              width: "40px",
+                              height: "40px",
+                              borderRadius: "50%",
+                              border: "1px solid #79747e",
+                              backgroundColor: count <= 0 ? "#f1f1f1" : "#ffffff",
+                              color: "#6750a4",
+                              fontWeight: "900",
+                              cursor: count <= 0 ? "not-allowed" : "pointer",
+                              fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
-                              gap: "8px",
-                              padding: "8px",
-                              borderRadius: "12px",
-                              backgroundColor: "#f7f2fa",
-                              border: "1px solid #e7e0ec"
-                            }}>
-                              {/* Worker Name Input */}
-                              <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <input
-                                  type="text"
-                                  placeholder="Worker Name"
-                                  value={row.workerName}
-                                  onChange={(e) => handleWorkerRowChange(row.id, "workerName", e.target.value)}
-                                  onBlur={() => handleWorkerRowBlur(row.id)}
-                                  autoFocus={!row.workerName}
-                                  style={{
-                                    width: "100%",
-                                    height: "38px",
-                                    padding: "8px 12px",
-                                    borderRadius: "8px",
-                                    border: !row.workerName && row.isSaved === false ? "1.5px solid #b3261e" : "1px solid #79747e",
-                                    fontSize: "14px",
-                                    color: "#1c1b1f",
-                                    outline: "none",
-                                    backgroundColor: "#ffffff"
-                                  }}
-                                />
-                              </div>
+                              justifyContent: "center",
+                              transition: "all 0.1s ease",
+                              outline: "none"
+                            }}
+                          >
+                            -
+                          </button>
 
-                              {/* Attendance Type Dropdown */}
-                              <div style={{ flex: 1.2 }}>
-                                <select
-                                  value={row.attendanceValue}
-                                  onChange={(e) => handleWorkerRowChange(row.id, "attendanceValue", Number(e.target.value))}
-                                  style={{
-                                    width: "100%",
-                                    height: "38px",
-                                    padding: "8px",
-                                    borderRadius: "8px",
-                                    border: "1px solid #79747e",
-                                    fontSize: "14px",
-                                    outline: "none",
-                                    backgroundColor: "#ffffff",
-                                    color: "#1c1b1f",
-                                    fontWeight: "600"
-                                  }}
-                                >
-                                  <option value={1.0}>Full Day</option>
-                                  <option value={0.5}>Half Day</option>
-                                </select>
-                              </div>
-
-                              {/* Status Indicator */}
-                              <div style={{
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                width: "24px"
-                              }}>
-                                {row.isSaving ? (
-                                  <span style={{
-                                    width: "14px",
-                                    height: "14px",
-                                    border: "2px solid #6750a4",
-                                    borderTop: "2px solid transparent",
-                                    borderRadius: "50%",
-                                    animation: "spin 0.8s linear infinite",
-                                    display: "inline-block"
-                                  }} />
-                                ) : row.isSaved ? (
-                                  <CheckCircle2 size={18} style={{ color: "#2e7d32" }} title="Saved to Firestore" />
-                                ) : row.workerName.trim() ? (
-                                  <AlertCircle size={18} style={{ color: "#ff8f00" }} title="Unsaved changes" />
-                                ) : (
-                                  <div style={{ width: "18px" }} />
-                                )}
-                              </div>
-
-                              {/* Delete Button */}
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteWorkerRow(row.id)}
-                                style={{
-                                  border: "none",
-                                  backgroundColor: "transparent",
-                                  color: "#b3261e",
-                                  cursor: "pointer",
-                                  padding: "4px",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  justifyContent: "center",
-                                  borderRadius: "50%",
-                                  transition: "background-color 0.2s"
-                                }}
-                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f9dedc"}
-                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
-                                title="Remove worker"
-                              >
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
-                          ))}
+                          {/* Increment Button */}
+                          <button
+                            type="button"
+                            onClick={() => handleCountChange(cat.id, currentType, 1)}
+                            disabled={isSaving}
+                            style={{
+                              width: "40px",
+                              height: "40px",
+                              borderRadius: "50%",
+                              border: "1px solid #6750a4",
+                              backgroundColor: "#6750a4",
+                              color: "#ffffff",
+                              fontWeight: "900",
+                              cursor: "pointer",
+                              fontSize: "20px",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              transition: "all 0.1s ease",
+                              outline: "none"
+                            }}
+                          >
+                            +
+                          </button>
                         </div>
-                      )}
+                      </div>
+
+                      {/* Attendance Radio Buttons */}
+                      <div style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                        borderTop: "1px solid #e7e0ec",
+                        paddingTop: "10px"
+                      }}>
+                        <span style={{
+                          fontSize: "12px",
+                          fontWeight: "700",
+                          color: "#6750a4",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.5px"
+                        }}>
+                          Attendance
+                        </span>
+
+                        <div style={{ display: "flex", gap: "24px" }}>
+                          <label style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "14px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            color: "#1c1b1f"
+                          }}>
+                            <input
+                              type="radio"
+                              name={`attendance-type-${cat.id}`}
+                              value="Full Day"
+                              checked={currentType === "Full Day"}
+                              onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Full Day" }))}
+                              style={{ width: "18px", height: "18px", accentColor: "#6750a4" }}
+                            />
+                            Full Day
+                          </label>
+
+                          <label style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "14px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            color: "#1c1b1f"
+                          }}>
+                            <input
+                              type="radio"
+                              name={`attendance-type-${cat.id}`}
+                              value="Half Day"
+                              checked={currentType === "Half Day"}
+                              onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Half Day" }))}
+                              style={{ width: "18px", height: "18px", accentColor: "#6750a4" }}
+                            />
+                            Half Day
+                          </label>
+                        </div>
+                      </div>
+
                     </div>
                   );
                 })}
@@ -4731,14 +4701,73 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderLabourAttendanceHistoryView = () => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    
+    const getYesterdayStr = () => {
+      const d = new Date();
+      d.setDate(d.getDate() - 1);
+      return d.toISOString().split("T")[0];
+    };
+    const yesterdayStr = getYesterdayStr();
+
+    const getStartOfWeek = () => {
+      const today = new Date();
+      const day = today.getDay();
+      const diff = today.getDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(today.setDate(diff));
+      monday.setHours(0,0,0,0);
+      return monday;
+    };
+    const startOfWeek = getStartOfWeek();
+
+    const thisMonthPrefix = new Date().toISOString().slice(0, 7);
+
+    const getEntryTimeStr = (record) => {
+      if (!record.createdAt) return "-";
+      let dateObj;
+      if (record.createdAt.seconds) {
+        dateObj = new Date(record.createdAt.seconds * 1000);
+      } else {
+        dateObj = new Date(record.createdAt);
+      }
+      if (isNaN(dateObj.getTime())) return "-";
+      return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
     // 1. Filter records in memory
     const filteredRecords = labourHistoryRecords.filter(r => {
-      if (filterSearch.trim() && !r.workerName.toLowerCase().includes(filterSearch.trim().toLowerCase())) {
+      if (r.createdBy !== currentEngineerId) {
         return false;
       }
-      if (filterDate && r.attendanceDate !== filterDate) {
-        return false;
+
+      if (filterSearch.trim()) {
+        const queryStr = filterSearch.trim().toLowerCase();
+        const teamObj = labourTeams.find(t => t.id === r.teamId);
+        const catObj = teamObj?.categories?.[r.categoryId];
+        const catName = catObj ? catObj.name : "";
+        
+        const workerNameMatch = r.workerName && r.workerName.toLowerCase().includes(queryStr);
+        const categoryNameMatch = catName && catName.toLowerCase().includes(queryStr);
+        if (!workerNameMatch && !categoryNameMatch) {
+          return false;
+        }
       }
+
+      // Date Range Filters
+      if (filterDateMode === "Today") {
+        if (r.attendanceDate !== todayStr) return false;
+      } else if (filterDateMode === "Yesterday") {
+        if (r.attendanceDate !== yesterdayStr) return false;
+      } else if (filterDateMode === "This Week") {
+        const rDate = new Date(r.attendanceDate);
+        rDate.setHours(0,0,0,0);
+        if (rDate < startOfWeek) return false;
+      } else if (filterDateMode === "This Month") {
+        if (!r.attendanceDate || !r.attendanceDate.startsWith(thisMonthPrefix)) return false;
+      } else if (filterDateMode === "Custom Date") {
+        if (filterDate && r.attendanceDate !== filterDate) return false;
+      }
+
       if (filterTeamId && r.teamId !== filterTeamId) {
         return false;
       }
@@ -4748,7 +4777,30 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return true;
     });
 
-    // 2. Group by Date -> Team -> Category
+    // 2. Calculate dynamic summary counts from filtered records
+    let summaryFullDay = 0;
+    let summaryHalfDay = 0;
+    let summaryTotal = 0;
+
+    filteredRecords.forEach(r => {
+      const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
+      if (r.workerCount !== undefined) {
+        if (r.attendanceType === "Full Day") {
+          summaryFullDay += count;
+        } else if (r.attendanceType === "Half Day") {
+          summaryHalfDay += count;
+        }
+      } else {
+        if (Number(r.attendanceValue) === 1.0) {
+          summaryFullDay += count;
+        } else {
+          summaryHalfDay += count;
+        }
+      }
+      summaryTotal += count;
+    });
+
+    // 3. Group by Date -> Team -> Category
     const groupedByDate = {};
     filteredRecords.forEach(r => {
       const date = r.attendanceDate;
@@ -4770,7 +4822,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       teamGroup[catId].push(r);
     });
 
-    // Get unique categories for dropdown filter
     const allCategories = [];
     const catSeen = new Set();
     labourTeams.forEach(t => {
@@ -4787,6 +4838,54 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        
+        {/* Dynamic Summary Cards */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 1fr 1fr",
+          gap: "12px",
+          width: "100%"
+        }}>
+          <div style={{
+            backgroundColor: "#e8f5e9",
+            borderRadius: "16px",
+            padding: "12px 14px",
+            border: "1px solid #c8e6c9",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#2e7d32", textTransform: "uppercase", letterSpacing: "0.5px" }}>Full Day</span>
+            <span style={{ fontSize: "20px", fontWeight: "900", color: "#1b5e20" }}>{summaryFullDay}</span>
+          </div>
+
+          <div style={{
+            backgroundColor: "#fff3e0",
+            borderRadius: "16px",
+            padding: "12px 14px",
+            border: "1px solid #ffe0b2",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Half Day</span>
+            <span style={{ fontSize: "20px", fontWeight: "900", color: "#e65100" }}>{summaryHalfDay}</span>
+          </div>
+
+          <div style={{
+            backgroundColor: "#f3edf7",
+            borderRadius: "16px",
+            padding: "12px 14px",
+            border: "1px solid #e7e0ec",
+            display: "flex",
+            flexDirection: "column",
+            gap: "2px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Labour</span>
+            <span style={{ fontSize: "20px", fontWeight: "900", color: "#6750a4" }}>{summaryTotal}</span>
+          </div>
+        </div>
+
         {/* Filters Card */}
         <div style={{
           backgroundColor: "#ffffff",
@@ -4800,12 +4899,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         }}>
           <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#6750a4" }}>Filter History</h4>
           
-          {/* Worker Name Search */}
+          {/* Search Category */}
           <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
             <Search size={18} style={{ position: "absolute", left: "12px", color: "#49454f" }} />
             <input 
               type="text"
-              placeholder="Search worker name..."
+              placeholder="Search category name..."
               value={filterSearch}
               onChange={(e) => setFilterSearch(e.target.value)}
               style={{
@@ -4823,26 +4922,55 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            {/* Date filter */}
+            {/* Date range mode filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Date</span>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Time Period</span>
+              <select
+                value={filterDateMode}
+                onChange={(e) => setFilterDateMode(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #79747e",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13px",
+                  outline: "none",
+                  color: "#1c1b1f",
+                  fontWeight: "600"
+                }}
+              >
+                <option value="Today">Today</option>
+                <option value="Yesterday">Yesterday</option>
+                <option value="This Week">This Week</option>
+                <option value="This Month">This Month</option>
+                <option value="Custom Date">Custom Date</option>
+              </select>
+            </div>
+
+            {/* Custom Date Picker (shown only when mode is Custom Date) */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: filterDateMode === "Custom Date" ? 1 : 0.5 }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Custom Date</span>
               <input 
                 type="date"
                 value={filterDate}
+                disabled={filterDateMode !== "Custom Date"}
                 onChange={(e) => setFilterDate(e.target.value)}
                 style={{
                   height: "40px",
                   padding: "8px 10px",
                   borderRadius: "8px",
                   border: "1px solid #79747e",
-                  backgroundColor: "#ffffff",
+                  backgroundColor: filterDateMode === "Custom Date" ? "#ffffff" : "#f1f1f1",
                   fontSize: "13px",
                   outline: "none",
                   color: "#1c1b1f"
                 }}
               />
             </div>
+          </div>
 
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
             {/* Team Filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
               <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Team</span>
@@ -4867,40 +4995,41 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 ))}
               </select>
             </div>
-          </div>
 
-          {/* Category Filter */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Category</span>
-            <select
-              value={filterCategory}
-              onChange={(e) => setFilterCategory(e.target.value)}
-              style={{
-                height: "40px",
-                padding: "8px",
-                borderRadius: "8px",
-                border: "1px solid #79747e",
-                backgroundColor: "#ffffff",
-                fontSize: "13px",
-                outline: "none",
-                color: "#1c1b1f",
-                fontWeight: "600"
-              }}
-            >
-              <option value="">All Categories</option>
-              {allCategories.map(c => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
+            {/* Category Filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Category</span>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #79747e",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13px",
+                  outline: "none",
+                  color: "#1c1b1f",
+                  fontWeight: "600"
+                }}
+              >
+                <option value="">All Categories</option>
+                {allCategories.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
           </div>
 
           {/* Reset Filters button */}
-          {(filterSearch || filterDate || filterTeamId || filterCategory) && (
+          {(filterSearch || (filterDateMode === "Custom Date" && filterDate) || filterDateMode !== "This Month" || filterTeamId || filterCategory) && (
             <button
               type="button"
               onClick={() => {
                 setFilterSearch("");
                 setFilterDate("");
+                setFilterDateMode("This Month");
                 setFilterTeamId("");
                 setFilterCategory("");
               }}
@@ -4928,7 +5057,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               padding: "40px 16px",
               backgroundColor: "#ffffff",
               borderRadius: "16px",
-              border: "1px dashed #79747e",
+              border: "1px solid #e7e0ec",
               color: "#49454f",
               fontSize: "14px"
             }}>
@@ -4941,15 +5070,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               const isExpanded = expandedDates.includes(dateStr);
               const dateTeams = groupedByDate[dateStr];
               
-              // Total worker records count on this date
               let dateTotalWorkers = 0;
               Object.values(dateTeams).forEach(teamCats => {
                 Object.values(teamCats).forEach(records => {
-                  dateTotalWorkers += records.length;
+                  records.forEach(r => {
+                    dateTotalWorkers += r.workerCount !== undefined ? Number(r.workerCount) : 1;
+                  });
                 });
               });
 
-              // Format date string to display (e.g. DD-MM-YYYY)
               let displayDateStr = dateStr;
               try {
                 const [y, m, d] = dateStr.split("-");
@@ -5094,47 +5223,120 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                                       {records.map(record => {
                                         const isEditing = editingRecordId === record.id;
+                                        const siteObj = assignedSites.find(s => s.id === record.siteId) || allSites.find(s => s.id === record.siteId);
+                                        const siteName = siteObj ? siteObj.siteName : "Unknown Site";
+                                        
                                         return (
                                           <div key={record.id} style={{
                                             display: "flex",
-                                            alignItems: "center",
-                                            justifyContent: "space-between",
-                                            padding: "6px 8px 6px 12px",
+                                            flexDirection: "column",
+                                            gap: "8px",
+                                            padding: "12px 14px",
                                             backgroundColor: "#fbfafe",
-                                            borderRadius: "8px",
+                                            borderRadius: "12px",
                                             border: "1px solid #e7e0ec"
                                           }}>
                                             {isEditing ? (
                                               <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
-                                                <input 
-                                                  type="text"
-                                                  value={editingName}
-                                                  onChange={(e) => setEditingName(e.target.value)}
-                                                  style={{
-                                                    flex: 2,
-                                                    height: "32px",
-                                                    padding: "4px 8px",
-                                                    borderRadius: "6px",
-                                                    border: "1px solid #79747e",
-                                                    fontSize: "13px"
-                                                  }}
-                                                />
-                                                <select
-                                                  value={editingValue}
-                                                  onChange={(e) => setEditingValue(Number(e.target.value))}
-                                                  style={{
-                                                    flex: 1.2,
-                                                    height: "32px",
-                                                    padding: "4px",
-                                                    borderRadius: "6px",
-                                                    border: "1px solid #79747e",
-                                                    fontSize: "13px",
-                                                    fontWeight: "600"
-                                                  }}
-                                                >
-                                                  <option value={1.0}>Full Day</option>
-                                                  <option value={0.5}>Half Day</option>
-                                                </select>
+                                                {record.workerCount !== undefined ? (
+                                                  <>
+                                                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: 2 }}>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => setEditingCount(prev => Math.max(1, prev - 1))}
+                                                        style={{
+                                                          width: "32px",
+                                                          height: "32px",
+                                                          borderRadius: "50%",
+                                                          border: "1px solid #79747e",
+                                                          backgroundColor: "#ffffff",
+                                                          color: "#6750a4",
+                                                          fontWeight: "bold",
+                                                          cursor: "pointer",
+                                                          fontSize: "16px",
+                                                          display: "flex",
+                                                          alignItems: "center",
+                                                          justifyContent: "center"
+                                                        }}
+                                                      >-</button>
+                                                      <span style={{ fontSize: "14px", fontWeight: "700", minWidth: "24px", textAlign: "center", color: "#1c1b1f" }}>
+                                                        {editingCount}
+                                                      </span>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => setEditingCount(prev => prev + 1)}
+                                                        style={{
+                                                          width: "32px",
+                                                          height: "32px",
+                                                          borderRadius: "50%",
+                                                          border: "1px solid #79747e",
+                                                          backgroundColor: "#ffffff",
+                                                          color: "#6750a4",
+                                                          fontWeight: "bold",
+                                                          cursor: "pointer",
+                                                          fontSize: "16px",
+                                                          display: "flex",
+                                                          alignItems: "center",
+                                                          justifyContent: "center"
+                                                        }}
+                                                      >+</button>
+                                                    </div>
+                                                    <select
+                                                      value={editingType}
+                                                      onChange={(e) => setEditingType(e.target.value)}
+                                                      style={{
+                                                        flex: 1.5,
+                                                        height: "32px",
+                                                        padding: "4px",
+                                                        borderRadius: "6px",
+                                                        border: "1px solid #79747e",
+                                                        fontSize: "13px",
+                                                        fontWeight: "600",
+                                                        backgroundColor: "#ffffff",
+                                                        color: "#1c1b1f"
+                                                      }}
+                                                    >
+                                                      <option value="Full Day">Full Day</option>
+                                                      <option value="Half Day">Half Day</option>
+                                                    </select>
+                                                  </>
+                                                ) : (
+                                                  <>
+                                                    <input 
+                                                      type="text"
+                                                      value={editingName}
+                                                      onChange={(e) => setEditingName(e.target.value)}
+                                                      style={{
+                                                        flex: 2,
+                                                        height: "32px",
+                                                        padding: "4px 8px",
+                                                        borderRadius: "6px",
+                                                        border: "1px solid #79747e",
+                                                        fontSize: "13px",
+                                                        backgroundColor: "#ffffff",
+                                                        color: "#1c1b1f"
+                                                      }}
+                                                    />
+                                                    <select
+                                                      value={editingValue}
+                                                      onChange={(e) => setEditingValue(Number(e.target.value))}
+                                                      style={{
+                                                        flex: 1.2,
+                                                        height: "32px",
+                                                        padding: "4px",
+                                                        borderRadius: "6px",
+                                                        border: "1px solid #79747e",
+                                                        fontSize: "13px",
+                                                        fontWeight: "600",
+                                                        backgroundColor: "#ffffff",
+                                                        color: "#1c1b1f"
+                                                      }}
+                                                    >
+                                                      <option value={1.0}>Full Day</option>
+                                                      <option value={0.5}>Half Day</option>
+                                                    </select>
+                                                  </>
+                                                )}
                                                 <button
                                                   type="button"
                                                   onClick={() => handleSaveHistoryRecord(record.id)}
@@ -5167,18 +5369,61 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                                 </button>
                                               </div>
                                             ) : (
-                                              <>
-                                                <span style={{ fontSize: "13px", color: "#1c1b1f" }}>
-                                                  <strong style={{ color: "#1d1b20" }}>{record.workerName}</strong>
-                                                  <span style={{ margin: "0 6px", color: "#79747e" }}>—</span>
-                                                  <span style={{
-                                                    fontWeight: "700",
-                                                    color: record.attendanceValue === 1.0 ? "#2e7d32" : "#9a3412"
-                                                  }}>
-                                                    {record.attendanceValue === 1.0 ? "Full Day" : "Half Day"}
+                                              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                                {/* Row 1: Site Name & Status */}
+                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
+                                                  <span style={{ fontSize: "13px", fontWeight: "750", color: "#1c1b1f" }}>
+                                                    {siteName}
                                                   </span>
-                                                </span>
-                                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                  <span style={{
+                                                    fontSize: "11px",
+                                                    fontWeight: "700",
+                                                    color: "#2e7d32",
+                                                    backgroundColor: "#e8f5e9",
+                                                    padding: "2px 8px",
+                                                    borderRadius: "12px"
+                                                  }}>
+                                                    Present
+                                                  </span>
+                                                </div>
+
+                                                {/* Row 2: Team, Category, and Entry Time */}
+                                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#49454f" }}>
+                                                  <span>Team: <strong>{teamName}</strong> | Cat: <strong>{catName}</strong></span>
+                                                  <span>Time: {getEntryTimeStr(record)}</span>
+                                                </div>
+
+                                                {/* Row 3: Count details (Worker Count, Full Day Count, Half Day Count, Total Labour) */}
+                                                <div style={{
+                                                  display: "grid",
+                                                  gridTemplateColumns: "repeat(4, 1fr)",
+                                                  gap: "6px",
+                                                  backgroundColor: "#ffffff",
+                                                  borderRadius: "8px",
+                                                  padding: "8px",
+                                                  border: "1px solid #e7e0ec",
+                                                  textAlign: "center"
+                                                }}>
+                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Worker Count</span>
+                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#1c1b1f" }}>{record.workerCount !== undefined ? record.workerCount : 1}</span>
+                                                  </div>
+                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Full Day</span>
+                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#2e7d32" }}>{record.workerCount !== undefined ? (record.attendanceType === "Full Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 1.0 ? 1 : 0)}</span>
+                                                  </div>
+                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Half Day</span>
+                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#e65100" }}>{record.workerCount !== undefined ? (record.attendanceType === "Half Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 0.5 ? 1 : 0)}</span>
+                                                  </div>
+                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Total</span>
+                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#6750a4" }}>{record.workerCount !== undefined ? record.workerCount : 1}</span>
+                                                  </div>
+                                                </div>
+
+                                                {/* Actions */}
+                                                <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", borderTop: "1px solid #e7e0ec", paddingTop: "6px", marginTop: "2px" }}>
                                                   <button
                                                     type="button"
                                                     onClick={() => handleStartEditHistoryRecord(record)}
@@ -5187,9 +5432,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                                       backgroundColor: "transparent",
                                                       color: "#6750a4",
                                                       cursor: "pointer",
-                                                      padding: "4px",
-                                                      fontSize: "11px",
-                                                      fontWeight: "700"
+                                                      fontSize: "12px",
+                                                      fontWeight: "800"
                                                     }}
                                                   >
                                                     Edit
@@ -5202,15 +5446,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                                       backgroundColor: "transparent",
                                                       color: "#b3261e",
                                                       cursor: "pointer",
-                                                      padding: "4px",
-                                                      fontSize: "11px",
-                                                      fontWeight: "700"
+                                                      fontSize: "12px",
+                                                      fontWeight: "800"
                                                     }}
                                                   >
                                                     Delete
                                                   </button>
                                                 </div>
-                                              </>
+                                              </div>
                                             )}
                                           </div>
                                         );

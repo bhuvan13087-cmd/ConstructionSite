@@ -68,6 +68,15 @@ export default function Sidebar({ isOpen, onClose }) {
             </NavLink>
 
             <NavLink 
+              to="/superadmin/payroll" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FileText size={18} />
+              <span>Payroll Summary</span>
+            </NavLink>
+
+            <NavLink 
               to="/superadmin/progress" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
@@ -176,6 +185,15 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <DollarSign size={18} />
               <span>Payments & Expenses</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/payroll" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FileText size={18} />
+              <span>Payroll Summary</span>
             </NavLink>
 
             <NavLink 

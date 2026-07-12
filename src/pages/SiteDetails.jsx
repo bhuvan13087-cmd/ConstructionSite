@@ -14,7 +14,8 @@ import {
   getDailyUpdatesForSite, 
   subscribePhotosForSite, 
   updateMaterial,
-  deleteMaterial
+  deleteMaterial,
+  subscribeGeneralExpenses
 } from "../services/firebaseService";
 import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress } from "../services/businessLogic";
 import { 
@@ -44,6 +45,7 @@ export default function SiteDetails({ siteId, onBack }) {
   const [attendance, setAttendance] = useState([]);
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [photos, setPhotos] = useState([]);
+  const [expenses, setExpenses] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
@@ -194,6 +196,15 @@ export default function SiteDetails({ siteId, onBack }) {
     return () => unsubscribe();
   }, [siteId]);
 
+  useEffect(() => {
+    if (!siteId) return;
+    const unsubscribe = subscribeGeneralExpenses((expList) => {
+      const siteExp = expList.filter(e => e.siteId === siteId);
+      setExpenses(siteExp);
+    });
+    return () => unsubscribe();
+  }, [siteId]);
+
   if (loading) {
     return (
       <Layout title="Site Details" description="Loading detailed resource logs...">
@@ -301,8 +312,12 @@ export default function SiteDetails({ siteId, onBack }) {
     const siteSeed = site.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
     budget = (50 + (siteSeed % 50)) * 100000;
   }
-  const remainingBudget = budget - totalSpent;
-  const budgetAlert = remainingBudget < 0;
+  
+  // Dynamic Total Expense = Sum of all approved expenses for the selected site
+  const approvedExpenses = expenses.filter(e => e.status === "Approved" || e.status === "approved");
+  const totalExpense = approvedExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+  const remainingBudget = budget - totalExpense;
+  const budgetUtilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
 
   // Handle Print Action for Reports tab
   const handlePrint = () => {
@@ -448,36 +463,51 @@ export default function SiteDetails({ siteId, onBack }) {
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
               {/* Budget Tracking Card */}
-              <Card title="Financial & Budget Audit" subtitle="Real-time site budget utilization">
+              <Card title="Financial & Budget Audit" subtitle="Real-time site budget utilization against actual expenses">
                 <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
                     <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Total Site Budget</span>
                     <span style={{ fontWeight: "800", color: "var(--primary-900)", fontFamily: "monospace" }}>₹{budget.toLocaleString("en-IN")}</span>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Total Accrued Spent</span>
-                    <span style={{ fontWeight: "700", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                      ₹{totalSpent.toLocaleString("en-IN")}
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", fontWeight: "normal" }}>
-                        (Materials: ₹{matSpent.toLocaleString("en-IN")} | Labor: ₹{laborSpent.toLocaleString("en-IN")})
-                      </span>
+                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Total Approved Expense</span>
+                    <span style={{ fontWeight: "800", color: "var(--primary-900)", fontFamily: "monospace" }}>₹{totalExpense.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Remaining Budget</span>
+                    <span style={{ fontWeight: "800", color: remainingBudget < 0 ? "var(--danger-700)" : "var(--success-700)", fontFamily: "monospace" }}>
+                      ₹{remainingBudget.toLocaleString("en-IN")}
                     </span>
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: "4px", alignItems: "center" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Remaining Balance</span>
-                    <div style={{ textAlign: "right" }}>
-                      <span style={{ 
-                        fontWeight: "800", 
-                        fontFamily: "monospace",
-                        color: budgetAlert ? "var(--danger-700)" : "var(--success-700)"
-                      }}>
-                        ₹{remainingBudget.toLocaleString("en-IN")}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: "700" }}>
+                      <span style={{ color: "var(--text-muted)" }}>Budget Utilization</span>
+                      <span style={{ color: budgetUtilization > 100 ? "var(--danger-700)" : (budgetUtilization > 80 ? "var(--warning-700)" : "var(--success-700)") }}>
+                        {budgetUtilization.toFixed(1)}%
                       </span>
-                      {budgetAlert && (
-                        <span className="badge badge-danger" style={{ display: "block", fontSize: "10px", marginTop: "2px" }}>Over Budget</span>
-                      )}
+                    </div>
+                    {/* Clean Progress Bar */}
+                    <div style={{ width: "100%", height: "10px", backgroundColor: "#e2e8f0", borderRadius: "5px", overflow: "hidden" }}>
+                      <div style={{
+                        width: `${Math.min(budgetUtilization, 100)}%`,
+                        height: "100%",
+                        backgroundColor: budgetUtilization > 100 ? "#b3261e" : (budgetUtilization > 80 ? "#e65100" : "#2e7d32"),
+                        borderRadius: "5px",
+                        transition: "width 0.4s ease"
+                      }} />
                     </div>
                   </div>
+                  
+                  {/* Warning Alerts */}
+                  {budgetUtilization > 100 ? (
+                    <div style={{ backgroundColor: "#fde8e8", border: "1px solid #f8b4b4", borderRadius: "8px", padding: "10px", color: "#b3261e", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <AlertCircle size={16} /> ⚠️ DANGER: site expenses have exceeded 100% of the allocated budget!
+                    </div>
+                  ) : budgetUtilization > 80 ? (
+                    <div style={{ backgroundColor: "#fff3e0", border: "1px solid #ffe0b2", borderRadius: "8px", padding: "10px", color: "#e65100", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <AlertCircle size={16} /> ⚠️ WARNING: site expenses have exceeded 80% of the allocated budget.
+                    </div>
+                  ) : null}
                 </div>
               </Card>
 

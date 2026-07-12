@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { onSnapshot, collection, query, where } from "firebase/firestore";
+import { onSnapshot, collection, query, where, doc } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase/config";
 import Layout from "../components/layout/Layout";
 import Card from "../components/common/Card";
@@ -191,19 +191,28 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       setDocuments(list);
     });
 
+    // 8. General Expenses Listener
+    const unsubExpenses = onSnapshot(doc(db, "expenses", "general"), (snapshot) => {
+      if (snapshot.exists()) {
+        setGeneralExpenses(snapshot.data().expenses || []);
+      } else {
+        setGeneralExpenses([]);
+      }
+    }, (err) => {
+      console.error("Expenses super admin listener error:", err);
+    });
+
     // Central load for static / metadata entities
     const loadStaticData = async () => {
       try {
-        const [fetchedLeaves, fetchedLabourMaster, fetchedGeneralExpenses, fetchedLabourPayments, fetchedSysActivities] = await Promise.all([
+        const [fetchedLeaves, fetchedLabourMaster, fetchedLabourPayments, fetchedSysActivities] = await Promise.all([
           getAllLeaves(),
           getLabourMaster(),
-          getGeneralExpenses(),
           getLabourPayments(),
           getSystemActivities()
         ]);
         setLeaves(fetchedLeaves);
         setLabourMaster(fetchedLabourMaster);
-        setGeneralExpenses(fetchedGeneralExpenses);
         setLabourPayments(fetchedLabourPayments);
         setSystemActivities(fetchedSysActivities);
       } catch (err) {
@@ -220,6 +229,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       unsubLabour();
       unsubApprovals();
       unsubDocs();
+      unsubExpenses();
     };
   }, []);
 
@@ -782,17 +792,62 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
                 {/* Financial Summary */}
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--border-color)", paddingTop: "14px" }}>
-                  <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Financial Standings</h4>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "4px" }}>
-                    <div style={{ backgroundColor: "#f8fafc", padding: "10px", borderRadius: "6px" }}>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Budget Value</span>
-                      <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{formatINR(financials.budget)}</strong>
-                    </div>
-                    <div style={{ backgroundColor: "#f8fafc", padding: "10px", borderRadius: "6px" }}>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Spent</span>
-                      <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{formatINR(financials.totalSpent)}</strong>
-                    </div>
-                  </div>
+                  <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Budget &amp; Expense Status</h4>
+                  {(() => {
+                    const budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : 0;
+                    const siteExpenses = generalExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
+                    const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                    const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
+                    const remaining = budget - totalExpense;
+
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginTop: "4px" }}>
+                          <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Budget</span>
+                            <strong style={{ fontSize: "12px", color: "var(--primary-900)", fontFamily: "monospace" }}>{formatINR(budget)}</strong>
+                          </div>
+                          <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Expense</span>
+                            <strong style={{ fontSize: "12px", color: "var(--primary-900)", fontFamily: "monospace" }}>{formatINR(totalExpense)}</strong>
+                          </div>
+                          <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Remaining</span>
+                            <strong style={{ fontSize: "12px", color: remaining < 0 ? "var(--danger-700)" : "var(--success-700)", fontFamily: "monospace" }}>{formatINR(remaining)}</strong>
+                          </div>
+                        </div>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700" }}>
+                            <span style={{ color: "var(--text-muted)" }}>Budget Used %</span>
+                            <span style={{ color: utilization > 100 ? "var(--danger-700)" : (utilization > 80 ? "var(--warning-700)" : "var(--success-700)") }}>
+                              {utilization.toFixed(1)}%
+                            </span>
+                          </div>
+                          {/* Clean progress bar */}
+                          <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
+                            <div style={{
+                              width: `${Math.min(utilization, 100)}%`,
+                              height: "100%",
+                              backgroundColor: utilization > 100 ? "#b3261e" : (utilization > 80 ? "#e65100" : "#2e7d32"),
+                              borderRadius: "4px"
+                            }} />
+                          </div>
+                        </div>
+
+                        {/* Warning Alert */}
+                        {utilization > 100 ? (
+                          <div style={{ backgroundColor: "#fde8e8", border: "1px solid #f8b4b4", borderRadius: "6px", padding: "6px 8px", color: "#b3261e", fontSize: "11px", fontWeight: "600" }}>
+                            ⚠️ DANGER: Exceeded 100% of budget!
+                          </div>
+                        ) : utilization > 80 ? (
+                          <div style={{ backgroundColor: "#fff3e0", border: "1px solid #ffe0b2", borderRadius: "6px", padding: "6px 8px", color: "#e65100", fontSize: "11px", fontWeight: "600" }}>
+                            ⚠️ WARNING: Exceeded 80% of budget.
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })()}
                 </div>
 
               </div>

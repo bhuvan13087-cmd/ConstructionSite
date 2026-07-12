@@ -1972,16 +1972,53 @@ export async function getLabourDailyCountsHistory(siteId) {
     where("siteId", "==", siteId)
   );
   const snapNew = await getDocs(qNew);
+  
+  // Fetch teams for category and wage lookups
+  const teamsSnap = await getDocs(collection(db, "labourTeams"));
+  const teamCatWageMap = {};
+  const teamCatNameMap = {};
+  const teamNameMap = {};
+  teamsSnap.forEach(d => {
+    const teamData = d.data();
+    teamNameMap[d.id] = teamData.teamName;
+    if (teamData.categories) {
+      Object.keys(teamData.categories).forEach(catId => {
+        const cat = teamData.categories[catId];
+        teamCatWageMap[`${d.id}_${catId}`] = Number(cat.baseWage) || 500;
+        teamCatNameMap[`${d.id}_${catId}`] = cat.name;
+      });
+    }
+  });
+
   const newList = [];
   snapNew.forEach(d => {
-    newList.push({ id: d.id, ...d.data() });
+    const data = d.data();
+    if (data.workerCount !== undefined) {
+      const units = Number(data.workerCount) * (data.attendanceType === "Full Day" ? 1.0 : 0.5);
+      const wage = teamCatWageMap[`${data.teamId}_${data.categoryId}`] || 500;
+      const catName = teamCatNameMap[`${data.teamId}_${data.categoryId}`] || "Workers";
+      const tName = teamNameMap[data.teamId] || "Team";
+      newList.push({
+        id: d.id,
+        ...data,
+        date: data.attendanceDate,
+        memberId: `${data.categoryId}_${data.attendanceType}`,
+        memberName: `${data.workerCount} x ${catName} (${data.attendanceType})`,
+        units,
+        wage,
+        categoryName: catName,
+        teamName: tName
+      });
+    } else {
+      newList.push({ id: d.id, ...data });
+    }
   });
 
   // 4. Combine both
   const combined = [...legacyList, ...newList];
   
   // Sort descending by date
-  return combined.sort((a, b) => b.date.localeCompare(a.date));
+  return combined.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 }
 
 // Aggregates counts by date to support the Admin Dashboard (aliased to getLabourDailyCountsHistory)
@@ -4083,19 +4120,17 @@ export async function getLabourMemberAttendanceSummary(siteId) {
 // Save/Update a single labour attendance record (Auto-save row-by-row)
 export async function saveLabourAttendanceRecord(recordId, recordData) {
   const db = getDb();
-  const docRef = recordId 
-    ? doc(db, "labourMemberAttendance", recordId)
-    : doc(collection(db, "labourMemberAttendance"));
+  const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${recordData.attendanceType.replace(/\s+/g, "_")}_${recordData.attendanceDate}`;
+  const docRef = doc(db, "labourMemberAttendance", docId);
   
   const payload = {
-    attendanceDate: recordData.attendanceDate,
     siteId: recordData.siteId,
     teamId: recordData.teamId,
     categoryId: recordData.categoryId,
-    workerName: recordData.workerName.trim(),
-    attendanceValue: Number(recordData.attendanceValue),
-    createdBy: recordData.createdBy,
-    updatedAt: serverTimestamp()
+    attendanceDate: recordData.attendanceDate,
+    workerCount: Number(recordData.workerCount),
+    attendanceType: recordData.attendanceType,
+    createdBy: recordData.createdBy
   };
 
   if (!recordId) {
@@ -4146,10 +4181,107 @@ export function subscribeLabourAttendanceRecords(siteId, onUpdate) {
     list.sort((a, b) => {
       const dateCompare = (b.attendanceDate || "").localeCompare(a.attendanceDate || "");
       if (dateCompare !== 0) return dateCompare;
-      return (a.workerName || "").localeCompare(b.workerName || "");
+      return (a.workerName || a.categoryId || "").localeCompare(b.workerName || b.categoryId || "");
     });
     onUpdate(list);
   }, (err) => {
     console.error("Labour member attendance subscription failed:", err);
+  });
+}
+
+// Real-time subscription to all labour attendance records across all sites
+export function subscribeAllLabourAttendance(onUpdate) {
+  const db = getDb();
+  const q = query(collection(db, "labourMemberAttendance"));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    // Sort by attendanceDate descending
+    list.sort((a, b) => (b.attendanceDate || "").localeCompare(a.attendanceDate || ""));
+    onUpdate(list);
+  }, (err) => {
+    console.error("All labour attendance subscription failed:", err);
+  });
+}
+
+// Real-time subscription to all engineer attendance logs
+export function subscribeAllEngineerAttendance(onUpdate) {
+  const db = getDb();
+  const q = query(collection(db, "attendance"));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    onUpdate(list);
+  }, (err) => {
+    console.error("All engineer attendance subscription failed:", err);
+  });
+}
+
+// Real-time subscription to all engineer leaves logs
+export function subscribeAllEngineerLeaves(onUpdate) {
+  const db = getDb();
+  const q = query(collection(db, "leaves"));
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    onUpdate(list);
+  }, (err) => {
+    console.error("All engineer leaves subscription failed:", err);
+  });
+}
+
+// Real-time subscription to payroll payment status records
+export function subscribePayrollStatuses(onUpdate) {
+  const db = getDb();
+  const docRef = doc(db, "users", "payroll_status_global");
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      onUpdate(snapshot.data().statuses || {});
+    } else {
+      onUpdate({});
+    }
+  }, (err) => {
+    console.error("Payroll statuses subscription failed:", err);
+  });
+}
+
+// Update payment status for a specific payroll item
+export async function savePayrollStatus(key, statusData) {
+  const db = getDb();
+  const docRef = doc(db, "users", "payroll_status_global");
+  const snap = await getDoc(docRef);
+  
+  let currentStatuses = {};
+  if (snap.exists()) {
+    currentStatuses = snap.data().statuses || {};
+  }
+  
+  currentStatuses[key] = {
+    ...currentStatuses[key],
+    ...statusData,
+    updatedAt: new Date().toISOString()
+  };
+  
+  await setDoc(docRef, { statuses: currentStatuses }, { merge: true });
+}
+
+// Real-time subscription to all general expenses
+export function subscribeGeneralExpenses(onUpdate) {
+  const db = getDb();
+  const docRef = doc(db, "expenses", "general");
+  return onSnapshot(docRef, (snapshot) => {
+    if (snapshot.exists()) {
+      onUpdate(snapshot.data().expenses || []);
+    } else {
+      onUpdate([]);
+    }
+  }, (err) => {
+    console.error("General expenses subscription failed:", err);
   });
 }

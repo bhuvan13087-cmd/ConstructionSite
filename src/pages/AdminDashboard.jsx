@@ -6,7 +6,8 @@ import {
   collection, 
   query, 
   where, 
-  limit 
+  limit,
+  doc
 } from "firebase/firestore";
 import { getFirebaseDb } from "../firebase/config";
 import { 
@@ -41,6 +42,7 @@ export default function AdminDashboard() {
   const [systemActivities, setSystemActivities] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [rawExpenses, setRawExpenses] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -256,6 +258,17 @@ export default function AdminDashboard() {
       console.error("Documents listener error:", err);
     });
 
+    // 10. Expenses Listener
+    const unsubExpenses = onSnapshot(doc(db, "expenses", "general"), (snapshot) => {
+      if (snapshot.exists()) {
+        setRawExpenses(snapshot.data().expenses || []);
+      } else {
+        setRawExpenses([]);
+      }
+    }, (err) => {
+      console.error("Expenses dashboard listener error:", err);
+    });
+
     return () => {
       unsubSites();
       unsubEngineers();
@@ -267,6 +280,7 @@ export default function AdminDashboard() {
       unsubSys();
       unsubApprovals();
       unsubDocuments();
+      unsubExpenses();
     };
   }, []);
 
@@ -510,7 +524,7 @@ export default function AdminDashboard() {
                   <th>Project / Site Name</th>
                   <th>Assigned Engineer</th>
                   <th>Location</th>
-                  <th style={{ textAlign: "right" }}>Budget</th>
+                  <th style={{ textAlign: "right", width: "135px" }}>Budget Utilization</th>
                   <th>Status</th>
                   <th>Created</th>
                 </tr>
@@ -568,8 +582,34 @@ export default function AdminDashboard() {
                             <span style={{ fontSize: "13px" }}>{site.location}</span>
                           </div>
                         </td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                          {site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--"}
+                        <td style={{ textAlign: "right" }}>
+                          {(() => {
+                            const budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : 0;
+                            const siteExpenses = rawExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
+                            const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                            const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
+                            
+                            return (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "125px", marginLeft: "auto" }}>
+                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700" }}>
+                                  <span style={{ fontFamily: "monospace" }}>₹{totalExpense.toLocaleString()}</span>
+                                  <span style={{ 
+                                    color: utilization > 100 ? "var(--danger-700)" : (utilization > 80 ? "var(--warning-700)" : "var(--success-700)")
+                                  }}>
+                                    {utilization.toFixed(0)}%
+                                  </span>
+                                </div>
+                                <div style={{ width: "100%", height: "5px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden" }}>
+                                  <div style={{
+                                    width: `${Math.min(utilization, 100)}%`,
+                                    height: "100%",
+                                    backgroundColor: utilization > 100 ? "#b3261e" : (utilization > 80 ? "#e65100" : "#2e7d32"),
+                                    borderRadius: "3px"
+                                  }} />
+                                </div>
+                              </div>
+                            );
+                          })()}
                         </td>
                         <td>
                           <Badge status={site.status || "Planning"} />

@@ -15,7 +15,8 @@ import {
   deleteLabourCategoryFromTeam,
   addLabourMemberToCategory,
   updateLabourMemberInCategory,
-  deleteLabourMemberFromCategory
+  deleteLabourMemberFromCategory,
+  subscribeAllLabourAttendance
 } from "../services/firebaseService";
 import {
   getLabourDisplayName,
@@ -32,7 +33,8 @@ import {
   UserPlus,
   Trash2,
   Save,
-  X
+  X,
+  Search
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -90,6 +92,12 @@ export default function AdminLabour() {
   const [paymentDate, setPaymentDate] = useState(new Date().toISOString().split("T")[0]);
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
+
+  // Tab 4: Attendance History states
+  const [allLabourAttendance, setAllLabourAttendance] = useState([]);
+  const [adminFilterSiteId, setAdminFilterSiteId] = useState("");
+  const [adminFilterDate, setAdminFilterDate] = useState("");
+  const [adminFilterTeamId, setAdminFilterTeamId] = useState("");
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -234,6 +242,13 @@ export default function AdminLabour() {
     }, adminId);
     return () => unsubscribe();
   }, [userProfile]);
+
+  useEffect(() => {
+    const unsubscribeAllAttendance = subscribeAllLabourAttendance((records) => {
+      setAllLabourAttendance(records);
+    });
+    return () => unsubscribeAllAttendance();
+  }, []);
 
   // -------------------------------------------------------------
   // TEAM HANDLERS
@@ -1106,7 +1121,329 @@ export default function AdminLabour() {
               </div>
             )}
           </Card>
+        </div>
+      </div>
+    );
+  };
 
+  // -------------------------------------------------------------
+  // ATTENDANCE HISTORY TAB
+  // -------------------------------------------------------------
+  const renderAttendanceTab = () => {
+    const filteredAttendance = allLabourAttendance.filter(r => {
+      if (adminFilterSiteId && r.siteId !== adminFilterSiteId) {
+        return false;
+      }
+      if (adminFilterDate && r.attendanceDate !== adminFilterDate) {
+        return false;
+      }
+      if (adminFilterTeamId && r.teamId !== adminFilterTeamId) {
+        return false;
+      }
+      const isAllowedSite = sites.some(s => s.id === r.siteId);
+      return isAllowedSite;
+    });
+
+    let totalFullDay = 0;
+    let totalHalfDay = 0;
+    let totalLabour = 0;
+
+    filteredAttendance.forEach(r => {
+      const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
+      if (r.workerCount !== undefined) {
+        if (r.attendanceType === "Full Day") {
+          totalFullDay += count;
+        } else if (r.attendanceType === "Half Day") {
+          totalHalfDay += count;
+        }
+      } else {
+        if (Number(r.attendanceValue) === 1.0) {
+          totalFullDay += count;
+        } else {
+          totalHalfDay += count;
+        }
+      }
+      totalLabour += count;
+    });
+
+    const getEntryTimeStr = (record) => {
+      if (!record.createdAt) return "-";
+      let dateObj;
+      if (record.createdAt.seconds) {
+        dateObj = new Date(record.createdAt.seconds * 1000);
+      } else {
+        dateObj = new Date(record.createdAt);
+      }
+      if (isNaN(dateObj.getTime())) return "-";
+      return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    };
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        
+        {/* Dynamic Summary Stats Grid */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+          gap: "16px",
+          width: "100%"
+        }}>
+          <div style={{
+            backgroundColor: "#e8f5e9",
+            borderRadius: "16px",
+            padding: "16px",
+            border: "1px solid #c8e6c9",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#2e7d32", textTransform: "uppercase", letterSpacing: "0.5px" }}>Full Day Workers</span>
+            <span style={{ fontSize: "24px", fontWeight: "900", color: "#1b5e20" }}>{totalFullDay}</span>
+          </div>
+
+          <div style={{
+            backgroundColor: "#fff3e0",
+            borderRadius: "16px",
+            padding: "16px",
+            border: "1px solid #ffe0b2",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Half Day Workers</span>
+            <span style={{ fontSize: "24px", fontWeight: "900", color: "#e65100" }}>{totalHalfDay}</span>
+          </div>
+
+          <div style={{
+            backgroundColor: "#f3edf7",
+            borderRadius: "16px",
+            padding: "16px",
+            border: "1px solid #e7e0ec",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Headcount</span>
+            <span style={{ fontSize: "24px", fontWeight: "900", color: "#6750a4" }}>{totalLabour}</span>
+          </div>
+        </div>
+
+        {/* Filters Card */}
+        <Card title="Filter Site Attendance History" subtitle="Filter real-time attendance logs for assigned construction sites.">
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "16px"
+          }}>
+            {/* Site Filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Construction Site</span>
+              <select
+                value={adminFilterSiteId}
+                onChange={(e) => setAdminFilterSiteId(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13.5px",
+                  fontWeight: "600",
+                  outline: "none",
+                  color: "var(--text-main)"
+                }}
+              >
+                <option value="">All Sites</option>
+                {sites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Date Filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Date</span>
+              <input 
+                type="date"
+                value={adminFilterDate}
+                onChange={(e) => setAdminFilterDate(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13.5px",
+                  outline: "none",
+                  color: "var(--text-main)"
+                }}
+              />
+            </div>
+
+            {/* Team Filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Labour Team</span>
+              <select
+                value={adminFilterTeamId}
+                onChange={(e) => setAdminFilterTeamId(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13.5px",
+                  fontWeight: "600",
+                  outline: "none",
+                  color: "var(--text-main)"
+                }}
+              >
+                <option value="">All Teams</option>
+                {teams.map(t => (
+                  <option key={t.id} value={t.id}>{t.teamName}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Reset Filters */}
+          {(adminFilterSiteId || adminFilterDate || adminFilterTeamId) && (
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
+              <button
+                type="button"
+                onClick={() => {
+                  setAdminFilterSiteId("");
+                  setAdminFilterDate("");
+                  setAdminFilterTeamId("");
+                }}
+                style={{
+                  backgroundColor: "transparent",
+                  color: "var(--primary-800)",
+                  border: "none",
+                  fontSize: "12.5px",
+                  fontWeight: "700",
+                  cursor: "pointer",
+                  padding: "4px 8px"
+                }}
+              >
+                Clear Filters
+              </button>
+            </div>
+          )}
+        </Card>
+
+        {/* History Cards Logs */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--text-main)" }}>Detailed Attendance Logs</h3>
+          
+          {filteredAttendance.length === 0 ? (
+            <div style={{
+              textAlign: "center",
+              padding: "48px 24px",
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              border: "1px dashed var(--border-color)",
+              color: "var(--text-muted)",
+              fontSize: "14px"
+            }}>
+              No attendance logs found matching the selected filters.
+            </div>
+          ) : (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+              {filteredAttendance.map((record, index) => {
+                const site = sites.find(s => s.id === record.siteId) || { siteName: "Unknown Site" };
+                const team = teams.find(t => t.id === record.teamId) || { teamName: "Unknown Team" };
+                
+                let catName = "Unknown";
+                if (team.categories && team.categories[record.categoryId]) {
+                  catName = team.categories[record.categoryId].name;
+                } else if (record.categoryId) {
+                  catName = record.categoryId;
+                }
+                
+                const workerCount = record.workerCount !== undefined ? record.workerCount : 1;
+                const fullCount = record.workerCount !== undefined ? (record.attendanceType === "Full Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 1.0 ? 1 : 0);
+                const halfCount = record.workerCount !== undefined ? (record.attendanceType === "Half Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 0.5 ? 1 : 0);
+                
+                let formattedDate = record.attendanceDate;
+                try {
+                  const [y, m, d] = record.attendanceDate.split("-");
+                  if (y && m && d) formattedDate = `${d}-${m}-${y}`;
+                } catch (e) {}
+
+                return (
+                  <div key={record.id || index} style={{
+                    backgroundColor: "#ffffff",
+                    borderRadius: "16px",
+                    border: "1px solid var(--border-color)",
+                    padding: "16px",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px",
+                    boxShadow: "0px 1px 3px rgba(0,0,0,0.05)"
+                  }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: "14px", fontWeight: "800", color: "var(--text-main)" }}>
+                        {site.siteName}
+                      </span>
+                      <span style={{
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        color: "var(--success-700)",
+                        backgroundColor: "var(--success-50)",
+                        padding: "2px 8px",
+                        borderRadius: "12px"
+                      }}>
+                        Present
+                      </span>
+                    </div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", color: "var(--text-muted)" }}>
+                      <span>Date: <strong>{formattedDate}</strong></span>
+                      <span>Time: {getEntryTimeStr(record)}</span>
+                    </div>
+
+                    <div style={{ fontSize: "13px", color: "var(--text-muted)", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
+                      Team: <strong style={{ color: "var(--text-main)" }}>{team.teamName}</strong> | Category: <strong style={{ color: "var(--text-main)" }}>{catName}</strong>
+                    </div>
+
+                    {/* Counts Grid */}
+                    <div style={{
+                      display: "grid",
+                      gridTemplateColumns: "repeat(4, 1fr)",
+                      gap: "6px",
+                      backgroundColor: "#f9f9fa",
+                      borderRadius: "10px",
+                      padding: "8px",
+                      textAlign: "center",
+                      marginTop: "4px"
+                    }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Count</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--text-main)" }}>{workerCount}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Full</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--success-600)" }}>{fullCount}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Half</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--warning-600)" }}>{halfCount}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Total</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)" }}>{workerCount}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ fontSize: "11px", color: "var(--text-muted)", borderTop: "1px solid var(--border-color)", paddingTop: "8px", marginTop: "4px", textAlign: "right" }}>
+                      Logged By: {record.loggedBy || "Site Engineer"}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </div>
 
       </div>
@@ -1173,11 +1510,27 @@ export default function AdminLabour() {
         >
           Salary Management
         </button>
+        <button
+          onClick={() => setActiveTab("attendance")}
+          style={{
+            padding: "10px 18px",
+            border: "none",
+            background: "none",
+            fontWeight: "700",
+            fontSize: "14px",
+            color: activeTab === "attendance" ? "var(--primary-800)" : "var(--text-muted)",
+            borderBottom: activeTab === "attendance" ? "3px solid var(--primary-800)" : "3px solid transparent",
+            cursor: "pointer"
+          }}
+        >
+          Attendance History
+        </button>
       </div>
 
       {activeTab === "master" && renderMasterTab()}
       {activeTab === "assignments" && renderAssignmentsTab()}
       {activeTab === "salary" && renderSalaryTab()}
+      {activeTab === "attendance" && renderAttendanceTab()}
 
       <Loading show={loading || submitting} text="Processing labour operations..." />
     </Layout>

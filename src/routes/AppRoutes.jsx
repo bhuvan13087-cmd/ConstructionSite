@@ -13,6 +13,7 @@ import ApprovalsDashboard from "../pages/ApprovalsDashboard";
 import SuperAdminDashboard from "../pages/SuperAdminDashboard";
 import DocumentsDashboard from "../pages/DocumentsDashboard";
 import ReportsDashboard from "../pages/ReportsDashboard";
+import PayrollSummary from "../pages/PayrollSummary";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import { useAuth } from "../context/AuthContext";
 
@@ -35,6 +36,7 @@ export default function AppRoutes() {
         <Route path="/admin/materials" element={<AdminMaterials />} />
         <Route path="/admin/labour" element={<AdminLabour />} />
         <Route path="/admin/payments" element={<AdminPayments />} />
+        <Route path="/admin/payroll" element={<PayrollSummary />} />
         <Route path="/admin/documents" element={<DocumentsDashboard />} />
         <Route path="/admin/reports" element={<ReportsDashboard />} />
       </Route>
@@ -62,6 +64,7 @@ export default function AppRoutes() {
         <Route path="/superadmin/progress" element={<SuperAdminDashboard tab="progress" />} />
         <Route path="/superadmin/approvals" element={<SuperAdminDashboard tab="approvals" />} />
         <Route path="/superadmin/reports" element={<ReportsDashboard />} />
+        <Route path="/superadmin/payroll" element={<PayrollSummary />} />
         <Route path="/superadmin/documents" element={<DocumentsDashboard />} />
       </Route>
 
