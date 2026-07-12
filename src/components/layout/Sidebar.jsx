@@ -6,6 +6,19 @@ import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Cam
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
 
+const NavGroupTitle = ({ children }) => (
+  <div style={{
+    fontSize: "9px",
+    fontWeight: "850",
+    color: "rgba(148, 163, 184, 0.45)",
+    textTransform: "uppercase",
+    letterSpacing: "1px",
+    margin: "16px 0 6px 12px",
+    fontFamily: "var(--font-family-title, sans-serif)"
+  }}>
+    {children}
+  </div>
+);
 
 export default function Sidebar({ isOpen, onClose }) {
   const { userProfile, logout } = useAuth();
@@ -26,6 +39,125 @@ export default function Sidebar({ isOpen, onClose }) {
 
   return (
     <aside className={`sidebar ${isOpen ? "open" : ""}`}>
+      {/* Self-contained CSS scopes for modern Enterprise branding */}
+      <style>{`
+        .sidebar {
+          background-color: var(--primary-900, #0f172a);
+          border-right: 1px solid rgba(255,255,255,0.06);
+          display: flex;
+          flex-direction: column;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        .sidebar-brand {
+          font-family: var(--font-family-title, sans-serif);
+          font-weight: 800;
+          color: #ffffff;
+          letter-spacing: 0.5px;
+        }
+
+        .sidebar-nav {
+          padding: 8px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          overflow-y: auto;
+          flex: 1;
+        }
+
+        .nav-item {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          padding: 9px 12px;
+          color: rgba(255,255,255,0.65);
+          border-radius: 8px;
+          font-weight: 600;
+          font-size: 13px;
+          text-decoration: none;
+          transition: all 0.2s ease;
+        }
+
+        .nav-item:hover {
+          background-color: rgba(255,255,255,0.04);
+          color: #ffffff;
+        }
+
+        .nav-item.active {
+          background-color: var(--accent-600, #e65100) !important;
+          color: #ffffff !important;
+          box-shadow: 0 4px 12px rgba(230, 81, 0, 0.2);
+        }
+
+        .nav-item svg {
+          opacity: 0.8;
+          transition: transform 0.2s ease;
+        }
+
+        .nav-item:hover svg {
+          opacity: 1;
+          transform: translateX(2px);
+        }
+
+        .sidebar-footer {
+          border-top: 1px solid rgba(255,255,255,0.06);
+          padding: 16px;
+          background-color: var(--primary-950, #080c14);
+        }
+
+        .user-profile {
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          margin-bottom: 12px;
+        }
+
+        .user-avatar {
+          width: 36px;
+          height: 36px;
+          background: linear-gradient(135deg, var(--accent-500), var(--accent-700));
+          color: #ffffff;
+          border-radius: 50%;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-weight: 800;
+          font-size: 12px;
+          border: 1px solid rgba(255,255,255,0.15);
+        }
+
+        .user-name {
+          color: #ffffff;
+          font-weight: 700;
+          font-size: 13px;
+          margin: 0;
+        }
+
+        .user-email {
+          color: rgba(255,255,255,0.45);
+          font-size: 11px;
+          margin: 0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 140px;
+        }
+
+        .btn-logout {
+          border: 1px solid rgba(255,255,255,0.1) !important;
+          color: rgba(255,255,255,0.7) !important;
+          background: transparent !important;
+          transition: all 0.2s ease;
+        }
+
+        .btn-logout:hover {
+          background-color: var(--danger-600, #b3261e) !important;
+          border-color: var(--danger-600, #b3261e) !important;
+          color: #ffffff !important;
+          box-shadow: 0 4px 10px rgba(179, 38, 30, 0.2);
+        }
+      `}</style>
+
       <div className="sidebar-header">
         <div className="sidebar-brand">
           <CivilEngineerLogo className="brand-icon" size={24} />
@@ -39,6 +171,7 @@ export default function Sidebar({ isOpen, onClose }) {
       <nav className="sidebar-nav">
         {userProfile?.role === "super_admin" || userProfile?.role === "superadmin" ? (
           <>
+            <NavGroupTitle>Executive Console</NavGroupTitle>
             <NavLink 
               to="/superadmin" 
               end 
@@ -49,6 +182,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Executive Overview</span>
             </NavLink>
             
+            <NavGroupTitle>Operations &amp; Finance</NavGroupTitle>
             <NavLink 
               to="/superadmin/sites" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -76,6 +210,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Payroll Summary</span>
             </NavLink>
 
+            <NavGroupTitle>Approvals &amp; Progress</NavGroupTitle>
             <NavLink 
               to="/superadmin/progress" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -94,6 +229,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Approval Center</span>
             </NavLink>
 
+            <NavGroupTitle>Information Ledger</NavGroupTitle>
             <NavLink 
               to="/superadmin/reports" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -114,6 +250,7 @@ export default function Sidebar({ isOpen, onClose }) {
           </>
         ) : hasPermission(userProfile?.role, "view", "approvals") ? (
           <>
+            <NavGroupTitle>Core Console</NavGroupTitle>
             <NavLink 
               to="/admin" 
               end 
@@ -133,15 +270,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Approval Dashboard</span>
             </NavLink>
 
-            <NavLink 
-              to="/admin/engineers" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <Users size={18} />
-              <span>Site Engineers</span>
-            </NavLink>
-
+            <NavGroupTitle>Operations</NavGroupTitle>
             <NavLink 
               to="/admin/sites" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -149,6 +278,15 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <MapPin size={18} />
               <span>Construction Sites</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/engineers" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Site Engineers</span>
             </NavLink>
 
             <NavLink 
@@ -160,15 +298,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Site Assignments</span>
             </NavLink>
 
-            <NavLink 
-              to="/admin/materials" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <Package size={18} />
-              <span>Materials Management</span>
-            </NavLink>
-
+            <NavGroupTitle>Logistics &amp; Workforce</NavGroupTitle>
             <NavLink 
               to="/admin/labour" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -179,12 +309,22 @@ export default function Sidebar({ isOpen, onClose }) {
             </NavLink>
 
             <NavLink 
+              to="/admin/materials" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Package size={18} />
+              <span>Materials Management</span>
+            </NavLink>
+
+            <NavGroupTitle>Finance &amp; Audit</NavGroupTitle>
+            <NavLink 
               to="/admin/payments" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
             >
               <DollarSign size={18} />
-              <span>Payments & Expenses</span>
+              <span>Payments &amp; Expenses</span>
             </NavLink>
 
             <NavLink 
@@ -196,6 +336,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Payroll Summary</span>
             </NavLink>
 
+            <NavGroupTitle>Analytics &amp; Records</NavGroupTitle>
             <NavLink 
               to="/admin/documents" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
@@ -216,6 +357,7 @@ export default function Sidebar({ isOpen, onClose }) {
           </>
         ) : (
           <>
+            <NavGroupTitle>Field Console</NavGroupTitle>
             <NavLink 
               to="/engineer" 
               end 
@@ -224,6 +366,16 @@ export default function Sidebar({ isOpen, onClose }) {
             >
               <LayoutDashboard size={18} />
               <span>Dashboard Overview</span>
+            </NavLink>
+
+            <NavGroupTitle>Workforce &amp; Logs</NavGroupTitle>
+            <NavLink 
+              to="/engineer/attendance" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <ClipboardCheck size={18} />
+              <span>Labour Attendance</span>
             </NavLink>
 
             <NavLink 
@@ -236,15 +388,6 @@ export default function Sidebar({ isOpen, onClose }) {
             </NavLink>
 
             <NavLink 
-              to="/engineer/attendance" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <ClipboardCheck size={18} />
-              <span>Labour Attendance</span>
-            </NavLink>
-
-            <NavLink 
               to="/engineer/labour" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
@@ -253,6 +396,7 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Labour Management</span>
             </NavLink>
 
+            <NavGroupTitle>Site Resources</NavGroupTitle>
             <NavLink 
               to="/engineer/material" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
