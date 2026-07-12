@@ -4080,8 +4080,76 @@ export async function getLabourMemberAttendanceSummary(siteId) {
   return records;
 }
 
+// Save/Update a single labour attendance record (Auto-save row-by-row)
+export async function saveLabourAttendanceRecord(recordId, recordData) {
+  const db = getDb();
+  const docRef = recordId 
+    ? doc(db, "labourMemberAttendance", recordId)
+    : doc(collection(db, "labourMemberAttendance"));
+  
+  const payload = {
+    attendanceDate: recordData.attendanceDate,
+    siteId: recordData.siteId,
+    teamId: recordData.teamId,
+    categoryId: recordData.categoryId,
+    workerName: recordData.workerName.trim(),
+    attendanceValue: Number(recordData.attendanceValue),
+    createdBy: recordData.createdBy,
+    updatedAt: serverTimestamp()
+  };
 
+  if (!recordId) {
+    payload.createdAt = serverTimestamp();
+  }
 
+  await setDoc(docRef, payload, { merge: true });
+  return docRef.id;
+}
 
+// Delete a single labour attendance record
+export async function deleteLabourAttendanceRecord(recordId) {
+  const db = getDb();
+  const docRef = doc(db, "labourMemberAttendance", recordId);
+  await deleteDoc(docRef);
+}
 
+// Get labour attendance records for a specific site, date, and team
+export async function getLabourAttendanceRecords(siteId, dateStr, teamId) {
+  const db = getDb();
+  const q = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId),
+    where("attendanceDate", "==", dateStr),
+    where("teamId", "==", teamId)
+  );
+  const snap = await getDocs(q);
+  const records = [];
+  snap.forEach(d => {
+    records.push({ id: d.id, ...d.data() });
+  });
+  return records;
+}
 
+// Real-time subscription to all labour attendance records for a site
+export function subscribeLabourAttendanceRecords(siteId, onUpdate) {
+  const db = getDb();
+  const q = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", siteId)
+  );
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    // Sort by attendanceDate descending, then workerName ascending
+    list.sort((a, b) => {
+      const dateCompare = (b.attendanceDate || "").localeCompare(a.attendanceDate || "");
+      if (dateCompare !== 0) return dateCompare;
+      return (a.workerName || "").localeCompare(b.workerName || "");
+    });
+    onUpdate(list);
+  }, (err) => {
+    console.error("Labour member attendance subscription failed:", err);
+  });
+}

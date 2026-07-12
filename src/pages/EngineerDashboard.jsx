@@ -46,7 +46,11 @@ import {
   getLabourDailyCountsSummary,
   getNotifications,
   markNotificationAsRead,
-  markAllNotificationsAsRead
+  markAllNotificationsAsRead,
+  saveLabourAttendanceRecord,
+  deleteLabourAttendanceRecord,
+  getLabourAttendanceRecords,
+  subscribeLabourAttendanceRecords
 } from "../services/firebaseService";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
@@ -330,6 +334,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [pendingLabourCount, setPendingLabourCount] = useState(1);
   const [labourTeams, setLabourTeams] = useState([]);
   const [selectedLabourTeamId, setSelectedLabourTeamId] = useState("");
+  const [attendanceRows, setAttendanceRows] = useState([]);
+  const [labourHistoryRecords, setLabourHistoryRecords] = useState([]);
+  const [activeWorkforceSubTab, setActiveWorkforceSubTab] = useState("new-entry"); // "new-entry" or "history"
+  const [expandedDates, setExpandedDates] = useState([]);
+  const [editingRecordId, setEditingRecordId] = useState(null);
+  const [editingName, setEditingName] = useState("");
+  const [editingValue, setEditingValue] = useState(1.0);
+  const [filterDate, setFilterDate] = useState("");
+  const [filterTeamId, setFilterTeamId] = useState("");
+  const [filterCategory, setFilterCategory] = useState("");
+  const [filterSearch, setFilterSearch] = useState("");
   const [memberAttendanceUnits, setMemberAttendanceUnits] = useState({});
 
   // 3. Material Received fields
@@ -515,21 +530,46 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   }, [userProfile, activeSiteId]);
 
   useEffect(() => {
-    if (!activeSiteId || !labourDate) return;
-    const fetchExisting = async () => {
+    if (!activeSiteId || !labourDate || !selectedLabourTeamId) {
+      setAttendanceRows([]);
+      return;
+    }
+    const fetchExistingRecords = async () => {
       try {
-        const records = await getLabourMemberAttendance(activeSiteId, labourDate);
-        const map = {};
-        records.forEach(r => {
-          map[r.memberId] = r.units;
-        });
-        setMemberAttendanceUnits(map);
+        setLabourHistoryLoading(true);
+        const records = await getLabourAttendanceRecords(activeSiteId, labourDate, selectedLabourTeamId);
+        const loadedRows = records.map(r => ({
+          id: r.id,
+          categoryId: r.categoryId,
+          workerName: r.workerName,
+          attendanceValue: Number(r.attendanceValue),
+          dbId: r.id,
+          isSaving: false,
+          isSaved: true,
+          lastSavedName: r.workerName,
+          lastSavedValue: Number(r.attendanceValue)
+        }));
+        setAttendanceRows(loadedRows);
       } catch (err) {
-        console.error("Failed to load existing member attendance:", err);
+        console.error("Failed to load existing labour attendance records:", err);
+        showToast("Error loading attendance: " + err.message, "error");
+      } finally {
+        setLabourHistoryLoading(false);
       }
     };
-    fetchExisting();
-  }, [activeSiteId, labourDate]);
+    fetchExistingRecords();
+  }, [activeSiteId, labourDate, selectedLabourTeamId]);
+
+  useEffect(() => {
+    if (!activeSiteId) {
+      setLabourHistoryRecords([]);
+      return;
+    }
+    const unsubscribe = subscribeLabourAttendanceRecords(activeSiteId, (records) => {
+      setLabourHistoryRecords(records);
+    });
+    return () => unsubscribe();
+  }, [activeSiteId]);
 
   useEffect(() => {
     if (!activeSiteId) {
@@ -1336,90 +1376,220 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // 3. Save Labour Counts Attendance (Member-level Team Attendance)
-  const handleSaveLabourCounts = async (e) => {
-    if (e && e.preventDefault) e.preventDefault();
-    if (labourSaving) return;
-    setLabourSaving(true);
-    try {
-      const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
-      if (!selectedTeam) {
-        showToast("No team selected.", "error");
-        return;
+  // Dynamic dynamic worker attendance handlers
+  const handleAddWorkerRow = (categoryId) => {
+    // Check if there is an empty workerName row under this category
+    const hasEmptyRow = attendanceRows.some(row => row.categoryId === categoryId && !row.workerName.trim());
+    if (hasEmptyRow) {
+      showToast("Please enter a name for the existing empty row first.", "error");
+      return;
+    }
+    const newRow = {
+      id: `local_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      categoryId,
+      workerName: "",
+      attendanceValue: 1.0, // Default Full Day
+      dbId: null,
+      isSaving: false,
+      isSaved: false,
+      lastSavedName: "",
+      lastSavedValue: null
+    };
+    setAttendanceRows(prev => [...prev, newRow]);
+  };
+
+  const handleWorkerRowChange = (rowId, field, value) => {
+    setAttendanceRows(prev => prev.map(row => {
+      if (row.id !== rowId) return row;
+      const updated = { ...row, [field]: value };
+      
+      // If we modified attendanceValue and workerName is not empty, trigger auto-save immediately!
+      if (field === "attendanceValue" && updated.workerName.trim()) {
+        saveRowToFirestore(updated);
       }
       
-      const list = [];
-      if (selectedTeam.categories) {
-        Object.values(selectedTeam.categories).forEach(cat => {
-          if (cat.members) {
-            Object.values(cat.members).forEach(m => {
-              const units = Number(memberAttendanceUnits[m.memberId]) || 0;
-              if (units > 0) {
-                list.push({
-                  teamId: selectedTeam.id,
-                  teamName: selectedTeam.teamName,
-                  categoryId: cat.id,
-                  categoryName: cat.name,
-                  memberId: m.memberId,
-                  memberName: m.name,
-                  units: units,
-                  wage: Number(m.salary)
-                });
-              }
-            });
-          }
-        });
-      }
+      return updated;
+    }));
+  };
 
-      await saveLabourMemberAttendance(activeSiteId, currentEngineerId, labourDate, list);
-      showToast("Labour attendance saved successfully!", "success");
-      await loadDashboardData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setLabourSaving(false);
+  const handleWorkerRowBlur = (rowId) => {
+    const row = attendanceRows.find(r => r.id === rowId);
+    if (row && row.workerName.trim()) {
+      saveRowToFirestore(row);
     }
   };
 
-  const handleIncrementLabour = (category) => {
-    setLabourEntries(prev => {
-      const catEntries = prev.filter(e => e.categoryId === category.id);
-      
-      let nextNum = 1;
-      if (catEntries.length > 0) {
-        const numbers = catEntries.map(e => {
-          const parts = e.displayName.split(" ");
-          const num = parseInt(parts[parts.length - 1], 10);
-          return isNaN(num) ? 0 : num;
-        });
-        nextNum = Math.max(...numbers) + 1;
+  const handleDeleteWorkerRow = async (rowId) => {
+    const row = attendanceRows.find(r => r.id === rowId);
+    if (!row) return;
+
+    if (row.dbId) {
+      try {
+        setAttendanceRows(prev => prev.map(r => r.id === rowId ? { ...r, isSaving: true } : r));
+        await deleteLabourAttendanceRecord(row.dbId);
+        showToast("Worker attendance deleted successfully.", "success");
+      } catch (err) {
+        console.error("Failed to delete record:", err);
+        showToast("Failed to delete: " + err.message, "error");
+        setAttendanceRows(prev => prev.map(r => r.id === rowId ? { ...r, isSaving: false } : r));
+        return;
       }
-      
-      const newEntry = {
-        categoryId: category.id,
-        categoryName: category.name,
-        displayName: `${category.name} ${nextNum}`,
+    }
+    setAttendanceRows(prev => prev.filter(r => r.id !== rowId));
+  };
+
+  const saveRowToFirestore = async (row) => {
+    const workerNameClean = row.workerName.trim();
+    if (!workerNameClean) return;
+
+    // Check for duplicate worker attendance on the same date
+    const hasDuplicate = labourHistoryRecords.some(r => 
+      r.attendanceDate === labourDate &&
+      r.workerName.toLowerCase().trim() === workerNameClean.toLowerCase() &&
+      r.id !== row.dbId
+    );
+    if (hasDuplicate) {
+      showToast(`Worker "${workerNameClean}" already has an attendance record on this date.`, "error");
+      // Reset local saving state
+      setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: false, isSaved: false } : r));
+      return;
+    }
+
+    // Check if anything has actually changed since the last save
+    if (row.isSaved && workerNameClean === row.lastSavedName && Number(row.attendanceValue) === Number(row.lastSavedValue)) {
+      return;
+    }
+
+    // Temporarily mark as saving in local state
+    setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: true } : r));
+
+    try {
+      const dbId = await saveLabourAttendanceRecord(row.dbId, {
+        attendanceDate: labourDate,
         siteId: activeSiteId,
-        engineerId: userProfile?.uid || userProfile?.id || "",
-        date: labourDate
-      };
-      
-      return [...prev, newEntry];
-    });
+        teamId: selectedLabourTeamId,
+        categoryId: row.categoryId,
+        workerName: workerNameClean,
+        attendanceValue: Number(row.attendanceValue),
+        createdBy: currentEngineerId
+      });
+
+      setAttendanceRows(prev => prev.map(r => r.id === row.id ? {
+        ...r,
+        dbId,
+        isSaving: false,
+        isSaved: true,
+        lastSavedName: workerNameClean,
+        lastSavedValue: Number(row.attendanceValue)
+      } : r));
+    } catch (err) {
+      console.error("Auto-save failed:", err);
+      showToast("Auto-save failed: " + err.message, "error");
+      setAttendanceRows(prev => prev.map(r => r.id === row.id ? { ...r, isSaving: false } : r));
+    }
   };
 
-  const handleDecrementLabour = (categoryId) => {
-    setLabourEntries(prev => {
-      const catEntries = prev.filter(e => e.categoryId === categoryId);
-      if (catEntries.length === 0) return prev;
-      
-      const lastEntry = catEntries[catEntries.length - 1];
-      return prev.filter(e => e !== lastEntry);
-    });
+  // Attendance History event handlers
+  const handleStartEditHistoryRecord = (record) => {
+    setEditingRecordId(record.id);
+    setEditingName(record.workerName);
+    setEditingValue(record.attendanceValue);
   };
 
-  const handleRemoveSpecificEntry = (entryToRemove) => {
-    setLabourEntries(prev => prev.filter(e => e !== entryToRemove));
+  const handleSaveHistoryRecord = async (recordId) => {
+    const record = labourHistoryRecords.find(r => r.id === recordId);
+    if (!record) return;
+
+    const workerNameClean = editingName.trim();
+    if (!workerNameClean) {
+      showToast("Worker Name cannot be empty.", "error");
+      return;
+    }
+
+    // Check for duplicate worker attendance on the same date
+    const hasDuplicate = labourHistoryRecords.some(r => 
+      r.attendanceDate === record.attendanceDate &&
+      r.workerName.toLowerCase().trim() === workerNameClean.toLowerCase() &&
+      r.id !== recordId
+    );
+    if (hasDuplicate) {
+      showToast(`Worker "${workerNameClean}" already has an attendance record on this date.`, "error");
+      return;
+    }
+
+    // Check if nothing changed
+    if (workerNameClean === record.workerName && Number(editingValue) === Number(record.attendanceValue)) {
+      setEditingRecordId(null);
+      return;
+    }
+
+    try {
+      await saveLabourAttendanceRecord(recordId, {
+        attendanceDate: record.attendanceDate,
+        siteId: record.siteId,
+        teamId: record.teamId,
+        categoryId: record.categoryId,
+        workerName: workerNameClean,
+        attendanceValue: Number(editingValue),
+        createdBy: record.createdBy || currentEngineerId
+      });
+      setEditingRecordId(null);
+      showToast("Attendance record updated successfully.", "success");
+    } catch (err) {
+      console.error("Failed to update record:", err);
+      showToast("Failed to update record: " + err.message, "error");
+    }
+  };
+
+  const handleDeleteHistoryRecord = async (recordId) => {
+    if (window.confirm("Are you sure you want to delete this worker record?")) {
+      try {
+        await deleteLabourAttendanceRecord(recordId);
+        showToast("Record deleted successfully.", "success");
+      } catch (err) {
+        console.error("Failed to delete record:", err);
+        showToast("Failed to delete: " + err.message, "error");
+      }
+    }
+  };
+
+  const handleDeleteCategoryHistoryRecords = async (dateStr, teamId, categoryId) => {
+    if (window.confirm(`Are you sure you want to delete all attendance records for this category on ${dateStr}?`)) {
+      const recordsToDelete = labourHistoryRecords.filter(r => 
+        r.attendanceDate === dateStr && 
+        r.teamId === teamId && 
+        r.categoryId === categoryId
+      );
+
+      if (recordsToDelete.length === 0) return;
+
+      try {
+        await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
+        showToast("Category attendance deleted successfully.", "success");
+      } catch (err) {
+        console.error("Failed to delete category records:", err);
+        showToast("Failed to delete category records: " + err.message, "error");
+      }
+    }
+  };
+
+  const handleDeleteTeamHistoryRecords = async (dateStr, teamId) => {
+    if (window.confirm(`Are you sure you want to delete the entire team's attendance for ${dateStr}?`)) {
+      const recordsToDelete = labourHistoryRecords.filter(r => 
+        r.attendanceDate === dateStr && 
+        r.teamId === teamId
+      );
+
+      if (recordsToDelete.length === 0) return;
+
+      try {
+        await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
+        showToast("Team attendance deleted successfully.", "success");
+      } catch (err) {
+        console.error("Failed to delete team records:", err);
+        showToast("Failed to delete team records: " + err.message, "error");
+      }
+    }
   };
 
   // 4. Save Material Receipt
@@ -4189,374 +4359,881 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
     const teamCategories = selectedTeam?.categories ? Object.values(selectedTeam.categories) : [];
     
-    // Filter categories that actually exist and are not empty
-    const activeCategories = teamCategories.filter(cat => cat.members && Object.keys(cat.members).length > 0);
-
-    // Calculate dynamic team metrics
-    const totalCategories = activeCategories.length;
-    let totalLabourMembers = 0;
-    const wageCycles = [];
-    const baseWages = [];
-    
-    activeCategories.forEach(cat => {
-      if (cat.members) {
-        totalLabourMembers += Object.keys(cat.members).length;
-      }
-      if (cat.paymentType) wageCycles.push(cat.paymentType);
-      if (cat.baseWage) baseWages.push(cat.baseWage);
-    });
-    
-    const cycleStr = Array.from(new Set(wageCycles)).join(", ") || "Daily";
-    const wageStr = baseWages.length > 0 ? `₹${Math.min(...baseWages)} - ₹${Math.max(...baseWages)}` : "N/A";
-
-    const getCategoryIcon = (catName) => {
-      const name = (catName || "").toLowerCase();
-      if (name.includes("mason")) return HardHat;
-      if (name.includes("helper")) return Users;
-      if (name.includes("electrician")) return Sliders;
-      if (name.includes("plumber")) return Activity;
-      return Briefcase;
-    };
-
-    // Calculate total man-days present and unique workers present
-    let totalManDays = 0;
-    let totalWorkersCount = 0;
-    Object.values(memberAttendanceUnits).forEach(val => {
-      const u = Number(val) || 0;
-      if (u > 0) {
-        totalManDays += u;
-        totalWorkersCount += 1;
-      }
-    });
+    // Sort categories alphabetically by name
+    teamCategories.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
-        {/* Date Selector */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span className="mobile-form-label" style={{ margin: 0 }}>Labour Attendance Date</span>
-            {assignedSites.length > 1 && (
-              <select
-                value={activeSiteId}
-                onChange={(e) => setActiveSiteId(e.target.value)}
-                style={{
-                  padding: "4px 8px",
-                  borderRadius: "4px",
-                  border: "1px solid var(--border-color)",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "var(--primary-800)",
-                  backgroundColor: "#fff"
-                }}
-              >
-                {assignedSites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
-            )}
-          </div>
-          <div className="input-wrapper" style={{ marginTop: "4px" }}>
-            <Calendar size={18} className="input-icon" />
-            <input 
-              type="date" 
-              value={labourDate} 
-              onChange={(e) => setLabourDate(e.target.value)} 
-              required 
-              style={{ height: "42px", padding: "10px 14px 10px 40px", fontSize: "14px" }}
-            />
-          </div>
-        </div>
-
-        {/* Team Selector */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-          <span className="mobile-form-label" style={{ margin: 0 }}>Select Labour Team</span>
-          <select
-            value={selectedLabourTeamId}
-            onChange={(e) => {
-              setSelectedLabourTeamId(e.target.value);
-              setMemberAttendanceUnits({});
-            }}
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "20px",
+        fontFamily: "'Outfit', 'Inter', sans-serif",
+        color: "#1c1b1f",
+        maxWidth: "600px",
+        margin: "0 auto",
+        padding: "8px 4px 80px 4px"
+      }}>
+        {/* Segmented Control (Material 3 style Tab Selector) */}
+        <div style={{
+          display: "flex",
+          backgroundColor: "#f3edf7",
+          borderRadius: "24px",
+          padding: "4px",
+          gap: "4px",
+          border: "1px solid #e7e0ec",
+          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.05)"
+        }}>
+          <button
+            type="button"
+            onClick={() => setActiveWorkforceSubTab("new-entry")}
             style={{
-              width: "100%",
-              padding: "12px 14px",
-              borderRadius: "10px",
-              border: "1px solid var(--border-color)",
-              backgroundColor: "#ffffff",
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: "20px",
               fontSize: "14px",
-              fontWeight: "600",
-              outline: "none",
-              boxShadow: "var(--shadow-xs)"
+              fontWeight: "750",
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: activeWorkforceSubTab === "new-entry" ? "#ffffff" : "transparent",
+              color: activeWorkforceSubTab === "new-entry" ? "#6750a4" : "#49454f",
+              boxShadow: activeWorkforceSubTab === "new-entry" ? "0px 1px 3px rgba(0,0,0,0.15)" : "none",
+              transition: "all 0.2s ease"
             }}
           >
-            <option value="">-- Choose Team --</option>
-            {labourTeams.map(t => (
-              <option key={t.id} value={t.id}>{t.teamName}</option>
-            ))}
-          </select>
+            Record Attendance
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveWorkforceSubTab("history")}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: "20px",
+              fontSize: "14px",
+              fontWeight: "750",
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: activeWorkforceSubTab === "history" ? "#ffffff" : "transparent",
+              color: activeWorkforceSubTab === "history" ? "#6750a4" : "#49454f",
+              boxShadow: activeWorkforceSubTab === "history" ? "0px 1px 3px rgba(0,0,0,0.15)" : "none",
+              transition: "all 0.2s ease"
+            }}
+          >
+            Attendance History
+          </button>
         </div>
 
-        {/* Dynamic Team Info Card (When a Team is selected) */}
-        {selectedLabourTeamId && selectedTeam && (
-          <div style={{
-            backgroundColor: "var(--primary-900)",
-            color: "#ffffff",
-            borderRadius: "14px",
-            padding: "20px",
-            boxShadow: "var(--shadow-md)",
-            background: "linear-gradient(135deg, var(--primary-900) 0%, var(--primary-950) 100%)",
-            border: "1px solid rgba(255,255,255,0.08)",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px"
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-              <div>
-                <span style={{ fontSize: "10px", textTransform: "uppercase", fontWeight: "700", opacity: 0.75, letterSpacing: "0.5px" }}>Active Team Registry</span>
-                <h3 style={{ margin: "2px 0 0 0", fontSize: "22px", fontWeight: "800", color: "var(--accent-400)" }}>{selectedTeam.teamName}</h3>
+        {activeWorkforceSubTab === "history" ? (
+          renderLabourAttendanceHistoryView()
+        ) : (
+          <>
+            {/* Date Selector (Material 3 style) */}
+            <div style={{
+              backgroundColor: "#f7f2fa",
+              borderRadius: "16px",
+              padding: "16px 20px",
+              border: "1px solid #e7e0ec",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              <label style={{
+                fontSize: "12px",
+                fontWeight: "700",
+                color: "#6750a4",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px"
+              }}>
+                Attendance Date
+              </label>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#49454f" }} />
+                <input 
+                  type="date" 
+                  value={labourDate} 
+                  onChange={(e) => setLabourDate(e.target.value)} 
+                  style={{
+                    width: "100%",
+                    height: "48px",
+                    padding: "12px 14px 12px 44px",
+                    borderRadius: "12px",
+                    border: "1px solid #79747e",
+                    backgroundColor: "#ffffff",
+                    fontSize: "16px",
+                    outline: "none",
+                    color: "#1c1b1f"
+                  }}
+                />
               </div>
-              <span className="badge" style={{ backgroundColor: "rgba(34, 197, 94, 0.2)", color: "#4ade80", border: "1px solid rgba(34, 197, 94, 0.3)", fontSize: "11px", fontWeight: "700", padding: "4px 10px", borderRadius: "12px" }}>
-                Live Firestore
-              </span>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", borderTop: "1px solid rgba(255,255,255,0.12)", paddingTop: "14px" }}>
-              <div>
-                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Categories</span>
-                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{totalCategories} Active Trades</strong>
+            {/* Team Selector (Material 3 style) */}
+            <div style={{
+              backgroundColor: "#f7f2fa",
+              borderRadius: "16px",
+              padding: "16px 20px",
+              border: "1px solid #e7e0ec",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              <label style={{
+                fontSize: "12px",
+                fontWeight: "700",
+                color: "#6750a4",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px"
+              }}>
+                Labour Team
+              </label>
+              <select
+                value={selectedLabourTeamId}
+                onChange={(e) => setSelectedLabourTeamId(e.target.value)}
+                style={{
+                  width: "100%",
+                  height: "48px",
+                  padding: "12px 14px",
+                  borderRadius: "12px",
+                  border: "1px solid #79747e",
+                  backgroundColor: "#ffffff",
+                  fontSize: "16px",
+                  outline: "none",
+                  color: "#1c1b1f",
+                  fontWeight: "600"
+                }}
+              >
+                <option value="">-- Select Labour Team --</option>
+                {labourTeams.map(t => (
+                  <option key={t.id} value={t.id}>{t.teamName}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Categories & Dynamic Rows list */}
+            {!selectedLabourTeamId ? (
+              <div style={{
+                textAlign: "center",
+                padding: "48px 24px",
+                backgroundColor: "#fff",
+                borderRadius: "24px",
+                border: "1px dashed #79747e",
+                color: "#49454f",
+                fontSize: "15px",
+                fontWeight: "500"
+              }}>
+                Please select a Labour Team to record attendance
               </div>
-              <div>
-                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Registered Force</span>
-                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{totalLabourMembers} Workers</strong>
+            ) : teamCategories.length === 0 ? (
+              <div style={{
+                textAlign: "center",
+                padding: "48px 24px",
+                backgroundColor: "#fff",
+                borderRadius: "24px",
+                border: "1px dashed #b3261e",
+                color: "#b3261e",
+                fontSize: "15px",
+                fontWeight: "600"
+              }}>
+                No categories configured for this Team by Admin
               </div>
-              <div>
-                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Wage Cycle</span>
-                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{cycleStr}</strong>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {teamCategories.map(cat => {
+                  const catRows = attendanceRows.filter(row => row.categoryId === cat.id);
+                  
+                  return (
+                    <div key={cat.id} style={{
+                      backgroundColor: "#ffffff",
+                      borderRadius: "20px",
+                      border: "1px solid #e7e0ec",
+                      padding: "16px",
+                      boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)"
+                    }}>
+                      {/* Category Header */}
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        marginBottom: "12px",
+                        borderBottom: "1px solid #e7e0ec",
+                        paddingBottom: "8px"
+                      }}>
+                        <span style={{
+                          fontSize: "16px",
+                          fontWeight: "700",
+                          color: "#1c1b1f"
+                        }}>
+                          {cat.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleAddWorkerRow(cat.id)}
+                          style={{
+                            backgroundColor: "#6750a4",
+                            color: "#ffffff",
+                            border: "none",
+                            borderRadius: "20px",
+                            padding: "6px 14px",
+                            fontSize: "12px",
+                            fontWeight: "700",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            boxShadow: "0px 1px 2px rgba(0, 0, 0, 0.15)",
+                            transition: "all 0.2s ease"
+                          }}
+                          onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#533f8a"}
+                          onMouseOut={(e) => e.currentTarget.style.backgroundColor = "#6750a4"}
+                        >
+                          <Plus size={14} /> Add Worker
+                        </button>
+                      </div>
+
+                      {/* Worker Rows */}
+                      {catRows.length === 0 ? (
+                        <div style={{
+                          textAlign: "center",
+                          padding: "12px",
+                          color: "#49454f",
+                          fontStyle: "italic",
+                          fontSize: "13px"
+                        }}>
+                          No workers. Click "+ Add Worker" to add.
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                          {catRows.map((row) => (
+                            <div key={row.id} style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "8px",
+                              borderRadius: "12px",
+                              backgroundColor: "#f7f2fa",
+                              border: "1px solid #e7e0ec"
+                            }}>
+                              {/* Worker Name Input */}
+                              <div style={{ flex: 2, display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <input
+                                  type="text"
+                                  placeholder="Worker Name"
+                                  value={row.workerName}
+                                  onChange={(e) => handleWorkerRowChange(row.id, "workerName", e.target.value)}
+                                  onBlur={() => handleWorkerRowBlur(row.id)}
+                                  autoFocus={!row.workerName}
+                                  style={{
+                                    width: "100%",
+                                    height: "38px",
+                                    padding: "8px 12px",
+                                    borderRadius: "8px",
+                                    border: !row.workerName && row.isSaved === false ? "1.5px solid #b3261e" : "1px solid #79747e",
+                                    fontSize: "14px",
+                                    color: "#1c1b1f",
+                                    outline: "none",
+                                    backgroundColor: "#ffffff"
+                                  }}
+                                />
+                              </div>
+
+                              {/* Attendance Type Dropdown */}
+                              <div style={{ flex: 1.2 }}>
+                                <select
+                                  value={row.attendanceValue}
+                                  onChange={(e) => handleWorkerRowChange(row.id, "attendanceValue", Number(e.target.value))}
+                                  style={{
+                                    width: "100%",
+                                    height: "38px",
+                                    padding: "8px",
+                                    borderRadius: "8px",
+                                    border: "1px solid #79747e",
+                                    fontSize: "14px",
+                                    outline: "none",
+                                    backgroundColor: "#ffffff",
+                                    color: "#1c1b1f",
+                                    fontWeight: "600"
+                                  }}
+                                >
+                                  <option value={1.0}>Full Day</option>
+                                  <option value={0.5}>Half Day</option>
+                                </select>
+                              </div>
+
+                              {/* Status Indicator */}
+                              <div style={{
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                width: "24px"
+                              }}>
+                                {row.isSaving ? (
+                                  <span style={{
+                                    width: "14px",
+                                    height: "14px",
+                                    border: "2px solid #6750a4",
+                                    borderTop: "2px solid transparent",
+                                    borderRadius: "50%",
+                                    animation: "spin 0.8s linear infinite",
+                                    display: "inline-block"
+                                  }} />
+                                ) : row.isSaved ? (
+                                  <CheckCircle2 size={18} style={{ color: "#2e7d32" }} title="Saved to Firestore" />
+                                ) : row.workerName.trim() ? (
+                                  <AlertCircle size={18} style={{ color: "#ff8f00" }} title="Unsaved changes" />
+                                ) : (
+                                  <div style={{ width: "18px" }} />
+                                )}
+                              </div>
+
+                              {/* Delete Button */}
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteWorkerRow(row.id)}
+                                style={{
+                                  border: "none",
+                                  backgroundColor: "transparent",
+                                  color: "#b3261e",
+                                  cursor: "pointer",
+                                  padding: "4px",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  borderRadius: "50%",
+                                  transition: "background-color 0.2s"
+                                }}
+                                onMouseOver={(e) => e.currentTarget.style.backgroundColor = "#f9dedc"}
+                                onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                                title="Remove worker"
+                              >
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-              <div>
-                <span style={{ fontSize: "10px", color: "rgba(255,255,255,0.6)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Base Wages</span>
-                <strong style={{ fontSize: "15px", color: "#ffffff", fontWeight: "800" }}>{wageStr}</strong>
-              </div>
+            )}
+          </>
+        )}
+        
+        {/* CSS Keyframes for Spin Loader */}
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
+        `}} />
+      </div>
+    );
+  };
+
+  const renderLabourAttendanceHistoryView = () => {
+    // 1. Filter records in memory
+    const filteredRecords = labourHistoryRecords.filter(r => {
+      if (filterSearch.trim() && !r.workerName.toLowerCase().includes(filterSearch.trim().toLowerCase())) {
+        return false;
+      }
+      if (filterDate && r.attendanceDate !== filterDate) {
+        return false;
+      }
+      if (filterTeamId && r.teamId !== filterTeamId) {
+        return false;
+      }
+      if (filterCategory && r.categoryId !== filterCategory) {
+        return false;
+      }
+      return true;
+    });
+
+    // 2. Group by Date -> Team -> Category
+    const groupedByDate = {};
+    filteredRecords.forEach(r => {
+      const date = r.attendanceDate;
+      if (!groupedByDate[date]) {
+        groupedByDate[date] = {};
+      }
+      const dateGroup = groupedByDate[date];
+      
+      const teamId = r.teamId;
+      if (!dateGroup[teamId]) {
+        dateGroup[teamId] = {};
+      }
+      const teamGroup = dateGroup[teamId];
+      
+      const catId = r.categoryId;
+      if (!teamGroup[catId]) {
+        teamGroup[catId] = [];
+      }
+      teamGroup[catId].push(r);
+    });
+
+    // Get unique categories for dropdown filter
+    const allCategories = [];
+    const catSeen = new Set();
+    labourTeams.forEach(t => {
+      if (t.categories) {
+        Object.values(t.categories).forEach(c => {
+          if (!catSeen.has(c.name)) {
+            catSeen.add(c.name);
+            allCategories.push({ id: c.id, name: c.name });
+          }
+        });
+      }
+    });
+    allCategories.sort((a, b) => a.name.localeCompare(b.name));
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Filters Card */}
+        <div style={{
+          backgroundColor: "#ffffff",
+          borderRadius: "16px",
+          padding: "16px",
+          border: "1px solid #e7e0ec",
+          display: "flex",
+          flexDirection: "column",
+          gap: "12px",
+          boxShadow: "0px 1px 2px rgba(0, 0, 0, 0.05)"
+        }}>
+          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#6750a4" }}>Filter History</h4>
+          
+          {/* Worker Name Search */}
+          <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+            <Search size={18} style={{ position: "absolute", left: "12px", color: "#49454f" }} />
+            <input 
+              type="text"
+              placeholder="Search worker name..."
+              value={filterSearch}
+              onChange={(e) => setFilterSearch(e.target.value)}
+              style={{
+                width: "100%",
+                height: "40px",
+                padding: "8px 12px 8px 38px",
+                borderRadius: "8px",
+                border: "1px solid #79747e",
+                backgroundColor: "#ffffff",
+                fontSize: "14px",
+                outline: "none",
+                color: "#1c1b1f"
+              }}
+            />
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+            {/* Date filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Date</span>
+              <input 
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #79747e",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13px",
+                  outline: "none",
+                  color: "#1c1b1f"
+                }}
+              />
+            </div>
+
+            {/* Team Filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Team</span>
+              <select
+                value={filterTeamId}
+                onChange={(e) => setFilterTeamId(e.target.value)}
+                style={{
+                  height: "40px",
+                  padding: "8px",
+                  borderRadius: "8px",
+                  border: "1px solid #79747e",
+                  backgroundColor: "#ffffff",
+                  fontSize: "13px",
+                  outline: "none",
+                  color: "#1c1b1f",
+                  fontWeight: "600"
+                }}
+              >
+                <option value="">All Teams</option>
+                {labourTeams.map(t => (
+                  <option key={t.id} value={t.id}>{t.teamName}</option>
+                ))}
+              </select>
             </div>
           </div>
-        )}
 
-        {/* Categories & Members list */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          {!selectedLabourTeamId ? (
-            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "13px" }}>
-              Please select a Labour Team to view workers
-            </div>
-          ) : activeCategories.length === 0 ? (
-            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", fontWeight: "600", fontSize: "13px" }}>
-              No active categories or workers configured for "{selectedTeam?.teamName}"
+          {/* Category Filter */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Category</span>
+            <select
+              value={filterCategory}
+              onChange={(e) => setFilterCategory(e.target.value)}
+              style={{
+                height: "40px",
+                padding: "8px",
+                borderRadius: "8px",
+                border: "1px solid #79747e",
+                backgroundColor: "#ffffff",
+                fontSize: "13px",
+                outline: "none",
+                color: "#1c1b1f",
+                fontWeight: "600"
+              }}
+            >
+              <option value="">All Categories</option>
+              {allCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Reset Filters button */}
+          {(filterSearch || filterDate || filterTeamId || filterCategory) && (
+            <button
+              type="button"
+              onClick={() => {
+                setFilterSearch("");
+                setFilterDate("");
+                setFilterTeamId("");
+                setFilterCategory("");
+              }}
+              style={{
+                alignSelf: "flex-end",
+                backgroundColor: "transparent",
+                color: "#6750a4",
+                border: "none",
+                fontSize: "12px",
+                fontWeight: "700",
+                cursor: "pointer",
+                padding: "4px 8px"
+              }}
+            >
+              Clear Filters
+            </button>
+          )}
+        </div>
+
+        {/* History Records List */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          {Object.keys(groupedByDate).length === 0 ? (
+            <div style={{
+              textAlign: "center",
+              padding: "40px 16px",
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              border: "1px dashed #79747e",
+              color: "#49454f",
+              fontSize: "14px"
+            }}>
+              {labourHistoryRecords.length === 0 
+                ? "No attendance records found for this site yet." 
+                : "No records match the selected filters."}
             </div>
           ) : (
-            activeCategories.map(cat => {
-              const IconComponent = getCategoryIcon(cat.name);
-              const membersList = cat.members ? Object.values(cat.members) : [];
+            Object.keys(groupedByDate).map(dateStr => {
+              const isExpanded = expandedDates.includes(dateStr);
+              const dateTeams = groupedByDate[dateStr];
+              
+              // Total worker records count on this date
+              let dateTotalWorkers = 0;
+              Object.values(dateTeams).forEach(teamCats => {
+                Object.values(teamCats).forEach(records => {
+                  dateTotalWorkers += records.length;
+                });
+              });
+
+              // Format date string to display (e.g. DD-MM-YYYY)
+              let displayDateStr = dateStr;
+              try {
+                const [y, m, d] = dateStr.split("-");
+                if (y && m && d) displayDateStr = `${d}-${m}-${y}`;
+              } catch (e) {}
+
               return (
-                <div key={cat.id} style={{
+                <div key={dateStr} style={{
                   backgroundColor: "#ffffff",
-                  borderRadius: "12px",
-                  border: "1px solid var(--border-color)",
-                  boxShadow: "var(--shadow-sm)",
-                  padding: "16px",
-                  display: "flex",
-                  flexDirection: "column",
-                  gap: "12px"
+                  borderRadius: "16px",
+                  border: "1px solid #e7e0ec",
+                  overflow: "hidden",
+                  boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)",
+                  transition: "all 0.2s"
                 }}>
-                  {/* Category Header Card */}
-                  <div style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    borderBottom: "1px solid var(--border-color)",
-                    paddingBottom: "10px"
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center" }}>
-                      <IconComponent size={20} style={{ color: "var(--primary-600)", marginRight: "8px" }} />
-                      <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-900)" }}>{cat.name}</h4>
+                  {/* Expandable Card Header */}
+                  <div 
+                    onClick={() => {
+                      setExpandedDates(prev => 
+                        prev.includes(dateStr) 
+                          ? prev.filter(d => d !== dateStr) 
+                          : [...prev, dateStr]
+                      );
+                    }}
+                    style={{
+                      padding: "16px 20px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      backgroundColor: isExpanded ? "#f3edf7" : "#ffffff",
+                      cursor: "pointer",
+                      borderBottom: isExpanded ? "1px solid #e7e0ec" : "none",
+                      transition: "background-color 0.2s"
+                    }}
+                  >
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <span style={{ fontSize: "16px", fontWeight: "800", color: "#1d1b20" }}>{displayDateStr}</span>
+                      <span style={{ fontSize: "12px", color: "#49454f", fontWeight: "600" }}>
+                        {dateTotalWorkers} Workers Present
+                      </span>
                     </div>
-                    <span className="badge badge-success" style={{
-                      fontSize: "11px",
-                      padding: "4px 8px",
-                      borderRadius: "20px",
-                      fontWeight: "800",
-                      backgroundColor: "var(--success-50)",
-                      color: "var(--success-700)",
-                      border: "none"
+                    <span style={{
+                      transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s",
+                      fontSize: "18px",
+                      color: "#49454f"
                     }}>
-                      {membersList.length} {membersList.length === 1 ? "Worker" : "Workers"}
+                      ▶
                     </span>
                   </div>
 
-                  {/* Members List */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {membersList.map(m => {
-                      const units = memberAttendanceUnits[m.memberId] || 0;
-                      return (
-                        <div key={m.memberId} style={{
-                          padding: "12px",
-                          borderRadius: "8px",
-                          backgroundColor: "var(--primary-50)",
-                          border: "1px solid var(--border-color)",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "10px"
-                        }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              <span style={{ fontWeight: "700", fontSize: "13.5px", color: "var(--primary-950)" }}>{m.name}</span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>
-                                ID: {m.memberId} · Wage: ₹{m.salary}
-                              </span>
-                            </div>
-                            <span style={{
-                              fontSize: "12px",
-                              fontWeight: "800",
-                              color: units > 0 ? "var(--success-700)" : "var(--text-muted)",
-                              backgroundColor: units > 0 ? "var(--success-50)" : "transparent",
-                              padding: "2px 8px",
-                              borderRadius: "6px"
-                            }}>
-                              {units > 0 ? `${units} Day` : "Absent"}
-                            </span>
-                          </div>
+                  {/* Expandable Card Content */}
+                  {isExpanded && (
+                    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "20px" }}>
+                      {Object.keys(dateTeams).map(teamId => {
+                        const teamCats = dateTeams[teamId];
+                        const teamObj = labourTeams.find(t => t.id === teamId);
+                        const teamName = teamObj ? teamObj.teamName : "Unknown Team";
 
-                          {/* Attendance Selector Button Group */}
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
-                            {[
-                              { val: 0, label: "Absent", activeColor: "#e2e8f0", activeTextColor: "#475569" },
-                              { val: 0.25, label: "0.25 Day", activeColor: "#fef08a", activeTextColor: "#854d0e" },
-                              { val: 0.5, label: "0.5 Day", activeColor: "#fed7aa", activeTextColor: "#9a3412" },
-                              { val: 1.0, label: "1.0 Day", activeColor: "#bbf7d0", activeTextColor: "#166534" }
-                            ].map(opt => {
-                              const isActive = units === opt.val;
-                              return (
-                                <button
-                                  key={opt.val}
-                                  type="button"
-                                  onClick={() => {
-                                    setMemberAttendanceUnits(prev => ({
-                                      ...prev,
-                                      [m.memberId]: opt.val
-                                    }));
-                                  }}
-                                  style={{
-                                    padding: "8px 2px",
-                                    borderRadius: "6px",
-                                    border: isActive ? "1px solid transparent" : "1px solid var(--border-color)",
-                                    fontSize: "11px",
-                                    fontWeight: "750",
-                                    cursor: "pointer",
-                                    backgroundColor: isActive ? opt.activeColor : "#ffffff",
-                                    color: isActive ? opt.activeTextColor : "var(--text-muted)",
-                                    transition: "all 0.15s ease",
-                                    boxShadow: isActive ? "var(--shadow-xs)" : "none"
-                                  }}
-                                >
-                                  {opt.label}
-                                </button>
-                              );
-                            })}
+                        return (
+                          <div key={teamId} style={{
+                            display: "flex",
+                            flexDirection: "column",
+                            gap: "12px",
+                            border: "1px solid #e7e0ec",
+                            borderRadius: "12px",
+                            padding: "12px"
+                          }}>
+                            {/* Team Header */}
+                            <div style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              borderBottom: "1.5px solid #6750a4",
+                              paddingBottom: "6px"
+                            }}>
+                              <span style={{ fontSize: "14px", fontWeight: "800", color: "#6750a4" }}>
+                                Team: {teamName}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteTeamHistoryRecords(dateStr, teamId)}
+                                style={{
+                                  border: "none",
+                                  backgroundColor: "transparent",
+                                  color: "#b3261e",
+                                  cursor: "pointer",
+                                  fontSize: "11px",
+                                  fontWeight: "700",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: "4px"
+                                }}
+                                title="Delete entire team attendance for this date"
+                              >
+                                <Trash2 size={14} /> Delete Team
+                              </button>
+                            </div>
+
+                            {/* Categories under Team */}
+                            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                              {Object.keys(teamCats).map(catId => {
+                                const records = teamCats[catId];
+                                const catObj = teamObj?.categories?.[catId];
+                                const catName = catObj ? catObj.name : "Unknown Category";
+
+                                return (
+                                  <div key={catId} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                                    {/* Category Subheader */}
+                                    <div style={{
+                                      display: "flex",
+                                      justifyContent: "space-between",
+                                      alignItems: "center",
+                                      backgroundColor: "#f7f2fa",
+                                      padding: "4px 8px",
+                                      borderRadius: "6px"
+                                    }}>
+                                      <span style={{ fontSize: "13px", fontWeight: "700", color: "#1c1b1f" }}>
+                                        {catName}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => handleDeleteCategoryHistoryRecords(dateStr, teamId, catId)}
+                                        style={{
+                                          border: "none",
+                                          backgroundColor: "transparent",
+                                          color: "#b3261e",
+                                          cursor: "pointer",
+                                          fontSize: "11px",
+                                          fontWeight: "700",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "4px"
+                                        }}
+                                        title="Delete category attendance for this date"
+                                      >
+                                        <Trash2 size={13} /> Delete Category
+                                      </button>
+                                    </div>
+
+                                    {/* Workers under Category */}
+                                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                                      {records.map(record => {
+                                        const isEditing = editingRecordId === record.id;
+                                        return (
+                                          <div key={record.id} style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            padding: "6px 8px 6px 12px",
+                                            backgroundColor: "#fbfafe",
+                                            borderRadius: "8px",
+                                            border: "1px solid #e7e0ec"
+                                          }}>
+                                            {isEditing ? (
+                                              <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+                                                <input 
+                                                  type="text"
+                                                  value={editingName}
+                                                  onChange={(e) => setEditingName(e.target.value)}
+                                                  style={{
+                                                    flex: 2,
+                                                    height: "32px",
+                                                    padding: "4px 8px",
+                                                    borderRadius: "6px",
+                                                    border: "1px solid #79747e",
+                                                    fontSize: "13px"
+                                                  }}
+                                                />
+                                                <select
+                                                  value={editingValue}
+                                                  onChange={(e) => setEditingValue(Number(e.target.value))}
+                                                  style={{
+                                                    flex: 1.2,
+                                                    height: "32px",
+                                                    padding: "4px",
+                                                    borderRadius: "6px",
+                                                    border: "1px solid #79747e",
+                                                    fontSize: "13px",
+                                                    fontWeight: "600"
+                                                  }}
+                                                >
+                                                  <option value={1.0}>Full Day</option>
+                                                  <option value={0.5}>Half Day</option>
+                                                </select>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => handleSaveHistoryRecord(record.id)}
+                                                  style={{
+                                                    backgroundColor: "#2e7d32",
+                                                    color: "#ffffff",
+                                                    border: "none",
+                                                    borderRadius: "6px",
+                                                    padding: "4px 8px",
+                                                    fontSize: "12px",
+                                                    fontWeight: "700",
+                                                    cursor: "pointer"
+                                                  }}
+                                                >
+                                                  Save
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setEditingRecordId(null)}
+                                                  style={{
+                                                    backgroundColor: "transparent",
+                                                    color: "#49454f",
+                                                    border: "none",
+                                                    fontSize: "12px",
+                                                    fontWeight: "700",
+                                                    cursor: "pointer"
+                                                  }}
+                                                >
+                                                  Cancel
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <>
+                                                <span style={{ fontSize: "13px", color: "#1c1b1f" }}>
+                                                  <strong style={{ color: "#1d1b20" }}>{record.workerName}</strong>
+                                                  <span style={{ margin: "0 6px", color: "#79747e" }}>—</span>
+                                                  <span style={{
+                                                    fontWeight: "700",
+                                                    color: record.attendanceValue === 1.0 ? "#2e7d32" : "#9a3412"
+                                                  }}>
+                                                    {record.attendanceValue === 1.0 ? "Full Day" : "Half Day"}
+                                                  </span>
+                                                </span>
+                                                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleStartEditHistoryRecord(record)}
+                                                    style={{
+                                                      border: "none",
+                                                      backgroundColor: "transparent",
+                                                      color: "#6750a4",
+                                                      cursor: "pointer",
+                                                      padding: "4px",
+                                                      fontSize: "11px",
+                                                      fontWeight: "700"
+                                                    }}
+                                                  >
+                                                    Edit
+                                                  </button>
+                                                  <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteHistoryRecord(record.id)}
+                                                    style={{
+                                                      border: "none",
+                                                      backgroundColor: "transparent",
+                                                      color: "#b3261e",
+                                                      cursor: "pointer",
+                                                      padding: "4px",
+                                                      fontSize: "11px",
+                                                      fontWeight: "700"
+                                                    }}
+                                                  >
+                                                    Delete
+                                                  </button>
+                                                </div>
+                                              </>
+                                            )}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })
           )}
         </div>
-
-        {/* Workforce Total Count */}
-        {selectedLabourTeamId && activeCategories.length > 0 && (
-          <div style={{
-            backgroundColor: "var(--primary-900)",
-            color: "#ffffff",
-            borderRadius: "12px",
-            padding: "16px",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            boxShadow: "var(--shadow-md)",
-            marginTop: "16px",
-            background: "linear-gradient(135deg, var(--primary-900) 0%, var(--primary-950) 100%)",
-            border: "1px solid rgba(255,255,255,0.08)"
-          }}>
-            <div>
-              <span style={{ fontSize: "11px", opacity: 0.8, textTransform: "uppercase", fontWeight: "700", display: "block" }}>Wages / Attendance Accrued</span>
-              <span style={{ fontSize: "16px", fontWeight: "800", color: "var(--accent-400)" }}>
-                {totalManDays} Man-days ({totalWorkersCount} present)
-              </span>
-            </div>
-            <button
-              type="button"
-              className="mobile-attendance-btn"
-              style={{ backgroundColor: "var(--accent-500)", color: "var(--primary-950)", fontSize: "12px", fontWeight: "800" }}
-              onClick={handleSaveLabourCounts}
-              disabled={labourSaving}
-            >
-              {labourSaving ? "Saving..." : "Save Attendance"}
-            </button>
-          </div>
-        )}
-
-        {/* History logs */}
-        <div style={{ marginTop: "24px" }}>
-          <span className="mobile-form-label">Workforce History Logs</span>
-          {labourHistoryLoading ? (
-            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>Loading logs...</div>
-          ) : labourHistory.length === 0 ? (
-            <div style={{ textAlign: "center", fontSize: "12px", color: "var(--text-muted)", padding: "16px" }}>No past records found.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {labourHistory.map(row => (
-                <div key={row.date} style={{
-                  padding: "12px 16px",
-                  border: "1px solid var(--border-color)",
-                  borderRadius: "var(--radius-md)",
-                  backgroundColor: "#ffffff",
-                  boxShadow: "var(--shadow-sm)"
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                    <span className="font-mono" style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "13px" }}>{row.date}</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span className="badge badge-success" style={{ fontWeight: "800", fontSize: "11px", backgroundColor: "var(--success-50)", color: "var(--success-700)", border: "none" }}>{row.total} Workers</span>
-                      {row.engineerId === currentEngineerId && (
-                        <button 
-                          type="button" 
-                          onClick={() => handleDeleteLabourLog(row.date)}
-                          style={{ border: "none", backgroundColor: "transparent", color: "var(--danger-500)", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center" }}
-                          title="Delete Labour Log"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
-                    {Object.entries(row).map(([k, v]) => {
-                      if (["date", "total", "id", "siteId", "createdAt", "updatedAt", "engineerId"].includes(k)) return null;
-                      let masterKey = k;
-                      if (k === "Masons") masterKey = "Mason";
-                      if (k === "Helpers") masterKey = "Helper";
-                      if (k === "Painters") masterKey = "Painter";
-                      if (k === "Plumbers") masterKey = "Plumber";
-                      if (k === "Electricians") masterKey = "Electrician";
-                      if (k === "Others") masterKey = "Other";
-                      return <span key={k}>{getLabourDisplayName(masterKey)}: {v}</span>;
-                    }).filter(Boolean).reduce((prev, curr) => [prev, <span key={Math.random()}>•</span>, curr], [])}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     );
   };
+
 
 
   const renderMoreView = () => {
