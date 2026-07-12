@@ -25,7 +25,12 @@ import {
   Eye,
   FolderOpen,
   HardHat,
-  ArrowRight
+  ArrowRight,
+  ChevronRight,
+  TrendingUp,
+  Search,
+  Bell,
+  Briefcase
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -94,13 +99,12 @@ export default function AdminDashboard() {
       }
     };
 
-    // 1. Sites Listener — filtered to this admin's sites (soft filter for legacy data)
+    // 1. Sites Listener
     const adminUid = user?.uid || null;
     const unsubSites = onSnapshot(collection(db, "sites"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
         const data = docSnap.data();
-        // Soft filter: include sites with no createdByAdmin (legacy) or matching this admin
         if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
         list.push({ id: docSnap.id, ...data });
       });
@@ -113,7 +117,7 @@ export default function AdminDashboard() {
       checkLoadingComplete();
     });
 
-    // 2. Engineers Listener (with legacy fallback) — filtered to this admin's engineers
+    // 2. Engineers Listener
     let unsubLegacyEngineers = null;
     const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
       if (snapshot.empty) {
@@ -194,7 +198,7 @@ export default function AdminDashboard() {
       console.error("Materials listener error:", err);
     });
 
-    // 5. Teams Listener to fetch active workers from the centralized team master
+    // 5. Teams Listener
     const unsubWorkers = onSnapshot(collection(db, "labourTeams"), (snapshot) => {
       const flattenedWorkers = [];
       snapshot.forEach(docSnap => {
@@ -223,8 +227,7 @@ export default function AdminDashboard() {
       console.error("Labour teams listener error on Dashboard:", err);
     });
 
-
-    // 7. System Activities Listener (limit 50, sorted in-memory desc)
+    // 7. System Activities Listener
     const qSys = query(collection(db, "activities"), limit(50));
     const unsubSys = onSnapshot(qSys, (snapshot) => {
       const list = [];
@@ -276,7 +279,6 @@ export default function AdminDashboard() {
       unsubAttendance();
       unsubMaterials();
       unsubWorkers();
-
       unsubSys();
       unsubApprovals();
       unsubDocuments();
@@ -290,18 +292,16 @@ export default function AdminDashboard() {
     engineersMap[eng.id] = eng.fullName;
   });
 
-  // Calculate sites that have at least one assigned engineer
   const totalAssignedProjects = sites.filter(
     site => site.assignedEngineers && site.assignedEngineers.length > 0
   ).length;
 
   const pendingCount = approvals.filter(r => (r.status || "").toLowerCase() === "pending").length;
 
-  // Compute Alerts and Reminders dynamically
+  // Compute Alerts dynamically
   const alerts = [];
-  
-  // 1. Long Pending Approvals (Pending > 3 days)
   const nowMs = Date.now();
+
   approvals.forEach(a => {
     if ((a.status || "").toLowerCase() === "pending") {
       const createdMs = a.createdAt?.seconds 
@@ -313,26 +313,24 @@ export default function AdminDashboard() {
           id: `alert_app_${a.id}`,
           type: "warning",
           category: "Approvals",
-          title: "Long Pending Approval Request",
-          message: `${a.type} request from ${a.requestedBy} for ${a.siteName} has been pending for over 3 days.`
+          title: "Pending Requisition",
+          message: `${a.type} from ${a.requestedBy} has been pending for over 3 days.`
         });
       }
     }
   });
 
-  // 1.5 Pending Document Verification Alert
   const pendingDocs = documents.filter(d => (d.status || "").toLowerCase() === "uploaded" || (d.status || "").toLowerCase() === "pending" || !d.status);
   if (pendingDocs.length > 0) {
     alerts.push({
       id: "alert_pending_docs",
       type: "warning",
       category: "Documents",
-      title: "Pending Document Verification",
-      message: `There are ${pendingDocs.length} uploaded project document(s) waiting for verification.`
+      title: "Document Review",
+      message: `There are ${pendingDocs.length} site document(s) awaiting verification.`
     });
   }
 
-  // 2. Missing Daily Progress Updates (Active sites with no updates in > 48h)
   sites.forEach(site => {
     if ((site.status || "").toLowerCase() === "active") {
       const updates = systemActivities.filter(a => a.siteId === site.id && a.moduleType === "Progress");
@@ -354,27 +352,25 @@ export default function AdminDashboard() {
           id: `alert_dpr_${site.id}`,
           type: "danger",
           category: "Progress",
-          title: "Missing Daily Progress Report",
-          message: `No progress updates submitted for project "${site.siteName}" in the last 48 hours.`
+          title: "Missing DPR",
+          message: `No updates logged for "${site.siteName}" in the last 48 hours.`
         });
       }
     }
   });
 
-  // 3. Delayed Projects (Site delayed scheduled milestone)
   sites.forEach(site => {
     if (site.status === "Delayed" || site.isSiteDelayed) {
       alerts.push({
         id: `alert_delay_${site.id}`,
         type: "danger",
         category: "Milestone",
-        title: "Construction Project Schedule Delayed",
-        message: `Project "${site.siteName}" milestone execution status has been flagged as delayed.`
+        title: "Timeline Slippage",
+        message: `Project "${site.siteName}" timeline has slipped behind target.`
       });
     }
   });
 
-  // Combine site entry/exit logs with module system activities
   const mappedSys = systemActivities.map(s => ({
     id: s.id,
     type: s.actionType,
@@ -387,7 +383,7 @@ export default function AdminDashboard() {
       ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     description: s.description,
-    details: `Module: ${s.moduleType} Action`,
+    details: `Module: ${s.moduleType}`,
     timestamp: s.createdAt,
     isSystem: true,
     moduleType: s.moduleType
@@ -397,7 +393,7 @@ export default function AdminDashboard() {
     .sort((a, b) => {
       const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
       const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
-      return tB - tA; // sorted descending
+      return tB - tA;
     })
     .filter(log => {
       if (filterSite && log.siteId !== filterSite) return false;
@@ -406,7 +402,6 @@ export default function AdminDashboard() {
       return true;
     });
 
-  // Group timeline by date for display
   const groupedTimeline = {};
   combinedTimeline.forEach(log => {
     const d = log.date || "Unknown Date";
@@ -428,9 +423,224 @@ export default function AdminDashboard() {
 
   return (
     <Layout 
-      title="Overview Dashboard" 
-      description="Executive summary of civil construction site operations, workforce levels, and resource tracking."
+      title="ERP Control Center" 
+      description="Enterprise civil construction intelligence console. Real-time scheduling, personnel deployment and capital utilization analytics."
     >
+      {/* Dynamic inline variables & styling overrides for a premium dark-slate / warm accent theme */}
+      <style>{`
+        .erp-kpi-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+          gap: 16px;
+          margin-bottom: 24px;
+        }
+        
+        .erp-kpi-card {
+          background: #ffffff;
+          border: 1px solid var(--border-color, #e2e8f0);
+          border-radius: 12px;
+          padding: 18px 20px;
+          display: flex;
+          align-items: center;
+          gap: 16px;
+          box-shadow: 0 4px 6px -1px rgba(0,0,0,0.02), 0 2px 4px -2px rgba(0,0,0,0.02);
+          transition: all 0.2s ease;
+          position: relative;
+          overflow: hidden;
+        }
+
+        .erp-kpi-card::after {
+          content: '';
+          position: absolute;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 3px;
+          background: transparent;
+          transition: background 0.2s ease;
+        }
+
+        .erp-kpi-card:hover::after {
+          background: var(--primary-600, #3b82f6);
+        }
+        
+        .erp-kpi-icon {
+          width: 44px;
+          height: 44px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        
+        .erp-kpi-content {
+          display: flex;
+          flex-direction: column;
+          min-width: 0;
+          flex: 1;
+        }
+        
+        .erp-kpi-num {
+          font-size: 24px;
+          font-weight: 800;
+          color: var(--primary-900, #0f172a);
+          line-height: 1;
+          font-family: var(--font-family-title, sans-serif);
+          margin-bottom: 4px;
+        }
+        
+        .erp-kpi-label {
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--text-muted, #64748b);
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          margin-bottom: 2px;
+        }
+        
+        .erp-kpi-footer {
+          font-size: 11px;
+          color: var(--text-muted, #64748b);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .erp-card-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          padding: 16px 20px;
+          border-bottom: 1px solid var(--border-color, #e2e8f0);
+          font-family: var(--font-family-title, sans-serif);
+        }
+
+        .erp-card-title {
+          font-size: 14px;
+          font-weight: 800;
+          color: var(--primary-950, #030712);
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+        }
+
+        .erp-table-container {
+          overflow-x: auto;
+          position: relative;
+        }
+
+        .erp-table {
+          width: 100%;
+          border-collapse: collapse;
+          font-size: 12.5px;
+          text-align: left;
+        }
+
+        .erp-table th {
+          position: sticky;
+          top: 0;
+          background: #f8fafc !important;
+          z-index: 10;
+          color: var(--primary-700, #475569);
+          font-weight: 700;
+          padding: 12px 16px;
+          border-bottom: 1.5px solid var(--border-color, #e2e8f0);
+          text-transform: uppercase;
+          font-size: 10.5px;
+          letter-spacing: 0.5px;
+        }
+
+        .erp-table td {
+          padding: 12px 16px;
+          border-bottom: 1px solid var(--border-color, #e2e8f0);
+          color: #334155;
+          vertical-align: middle;
+        }
+
+        .erp-table tbody tr {
+          transition: background-color 0.15s ease;
+        }
+
+        .erp-table tbody tr:hover {
+          background-color: #f8fafc;
+        }
+
+        .erp-badge-container {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+        }
+
+        .erp-badge-eng {
+          font-size: 10px;
+          padding: 2.5px 6.5px;
+          font-weight: 700;
+          background-color: #f1f5f9;
+          color: #334155;
+          border-radius: 4px;
+          border: 1px solid #e2e8f0;
+        }
+
+        .erp-utilization-bar-wrapper {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+          width: 120px;
+        }
+
+        .erp-utilization-metrics {
+          display: flex;
+          justify-content: space-between;
+          font-size: 10.5px;
+          font-weight: 700;
+        }
+
+        .erp-utilization-track {
+          width: 100%;
+          height: 6px;
+          background-color: #f1f5f9;
+          border-radius: 3px;
+          overflow: hidden;
+          border: 1px solid #cbd5e1;
+        }
+
+        .erp-alert-item {
+          display: flex;
+          gap: 10px;
+          padding: 10px 12px;
+          border-radius: 8px;
+          border-left: 3px solid transparent;
+          background-color: #f8fafc;
+          font-size: 12px;
+        }
+
+        .erp-alert-item.danger {
+          border-left-color: var(--danger-500, #ef4444);
+          background-color: #fef2f2;
+        }
+
+        .erp-alert-item.warning {
+          border-left-color: var(--warning-500, #f59e0b);
+          background-color: #fffbeb;
+        }
+
+        .erp-grid-layout {
+          display: grid;
+          grid-template-columns: 2.2fr 1fr;
+          gap: 20px;
+          margin-bottom: 24px;
+        }
+
+        @media (max-width: 1024px) {
+          .erp-grid-layout {
+            grid-template-columns: 1fr;
+          }
+        }
+      `}</style>
+
       {toast.show && (
         <div id="toast-container" className="toast-container">
           <div className={`toast toast-${toast.type}`}>
@@ -440,246 +650,267 @@ export default function AdminDashboard() {
       )}
 
       {sites.length === 0 && (
-        <div style={{ borderLeft: "4px solid var(--warning-500)", backgroundColor: "var(--warning-100)", marginBottom: "20px", padding: "12px 16px", borderRadius: "var(--radius-sm)", display: "flex", alignItems: "center", gap: "10px" }}>
+        <div style={{ borderLeft: "4px solid var(--warning-500)", backgroundColor: "#fffbeb", marginBottom: "20px", padding: "12px 16px", borderRadius: "8px", display: "flex", alignItems: "center", gap: "10px" }}>
           <AlertTriangle size={16} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
           <span style={{ color: "var(--warning-700)", fontWeight: "600", fontSize: "13px" }}>
-            <strong>No sites created yet!</strong> Navigate to the <Link to="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Construction Sites</Link> page to register your first construction site.
+            <strong>Workspace Setup Required:</strong> You do not have any registered sites yet. Go to <Link to="/admin/sites" style={{ color: "var(--warning-800)", fontWeight: "700", textDecoration: "underline" }}>Sites Panel</Link> to create your first site profile.
           </span>
         </div>
       )}
 
-      {/* ── TOP: Compact KPI Bar ── */}
-      <div className="dash-kpi-bar" style={{ marginBottom: "24px" }}>
-
-        <div className="dash-kpi-item">
-          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
-            <Building2 size={20} />
+      {/* ── ERP COMPACT KPI METRICS GRID ── */}
+      <div className="erp-kpi-grid">
+        
+        {/* KPI 1: Project Sites */}
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid #3b82f6" }}>
+          <div className="erp-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
+            <Building2 size={22} />
           </div>
-          <div className="dash-kpi-info">
-            <span className="dash-kpi-label">Total Sites</span>
-            <span className="dash-kpi-value">{sites.length}</span>
-            <span className="dash-kpi-sub">{totalAssignedProjects} assigned</span>
-          </div>
-        </div>
-
-        <div className="dash-kpi-item">
-          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "#10b981" }}>
-            <HardHat size={20} />
-          </div>
-          <div className="dash-kpi-info">
-            <span className="dash-kpi-label">Active Engineers</span>
-            <span className="dash-kpi-value">{engineers.filter(e => e.status === "active").length}</span>
-            <span className="dash-kpi-sub">Site personnel</span>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Active Projects</span>
+            <span className="erp-kpi-num">{sites.length}</span>
+            <span className="erp-kpi-footer">{totalAssignedProjects} actively assigned</span>
           </div>
         </div>
 
-        <div className="dash-kpi-item">
-          <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "#f97316" }}>
-            <Users size={20} />
+        {/* KPI 2: Site Engineers */}
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid #10b981" }}>
+          <div className="erp-kpi-icon" style={{ backgroundColor: "rgba(16,185,129,0.08)", color: "#10b981" }}>
+            <HardHat size={22} />
           </div>
-          <div className="dash-kpi-info">
-            <span className="dash-kpi-label">Workforce &amp; Materials</span>
-            <span className="dash-kpi-value">{metrics.attendanceToday}</span>
-            <span className="dash-kpi-sub">{metrics.activeWorkers} workers active · {metrics.totalMaterials} logged</span>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Personnel Logs</span>
+            <span className="erp-kpi-num">{engineers.filter(e => e.status === "active").length}</span>
+            <span className="erp-kpi-footer">{engineers.length} registered engineers</span>
           </div>
         </div>
 
-        <div className="dash-kpi-item" style={{ backgroundColor: pendingCount > 0 ? "hsl(38,90%,97%)" : undefined }}>
-          <div className="dash-kpi-icon" style={{ backgroundColor: pendingCount > 0 ? "rgba(234,179,8,0.12)" : "rgba(16,185,129,0.08)", color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>
-            <ClipboardCheck size={20} />
+        {/* KPI 3: Labor Force Deployments */}
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid #f59e0b" }}>
+          <div className="erp-kpi-icon" style={{ backgroundColor: "rgba(245,158,11,0.08)", color: "#f59e0b" }}>
+            <Users size={22} />
           </div>
-          <div className="dash-kpi-info">
-            <span className="dash-kpi-label">Pending Approvals</span>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <span className="dash-kpi-value" style={{ color: pendingCount > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{pendingCount}</span>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Labor Force deployment</span>
+            <span className="erp-kpi-num">{metrics.activeWorkers}</span>
+            <span className="erp-kpi-footer">{metrics.attendanceToday} check-ins logged today</span>
+          </div>
+        </div>
+
+        {/* KPI 4: Pending Requisitions */}
+        <div className="erp-kpi-card" style={{ 
+          borderLeft: "4px solid #f43f5e",
+          backgroundColor: pendingCount > 0 ? "rgba(244,63,94,0.02)" : undefined
+        }}>
+          <div className="erp-kpi-icon" style={{ 
+            backgroundColor: pendingCount > 0 ? "rgba(244,63,94,0.08)" : "rgba(100,116,139,0.08)", 
+            color: pendingCount > 0 ? "#f43f5e" : "#64748b" 
+          }}>
+            <ClipboardCheck size={22} />
+          </div>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Task Requisitions</span>
+            <span className="erp-kpi-num" style={{ color: pendingCount > 0 ? "#f43f5e" : undefined }}>{pendingCount}</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span className="erp-kpi-footer">Awaiting authorization</span>
               {pendingCount > 0 && (
-                <span className="badge badge-danger" style={{ fontSize: "9px", padding: "1px 5px", lineHeight: "1" }}>Action</span>
+                <Link to="/admin/approvals" style={{ fontSize: "10.5px", fontWeight: "800", color: "#f43f5e", display: "flex", alignItems: "center", gap: "2px", textDecoration: "none" }}>
+                  Action <ChevronRight size={10} />
+                </Link>
               )}
             </div>
-            <Link to="/admin/approvals" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", display: "flex", alignItems: "center", gap: "2px", marginTop: "2px", textDecoration: "none" }}>
-              Review <ArrowRight size={10} />
-            </Link>
           </div>
         </div>
 
       </div>
 
-      {/* ── MIDDLE: Two-Column Layout ── */}
-      <div className="admin-dashboard-main-grid">
-
-        {/* Left Column — Projects Table (2/3 width) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-
-          <div className="dash-section-label"><span>Projects &amp; Assignments</span></div>
-
-          <Card 
-            variant="table" 
-            headerActions={
-              <Badge status="success">{sites.length} Projects</Badge>
-            }
-          >
-            <table className="data-table" style={{ margin: "0" }}>
-              <thead>
-                <tr>
-                  <th>Project / Site Name</th>
-                  <th>Assigned Engineer</th>
-                  <th>Location</th>
-                  <th style={{ textAlign: "right", width: "135px" }}>Budget Utilization</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sites.length === 0 ? (
+      {/* ── MAIN ERP TWO-COLUMN LAYOUT ── */}
+      <div className="erp-grid-layout">
+        
+        {/* Left Column — Corporate Sites Portfolio */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          
+          <Card variant="table" style={{ borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+            <div className="erp-card-header">
+              <span className="erp-card-title">
+                <Briefcase size={16} style={{ color: "var(--primary-600)" }} />
+                Corporate Site Portfolio
+              </span>
+              <Badge status="success">{sites.length} Active Sites</Badge>
+            </div>
+            
+            <div className="erp-table-container">
+              <table className="erp-table">
+                <thead>
                   <tr>
-                    <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                      No registered construction sites or assignments found.
-                    </td>
+                    <th>Site Profile</th>
+                    <th>Supervisor Engineer</th>
+                    <th>Site Location</th>
+                    <th style={{ textAlign: "right" }}>Financial Allocation</th>
+                    <th>Status</th>
+                    <th>Created</th>
                   </tr>
-                ) : (
-                  sites.map((site) => {
-                    const createdDateStr = site.createdAt
-                      ? (site.createdAt.seconds
-                          ? new Date(site.createdAt.seconds * 1000).toLocaleDateString()
-                          : new Date(site.createdAt).toLocaleDateString())
-                      : "N/A";
-                    
-                    return (
-                      <tr key={site.id}>
-                        <td style={{ fontWeight: 700, color: "var(--primary-900)" }}>{site.siteName}</td>
-                        <td>
-                          {site.assignedEngineers && site.assignedEngineers.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                              {site.assignedEngineers.map(uid => {
-                                const name = engineersMap[uid] || "Unknown Engineer";
-                                return (
-                                  <span 
-                                    key={uid} 
-                                    className="badge badge-completed" 
-                                    style={{ 
-                                      fontSize: "11px", 
-                                      padding: "3px 7px",
-                                      fontWeight: "600",
-                                      backgroundColor: "var(--primary-100)",
-                                      color: "var(--primary-800)",
-                                      borderRadius: "var(--radius-sm)"
-                                    }}
-                                  >
-                                    {name}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>
-                              Unassigned
-                            </span>
-                          )}
-                        </td>
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                            <MapPin size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
-                            <span style={{ fontSize: "13px" }}>{site.location}</span>
-                          </div>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          {(() => {
-                            const budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : 0;
-                            const siteExpenses = rawExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
-                            const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-                            const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
-                            
-                            return (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "4px", width: "125px", marginLeft: "auto" }}>
-                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700" }}>
-                                  <span style={{ fontFamily: "monospace" }}>₹{totalExpense.toLocaleString()}</span>
-                                  <span style={{ 
-                                    color: utilization > 100 ? "var(--danger-700)" : (utilization > 80 ? "var(--warning-700)" : "var(--success-700)")
-                                  }}>
-                                    {utilization.toFixed(0)}%
-                                  </span>
-                                </div>
-                                <div style={{ width: "100%", height: "5px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden" }}>
-                                  <div style={{
-                                    width: `${Math.min(utilization, 100)}%`,
-                                    height: "100%",
-                                    backgroundColor: utilization > 100 ? "#b3261e" : (utilization > 80 ? "#e65100" : "#2e7d32"),
-                                    borderRadius: "3px"
-                                  }} />
-                                </div>
+                </thead>
+                <tbody>
+                  {sites.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "40px" }}>
+                        No project profiles registered in the system portfolio.
+                      </td>
+                    </tr>
+                  ) : (
+                    sites.map((site) => {
+                      const createdDateStr = site.createdAt
+                        ? (site.createdAt.seconds
+                            ? new Date(site.createdAt.seconds * 1000).toLocaleDateString("en-GB")
+                            : new Date(site.createdAt).toLocaleDateString("en-GB"))
+                        : "N/A";
+                      
+                      return (
+                        <tr key={site.id}>
+                          <td style={{ fontWeight: 800, color: "var(--primary-900)" }}>
+                            {site.siteName}
+                          </td>
+                          <td>
+                            {site.assignedEngineers && site.assignedEngineers.length > 0 ? (
+                              <div className="erp-badge-container">
+                                {site.assignedEngineers.map(uid => {
+                                  const name = engineersMap[uid] || "Unknown Engineer";
+                                  return (
+                                    <span key={uid} className="erp-badge-eng">
+                                      {name}
+                                    </span>
+                                  );
+                                })}
                               </div>
-                            );
-                          })()}
-                        </td>
-                        <td>
-                          <Badge status={site.status || "Planning"} />
-                        </td>
-                        <td className="font-mono" style={{ fontSize: "12px" }}>{createdDateStr}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
+                            ) : (
+                              <span style={{ color: "var(--text-muted)", fontSize: "11.5px", fontStyle: "italic" }}>
+                                Not Assigned
+                              </span>
+                            )}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                              <MapPin size={12} style={{ color: "var(--text-muted)" }} />
+                              <span style={{ fontSize: "12px" }}>{site.location}</span>
+                            </div>
+                          </td>
+                          <td>
+                            {(() => {
+                              const budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : 0;
+                              const siteExpenses = rawExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
+                              const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
+                              const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
+                              
+                              return (
+                                <div className="erp-utilization-bar-wrapper" style={{ marginLeft: "auto" }}>
+                                  <div className="erp-utilization-metrics">
+                                    <span style={{ fontFamily: "monospace", color: "var(--primary-900)" }}>₹{totalExpense.toLocaleString()}</span>
+                                    <span style={{ 
+                                      color: utilization > 100 ? "var(--danger-700)" : (utilization > 80 ? "var(--warning-700)" : "var(--success-700)")
+                                    }}>
+                                      {utilization.toFixed(0)}%
+                                    </span>
+                                  </div>
+                                  <div className="erp-utilization-track">
+                                    <div style={{
+                                      width: `${Math.min(utilization, 100)}%`,
+                                      height: "100%",
+                                      backgroundColor: utilization > 100 ? "#b3261e" : (utilization > 80 ? "#e65100" : "#2e7d32")
+                                    }} />
+                                  </div>
+                                </div>
+                              );
+                            })()}
+                          </td>
+                          <td>
+                            <Badge status={site.status || "Planning"} />
+                          </td>
+                          <td className="font-mono" style={{ fontSize: "11px" }}>{createdDateStr}</td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </Card>
-
         </div>
 
-        {/* Right Column — Alerts + Docs (1/3 width) */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-
-          {/* Alerts Panel */}
+        {/* Right Column — Operational Tasks & Warning Alerts */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          
+          {/* ERP Alarm Warnings */}
           {alerts.length > 0 && (
-            <>
-              <div className="dash-section-label"><span>Alerts &amp; Reminders</span></div>
-              <Card style={{ borderLeft: "3px solid var(--danger-500)" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {alerts.slice(0, 5).map(alert => (
-                    <div key={alert.id} className={`dash-alert-row ${alert.type}`}>
-                      <AlertTriangle 
-                        size={14} 
-                        style={{ 
-                          color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", 
-                          flexShrink: 0,
-                          marginTop: "2px"
-                        }} 
-                      />
-                      <div>
-                        <span className="dash-alert-title">[{alert.category}] {alert.title}</span>
-                        <p className="dash-alert-msg">{alert.message}</p>
-                      </div>
+            <Card style={{ padding: "0 0 16px 0", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+              <div className="erp-card-header" style={{ borderBottom: "none" }}>
+                <span className="erp-card-title" style={{ color: "var(--danger-600)" }}>
+                  <AlertTriangle size={16} />
+                  Operational Flags
+                </span>
+                <span style={{ 
+                  fontSize: "10px", 
+                  fontWeight: "800", 
+                  backgroundColor: "rgba(239,68,68,0.1)", 
+                  color: "var(--danger-600)", 
+                  padding: "2px 8px", 
+                  borderRadius: "10px" 
+                }}>
+                  {alerts.length} Warnings
+                </span>
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "0 16px" }}>
+                {alerts.slice(0, 4).map(alert => (
+                  <div key={alert.id} className={`erp-alert-item ${alert.type}`}>
+                    <AlertTriangle 
+                      size={15} 
+                      style={{ 
+                        color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", 
+                        flexShrink: 0,
+                        marginTop: "1px"
+                      }} 
+                    />
+                    <div>
+                      <strong style={{ fontSize: "11px", display: "block", color: "var(--primary-900)" }}>{alert.category} • {alert.title}</strong>
+                      <p style={{ margin: "2px 0 0 0", color: "var(--primary-700)", fontSize: "11.5px", lineHeight: "1.3" }}>{alert.message}</p>
                     </div>
-                  ))}
-                </div>
-              </Card>
-            </>
+                  </div>
+                ))}
+              </div>
+            </Card>
           )}
 
-          {/* Document Verification Tasks */}
-          <div className="dash-section-label"><span>Document Verification</span></div>
-          <Card>
+          {/* Document Verification Action Card */}
+          <Card style={{ borderRadius: "12px", border: "1px solid var(--border-color)", padding: "16px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-950)", textTransform: "uppercase", letterSpacing: "0.5px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <FolderOpen size={15} style={{ color: "var(--primary-600)" }} />
+                Document Verification
+              </span>
+            </div>
+            
             <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
               <div style={{ 
                 display: "flex", 
                 alignItems: "center", 
                 gap: "8px", 
-                padding: "10px 12px", 
-                backgroundColor: pendingDocs.length > 0 ? "var(--warning-100)" : "var(--success-50)", 
+                padding: "8px 12px", 
+                backgroundColor: pendingDocs.length > 0 ? "rgba(245,158,11,0.06)" : "rgba(16,185,129,0.06)", 
                 borderRadius: "6px", 
-                border: pendingDocs.length > 0 ? "1px solid var(--warning-500)" : "1px solid var(--success-100)" 
+                border: `1px solid ${pendingDocs.length > 0 ? "rgba(245,158,11,0.2)" : "rgba(16,185,129,0.2)"}` 
               }}>
                 {pendingDocs.length > 0 ? (
                   <>
-                    <AlertTriangle size={16} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--warning-600)" }}>
-                      {pendingDocs.length} document(s) pending
+                    <AlertTriangle size={15} style={{ color: "var(--warning-600)" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--warning-700)" }}>
+                      {pendingDocs.length} site documentation logs pending
                     </span>
                   </>
                 ) : (
                   <>
-                    <CheckCircle2 size={16} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--success-600)" }}>
-                      All documents verified
+                    <CheckCircle2 size={15} style={{ color: "var(--success-600)" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)" }}>
+                      All system documentation verified
                     </span>
                   </>
                 )}
@@ -687,102 +918,107 @@ export default function AdminDashboard() {
 
               {pendingDocs.length > 0 && (
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  {pendingDocs.slice(0, 3).map(doc => (
-                    <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "7px 10px", border: "1px solid var(--border-color)", borderRadius: "6px", backgroundColor: "#ffffff" }}>
+                  {pendingDocs.slice(0, 2).map(doc => (
+                    <div key={doc.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", border: "1px solid var(--border-color)", borderRadius: "6px", backgroundColor: "#ffffff" }}>
                       <div style={{ minWidth: 0, marginRight: "8px" }}>
-                        <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</div>
+                        <div style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</div>
                         <p style={{ margin: 0, fontSize: "10.5px", color: "var(--text-muted)" }} className="text-ellipsis">{doc.siteName}</p>
                       </div>
-                      <Link to="/admin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "underline", flexShrink: 0 }}>
-                        Verify
+                      <Link to="/admin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none" }}>
+                        Verify →
                       </Link>
                     </div>
                   ))}
-                  {pendingDocs.length > 3 && (
-                    <Link to="/admin/documents" style={{ fontSize: "11px", color: "var(--text-muted)", textAlign: "center", display: "block" }}>
-                      + {pendingDocs.length - 3} more pending
-                    </Link>
-                  )}
                 </div>
               )}
             </div>
           </Card>
 
-          {/* Recent Document Uploads */}
-          <Card 
-            title="Recent Uploads" 
-            headerActions={
+          {/* Recent uploads catalog */}
+          <Card style={{ borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+            <div className="erp-card-header">
+              <span className="erp-card-title">
+                <FileText size={16} style={{ color: "var(--primary-600)" }} />
+                Recent Uploads
+              </span>
               <Link to="/admin/documents" style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none" }}>
-                View all
+                All Logs
               </Link>
-            }
-          >
-            {recentDocs.length === 0 ? (
-              <p style={{ textAlign: "center", color: "var(--text-muted)", padding: "12px", fontSize: "13px" }}>No documents uploaded yet.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {recentDocs.map(doc => {
+            </div>
+            
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "16px 20px" }}>
+              {recentDocs.length === 0 ? (
+                <p style={{ textAlign: "center", color: "var(--text-muted)", padding: "10px", fontSize: "12px" }}>No document streams uploaded yet.</p>
+              ) : (
+                recentDocs.slice(0, 3).map(doc => {
                   const isUploaded = doc.status === "Uploaded";
                   const isVerified = doc.status === "Verified";
                   return (
-                    <div key={doc.id} style={{ display: "flex", gap: "10px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
+                    <div key={doc.id} style={{ display: "flex", gap: "10px", borderBottom: "1px solid #f1f5f9", paddingBottom: "10px" }}>
                       <div style={{
-                        backgroundColor: isVerified ? "var(--success-50)" : (isUploaded ? "var(--primary-50)" : "var(--danger-50)"),
-                        color: isVerified ? "var(--success-600)" : (isUploaded ? "var(--primary-600)" : "var(--danger-600)"),
-                        padding: "7px",
+                        backgroundColor: isVerified ? "rgba(16,185,129,0.06)" : (isUploaded ? "rgba(59,130,246,0.06)" : "rgba(239,68,68,0.06)"),
+                        color: isVerified ? "#10b981" : (isUploaded ? "#3b82f6" : "#ef4444"),
+                        padding: "6px",
                         borderRadius: "6px",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        height: "32px",
-                        width: "32px",
+                        height: "28px",
+                        width: "28px",
                         flexShrink: 0
                       }}>
-                        <FolderOpen size={16} />
+                        <FolderOpen size={14} />
                       </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 }}>
-                        <span style={{ fontSize: "12.5px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</span>
-                        <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{doc.category} • {doc.siteName}</span>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "1px", flex: 1, minWidth: 0 }}>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)" }} className="text-ellipsis">{doc.title}</span>
+                        <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{doc.category} • {doc.siteName}</span>
                         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "2px" }}>
-                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>By: {doc.uploadedBy}</span>
-                          <Badge status={doc.status === "Uploaded" ? "pending" : (doc.status === "Verified" ? "success" : "danger")} style={{ fontSize: "9px", padding: "1px 6px" }}>
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Uploaded by: {doc.uploadedBy}</span>
+                          <Badge status={doc.status === "Uploaded" ? "pending" : (doc.status === "Verified" ? "success" : "danger")} style={{ fontSize: "8.5px", padding: "0 6px" }}>
                             {doc.status}
                           </Badge>
                         </div>
                       </div>
                     </div>
                   );
-                })}
-              </div>
-            )}
+                })
+              )}
+            </div>
           </Card>
 
         </div>
       </div>
 
-      {/* ── BOTTOM: Full-Width Activity Timeline ── */}
-      <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Site Operations &amp; Activity Timeline</span></div>
+      {/* ── BOTTOM: Operations Chronological Timeline ── */}
+      <Card style={{ borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+        
+        <div className="erp-card-header" style={{ borderBottom: "none", paddingBottom: "0" }}>
+          <span className="erp-card-title">
+            <Activity size={16} style={{ color: "var(--primary-600)" }} />
+            Site Operations &amp; Event Stream
+          </span>
+        </div>
 
-      <Card>
-        {/* Compact Inline Filter Bar */}
+        {/* Compact Filters panel */}
         <div style={{ 
           display: "flex", 
           flexWrap: "wrap",
           gap: "10px", 
-          marginBottom: "18px",
+          margin: "16px 20px",
           alignItems: "center",
-          padding: "10px 14px",
+          padding: "8px 12px",
           backgroundColor: "#f8fafc",
-          borderRadius: "6px",
+          borderRadius: "8px",
           border: "1px solid var(--border-color)"
         }}>
-          <Filter size={14} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          <Filter size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+          
           <select 
             value={filterSite} 
             onChange={(e) => setFilterSite(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 160px" }}
+            style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12px", flex: "1 1 150px" }}
           >
-            <option value="">All Projects</option>
+            <option value="">All Project Sites</option>
             {sites.map(s => (
               <option key={s.id} value={s.id}>{s.siteName}</option>
             ))}
@@ -791,7 +1027,7 @@ export default function AdminDashboard() {
           <select 
             value={filterEngineer} 
             onChange={(e) => setFilterEngineer(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 160px" }}
+            style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12px", flex: "1 1 150px" }}
           >
             <option value="">All Engineers</option>
             {engineers.map(e => (
@@ -803,140 +1039,144 @@ export default function AdminDashboard() {
             type="date"
             value={filterDate}
             onChange={(e) => setFilterDate(e.target.value)}
-            style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12.5px", flex: "1 1 140px" }}
+            style={{ padding: "5px 8px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "12px", flex: "1 1 130px" }}
           />
 
           {(filterSite || filterEngineer || filterDate) && (
             <button 
               type="button"
               onClick={() => { setFilterSite(""); setFilterEngineer(""); setFilterDate(""); }}
-              style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12px", fontWeight: "600", color: "var(--text-muted)", cursor: "pointer" }}
+              style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "11.5px", fontWeight: "700", color: "var(--text-muted)", cursor: "pointer" }}
             >
-              Clear
+              Reset Filters
             </button>
           )}
         </div>
 
-        {sortedDates.length === 0 ? (
-          <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "40px" }}>
-            <Activity size={32} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
-            <p>No matching activities or operations logged.</p>
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            {sortedDates.map((dateStr) => {
-              let formattedDate = dateStr;
-              try {
-                const [y, m, d] = dateStr.split("-").map(Number);
-                const dateObj = new Date(y, m - 1, d);
-                formattedDate = dateObj.toLocaleDateString("en-GB", {
-                  day: "numeric",
-                  month: "long",
-                  year: "numeric"
-                });
-              } catch (e) {
-                console.error(e);
-              }
+        <div style={{ padding: "0 20px 20px 20px" }}>
+          {sortedDates.length === 0 ? (
+            <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "30px 0" }}>
+              <Activity size={24} style={{ color: "var(--primary-300)", marginBottom: "6px" }} />
+              <p style={{ fontSize: "12.5px" }}>No operations logs matching selected parameter scope.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {sortedDates.map((dateStr) => {
+                let formattedDate = dateStr;
+                try {
+                  const [y, m, d] = dateStr.split("-").map(Number);
+                  const dateObj = new Date(y, m - 1, d);
+                  formattedDate = dateObj.toLocaleDateString("en-GB", {
+                    day: "numeric",
+                    month: "long",
+                    year: "numeric"
+                  });
+                } catch (e) {
+                  console.error(e);
+                }
 
-              const logsForDate = groupedTimeline[dateStr];
+                const logsForDate = groupedTimeline[dateStr];
 
-              return (
-                <div key={dateStr} style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                  {/* Date Header */}
-                  <div style={{ 
-                    fontSize: "12px", 
-                    fontWeight: "800", 
-                    color: "var(--primary-700)", 
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    paddingBottom: "6px",
-                    borderBottom: "1.5px solid var(--border-color)"
-                  }}>
-                    <Calendar size={13} style={{ color: "var(--primary-500)" }} />
-                    {formattedDate}
-                    <span style={{ marginLeft: "auto", fontSize: "11px", fontWeight: "600", color: "var(--text-muted)" }}>
-                      {logsForDate.length} {logsForDate.length === 1 ? "event" : "events"}
-                    </span>
-                  </div>
-                  
-                  {/* Timeline Items */}
-                  <div style={{ 
-                    position: "relative", 
-                    paddingLeft: "18px", 
-                    borderLeft: "2px solid var(--border-color)",
-                    marginLeft: "8px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "10px"
-                  }}>
-                    {logsForDate.map((log, index) => {
-                      const isEntry = log.type === "entry";
-                      const isExit = log.type === "exit";
+                return (
+                  <div key={dateStr} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    
+                    {/* Date subtitle header */}
+                    <div style={{ 
+                      fontSize: "11.5px", 
+                      fontWeight: "800", 
+                      color: "var(--primary-800)", 
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      paddingBottom: "4px",
+                      borderBottom: "1px solid #f1f5f9"
+                    }}>
+                      <Calendar size={12} style={{ color: "var(--primary-500)" }} />
+                      {formattedDate}
+                      <span style={{ marginLeft: "auto", fontSize: "10px", fontWeight: "700", color: "var(--text-muted)" }}>
+                        {logsForDate.length} Logged Action(s)
+                      </span>
+                    </div>
+                    
+                    {/* Timeline elements */}
+                    <div style={{ 
+                      position: "relative", 
+                      paddingLeft: "16px", 
+                      borderLeft: "1.5px solid #e2e8f0",
+                      marginLeft: "6px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "8px"
+                    }}>
+                      {logsForDate.map((log, index) => {
+                        const isEntry = log.type === "entry";
+                        const isExit = log.type === "exit";
 
-                      const dotColor = isEntry ? "var(--success-500)" : (isExit ? "var(--danger-500)" : "var(--primary-500)");
-                      const tagBg = isEntry ? "var(--success-50)" : (isExit ? "var(--danger-50)" : "var(--primary-50)");
-                      const tagColor = isEntry ? "var(--success-600)" : (isExit ? "var(--danger-600)" : "var(--primary-600)");
+                        const dotColor = isEntry ? "var(--success-500)" : (isExit ? "var(--danger-500)" : "var(--primary-500)");
+                        const tagBg = isEntry ? "var(--success-50)" : (isExit ? "var(--danger-50)" : "var(--primary-50)");
+                        const tagColor = isEntry ? "var(--success-600)" : (isExit ? "var(--danger-600)" : "var(--primary-600)");
 
-                      return (
-                        <div key={log.id || index} style={{ position: "relative" }}>
-                          <div style={{ 
-                            position: "absolute", 
-                            left: "-25px", 
-                            top: "4px", 
-                            width: "10px", 
-                            height: "10px", 
-                            borderRadius: "50%", 
-                            backgroundColor: dotColor,
-                            border: "2px solid #ffffff",
-                            boxShadow: `0 0 0 2px ${dotColor}33`
-                          }} />
-                          
-                          <div style={{ 
-                            display: "flex", 
-                            justifyContent: "space-between",
-                            alignItems: "flex-start",
-                            gap: "8px",
-                            padding: "8px 12px",
-                            borderRadius: "var(--radius-sm)",
-                            border: "1px solid var(--border-color)",
-                            backgroundColor: "#ffffff"
-                          }}>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "3px", flex: 1, minWidth: 0 }}>
-                              <div style={{ display: "flex", alignItems: "center", gap: "7px", flexWrap: "wrap" }}>
-                                <span style={{ 
-                                  fontWeight: "800", 
-                                  fontSize: "10px", 
-                                  color: tagColor,
-                                  backgroundColor: tagBg,
-                                  padding: "1px 7px",
-                                  borderRadius: "10px",
-                                  textTransform: "uppercase",
-                                  letterSpacing: "0.5px"
-                                }}>
-                                  {log.type.toUpperCase()}
-                                </span>
-                                <strong style={{ fontSize: "13px", color: "var(--primary-900)" }}>{log.engineerName}</strong>
+                        return (
+                          <div key={log.id || index} style={{ position: "relative" }}>
+                            <div style={{ 
+                              position: "absolute", 
+                              left: "-22px", 
+                              top: "6px", 
+                              width: "8px", 
+                              height: "8px", 
+                              borderRadius: "50%", 
+                              backgroundColor: dotColor,
+                              border: "1.5px solid #ffffff",
+                              boxShadow: `0 0 0 1.5px ${dotColor}33`
+                            }} />
+                            
+                            <div style={{ 
+                              display: "flex", 
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              gap: "8px",
+                              padding: "8px 12px",
+                              borderRadius: "8px",
+                              border: "1px solid var(--border-color)",
+                              backgroundColor: "#ffffff"
+                            }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px", flex: 1, minWidth: 0 }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span style={{ 
+                                    fontWeight: "800", 
+                                    fontSize: "9px", 
+                                    color: tagColor,
+                                    backgroundColor: tagBg,
+                                    padding: "0.5px 6px",
+                                    borderRadius: "8px",
+                                    textTransform: "uppercase"
+                                  }}>
+                                    {log.type}
+                                  </span>
+                                  <strong style={{ fontSize: "12px", color: "var(--primary-900)" }}>{log.engineerName}</strong>
+                                </div>
+                                <span style={{ fontSize: "12px", color: "#334155" }}>{log.description}</span>
+                                <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>{log.details} • Site: {log.siteName}</span>
                               </div>
-                              <span style={{ fontSize: "12.5px", color: "#334155", fontWeight: "500" }}>{log.description}</span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{log.details}</span>
+                              <span style={{ fontSize: "10.5px", fontWeight: "700", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "2.5px", flexShrink: 0 }}>
+                                <Clock size={11} /> {log.time}
+                              </span>
                             </div>
-                            <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "3px", flexShrink: 0 }}>
-                              <Clock size={11} /> {log.time}
-                            </span>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })}
+                    </div>
+
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
+                );
+              })}
+            </div>
+          )}
+        </div>
+
       </Card>
 
-      <Loading show={loading} text="Loading executive panel..." />
+      <Loading show={loading} text="Loading ERP dashboard..." />
     </Layout>
   );
 }
