@@ -2822,7 +2822,7 @@ export async function saveLabourPayment(paymentData, adminId = null) {
 
 export async function getMaterialMaster() {
   const db = getDb();
-  const docRef = doc(db, "users", "__material_master__");
+  const docRef = doc(db, "users", "material_master");
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
     return docSnap.data().materialsList || [];
@@ -2838,7 +2838,7 @@ export async function getMaterialMaster() {
 
 export async function saveMaterialMaster(materialsList) {
   const db = getDb();
-  const docRef = doc(db, "users", "__material_master__");
+  const docRef = doc(db, "users", "material_master");
   await setDoc(docRef, {
     materialsList,
     updatedAt: serverTimestamp()
