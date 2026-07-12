@@ -30,7 +30,8 @@ import {
   TrendingUp,
   Search,
   Bell,
-  Briefcase
+  Briefcase,
+  FileText
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
