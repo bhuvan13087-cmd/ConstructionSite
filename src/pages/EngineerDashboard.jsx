@@ -50,7 +50,10 @@ import {
   saveLabourAttendanceRecord,
   deleteLabourAttendanceRecord,
   getLabourAttendanceRecords,
-  subscribeLabourAttendanceRecords
+  subscribeLabourAttendanceRecords,
+  getAttendanceForSite,
+  checkLabourSubmissionStatus,
+  submitLabourAttendance
 } from "../services/firebaseService";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
@@ -258,6 +261,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   
+  // Workforce submit and lock states
+  const [lockedDates, setLockedDates] = useState(new Set());
+  const [labourSubmitting, setLabourSubmitting] = useState(false);
+
+  const loadLockedDates = async () => {
+    if (!activeSiteId) {
+      setLockedDates(new Set());
+      return;
+    }
+    try {
+      const records = await getAttendanceForSite(activeSiteId);
+      const locked = new Set(records.filter(r => r.status === "submitted").map(r => r.date));
+      setLockedDates(locked);
+    } catch (err) {
+      console.error("Failed to load locked dates:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadLockedDates();
+  }, [activeSiteId]);
+
   const handleCloseLeaveModal = () => {
     setLeaveDate(new Date().toISOString().split("T")[0]);
     setLeaveReason("Personal Leave");
@@ -338,6 +363,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [labourHistoryRecords, setLabourHistoryRecords] = useState([]);
   const [activeWorkforceSubTab, setActiveWorkforceSubTab] = useState("new-entry"); // "new-entry" or "history"
   const [expandedDates, setExpandedDates] = useState([]);
+  const isLabourSubmitted = lockedDates.has(labourDate);
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingValue, setEditingValue] = useState(1.0);
@@ -1381,6 +1407,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Count-based worker attendance handlers
   const handleCountChange = async (categoryId, attendanceType, increment) => {
+    if (lockedDates.has(labourDate)) {
+      showToast("Cannot modify count: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
     const record = attendanceRows.find(r => r.categoryId === categoryId && r.attendanceType === attendanceType);
     const currentCount = record ? Number(record.workerCount) || 0 : 0;
     const newCount = Math.max(0, currentCount + increment);
@@ -1438,6 +1468,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const handleSaveHistoryRecord = async (recordId) => {
     const record = labourHistoryRecords.find(r => r.id === recordId);
+    if (!record) return;
+    if (lockedDates.has(record.attendanceDate)) {
+      showToast("Cannot edit: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
     if (!record) return;
 
     if (record.workerCount !== undefined) {
@@ -1505,6 +1540,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleDeleteHistoryRecord = async (recordId) => {
+    const record = labourHistoryRecords.find(r => r.id === recordId);
+    if (!record) return;
+    if (lockedDates.has(record.attendanceDate)) {
+      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
     if (window.confirm("Are you sure you want to delete this worker record?")) {
       try {
         await deleteLabourAttendanceRecord(recordId);
@@ -1517,6 +1558,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleDeleteCategoryHistoryRecords = async (dateStr, teamId, categoryId) => {
+    if (lockedDates.has(dateStr)) {
+      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
     if (window.confirm(`Are you sure you want to delete all attendance records for this category on ${dateStr}?`)) {
       const recordsToDelete = labourHistoryRecords.filter(r => 
         r.attendanceDate === dateStr && 
@@ -1537,6 +1582,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleDeleteTeamHistoryRecords = async (dateStr, teamId) => {
+    if (lockedDates.has(dateStr)) {
+      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
     if (window.confirm(`Are you sure you want to delete the entire team's attendance for ${dateStr}?`)) {
       const recordsToDelete = labourHistoryRecords.filter(r => 
         r.attendanceDate === dateStr && 
@@ -1551,6 +1600,36 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       } catch (err) {
         console.error("Failed to delete team records:", err);
         showToast("Failed to delete team records: " + err.message, "error");
+      }
+    }
+  };
+
+  // Submit workforce attendance
+  const handleLabourSubmit = async () => {
+    if (!activeSiteId) {
+      showToast("Please choose active project.", "error");
+      return;
+    }
+    if (!selectedLabourTeamId) {
+      showToast("Please select a labour team.", "error");
+      return;
+    }
+    if (attendanceRows.length === 0) {
+      showToast("Please add at least one workforce count before submitting.", "error");
+      return;
+    }
+    
+    if (window.confirm("Are you sure you want to submit? This will lock the workforce attendance record for this date and site.")) {
+      setLabourSubmitting(true);
+      try {
+        await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId);
+        showToast("Workforce attendance submitted and locked successfully.", "success");
+        await loadLockedDates(); // Reload locked dates to trigger local locks
+      } catch (err) {
+        console.error("Failed to submit workforce attendance:", err);
+        showToast("Submission failed: " + err.message, "error");
+      } finally {
+        setLabourSubmitting(false);
       }
     }
   };
@@ -4501,6 +4580,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {isLabourSubmitted && (
+                  <div style={{
+                    backgroundColor: "#e8f5e9",
+                    color: "#2e7d32",
+                    padding: "16px",
+                    borderRadius: "16px",
+                    border: "1px solid #c8e6c9",
+                    fontSize: "14px",
+                    fontWeight: "700",
+                    textAlign: "center"
+                  }}>
+                    ✓ Attendance submitted successfully. This record is locked and can no longer be modified.
+                  </div>
+                )}
                 {teamCategories.map(cat => {
                   const currentType = attendanceSelections[cat.id] || "Full Day";
                   const record = attendanceRows.find(r => r.categoryId === cat.id && r.attendanceType === currentType);
@@ -4572,16 +4665,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <button
                             type="button"
                             onClick={() => handleCountChange(cat.id, currentType, -1)}
-                            disabled={count <= 0 || isSaving}
+                            disabled={count <= 0 || isSaving || isLabourSubmitted}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
                               border: "1px solid #79747e",
-                              backgroundColor: count <= 0 ? "#f1f1f1" : "#ffffff",
-                              color: "#6750a4",
+                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f1f1" : "#ffffff",
+                              color: isLabourSubmitted ? "#aaa" : "#6750a4",
                               fontWeight: "900",
-                              cursor: count <= 0 ? "not-allowed" : "pointer",
+                              cursor: (count <= 0 || isLabourSubmitted) ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
@@ -4597,16 +4690,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <button
                             type="button"
                             onClick={() => handleCountChange(cat.id, currentType, 1)}
-                            disabled={isSaving}
+                            disabled={isSaving || isLabourSubmitted}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
                               border: "1px solid #6750a4",
-                              backgroundColor: "#6750a4",
-                              color: "#ffffff",
+                              backgroundColor: isLabourSubmitted ? "#e2e2e2" : "#6750a4",
+                              color: isLabourSubmitted ? "#aaa" : "#ffffff",
                               fontWeight: "900",
-                              cursor: "pointer",
+                              cursor: isLabourSubmitted ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
@@ -4645,8 +4738,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             gap: "8px",
                             fontSize: "14px",
                             fontWeight: "700",
-                            cursor: "pointer",
-                            color: "#1c1b1f"
+                            cursor: isLabourSubmitted ? "not-allowed" : "pointer",
+                            color: isLabourSubmitted ? "#777" : "#1c1b1f"
                           }}>
                             <input
                               type="radio"
@@ -4654,7 +4747,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               value="Full Day"
                               checked={currentType === "Full Day"}
                               onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Full Day" }))}
-                              style={{ width: "18px", height: "18px", accentColor: "#6750a4" }}
+                              disabled={isLabourSubmitted}
+                              style={{ width: "18px", height: "18px", accentColor: "#6750a4", cursor: isLabourSubmitted ? "not-allowed" : "pointer" }}
                             />
                             Full Day
                           </label>
@@ -4665,8 +4759,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             gap: "8px",
                             fontSize: "14px",
                             fontWeight: "700",
-                            cursor: "pointer",
-                            color: "#1c1b1f"
+                            cursor: isLabourSubmitted ? "not-allowed" : "pointer",
+                            color: isLabourSubmitted ? "#777" : "#1c1b1f"
                           }}>
                             <input
                               type="radio"
@@ -4674,7 +4768,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               value="Half Day"
                               checked={currentType === "Half Day"}
                               onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Half Day" }))}
-                              style={{ width: "18px", height: "18px", accentColor: "#6750a4" }}
+                              disabled={isLabourSubmitted}
+                              style={{ width: "18px", height: "18px", accentColor: "#6750a4", cursor: isLabourSubmitted ? "not-allowed" : "pointer" }}
                             />
                             Half Day
                           </label>
@@ -4684,6 +4779,31 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     </div>
                   );
                 })}
+
+                {!isLabourSubmitted && (
+                  <button
+                    type="button"
+                    onClick={handleLabourSubmit}
+                    disabled={labourSubmitting || attendanceRows.length === 0}
+                    style={{
+                      width: "100%",
+                      padding: "14px 16px",
+                      borderRadius: "14px",
+                      backgroundColor: "#6750a4",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "16px",
+                      fontWeight: "750",
+                      cursor: labourSubmitting || attendanceRows.length === 0 ? "not-allowed" : "pointer",
+                      opacity: labourSubmitting || attendanceRows.length === 0 ? 0.6 : 1,
+                      marginTop: "16px",
+                      boxShadow: "0px 1px 3px rgba(0,0,0,0.15)",
+                      transition: "all 0.2s ease"
+                    }}
+                  >
+                    {labourSubmitting ? "Submitting..." : "Submit Attendance"}
+                  </button>
+                )}
               </div>
             )}
           </>
@@ -5158,24 +5278,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               <span style={{ fontSize: "14px", fontWeight: "800", color: "#6750a4" }}>
                                 Team: {teamName}
                               </span>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteTeamHistoryRecords(dateStr, teamId)}
-                                style={{
-                                  border: "none",
-                                  backgroundColor: "transparent",
-                                  color: "#b3261e",
-                                  cursor: "pointer",
-                                  fontSize: "11px",
-                                  fontWeight: "700",
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "4px"
-                                }}
-                                title="Delete entire team attendance for this date"
-                              >
-                                <Trash2 size={14} /> Delete Team
-                              </button>
+                              {!lockedDates.has(dateStr) && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteTeamHistoryRecords(dateStr, teamId)}
+                                  style={{
+                                    border: "none",
+                                    backgroundColor: "transparent",
+                                    color: "#b3261e",
+                                    cursor: "pointer",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "4px"
+                                  }}
+                                  title="Delete entire team attendance for this date"
+                                >
+                                  <Trash2 size={14} /> Delete Team
+                                </button>
+                              )}
                             </div>
 
                             {/* Categories under Team */}
@@ -5199,24 +5321,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       <span style={{ fontSize: "13px", fontWeight: "700", color: "#1c1b1f" }}>
                                         {catName}
                                       </span>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleDeleteCategoryHistoryRecords(dateStr, teamId, catId)}
-                                        style={{
-                                          border: "none",
-                                          backgroundColor: "transparent",
-                                          color: "#b3261e",
-                                          cursor: "pointer",
-                                          fontSize: "11px",
-                                          fontWeight: "700",
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: "4px"
-                                        }}
-                                        title="Delete category attendance for this date"
-                                      >
-                                        <Trash2 size={13} /> Delete Category
-                                      </button>
+                                      {!lockedDates.has(dateStr) && (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteCategoryHistoryRecords(dateStr, teamId, catId)}
+                                          style={{
+                                            border: "none",
+                                            backgroundColor: "transparent",
+                                            color: "#b3261e",
+                                            cursor: "pointer",
+                                            fontSize: "11px",
+                                            fontWeight: "700",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            gap: "4px"
+                                          }}
+                                          title="Delete category attendance for this date"
+                                        >
+                                          <Trash2 size={13} /> Delete Category
+                                        </button>
+                                      )}
                                     </div>
 
                                     {/* Workers under Category */}
@@ -5420,38 +5544,39 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                                     <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Total</span>
                                                     <span style={{ fontSize: "13px", fontWeight: "800", color: "#6750a4" }}>{record.workerCount !== undefined ? record.workerCount : 1}</span>
                                                   </div>
-                                                </div>
-
-                                                {/* Actions */}
-                                                <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", borderTop: "1px solid #e7e0ec", paddingTop: "6px", marginTop: "2px" }}>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleStartEditHistoryRecord(record)}
-                                                    style={{
-                                                      border: "none",
-                                                      backgroundColor: "transparent",
-                                                      color: "#6750a4",
-                                                      cursor: "pointer",
-                                                      fontSize: "12px",
-                                                      fontWeight: "800"
-                                                    }}
-                                                  >
-                                                    Edit
-                                                  </button>
-                                                  <button
-                                                    type="button"
-                                                    onClick={() => handleDeleteHistoryRecord(record.id)}
-                                                    style={{
-                                                      border: "none",
-                                                      backgroundColor: "transparent",
-                                                      color: "#b3261e",
-                                                      cursor: "pointer",
-                                                      fontSize: "12px",
-                                                      fontWeight: "800"
-                                                    }}
-                                                  >
-                                                    Delete
-                                                  </button>
+                                                  {/* Actions */}
+                                                  {!lockedDates.has(record.attendanceDate) && (
+                                                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", borderTop: "1px solid #e7e0ec", paddingTop: "6px", marginTop: "2px" }}>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleStartEditHistoryRecord(record)}
+                                                        style={{
+                                                          border: "none",
+                                                          backgroundColor: "transparent",
+                                                          color: "#6750a4",
+                                                          cursor: "pointer",
+                                                          fontSize: "12px",
+                                                          fontWeight: "800"
+                                                        }}
+                                                      >
+                                                        Edit
+                                                      </button>
+                                                      <button
+                                                        type="button"
+                                                        onClick={() => handleDeleteHistoryRecord(record.id)}
+                                                        style={{
+                                                          border: "none",
+                                                          backgroundColor: "transparent",
+                                                          color: "#b3261e",
+                                                          cursor: "pointer",
+                                                          fontSize: "12px",
+                                                          fontWeight: "800"
+                                                        }}
+                                                      >
+                                                        Delete
+                                                      </button>
+                                                    </div>
+                                                  )}
                                                 </div>
                                               </div>
                                             )}

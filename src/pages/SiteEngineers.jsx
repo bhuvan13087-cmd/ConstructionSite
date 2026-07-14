@@ -327,25 +327,8 @@ export default function SiteEngineers() {
                       <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                         <div 
                           onClick={() => setSelectedEngineerId(eng.id)} 
-                          className="user-avatar" 
-                          style={{ 
-                            width: "36px", 
-                            height: "36px", 
-                            borderRadius: "50%", 
-                            cursor: "pointer", 
-                            fontSize: "13px",
-                            boxShadow: "0 2px 5px rgba(0,0,0,0.05)",
-                            transition: "transform 0.15s ease",
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontWeight: "800",
-                            backgroundColor: "var(--accent-50)",
-                            color: "var(--accent-700)",
-                            border: "1px solid var(--accent-200)"
-                          }}
-                          onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.08)"}
-                          onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
+                          className="avatar-initials info" 
+                          style={{ cursor: "pointer", width: "36px", height: "36px" }}
                           title="Click to view details"
                         >
                           {eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE"}
@@ -372,12 +355,11 @@ export default function SiteEngineers() {
                       <Badge status="pending">{sitesCount} Sites</Badge>
                     </td>
                     <td>
-                      <div style={{ display: "flex", gap: "8px" }}>
+                      <div className="table-actions">
                         <button 
                           onClick={() => handleOpenEditModal(eng)} 
-                          className="btn-icon" 
+                          className="btn-icon btn-edit-action" 
                           title="Edit Profile"
-                          style={{ color: "var(--primary-600)", background: "none", border: "none", cursor: "pointer", padding: "4px" }}
                         >
                           <Edit3 size={15} />
                         </button>
@@ -385,7 +367,7 @@ export default function SiteEngineers() {
                           onClick={() => handleDeleteEngineer(eng)} 
                           className="btn-icon" 
                           title="Delete Engineer"
-                          style={{ color: "var(--danger-500)", background: "none", border: "none", cursor: "pointer", padding: "4px" }}
+                          style={{ color: "var(--danger-500)" }}
                         >
                           <Trash2 size={15} />
                         </button>

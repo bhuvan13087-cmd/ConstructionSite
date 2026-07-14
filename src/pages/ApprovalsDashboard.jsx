@@ -240,54 +240,54 @@ export default function ApprovalsDashboard() {
         </div>
 
         {/* Metrics Grid */}
-        <div className="dashboard-grid" style={{ gridTemplateColumns: "repeat(4, 1fr)", gap: "20px", marginBottom: "30px" }}>
-          <Card style={{ borderLeft: "4px solid var(--warning-500)", padding: "20px" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Pending Action</span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
-              <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{pendingCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--warning-600)", fontWeight: "600" }}>Waiting review</span>
+        <div className="erp-kpi-grid" style={{ marginBottom: "24px" }}>
+          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--warning-500)" }}>
+            <div className="erp-kpi-content">
+              <span className="erp-kpi-label">Pending Action</span>
+              <span className="erp-kpi-num">{pendingCount}</span>
+              <span className="erp-kpi-footer" style={{ color: "var(--warning-600)" }}>Awaiting verification review</span>
             </div>
-          </Card>
+          </div>
 
-          <Card style={{ borderLeft: "4px solid var(--success-500)", padding: "20px" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Approved</span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
-              <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{approvedCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--success-600)", fontWeight: "600" }}>Resolved verified</span>
+          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--success-500)" }}>
+            <div className="erp-kpi-content">
+              <span className="erp-kpi-label">Total Approved</span>
+              <span className="erp-kpi-num">{approvedCount}</span>
+              <span className="erp-kpi-footer" style={{ color: "var(--success-600)" }}>Audits verified resolved</span>
             </div>
-          </Card>
+          </div>
 
-          <Card style={{ borderLeft: "4px solid var(--danger-500)", padding: "20px" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Rejected</span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
-              <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{rejectedCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--danger-600)", fontWeight: "600" }}>Denied audits</span>
+          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--danger-500)" }}>
+            <div className="erp-kpi-content">
+              <span className="erp-kpi-label">Total Rejected</span>
+              <span className="erp-kpi-num">{rejectedCount}</span>
+              <span className="erp-kpi-footer" style={{ color: "var(--danger-600)" }}>Denied audits logged</span>
             </div>
-          </Card>
+          </div>
 
-          <Card style={{ borderLeft: "4px solid var(--accent-500)", padding: "20px" }}>
-            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Total Submissions</span>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "8px" }}>
-              <span style={{ fontSize: "36px", fontWeight: "800", color: "var(--primary-900)" }}>{totalCount}</span>
-              <span style={{ fontSize: "12px", color: "var(--accent-600)", fontWeight: "600" }}>Overall timeline</span>
+          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--accent-500)" }}>
+            <div className="erp-kpi-content">
+              <span className="erp-kpi-label">Total Submissions</span>
+              <span className="erp-kpi-num">{totalCount}</span>
+              <span className="erp-kpi-footer">Overall console submissions</span>
             </div>
-          </Card>
+          </div>
         </div>
 
         {/* Filters Panel */}
-        <Card style={{ padding: "20px", marginBottom: "24px", backgroundColor: "#fff" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "16px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
-            <Filter size={16} style={{ color: "var(--accent-600)" }} />
-            <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>Filter Requests Queue</strong>
+        <Card style={{ padding: "16px", marginBottom: "20px", backgroundColor: "#fff" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "12px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+            <Filter size={14} style={{ color: "var(--accent-600)" }} />
+            <strong style={{ fontSize: "13px", color: "var(--primary-900)" }}>Filter Requisitions Queue</strong>
           </div>
           
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Approval Type</label>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "750", color: "var(--primary-700)", textTransform: "uppercase" }}>Approval Type</label>
               <select 
                 value={filterType} 
                 onChange={(e) => setFilterType(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc", outline: "none", fontSize: "13px" }}
+                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px", height: "36px" }}
               >
                 <option value="all">All Request Types</option>
                 <option value="Leave">Leaves</option>
@@ -298,12 +298,12 @@ export default function ApprovalsDashboard() {
               </select>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Status</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "750", color: "var(--primary-700)", textTransform: "uppercase" }}>Status</label>
               <select 
                 value={filterStatus} 
                 onChange={(e) => setFilterStatus(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc", outline: "none", fontSize: "13px" }}
+                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px", height: "36px" }}
               >
                 <option value="all">All Statuses</option>
                 <option value="pending">Pending Review</option>
@@ -312,22 +312,22 @@ export default function ApprovalsDashboard() {
               </select>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Submission Date</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "750", color: "var(--primary-700)", textTransform: "uppercase" }}>Submission Date</label>
               <input 
                 type="date"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc", outline: "none", fontSize: "13px" }}
+                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px", height: "36px" }}
               />
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Site Engineer</label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "750", color: "var(--primary-700)", textTransform: "uppercase" }}>Site Engineer</label>
               <select 
                 value={filterEngineer} 
                 onChange={(e) => setFilterEngineer(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc", outline: "none", fontSize: "13px" }}
+                style={{ padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px", height: "36px" }}
               >
                 <option value="">All Engineers</option>
                 {engineers.map(e => (
@@ -339,9 +339,9 @@ export default function ApprovalsDashboard() {
         </Card>
 
         {/* Requests List */}
-        <Card style={{ padding: "0", overflow: "hidden", backgroundColor: "#fff" }}>
-          <div style={{ padding: "20px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span style={{ fontWeight: "700", color: "var(--primary-900)" }}>
+        <Card variant="table" style={{ padding: "0", overflow: "hidden", backgroundColor: "#fff" }}>
+          <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: "700", color: "var(--primary-900)", fontSize: "14px" }}>
               All Requests Queue ({filteredRequests.length} listed)
             </span>
             <Badge status={filterStatus === "pending" ? "pending" : "success"}>
@@ -356,27 +356,27 @@ export default function ApprovalsDashboard() {
               <p style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "4px" }}>Modify type or status filter selectors.</p>
             </div>
           ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div className="erp-table-container">
+              <table className="erp-table">
                 <thead>
-                  <tr style={{ borderBottom: "1px solid var(--border-color)", backgroundColor: "#f8fafc", textAlign: "left" }}>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Type</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Employee</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Details / Specification</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Site / Project</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Requested Date</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase" }}>Status</th>
-                    <th style={{ padding: "16px 20px", fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase", textAlign: "right" }}>Actions</th>
+                  <tr>
+                    <th>Type</th>
+                    <th>Employee</th>
+                    <th>Details / Specification</th>
+                    <th>Site / Project</th>
+                    <th>Requested Date</th>
+                    <th>Status</th>
+                    <th style={{ textAlign: "right" }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredRequests.map((req, index) => {
                     const isPending = (req.status || "").toLowerCase() === "pending";
                     return (
-                      <tr key={`${req.type}-${req.id}-${index}`} style={{ borderBottom: "1px solid var(--border-color)", transition: "background var(--transition-fast)" }} className="table-row-hover">
+                      <tr key={`${req.type}-${req.id}-${index}`}>
                         
                         {/* Type Badge */}
-                        <td style={{ padding: "16px 20px" }}>
+                        <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             {req.type === "Leave" && <Layers size={14} style={{ color: "var(--warning-500)" }} />}
                             {req.type === "Location" && <MapPin size={14} style={{ color: "var(--accent-600)" }} />}
@@ -388,9 +388,9 @@ export default function ApprovalsDashboard() {
                         </td>
 
                         {/* Employee Name */}
-                        <td style={{ padding: "16px 20px" }}>
+                        <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "var(--primary-100)", color: "var(--primary-800)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10px", fontWeight: "700" }}>
+                            <div className="avatar-initials info">
                               {(req.requestedBy || "SE").split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()}
                             </div>
                             <span style={{ fontSize: "13px", color: "var(--primary-900)", fontWeight: "600" }}>{req.requestedBy}</span>
@@ -398,56 +398,58 @@ export default function ApprovalsDashboard() {
                         </td>
 
                         {/* Details */}
-                        <td style={{ padding: "16px 20px", maxWidth: "450px" }}>
-                          <div style={{ fontSize: "13px", color: "var(--primary-950)", fontWeight: "600" }}>
+                        <td style={{ maxWidth: "350px" }}>
+                          <div style={{ fontSize: "12.5px", color: "var(--primary-950)", fontWeight: "600", lineHeight: "1.4" }}>
                             {req.details}
                           </div>
                         </td>
 
                         {/* Site */}
-                        <td style={{ padding: "16px 20px", fontSize: "13px", color: "var(--primary-800)" }}>
-                          <strong style={{ color: req.siteName === "N/A" ? "var(--text-muted)" : "var(--primary-900)" }}>
+                        <td>
+                          <strong style={{ fontSize: "13px", color: req.siteName === "N/A" ? "var(--text-muted)" : "var(--primary-900)" }}>
                             {req.siteName}
                           </strong>
                         </td>
 
                         {/* Date */}
-                        <td style={{ padding: "16px 20px", fontSize: "13px", color: "var(--primary-800)" }}>
+                        <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <Calendar size={14} style={{ color: "var(--text-muted)" }} />
+                            <Calendar size={13} style={{ color: "var(--text-muted)" }} />
                             <span>{req.requestDate}</span>
                           </div>
                         </td>
 
                         {/* Status Badge */}
-                        <td style={{ padding: "16px 20px" }}>
+                        <td>
                           <Badge status={req.status}>
                             {req.status === "pending" || req.status === "Pending" ? "Pending Approval" : req.status.toUpperCase()}
                           </Badge>
                         </td>
 
                         {/* Actions */}
-                        <td style={{ padding: "16px 20px", textAlign: "right" }}>
+                        <td>
                           {isPending ? (
-                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+                            <div style={{ display: "flex", justifyContent: "flex-end", gap: "6px" }}>
                               <Button 
                                 variant="outline" 
-                                size="xs" 
+                                size="sm" 
                                 onClick={() => handleApprove(req)}
                                 style={{ 
-                                  borderColor: "var(--success-500)", 
+                                  borderColor: "var(--success-600)", 
                                   color: "var(--success-600)", 
                                   backgroundColor: "var(--success-50)",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  height: "30px !important",
+                                  padding: "4px 10px !important"
                                 }}
                               >
                                 <Check size={12} /> Approve
                               </Button>
                               <Button 
                                 variant="outline" 
-                                size="xs" 
+                                size="sm" 
                                 onClick={() => handleReject(req)}
                                 style={{ 
                                   borderColor: "var(--danger-500)", 
@@ -455,14 +457,16 @@ export default function ApprovalsDashboard() {
                                   backgroundColor: "var(--danger-50)",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  height: "30px !important",
+                                  padding: "4px 10px !important"
                                 }}
                               >
                                 <X size={12} /> Reject
                               </Button>
                             </div>
                           ) : (
-                            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic", display: "block", textAlign: "right" }}>
                               Audited
                             </span>
                           )}

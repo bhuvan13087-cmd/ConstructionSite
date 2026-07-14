@@ -1032,7 +1032,8 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
   const minStr = minutes < 10 ? '0' + minutes : minutes;
   const timeStr = `${hours}:${minStr} ${ampm}`;
 
-  const newAttendanceRef = doc(collection(db, "attendance"));
+  const docId = `${siteId}_${dateStr}`;
+  const newAttendanceRef = doc(db, "attendance", docId);
   await setDoc(newAttendanceRef, {
     userId: engineerId,
     engineerId: engineerId, // compatibility
@@ -4285,3 +4286,49 @@ export function subscribeGeneralExpenses(onUpdate) {
     console.error("General expenses subscription failed:", err);
   });
 }
+
+// Check daily labor attendance submission status
+export async function checkLabourSubmissionStatus(siteId, dateStr) {
+  const db = getDb();
+  const docRef = doc(db, "attendance", `${siteId}_${dateStr}`);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    const data = docSnap.data();
+    return {
+      submitted: data.status === "submitted",
+      submittedAt: data.submittedAt || null,
+      submittedBy: data.submittedBy || null
+    };
+  }
+  return { submitted: false };
+}
+
+// Submit workforce attendance for site and date
+export async function submitLabourAttendance(siteId, dateStr, engineerId) {
+  const db = getDb();
+  const docId = `${siteId}_${dateStr}`;
+  const docRef = doc(db, "attendance", docId);
+  const docSnap = await getDoc(docRef);
+  
+  if (docSnap.exists()) {
+    await updateDoc(docRef, {
+      status: "submitted",
+      submittedAt: serverTimestamp(),
+      submittedBy: engineerId,
+      updatedAt: serverTimestamp()
+    });
+  } else {
+    await setDoc(docRef, {
+      userId: engineerId,
+      engineerId: engineerId,
+      siteId,
+      date: dateStr,
+      status: "submitted",
+      submittedAt: serverTimestamp(),
+      submittedBy: engineerId,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
+}
+

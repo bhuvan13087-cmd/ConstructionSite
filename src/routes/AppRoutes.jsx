@@ -15,6 +15,7 @@ import DocumentsDashboard from "../pages/DocumentsDashboard";
 import ReportsDashboard from "../pages/ReportsDashboard";
 import PayrollSummary from "../pages/PayrollSummary";
 import ProtectedRoute from "../components/common/ProtectedRoute";
+import ErrorBoundary from "../components/common/ErrorBoundary";
 import { useAuth } from "../context/AuthContext";
 
 export default function AppRoutes() {
@@ -23,49 +24,49 @@ export default function AppRoutes() {
   return (
     <Routes>
       {/* Landing / Login routes */}
-      <Route path="/" element={<Login />} />
-      <Route path="/login" element={<Login />} />
+      <Route path="/" element={<ErrorBoundary><Login /></ErrorBoundary>} />
+      <Route path="/login" element={<ErrorBoundary><Login /></ErrorBoundary>} />
 
       {/* Protected Admin Dashboard Area */}
       <Route element={<ProtectedRoute allowedRoles={["admin"]} />}>
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/admin/approvals" element={<ApprovalsDashboard />} />
-        <Route path="/admin/engineers" element={<SiteEngineers />} />
-        <Route path="/admin/sites" element={<Sites />} />
-        <Route path="/admin/assignments" element={<SiteAssignments />} />
-        <Route path="/admin/materials" element={<AdminMaterials />} />
-        <Route path="/admin/labour" element={<AdminLabour />} />
-        <Route path="/admin/payments" element={<AdminPayments />} />
-        <Route path="/admin/payroll" element={<PayrollSummary />} />
-        <Route path="/admin/documents" element={<DocumentsDashboard />} />
-        <Route path="/admin/reports" element={<ReportsDashboard />} />
+        <Route path="/admin" element={<ErrorBoundary><AdminDashboard /></ErrorBoundary>} />
+        <Route path="/admin/approvals" element={<ErrorBoundary><ApprovalsDashboard /></ErrorBoundary>} />
+        <Route path="/admin/engineers" element={<ErrorBoundary><SiteEngineers /></ErrorBoundary>} />
+        <Route path="/admin/sites" element={<ErrorBoundary><Sites /></ErrorBoundary>} />
+        <Route path="/admin/assignments" element={<ErrorBoundary><SiteAssignments /></ErrorBoundary>} />
+        <Route path="/admin/materials" element={<ErrorBoundary><AdminMaterials /></ErrorBoundary>} />
+        <Route path="/admin/labour" element={<ErrorBoundary><AdminLabour /></ErrorBoundary>} />
+        <Route path="/admin/payments" element={<ErrorBoundary><AdminPayments /></ErrorBoundary>} />
+        <Route path="/admin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
+        <Route path="/admin/documents" element={<ErrorBoundary><DocumentsDashboard /></ErrorBoundary>} />
+        <Route path="/admin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
       </Route>
 
       {/* Protected Site Engineer Area */}
       <Route element={<ProtectedRoute allowedRoles={["site_engineer", "engineer"]} />}>
-        <Route path="/engineer" element={<EngineerDashboard tab="dashboard" />} />
-        <Route path="/engineer/attendance" element={<EngineerDashboard tab="attendance" />} />
-        <Route path="/engineer/attendance-history" element={<EngineerDashboard tab="attendance-history" />} />
-        <Route path="/engineer/labour" element={<EngineerDashboard tab="labour" />} />
-        <Route path="/engineer/material" element={<EngineerDashboard tab="material" />} />
-        <Route path="/engineer/photos" element={<EngineerDashboard tab="photos" />} />
-        <Route path="/engineer/progress" element={<EngineerDashboard tab="progress" />} />
-        <Route path="/engineer/expenses" element={<EngineerDashboard tab="expenses" />} />
-        <Route path="/engineer/more" element={<EngineerDashboard tab="more" />} />
-        <Route path="/engineer/profile" element={<EngineerDashboard tab="profile" />} />
-        <Route path="/engineer/documents" element={<DocumentsDashboard />} />
+        <Route path="/engineer" element={<ErrorBoundary><EngineerDashboard tab="dashboard" /></ErrorBoundary>} />
+        <Route path="/engineer/attendance" element={<ErrorBoundary><EngineerDashboard tab="attendance" /></ErrorBoundary>} />
+        <Route path="/engineer/attendance-history" element={<ErrorBoundary><EngineerDashboard tab="attendance-history" /></ErrorBoundary>} />
+        <Route path="/engineer/labour" element={<ErrorBoundary><EngineerDashboard tab="labour" /></ErrorBoundary>} />
+        <Route path="/engineer/material" element={<ErrorBoundary><EngineerDashboard tab="material" /></ErrorBoundary>} />
+        <Route path="/engineer/photos" element={<ErrorBoundary><EngineerDashboard tab="photos" /></ErrorBoundary>} />
+        <Route path="/engineer/progress" element={<ErrorBoundary><EngineerDashboard tab="progress" /></ErrorBoundary>} />
+        <Route path="/engineer/expenses" element={<ErrorBoundary><EngineerDashboard tab="expenses" /></ErrorBoundary>} />
+        <Route path="/engineer/more" element={<ErrorBoundary><EngineerDashboard tab="more" /></ErrorBoundary>} />
+        <Route path="/engineer/profile" element={<ErrorBoundary><EngineerDashboard tab="profile" /></ErrorBoundary>} />
+        <Route path="/engineer/documents" element={<ErrorBoundary><DocumentsDashboard /></ErrorBoundary>} />
       </Route>
 
       {/* Protected Super Admin Area */}
       <Route element={<ProtectedRoute allowedRoles={["super_admin", "superadmin"]} />}>
-        <Route path="/superadmin" element={<SuperAdminDashboard tab="dashboard" />} />
-        <Route path="/superadmin/sites" element={<SuperAdminDashboard tab="sites" />} />
-        <Route path="/superadmin/finance" element={<SuperAdminDashboard tab="finance" />} />
-        <Route path="/superadmin/progress" element={<SuperAdminDashboard tab="progress" />} />
-        <Route path="/superadmin/approvals" element={<SuperAdminDashboard tab="approvals" />} />
-        <Route path="/superadmin/reports" element={<ReportsDashboard />} />
-        <Route path="/superadmin/payroll" element={<PayrollSummary />} />
-        <Route path="/superadmin/documents" element={<DocumentsDashboard />} />
+        <Route path="/superadmin" element={<ErrorBoundary><SuperAdminDashboard tab="dashboard" /></ErrorBoundary>} />
+        <Route path="/superadmin/sites" element={<ErrorBoundary><SuperAdminDashboard tab="sites" /></ErrorBoundary>} />
+        <Route path="/superadmin/finance" element={<ErrorBoundary><SuperAdminDashboard tab="finance" /></ErrorBoundary>} />
+        <Route path="/superadmin/progress" element={<ErrorBoundary><SuperAdminDashboard tab="progress" /></ErrorBoundary>} />
+        <Route path="/superadmin/approvals" element={<ErrorBoundary><SuperAdminDashboard tab="approvals" /></ErrorBoundary>} />
+        <Route path="/superadmin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
+        <Route path="/superadmin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
+        <Route path="/superadmin/documents" element={<ErrorBoundary><DocumentsDashboard /></ErrorBoundary>} />
       </Route>
 
       {/* Fallback route redirection */}

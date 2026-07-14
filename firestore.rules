@@ -202,7 +202,7 @@ service cloud.firestore {
       allow write: if isAdmin() || (
         isActiveUser() && (
           (resource == null && (request.resource.data.engineerId == request.auth.uid || request.resource.data.userId == request.auth.uid)) ||
-          (resource != null && (resource.data.engineerId == request.auth.uid || resource.data.userId == request.auth.uid))
+          (resource != null && resource.data.status != "submitted" && (resource.data.engineerId == request.auth.uid || resource.data.userId == request.auth.uid))
         )
       );
     }
@@ -325,7 +325,19 @@ service cloud.firestore {
     }
 
     match /labourMemberAttendance/{attendanceId} {
-      allow read, write: if isActiveUser();
+      allow read: if isActiveUser();
+      allow write: if isActiveUser() && (
+        (
+          resource == null && 
+          (!exists(/databases/$(database)/documents/attendance/$(request.resource.data.siteId)_$(request.resource.data.attendanceDate)) ||
+           get(/databases/$(database)/documents/attendance/$(request.resource.data.siteId)_$(request.resource.data.attendanceDate)).data.status != "submitted")
+        ) ||
+        (
+          resource != null && 
+          (!exists(/databases/$(database)/documents/attendance/$(resource.data.siteId)_$(resource.data.attendanceDate)) ||
+           get(/databases/$(database)/documents/attendance/$(resource.data.siteId)_$(resource.data.attendanceDate)).data.status != "submitted")
+        )
+      );
     }
 
 

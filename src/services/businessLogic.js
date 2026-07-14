@@ -72,6 +72,7 @@ export function verifySiteGeofence(coords, savedLocation, siteRadius) {
  * @returns {object} - Processed material object with computed fields
  */
 export function processMaterialPaymentAndDelivery(mat) {
+  if (!mat) return {};
   const isApproved = mat.status === "approved" || mat.status === "Approved";
   const isPending = mat.status === "pending" || mat.status === "Pending" || !mat.status;
   const isRejected = mat.status === "rejected" || mat.status === "Rejected";
@@ -645,6 +646,24 @@ export function generateWeeklyReportFromDprs(dprs = []) {
  * Consolidates all expenses and payouts across materials, labour, and general expenses for a site.
  */
 export function getSiteExpenseLedger(site, materials = [], labourHistory = [], generalExpenses = [], labourPayments = [], labourMaster = {}) {
+  if (!site) {
+    return {
+      expenses: [],
+      payments: [],
+      materialExpenseTotal: 0,
+      materialPaidTotal: 0,
+      labourExpenseTotal: 0,
+      labourPaidTotal: 0,
+      siteExpenseTotal: 0,
+      otherExpenseTotal: 0,
+      generalPaidTotal: 0,
+      budget: 0,
+      totalExpenses: 0,
+      totalPayments: 0,
+      balance: 0,
+      percentSpent: 0
+    };
+  }
   // 1. Budget retrieve (with fallback to hash for backward compatibility)
   let budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : null;
   if (budget === null || isNaN(budget)) {

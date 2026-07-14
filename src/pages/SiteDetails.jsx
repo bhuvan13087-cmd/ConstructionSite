@@ -347,12 +347,12 @@ export default function SiteDetails({ siteId, onBack }) {
         </div>
       )}
 
-      {/* Header Back Bar */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }} className="no-print">
-        <Button variant="outline" icon={ArrowLeft} onClick={onBack}>
-          Back to Sites List
-        </Button>
-        <span style={{ fontSize: "13px", fontWeight: "600", color: "var(--text-muted)" }}>
+      {/* Header Back Bar (Breadcrumbs) */}
+      <div className="erp-breadcrumbs no-print" style={{ marginBottom: "16px", display: "flex", alignItems: "center", width: "100%" }}>
+        <span className="clickable" onClick={onBack}>Construction Sites</span>
+        <span className="erp-breadcrumbs-separator">/</span>
+        <span className="erp-breadcrumbs-current">{site.siteName}</span>
+        <span style={{ marginLeft: "auto", fontSize: "13px", fontWeight: "600", color: "var(--text-muted)" }}>
           Site Status: <Badge status={site.status || "Planning"} />
         </span>
       </div>
@@ -390,14 +390,7 @@ export default function SiteDetails({ siteId, onBack }) {
       </div>
 
       {/* Tabs Switcher */}
-      <div style={{
-        display: "flex",
-        gap: "4px",
-        borderBottom: "2px solid var(--border-color)",
-        marginBottom: "24px",
-        overflowX: "auto",
-        paddingBottom: "2px"
-      }} className="no-print">
+      <div className="erp-tabs-list no-print">
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -405,25 +398,10 @@ export default function SiteDetails({ siteId, onBack }) {
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "12px 20px",
-                border: "none",
-                backgroundColor: isActive ? "var(--primary-50)" : "transparent",
-                color: isActive ? "var(--primary-750)" : "var(--text-muted)",
-                fontSize: "14px",
-                fontWeight: isActive ? "800" : "600",
-                cursor: "pointer",
-                borderBottom: isActive ? "3px solid var(--primary-600)" : "3px solid transparent",
-                borderRadius: "var(--radius-sm) var(--radius-sm) 0 0",
-                transition: "all 0.15s ease",
-                whiteSpace: "nowrap"
-              }}
+              className={`erp-tab-button ${isActive ? "active" : ""}`}
             >
-              <Icon size={16} />
-              {tab.label}
+              <Icon size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
+              <span style={{ verticalAlign: "middle" }}>{tab.label}</span>
             </button>
           );
         })}
@@ -438,26 +416,34 @@ export default function SiteDetails({ siteId, onBack }) {
         {activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
             {/* Quick Metrics Grid */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Materials Shipments</span>
-                <strong style={{ fontSize: "28px", color: "var(--primary-900)", display: "block", marginTop: "8px" }}>{materials.length}</strong>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>total registered ledger inputs</span>
+            <div className="erp-kpi-grid" style={{ marginBottom: "24px" }}>
+              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #3b82f6" }}>
+                <div className="erp-kpi-content">
+                  <span className="erp-kpi-label">Material Shipments</span>
+                  <span className="erp-kpi-num">{materials.length}</span>
+                  <span className="erp-kpi-footer">total registered ledger inputs</span>
+                </div>
               </div>
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Daily Labor Submissions</span>
-                <strong style={{ fontSize: "28px", color: "var(--primary-900)", display: "block", marginTop: "8px" }}>{labourHistory.length}</strong>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>active days reported</span>
+              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #10b981" }}>
+                <div className="erp-kpi-content">
+                  <span className="erp-kpi-label">Labor logs</span>
+                  <span className="erp-kpi-num">{labourHistory.length}</span>
+                  <span className="erp-kpi-footer">active days reported</span>
+                </div>
               </div>
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Progress Updates</span>
-                <strong style={{ fontSize: "28px", color: "var(--primary-900)", display: "block", marginTop: "8px" }}>{progressUpdates.length}</strong>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>field progress milestones</span>
+              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #f59e0b" }}>
+                <div className="erp-kpi-content">
+                  <span className="erp-kpi-label">Progress Updates</span>
+                  <span className="erp-kpi-num">{progressUpdates.length}</span>
+                  <span className="erp-kpi-footer">milestones logged</span>
+                </div>
               </div>
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Uploaded Photos</span>
-                <strong style={{ fontSize: "28px", color: "var(--primary-900)", display: "block", marginTop: "8px" }}>{photos.length}</strong>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block", marginTop: "4px" }}>inspection snaps</span>
+              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #ec4899" }}>
+                <div className="erp-kpi-content">
+                  <span className="erp-kpi-label">Uploaded Photos</span>
+                  <span className="erp-kpi-num">{photos.length}</span>
+                  <span className="erp-kpi-footer">site inspection snaps</span>
+                </div>
               </div>
             </div>
 

@@ -7,15 +7,7 @@ import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
 
 const NavGroupTitle = ({ children }) => (
-  <div style={{
-    fontSize: "9px",
-    fontWeight: "850",
-    color: "rgba(148, 163, 184, 0.45)",
-    textTransform: "uppercase",
-    letterSpacing: "1px",
-    margin: "16px 0 6px 12px",
-    fontFamily: "var(--font-family-title, sans-serif)"
-  }}>
+  <div className="sidebar-nav-group-title">
     {children}
   </div>
 );
@@ -42,27 +34,40 @@ export default function Sidebar({ isOpen, onClose }) {
       {/* Self-contained CSS scopes for modern Enterprise branding */}
       <style>{`
         .sidebar {
-          background-color: var(--primary-900, #0f172a);
-          border-right: 1px solid rgba(255,255,255,0.06);
+          background-color: #0f172a;
+          border-right: 1px solid rgba(255, 255, 255, 0.06);
           display: flex;
           flex-direction: column;
           transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
         
         .sidebar-brand {
-          font-family: var(--font-family-title, sans-serif);
+          font-family: 'Outfit', sans-serif;
           font-weight: 800;
           color: #ffffff;
           letter-spacing: 0.5px;
+          display: flex;
+          align-items: center;
+          gap: 10px;
         }
 
         .sidebar-nav {
-          padding: 8px 12px;
+          padding: 16px 12px;
           display: flex;
           flex-direction: column;
-          gap: 2px;
+          gap: 4px;
           overflow-y: auto;
           flex: 1;
+        }
+
+        /* Nav Group Title override */
+        .sidebar-nav-group-title {
+          font-size: 10px;
+          font-weight: 800;
+          color: #475569;
+          text-transform: uppercase;
+          letter-spacing: 1px;
+          margin: 16px 0 6px 12px;
         }
 
         .nav-item {
@@ -70,39 +75,42 @@ export default function Sidebar({ isOpen, onClose }) {
           align-items: center;
           gap: 12px;
           padding: 9px 12px;
-          color: rgba(255,255,255,0.65);
-          border-radius: 8px;
+          color: #94a3b8;
+          border-radius: 6px;
           font-weight: 600;
           font-size: 13px;
           text-decoration: none;
-          transition: all 0.2s ease;
+          transition: all 0.15s ease;
+          border: 1px solid transparent;
         }
 
         .nav-item:hover {
-          background-color: rgba(255,255,255,0.04);
+          background-color: rgba(255, 255, 255, 0.04);
           color: #ffffff;
         }
 
         .nav-item.active {
-          background-color: var(--accent-600, #e65100) !important;
-          color: #ffffff !important;
-          box-shadow: 0 4px 12px rgba(230, 81, 0, 0.2);
+          background-color: rgba(255, 255, 255, 0.08) !important;
+          border-color: rgba(255, 255, 255, 0.08) !important;
+          color: #f59e0b !important;
+          box-shadow: none;
         }
 
         .nav-item svg {
           opacity: 0.8;
           transition: transform 0.2s ease;
+          color: currentColor;
         }
 
         .nav-item:hover svg {
           opacity: 1;
-          transform: translateX(2px);
+          transform: translateX(1px);
         }
 
         .sidebar-footer {
-          border-top: 1px solid rgba(255,255,255,0.06);
+          border-top: 1px solid rgba(255, 255, 255, 0.06);
           padding: 16px;
-          background-color: var(--primary-950, #080c14);
+          background-color: #090d16;
         }
 
         .user-profile {
@@ -113,9 +121,9 @@ export default function Sidebar({ isOpen, onClose }) {
         }
 
         .user-avatar {
-          width: 36px;
-          height: 36px;
-          background: linear-gradient(135deg, var(--accent-500), var(--accent-700));
+          width: 34px;
+          height: 34px;
+          background: linear-gradient(135deg, #f59e0b, #d97706);
           color: #ffffff;
           border-radius: 50%;
           display: flex;
@@ -134,7 +142,7 @@ export default function Sidebar({ isOpen, onClose }) {
         }
 
         .user-email {
-          color: rgba(255,255,255,0.45);
+          color: #64748b;
           font-size: 11px;
           margin: 0;
           white-space: nowrap;
@@ -144,17 +152,19 @@ export default function Sidebar({ isOpen, onClose }) {
         }
 
         .btn-logout {
-          border: 1px solid rgba(255,255,255,0.1) !important;
-          color: rgba(255,255,255,0.7) !important;
+          border: 1px solid rgba(255, 255, 255, 0.1) !important;
+          color: #94a3b8 !important;
           background: transparent !important;
           transition: all 0.2s ease;
+          height: 32px !important;
+          font-size: 12px !important;
+          padding: 4px 12px !important;
         }
 
         .btn-logout:hover {
-          background-color: var(--danger-600, #b3261e) !important;
-          border-color: var(--danger-600, #b3261e) !important;
+          background-color: #ef4444 !important;
+          border-color: #ef4444 !important;
           color: #ffffff !important;
-          box-shadow: 0 4px 10px rgba(179, 38, 30, 0.2);
         }
       `}</style>
 

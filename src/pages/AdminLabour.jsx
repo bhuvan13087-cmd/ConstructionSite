@@ -1464,66 +1464,34 @@ export default function AdminLabour() {
       )}
 
       {/* Tabs Menu navigation */}
-      <div className="tab-menu" style={{ display: "flex", gap: "14px", borderBottom: "2px solid var(--border-color)", paddingBottom: "2px", marginBottom: "24px" }}>
+      <div className="erp-tabs-list no-print" style={{ marginBottom: "24px" }}>
         <button
           onClick={() => setActiveTab("master")}
-          style={{
-            padding: "10px 18px",
-            border: "none",
-            background: "none",
-            fontWeight: "700",
-            fontSize: "14px",
-            color: activeTab === "master" ? "var(--primary-800)" : "var(--text-muted)",
-            borderBottom: activeTab === "master" ? "3px solid var(--primary-800)" : "3px solid transparent",
-            cursor: "pointer"
-          }}
+          className={`erp-tab-button ${activeTab === "master" ? "active" : ""}`}
         >
-          Labour Master
+          <Users size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
+          <span style={{ verticalAlign: "middle" }}>Labour Master</span>
         </button>
         <button
           onClick={() => setActiveTab("assignments")}
-          style={{
-            padding: "10px 18px",
-            border: "none",
-            background: "none",
-            fontWeight: "700",
-            fontSize: "14px",
-            color: activeTab === "assignments" ? "var(--primary-800)" : "var(--text-muted)",
-            borderBottom: activeTab === "assignments" ? "3px solid var(--primary-800)" : "3px solid transparent",
-            cursor: "pointer"
-          }}
+          className={`erp-tab-button ${activeTab === "assignments" ? "active" : ""}`}
         >
-          Labour Assignments
+          <Plus size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
+          <span style={{ verticalAlign: "middle" }}>Labour Assignments</span>
         </button>
         <button
           onClick={() => setActiveTab("salary")}
-          style={{
-            padding: "10px 18px",
-            border: "none",
-            background: "none",
-            fontWeight: "700",
-            fontSize: "14px",
-            color: activeTab === "salary" ? "var(--primary-800)" : "var(--text-muted)",
-            borderBottom: activeTab === "salary" ? "3px solid var(--primary-800)" : "3px solid transparent",
-            cursor: "pointer"
-          }}
+          className={`erp-tab-button ${activeTab === "salary" ? "active" : ""}`}
         >
-          Salary Management
+          <DollarSign size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
+          <span style={{ verticalAlign: "middle" }}>Salary Management</span>
         </button>
         <button
           onClick={() => setActiveTab("attendance")}
-          style={{
-            padding: "10px 18px",
-            border: "none",
-            background: "none",
-            fontWeight: "700",
-            fontSize: "14px",
-            color: activeTab === "attendance" ? "var(--primary-800)" : "var(--text-muted)",
-            borderBottom: activeTab === "attendance" ? "3px solid var(--primary-800)" : "3px solid transparent",
-            cursor: "pointer"
-          }}
+          className={`erp-tab-button ${activeTab === "attendance" ? "active" : ""}`}
         >
-          Attendance History
+          <Calendar size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
+          <span style={{ verticalAlign: "middle" }}>Attendance History</span>
         </button>
       </div>
 

@@ -32,6 +32,7 @@ export default function SiteAssignments() {
   const [engineers, setEngineers] = useState([]);
   const [assignments, setAssignments] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState("");
+  const [selectedEngineerId, setSelectedEngineerId] = useState("");
   
   // Search states
   const [siteSearchQuery, setSiteSearchQuery] = useState("");
@@ -129,6 +130,7 @@ export default function SiteAssignments() {
       const adminId = user?.uid || "admin";
       await assignEngineerToSite(siteId, engineerId, adminId);
       showToast(`Assigned ${engineer.fullName} to "${site.siteName}" successfully!`, "success");
+      setSelectedEngineerId("");
       await loadData();
     } catch (err) {
       console.error("Assignment submission error:", err);
@@ -228,65 +230,57 @@ export default function SiteAssignments() {
       )}
 
       {/* Metrics Row */}
-      <div className="metrics-grid" style={{ marginBottom: "24px" }}>
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Total Registered Sites</span>
-            <div className="metric-icon-wrapper primary">
-              <Building2 size={18} />
-            </div>
+      <div className="erp-kpi-grid" style={{ marginBottom: "24px" }}>
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--primary-500)" }}>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Total Registered Sites</span>
+            <span className="erp-kpi-num">{sites.length}</span>
+            <span className="erp-kpi-footer">Registered project sites</span>
           </div>
-          <div className="metric-value">{sites.length}</div>
-          <div className="metric-subtext">Registered project sites</div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Active Field Engineers</span>
-            <div className="metric-icon-wrapper success">
-              <Users size={18} />
-            </div>
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--success-500)" }}>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Active Field Engineers</span>
+            <span className="erp-kpi-num">{activeEngineersList.length}</span>
+            <span className="erp-kpi-footer">Field staff ready for assignments</span>
           </div>
-          <div className="metric-value">{activeEngineersList.length}</div>
-          <div className="metric-subtext">Field staff ready for assignments</div>
         </div>
 
-        <div className="metric-card">
-          <div className="metric-header">
-            <span className="metric-title">Active Allocations</span>
-            <div className="metric-icon-wrapper warning">
-              <UserCheck size={18} />
-            </div>
+        <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--warning-500)" }}>
+          <div className="erp-kpi-content">
+            <span className="erp-kpi-label">Active Allocations</span>
+            <span className="erp-kpi-num">{assignments.length}</span>
+            <span className="erp-kpi-footer">Allocated project roles</span>
           </div>
-          <div className="metric-value">{assignments.length}</div>
-          <div className="metric-subtext">Allocated project roles</div>
         </div>
       </div>
 
       {/* Main Allocation Workspace */}
-      <div className="assignments-split-layout" style={{ marginBottom: "24px" }}>
+      <div className="assignments-workflow-container" style={{ marginBottom: "24px" }}>
         
-        {/* Left Column: Construction Site Selection */}
+        {/* Column 1: Construction Sites List */}
         <Card 
           variant="accent" 
-          title="1. Select Construction Site" 
-          subtitle="Search and click a site card to manage team allocation."
+          title="1. Select Project Site" 
+          subtitle="Click a site card to review team assignments."
+          style={{ height: "fit-content", maxHeight: "650px", display: "flex", flexDirection: "column" }}
         >
-          <div className="sites-select-card">
+          <div className="sites-select-card" style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, overflow: "hidden" }}>
             <div className="search-input-wrapper">
               <Search className="search-icon" size={16} />
               <input 
                 type="text" 
-                placeholder="Search sites by name, location, or client..."
+                placeholder="Search sites..."
                 value={siteSearchQuery}
                 onChange={(e) => setSiteSearchQuery(e.target.value)}
               />
             </div>
 
-            <div className="site-picker-list">
+            <div className="site-picker-list" style={{ overflowY: "auto", flex: 1, maxHeight: "480px" }}>
               {filteredSites.length === 0 ? (
                 <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px" }}>
-                  No construction sites match search query.
+                  No construction sites match query.
                 </div>
               ) : (
                 filteredSites.map((site) => {
@@ -299,20 +293,20 @@ export default function SiteAssignments() {
                     <div 
                       key={site.id} 
                       className={`site-picker-item ${isActive ? "active" : ""}`}
-                      onClick={() => setSelectedSiteId(site.id)}
+                      onClick={() => { setSelectedSiteId(site.id); setSelectedEngineerId(""); }}
+                      style={{ cursor: "pointer", padding: "12px", borderBottom: "1px solid var(--border-color)", borderLeft: isActive ? "4px solid var(--accent-600)" : "4px solid transparent" }}
                     >
-                      <div className="site-picker-header">
-                        <span className="site-picker-name">{site.siteName}</span>
+                      <div className="site-picker-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                        <span className="site-picker-name" style={{ fontWeight: 700, fontSize: "13.5px" }}>{site.siteName}</span>
                         <Badge status={site.status || "Planning"} />
                       </div>
-                      <span className="site-picker-client">Client: {site.clientName || "N/A"}</span>
-                      <div className="site-picker-meta">
-                        <div className="site-picker-loc">
-                          <MapPin size={13} />
+                      <div className="site-picker-meta" style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                        <div className="site-picker-loc" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                          <MapPin size={11} />
                           <span>{site.location}</span>
                         </div>
-                        <span style={{ fontWeight: 600, color: assignedCount > 0 ? "var(--accent-700)" : "var(--text-muted)" }}>
-                          {assignedCount} {assignedCount === 1 ? "Engineer" : "Engineers"}
+                        <span style={{ fontWeight: 650, color: assignedCount > 0 ? "var(--accent-700)" : "var(--text-muted)" }}>
+                          {assignedCount} {assignedCount === 1 ? "Staff" : "Staff"}
                         </span>
                       </div>
                     </div>
@@ -323,151 +317,124 @@ export default function SiteAssignments() {
           </div>
         </Card>
 
-        {/* Right Column: Allocate Site Engineer */}
+        {/* Column 2: Assignment Workbench */}
         <Card 
           variant="accent" 
-          title="2. Allocate Field Engineer" 
-          subtitle="View project team members and assign active field staff."
+          title="2. Assignment Workbench" 
+          subtitle="Configure personnel allocation and inspect site workloads."
         >
           {selectedSite ? (
-            <div className="engineers-selection-card">
-              
-              {/* Selected site details banner */}
-              <div className="selected-site-banner">
-                <h4>{selectedSite.siteName}</h4>
-                <div style={{ display: "flex", gap: "16px", color: "var(--text-muted)", fontSize: "12px", marginTop: "4px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              {/* Selected site information banner */}
+              <div style={{ padding: "16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <h4 style={{ margin: "0 0 6px 0", fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>{selectedSite.siteName}</h4>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "16px", color: "var(--text-muted)", fontSize: "12px" }}>
                   <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                     <MapPin size={13} /> {selectedSite.location}
                   </span>
-                  <span>|</span>
-                  <span>Client: {selectedSite.clientName}</span>
+                  <span>Client: <strong>{selectedSite.clientName}</strong></span>
                 </div>
-                
-                {/* Active site team badges */}
-                {selectedSiteAllocations.length > 0 ? (
-                  <div style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
-                    <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--primary-700)", textTransform: "uppercase" }}>
-                      Current Team on Site:
-                    </span>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
-                      {selectedSiteAllocations.map(asg => (
-                        <div 
-                          key={asg.id} 
-                          style={{ 
-                            display: "inline-flex", 
-                            alignItems: "center", 
-                            gap: "6px",
-                            backgroundColor: "var(--accent-100)", 
-                            color: "var(--accent-700)",
-                            padding: "4px 10px",
-                            borderRadius: "50px",
-                            fontSize: "12px",
-                            fontWeight: 600
-                          }}
-                        >
-                          <User size={12} />
-                          <span>{asg.engineerName}</span>
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleRemoveAssignment(asg); }} 
-                            style={{ 
-                              background: "none", 
-                              border: "none", 
-                              color: "var(--accent-700)", 
-                              cursor: "pointer", 
-                              padding: "0 2px",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              fontWeight: 700
-                            }}
-                            title="Remove assignment"
-                          >
-                            ×
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    No engineers assigned to this site yet.
-                  </div>
-                )}
               </div>
 
-              {/* Engineer Search */}
-              <div className="search-input-wrapper">
-                <Search className="search-icon" size={16} />
-                <input 
-                  type="text" 
-                  placeholder="Search available engineers by name, email, phone..."
-                  value={engineerSearchQuery}
-                  onChange={(e) => setEngineerSearchQuery(e.target.value)}
-                />
-              </div>
-
-              {/* Available Active Engineers Grid */}
-              <div className="engineer-picker-grid">
-                {filteredEngineers.length === 0 ? (
-                  <div style={{ gridColumn: "1 / -1", textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                    No active site engineers match search.
-                  </div>
-                ) : (
-                  filteredEngineers.map((eng) => {
-                    const isAssigned = selectedSiteAllocations.some(asg => asg.engineerId === eng.id);
-                    const workloadCount = getWorkload(eng.id);
-                    const isHighWorkload = workloadCount >= 3;
-                    
+              {/* Workbench Actions */}
+              <div style={{ padding: "20px", border: "2px dashed var(--border-color)", borderRadius: "8px", backgroundColor: "#fafbfc", textAlign: "center" }}>
+                {selectedEngineerId && engineers.find(eng => eng.id === selectedEngineerId) ? (
+                  (() => {
+                    const selectedEngineer = engineers.find(eng => eng.id === selectedEngineerId);
                     return (
-                      <div key={eng.id} className="engineer-picker-card">
-                        <div className="engineer-profile-info">
-                          <div className="initials-avatar-lg">
-                            {getInitials(eng.fullName)}
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginBottom: "12px" }}>
+                          <div className="avatar-initials info" style={{ width: "40px", height: "40px", fontSize: "14px" }}>
+                            {getInitials(selectedEngineer.fullName)}
                           </div>
-                          <div className="engineer-picker-details">
-                            <span className="engineer-picker-name">{eng.fullName}</span>
-                            <span className="engineer-picker-email" title={eng.email}>{eng.email}</span>
-                            <span className="engineer-picker-phone">{eng.phoneNumber || "No Phone Contact"}</span>
+                          <div style={{ textAlign: "left" }}>
+                            <strong style={{ display: "block", color: "var(--primary-950)", fontSize: "14px" }}>{selectedEngineer.fullName}</strong>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{selectedEngineer.email}</span>
                           </div>
                         </div>
-                        
-                        <div className="engineer-card-footer">
-                          <span 
-                            className={`workload-count-badge ${isHighWorkload ? "high" : ""}`}
-                            title={`Assigned to ${workloadCount} site(s)`}
+
+                        <p style={{ fontSize: "13px", color: "var(--primary-800)", margin: "0 0 16px 0", lineHeight: "1.4" }}>
+                          Ready to assign <strong>{selectedEngineer.fullName}</strong> to <strong>{selectedSite.siteName}</strong>. 
+                          Workload: {getWorkload(selectedEngineer.id)} &rarr; {getWorkload(selectedEngineer.id) + 1} active projects.
+                        </p>
+
+                        <div style={{ display: "flex", justifyContent: "center", gap: "10px" }}>
+                          <Button 
+                            variant="primary"
+                            onClick={() => handleAssign(selectedSiteId, selectedEngineerId)}
+                            icon={Plus}
                           >
-                            {workloadCount} {workloadCount === 1 ? "site" : "sites"} assigned
-                          </span>
-                          
-                          {isAssigned ? (
-                            <span 
-                              style={{ 
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px",
-                                fontSize: "12px", 
-                                color: "var(--success-600)", 
-                                fontWeight: 700 
-                              }}
-                            >
-                              ✓ Assigned
-                            </span>
-                          ) : (
-                            <Button 
-                              size="sm" 
-                              onClick={() => handleAssign(selectedSiteId, eng.id)}
-                              icon={Plus}
-                              style={{ padding: "6px 12px", borderRadius: "var(--radius-sm)" }}
-                            >
-                              Assign
-                            </Button>
-                          )}
+                            Confirm Assignment
+                          </Button>
+                          <Button 
+                            variant="outline"
+                            onClick={() => setSelectedEngineerId("")}
+                          >
+                            Cancel
+                          </Button>
                         </div>
                       </div>
                     );
-                  })
+                  })()
+                ) : (
+                  <div>
+                    <div style={{ display: "inline-flex", padding: "10px", borderRadius: "50%", backgroundColor: "var(--primary-50)", color: "var(--primary-600)", marginBottom: "10px" }}>
+                      <UserCheck size={24} />
+                    </div>
+                    <h5 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: "750", color: "var(--primary-900)" }}>Assign Personnel</h5>
+                    <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)", lineHeight: "1.4" }}>
+                      Select a field engineer from the roster on the right to configure site placement.
+                    </p>
+                  </div>
                 )}
               </div>
 
+              {/* Current site allocations */}
+              <div>
+                <strong style={{ fontSize: "11px", fontWeight: 750, color: "var(--primary-700)", textTransform: "uppercase", display: "block", marginBottom: "8px" }}>
+                  Current Site Team ({selectedSiteAllocations.length})
+                </strong>
+                {selectedSiteAllocations.length > 0 ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {selectedSiteAllocations.map(asg => (
+                      <div 
+                        key={asg.id} 
+                        style={{ 
+                          display: "flex", 
+                          alignItems: "center", 
+                          justifyContent: "space-between",
+                          backgroundColor: "#ffffff", 
+                          border: "1px solid var(--border-color)",
+                          padding: "10px 14px",
+                          borderRadius: "6px"
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div className="avatar-initials info" style={{ width: "28px", height: "28px", fontSize: "10.5px" }}>
+                            {getInitials(asg.engineerName)}
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "13px", fontWeight: 650, color: "var(--primary-900)" }}>{asg.engineerName}</span>
+                            <span style={{ display: "block", fontSize: "10px", color: "var(--text-muted)" }}>{asg.engineerEmail}</span>
+                          </div>
+                        </div>
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); handleRemoveAssignment(asg); }} 
+                          className="btn-icon" 
+                          style={{ color: "var(--danger-500)", border: "none", background: "none", cursor: "pointer" }}
+                          title="Remove assignment"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ padding: "16px", border: "1px dashed var(--border-color)", borderRadius: "6px", textAlign: "center", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
+                    No engineer team members allocated.
+                  </div>
+                )}
+              </div>
             </div>
           ) : (
             <div className="empty-state-container">
@@ -480,6 +447,83 @@ export default function SiteAssignments() {
               </p>
             </div>
           )}
+        </Card>
+
+        {/* Column 3: Site Engineers Roster */}
+        <Card 
+          variant="accent" 
+          title="3. Available Field Staff" 
+          subtitle="Roster of active civil engineers for deployment."
+          style={{ height: "fit-content", maxHeight: "650px", display: "flex", flexDirection: "column" }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px", flex: 1, overflow: "hidden" }}>
+            <div className="search-input-wrapper">
+              <Search className="search-icon" size={16} />
+              <input 
+                type="text" 
+                placeholder="Search staff..."
+                value={engineerSearchQuery}
+                onChange={(e) => setEngineerSearchQuery(e.target.value)}
+              />
+            </div>
+
+            <div className="engineer-picker-list" style={{ overflowY: "auto", flex: 1, maxHeight: "480px", display: "flex", flexDirection: "column", gap: "8px" }}>
+              {filteredEngineers.length === 0 ? (
+                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px" }}>
+                  No engineers match query.
+                </div>
+              ) : (
+                filteredEngineers.map((eng) => {
+                  const isAssigned = selectedSiteAllocations.some(asg => asg.engineerId === eng.id);
+                  const isSelected = eng.id === selectedEngineerId;
+                  const workloadCount = getWorkload(eng.id);
+                  
+                  return (
+                    <div 
+                      key={eng.id} 
+                      className={`engineer-picker-card ${isSelected ? "selected" : ""}`}
+                      onClick={() => {
+                        if (!isAssigned && selectedSiteId) {
+                          setSelectedEngineerId(eng.id);
+                        }
+                      }}
+                      style={{ 
+                        cursor: isAssigned ? "not-allowed" : "pointer", 
+                        padding: "10px", 
+                        borderRadius: "6px", 
+                        border: isSelected ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
+                        backgroundColor: isAssigned ? "#f1f5f9" : (isSelected ? "var(--accent-50)" : "#ffffff"),
+                        opacity: isAssigned ? 0.7 : 1,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <div className="avatar-initials info" style={{ width: "32px", height: "32px", fontSize: "11px" }}>
+                          {getInitials(eng.fullName)}
+                        </div>
+                        <div>
+                          <strong style={{ fontSize: "13px", color: "var(--primary-900)", display: "block" }}>{eng.fullName}</strong>
+                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Workload: {workloadCount} site(s)</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        {isAssigned ? (
+                          <span style={{ fontSize: "11px", color: "var(--success-600)", fontWeight: "700" }}>Assigned</span>
+                        ) : isSelected ? (
+                          <span style={{ fontSize: "11px", color: "var(--accent-600)", fontWeight: "700" }}>Selected</span>
+                        ) : (
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Deploy &rarr;</span>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </Card>
       </div>
 
@@ -541,7 +585,7 @@ export default function SiteAssignments() {
                     </td>
                     <td>
                       <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                        <div className="user-avatar" style={{ width: "32px", height: "32px", fontSize: "12px", borderRadius: "50%" }}>
+                        <div className="avatar-initials info" style={{ width: "32px", height: "32px", fontSize: "11px" }}>
                           {getInitials(asg.engineerName)}
                         </div>
                         <div>
@@ -560,7 +604,7 @@ export default function SiteAssignments() {
                           onClick={() => handleRemoveAssignment(asg)} 
                           className="btn-icon" 
                           title="Remove Allocation" 
-                          style={{ color: "var(--danger-500)", width: "32px", height: "32px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          style={{ color: "var(--danger-500)" }}
                         >
                           <Trash2 size={16} />
                         </button>
