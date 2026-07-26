@@ -76,7 +76,9 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (
         request.auth.uid == userId || 
         isAdmin() ||
-        userId == '__document_categories__'
+        userId == '__document_categories__' ||
+        userId == 'material_master' ||
+        userId == '__site_expenses__'
       );
       
       // Allow user profile creation if the user is authenticated and either:

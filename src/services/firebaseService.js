@@ -1548,25 +1548,21 @@ export async function addMaterial(materialData) {
   const newMaterialRef = doc(materialsColl);
   const matId = newMaterialRef.id;
   
-  const quantity = Number(materialData.quantity) || 0;
-  const unitPrice = Number(materialData.unitPrice !== undefined ? materialData.unitPrice : (materialData.defaultUnitPrice || (materialData.category === "Steel" ? 65000 : (materialData.category === "Cement" ? 380 : 500))));
-  const totalAmount = materialData.totalAmount !== undefined ? Number(materialData.totalAmount) : (quantity * unitPrice);
-
   await setDoc(newMaterialRef, {
     siteId: materialData.siteId,
     engineerId: materialData.engineerId,
     materialName: materialData.materialName,
     category: materialData.category,
-    quantity: quantity,
-    unit: materialData.unit || "Unit",
-    unitPrice: unitPrice,
-    defaultUnitPrice: unitPrice,
-    totalAmount: totalAmount,
-    supplierName: materialData.supplierName || "",
+    quantity: Number(materialData.quantity),
+    requiredQuantity: Number(materialData.requiredQuantity || materialData.quantity),
+    unit: materialData.unit,
+    unitPrice: Number(materialData.unitPrice) || 0,
+    totalAmount: Number(materialData.totalAmount) || (Number(materialData.quantity) * (Number(materialData.unitPrice) || 0)),
+    supplierName: materialData.supplierName,
     purchaseDate: materialData.purchaseDate,
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
-    status: materialData.status || "approved", // approved or pending
+    status: materialData.status || "Approved",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
@@ -1588,37 +1584,43 @@ export async function addMaterial(materialData) {
     }
   } catch (e) {}
 
-  const details = `${materialData.materialName} (${materialData.category}) - Qty: ${quantity} ${materialData.unit || 'Units'} @ ₹${unitPrice}/unit (Total: ₹${totalAmount})`;
-  await createApprovalRequest({
+  const details = `${materialData.materialName} (${materialData.category}) - Qty: ${materialData.quantity} ${materialData.unit}`;
+
+  await saveApprovalRequest({
+    id: matId,
     type: "Material",
-    siteName,
+    requestedBy: engineerName,
     engineerId: materialData.engineerId,
-    engineerName,
     siteId: materialData.siteId,
-    amount: totalAmount,
-    details,
+    siteName: siteName,
+    details: details,
+    amount: 0,
     requestDate: materialData.purchaseDate || new Date().toISOString().split("T")[0],
-    referenceId: matId
+    status: "pending",
+    raw: { id: matId }
   });
 
-  await logActivity(
+  await logSystemActivity(
     materialData.engineerId,
     engineerName,
+    "site_engineer",
     materialData.siteId,
     siteName,
-    "Material Log Added",
-    { materialId: matId, totalAmount }
+    "Create",
+    `${engineerName} requested ${details} for ${siteName}`,
+    "Material",
+    { materialId: matId }
   );
 
-  await createNotification(
+  await notifyAdmins(
     "New Material Requisition Request",
-    `Material requisition of ${quantity} ${materialData.unit || 'Units'} ${materialData.materialName} created for ${siteName}.`,
+    `${engineerName} submitted a new request for ${details} at ${siteName}.`,
     "Material",
     materialData.siteId,
-    materialData.engineerId
+    siteName,
+    materialData.engineerId,
+    engineerName
   );
-
-  return matId;
 }
 
 // Get materials, optionally filtered by siteId, and resolve names
@@ -2822,28 +2824,220 @@ export async function saveLabourPayment(paymentData, adminId = null) {
   return newPayment;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MATERIAL MASTER – Single Source of Truth
+//
+// Storage path:  labourCategories/__material_master__  (field: materialsList)
+//
+// Why this path?  The existing Firestore rule for /labourCategories/{categoryId}
+// already has:
+//   allow read: if isActiveUser();   ← admins AND site engineers
+//   allow write: if isAdmin();       ← only admins can write
+//
+// The old path (users/material_master) was blocked for site engineers because
+// the /users/{userId} read rule only allowed uid == userId | isAdmin() |
+// specific special document IDs.  Storing here requires NO rule change and
+// ensures every role can subscribe and receive real-time updates.
+// ─────────────────────────────────────────────────────────────────────────────
+const MATERIAL_MASTER_DOC = ["labourCategories", "material-master-config"];
+
 export async function getMaterialMaster() {
   const db = getDb();
-  const docRef = doc(db, "users", "material_master");
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    return docSnap.data().materialsList || [];
+  // Primary path – readable by all active users
+  const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
+  const primarySnap = await getDoc(primaryRef);
+  if (primarySnap.exists()) {
+    return primarySnap.data().materialsList || [];
   }
-  const defaultList = [
-    { name: "Cement", category: "Cement", unit: "Bag", defaultUnitPrice: 380, status: "Active" },
-    { name: "Steel", category: "Steel", unit: "Ton", defaultUnitPrice: 65000, status: "Active" },
-    { name: "Sand", category: "Sand", unit: "Load", defaultUnitPrice: 1200, status: "Active" },
-    { name: "Bricks", category: "Bricks", unit: "Piece", defaultUnitPrice: 9, status: "Active" }
-  ];
-  return defaultList;
+
+  // One-time migration: pull from legacy path (admin-only) and write to primary
+  try {
+    const legacyRef = doc(db, "users", "material_master");
+    const legacySnap = await getDoc(legacyRef);
+    if (legacySnap.exists()) {
+      const list = legacySnap.data().materialsList || [];
+      if (list.length > 0) {
+        await setDoc(primaryRef, { materialsList: list, updatedAt: serverTimestamp() });
+      }
+      return list;
+    }
+  } catch (e) {
+    // Legacy path not readable (e.g. called by site engineer) – safe to ignore
+  }
+  return [];
 }
 
 export async function saveMaterialMaster(materialsList) {
   const db = getDb();
-  const docRef = doc(db, "users", "material_master");
-  await setDoc(docRef, {
+  // Write to primary path (all active users can read this)
+  const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
+  await setDoc(primaryRef, {
     materialsList,
     updatedAt: serverTimestamp()
+  });
+  // Best-effort mirror to legacy path so any old clients still work
+  try {
+    const legacyRef = doc(db, "users", "material_master");
+    await setDoc(legacyRef, { materialsList, updatedAt: serverTimestamp() });
+  } catch (e) {
+    // Admin always has write access, but swallow any unexpected errors
+  }
+}
+
+// Real-time synchronization subscription for Material Master (Single Source of Truth)
+export function subscribeMaterialMaster(onUpdate) {
+  const db = getDb();
+  const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
+
+  return onSnapshot(primaryRef, async (docSnap) => {
+    if (docSnap.exists()) {
+      onUpdate(docSnap.data().materialsList || []);
+    } else {
+      try {
+        const list = await getMaterialMaster();
+        onUpdate(list || []);
+      } catch (e) {
+        onUpdate([]);
+      }
+    }
+  }, (error) => {
+    console.error("subscribeMaterialMaster failed:", error);
+    onUpdate([]);
+  });
+}
+
+export async function createMaterialGroup(groupName) {
+  const cleanName = (groupName || "").trim();
+  if (!cleanName) throw new Error("Material Group name cannot be empty.");
+  
+  const currentList = await getMaterialMaster();
+  const groupExists = currentList.some(item => (item.category || "").toLowerCase() === cleanName.toLowerCase());
+  if (groupExists) throw new Error("Material Group already exists.");
+
+  const newGroupItem = {
+    id: `mat_grp_${Date.now()}`,
+    name: `${cleanName} Standard`,
+    category: cleanName,
+    unit: "Unit",
+    status: "Active"
+  };
+  const updatedList = [...currentList, newGroupItem];
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+export async function renameMaterialGroup(oldGroupName, newGroupName) {
+  const oldClean = (oldGroupName || "").trim();
+  const newClean = (newGroupName || "").trim();
+  if (!newClean) throw new Error("New Material Group name cannot be empty.");
+
+  const currentList = await getMaterialMaster();
+  const updatedList = currentList.map(item => {
+    if ((item.category || "").toLowerCase() === oldClean.toLowerCase()) {
+      return { ...item, category: newClean };
+    }
+    return item;
+  });
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+export async function deleteMaterialGroup(groupName) {
+  const cleanName = (groupName || "").trim();
+  const currentList = await getMaterialMaster();
+  const updatedList = currentList.filter(item => (item.category || "").toLowerCase() !== cleanName.toLowerCase());
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+export async function createMaterialItem(materialData) {
+  const nameClean = (materialData.name || "").trim();
+  const categoryClean = (materialData.category || "").trim();
+  const unitClean = (materialData.unit || "Bag").trim();
+  
+  if (!nameClean) throw new Error("Material Name cannot be empty.");
+  if (!categoryClean) throw new Error("Material Group/Category cannot be empty.");
+
+  const currentList = await getMaterialMaster();
+  const newItem = {
+    id: `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    name: nameClean,
+    category: categoryClean,
+    unit: unitClean,
+    unitPrice: Number(materialData.unitPrice) || 0,
+    status: materialData.status || "Active"
+  };
+  const updatedList = [...currentList, newItem];
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+export async function updateMaterialItem(itemId, updatedData) {
+  const currentList = await getMaterialMaster();
+  const updatedList = currentList.map((item, index) => {
+    if (item.id === itemId || index === itemId) {
+      return {
+        ...item,
+        name: (updatedData.name || item.name).trim(),
+        category: (updatedData.category || item.category).trim(),
+        unit: (updatedData.unit || item.unit).trim(),
+        unitPrice: updatedData.unitPrice !== undefined ? Number(updatedData.unitPrice) : (item.unitPrice || 0),
+        status: updatedData.status || item.status || "Active"
+      };
+    }
+    return item;
+  });
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+export async function deleteMaterialItem(itemId, itemIndex = null) {
+  const currentList = await getMaterialMaster();
+  const updatedList = currentList.filter((item, index) => {
+    if (itemId && item.id) return item.id !== itemId;
+    if (itemIndex !== null && itemIndex !== undefined) return index !== itemIndex;
+    return true;
+  });
+  await saveMaterialMaster(updatedList);
+  return updatedList;
+}
+
+
+// Real-time synchronization subscription for site-specific detailed materials
+export function subscribeMaterialsDetailed(siteId, onUpdate) {
+  const db = getDb();
+  const materialsColl = collection(db, "materials");
+  
+  let q;
+  if (siteId) {
+    q = query(materialsColl, where("siteId", "==", siteId));
+  } else {
+    q = query(materialsColl);
+  }
+
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(d => {
+      const data = d.data();
+      list.push({
+        id: d.id,
+        ...data,
+        receivedQuantity: Number(data.receivedQuantity) || Number(data.quantity) || 0,
+        consumedQuantity: Number(data.consumedQuantity) || 0,
+        unitCost: Number(data.unitCost) || 0,
+        totalCost: Number(data.totalCost) || Number(data.totalAmount) || 0
+      });
+    });
+    
+    list.sort((a, b) => {
+      const dateA = a.createdTime?.seconds ? new Date(a.createdTime.seconds * 1000) : new Date(a.purchaseDate || 0);
+      const dateB = b.createdTime?.seconds ? new Date(b.createdTime.seconds * 1000) : new Date(b.purchaseDate || 0);
+      return dateB - dateA;
+    });
+
+    onUpdate(list);
+  }, (error) => {
+    console.error("subscribeMaterialsDetailed failed:", error);
   });
 }
 
@@ -4122,30 +4316,31 @@ export async function getLabourMemberAttendanceSummary(siteId) {
 // Save/Update a single labour attendance record (Auto-save row-by-row)
 export async function saveLabourAttendanceRecord(recordId, recordData) {
   const db = getDb();
-  
-  const workerCount = Number(recordData.workerCount) || 1;
-  const rawWorkUnit = recordData.workUnit !== undefined && recordData.workUnit !== null 
-    ? recordData.workUnit 
-    : (recordData.units !== undefined && recordData.units !== null ? (Number(recordData.units) / workerCount) : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0));
-  
-  const workUnit = Number(rawWorkUnit) > 0 ? Number(rawWorkUnit) : 1.0;
-  const totalUnits = recordData.units !== undefined && recordData.units !== null ? Number(recordData.units) : (workUnit * workerCount);
-  
-  const attType = recordData.attendanceType || (workUnit === 1.0 ? "Full Day" : (workUnit === 0.5 ? "Half Day" : `${workUnit} Unit(s)`));
-  const docKeyType = String(workUnit).replace(/\./g, "_");
-  const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${docKeyType}_${recordData.attendanceDate}`;
+  const safeType = (recordData.attendanceType || "Custom").replace(/\s+/g, "_");
+  const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${safeType}_${recordData.attendanceDate}`;
   const docRef = doc(db, "labourMemberAttendance", docId);
   
+  const workerCount = Number(recordData.workerCount) || 0;
+  const customWorkUnits = Number(recordData.customWorkUnits !== undefined ? recordData.customWorkUnits : (recordData.units !== undefined ? recordData.units : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+  const dailyWage = Number(recordData.dailyWage !== undefined ? recordData.dailyWage : (recordData.wage || 0)) || 0;
+  const calculatedAmount = Number(recordData.calculatedAmount) || (workerCount * customWorkUnits * dailyWage);
+
   const payload = {
     siteId: recordData.siteId,
     teamId: recordData.teamId,
     categoryId: recordData.categoryId,
+    categoryName: recordData.categoryName || "",
     attendanceDate: recordData.attendanceDate,
-    workerCount: workerCount,
-    workUnit: workUnit,
-    units: totalUnits,
-    attendanceType: attType,
-    createdBy: recordData.createdBy
+    workerCount,
+    customWorkUnits,
+    units: customWorkUnits,
+    dailyWage,
+    wage: dailyWage,
+    calculatedAmount,
+    totalAmount: calculatedAmount,
+    attendanceType: `${customWorkUnits} Units`,
+    createdBy: recordData.createdBy,
+    updatedAt: serverTimestamp()
   };
 
   if (!recordId) {
@@ -4303,8 +4498,49 @@ export function subscribeGeneralExpenses(onUpdate) {
 
 // Check daily labor attendance submission status
 export async function checkLabourSubmissionStatus(siteId, dateStr) {
+  if (!siteId || !dateStr) return { submitted: false };
   const db = getDb();
-  const docRef = doc(db, "attendance", `${siteId}_${dateStr}`);
+  const docRef = doc(db, "attendance", `labour_lock_${siteId}_${dateStr}`);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    const data = docSnap.data();
+    if (data.status === "submitted" && (data.type === "labour_attendance_lock" || data.siteId === siteId)) {
+      return {
+        submitted: true,
+        submittedAt: data.submittedAt || null,
+        submittedBy: data.submittedBy || null
+      };
+    }
+  }
+  return { submitted: false };
+}
+
+// Submit workforce attendance for site and date
+export async function submitLabourAttendance(siteId, dateStr, engineerId) {
+  if (!siteId || !dateStr) throw new Error("Site ID and Date are required to submit attendance.");
+  const db = getDb();
+  const docId = `labour_lock_${siteId}_${dateStr}`;
+  const docRef = doc(db, "attendance", docId);
+  
+  await setDoc(docRef, {
+    type: "labour_attendance_lock",
+    userId: engineerId || "",
+    engineerId: engineerId || "",
+    siteId,
+    date: dateStr,
+    status: "submitted",
+    submittedAt: serverTimestamp(),
+    submittedBy: engineerId || "",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+// Check bulk material submission status for site and date
+export async function checkMaterialSubmissionStatus(siteId, dateStr) {
+  if (!siteId || !dateStr) return { submitted: false };
+  const db = getDb();
+  const docRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
     const data = docSnap.data();
@@ -4317,32 +4553,63 @@ export async function checkLabourSubmissionStatus(siteId, dateStr) {
   return { submitted: false };
 }
 
-// Submit workforce attendance for site and date
-export async function submitLabourAttendance(siteId, dateStr, engineerId) {
+// Save bulk material entry for site and date in single transaction/batch
+export async function saveBulkMaterialEntry(bulkData) {
+  const { siteId, dateStr, engineerId, items } = bulkData;
+  if (!siteId) throw new Error("Construction site is required.");
+  if (!dateStr) throw new Error("Entry date is required.");
+  if (!engineerId) throw new Error("Engineer ID is required.");
+
+  const statusCheck = await checkMaterialSubmissionStatus(siteId, dateStr);
+  if (statusCheck.submitted) {
+    throw new Error("Material entry for this site and date is already submitted and locked.");
+  }
+
+  const validItems = (items || []).filter(item => Number(item.quantity) > 0);
+  if (validItems.length === 0) {
+    throw new Error("Please enter a quantity greater than 0 for at least one material.");
+  }
+
   const db = getDb();
-  const docId = `${siteId}_${dateStr}`;
-  const docRef = doc(db, "attendance", docId);
-  const docSnap = await getDoc(docRef);
-  
-  if (docSnap.exists()) {
-    await updateDoc(docRef, {
-      status: "submitted",
-      submittedAt: serverTimestamp(),
-      submittedBy: engineerId,
-      updatedAt: serverTimestamp()
-    });
-  } else {
-    await setDoc(docRef, {
-      userId: engineerId,
-      engineerId: engineerId,
+
+  // Save each material item to materials collection
+  for (const item of validItems) {
+    const qty = Number(item.quantity);
+    const uPrice = Number(item.unitPrice) || 0;
+    const totAmount = qty * uPrice;
+
+    await addMaterial({
       siteId,
-      date: dateStr,
-      status: "submitted",
-      submittedAt: serverTimestamp(),
-      submittedBy: engineerId,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
+      engineerId,
+      materialName: (item.materialName || item.name || "").trim(),
+      category: item.category || "General",
+      quantity: qty,
+      requiredQuantity: qty,
+      unit: item.unit || "Unit",
+      unitPrice: uPrice,
+      totalAmount: totAmount,
+      supplierName: item.supplierName?.trim() || "Bulk Material Supplier",
+      purchaseDate: dateStr,
+      notes: item.notes?.trim() || `Bulk Entry on ${dateStr}`,
+      invoiceUrl: item.invoiceUrl || "",
+      status: "Approved" // Automatically approved bulk log
     });
   }
+
+  // Create submission lock document
+  const lockRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
+  await setDoc(lockRef, {
+    engineerId: engineerId,
+    siteId: siteId,
+    date: dateStr,
+    status: "submitted",
+    submittedAt: serverTimestamp(),
+    submittedBy: engineerId,
+    itemsCount: validItems.length,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  });
+
+  return { success: true, count: validItems.length };
 }
 

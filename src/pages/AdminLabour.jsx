@@ -40,7 +40,6 @@ import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
 import Button from "../components/common/Button";
-import Modal from "../components/common/Modal";
 import { useAuth } from "../context/AuthContext";
 
 export default function AdminLabour() {
@@ -66,13 +65,6 @@ export default function AdminLabour() {
   const [newTeamName, setNewTeamName] = useState("");
   const [editingTeamId, setEditingTeamId] = useState(null);
   const [editingTeamName, setEditingTeamName] = useState("");
-  const [showCreateTeamModal, setShowCreateTeamModal] = useState(false);
-
-  useEffect(() => {
-    if (teams.length > 0 && !selectedTeamId) {
-      setSelectedTeamId(teams[0].id);
-    }
-  }, [teams, selectedTeamId]);
 
   const [newCatName, setNewCatName] = useState("");
   const [newCatWage, setNewCatWage] = useState("");
@@ -124,13 +116,9 @@ export default function AdminLabour() {
         getLabourPayments(adminId)
       ]);
 
-      const safeSites = Array.isArray(fetchedSites) ? fetchedSites : [];
-      const safeTeams = Array.isArray(fetchedTeams) ? fetchedTeams : [];
-      const safePayments = Array.isArray(fetchedPayments) ? fetchedPayments : [];
-
-      setSites(safeSites);
-      setTeams(safeTeams);
-      setPayments(safePayments);
+      setSites(fetchedSites);
+      setTeams(fetchedTeams);
+      setPayments(fetchedPayments);
 
       // Flatten teams members to populate legacy workers state for backward compatibility/reporting
       const flattenedWorkers = [];
@@ -493,394 +481,429 @@ export default function AdminLabour() {
   // -------------------------------------------------------------
   // RENDERS
   // -------------------------------------------------------------
-  // -------------------------------------------------------------
-  // RENDERS
-  // -------------------------------------------------------------
   const renderMasterTab = () => {
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
     const selectedCategory = selectedTeam?.categories?.[selectedCategoryId];
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 2fr", gap: "24px", alignItems: "start" }}>
         
-        {/* Top Header Section */}
-        <div className="erp-page-header-container" style={{ margin: 0, paddingBottom: "12px" }}>
-          <div className="erp-page-title-group">
-            <h2 className="erp-page-header-title" style={{ fontSize: "20px" }}>
-              <Users size={22} style={{ color: "var(--accent-600)" }} />
-              Subcontractor Teams & Skill Category Master
-            </h2>
-            <p className="erp-page-header-subtitle">
-              Configure labour workforce teams, daily base wages, payment cycles, and registered workers.
-            </p>
-          </div>
-          <div className="erp-page-header-actions">
-            <Button onClick={() => setShowCreateTeamModal(true)} icon={Plus}>
-              Create Labour Team
-            </Button>
-          </div>
-        </div>
-
-        {/* 3-Panel Dashboard Layout */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "310px 1fr 310px",
-          gap: "20px",
-          alignItems: "start"
-        }} className="erp-three-panel-layout">
-
-          {/* ===================================================================
-              LEFT PANEL (30% approx): LABOUR TEAMS LIST
-              =================================================================== */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <Card 
-              title="Labour Teams" 
-              subtitle="Registered subcontractor groups"
-              headerActions={<Badge status="info">{teams.length} Teams</Badge>}
-            >
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {teams.length === 0 ? (
-                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px 12px", fontSize: "13px", fontStyle: "italic" }}>
-                    No Labour Teams configured yet.
-                  </div>
-                ) : (
-                  teams.map(team => {
-                    const isSelected = selectedTeamId === team.id;
-                    const catCount = Object.keys(team.categories || {}).length;
-                    let totalWorkers = 0;
-                    if (team.categories) {
-                      Object.values(team.categories).forEach(c => {
-                        totalWorkers += Number(c.workerCount) || (c.members ? Object.keys(c.members).length : 0) || 1;
-                      });
-                    }
-
-                    return (
-                      <div
-                        key={team.id}
-                        onClick={() => {
-                          setSelectedTeamId(team.id);
-                          setSelectedCategoryId("");
-                        }}
-                        style={{
-                          padding: "14px 16px",
-                          borderRadius: "10px",
-                          border: isSelected ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                          backgroundColor: isSelected ? "#fffbeb" : "#ffffff",
-                          cursor: "pointer",
-                          display: "flex",
-                          flexDirection: "column",
-                          gap: "10px",
-                          boxShadow: isSelected ? "var(--shadow-md)" : "var(--shadow-sm)",
-                          transition: "all 0.2s ease"
-                        }}
-                      >
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                          <div>
-                            <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: isSelected ? "var(--accent-700)" : "var(--primary-950)" }}>
-                              {team.teamName}
-                            </h4>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px", display: "block" }}>
-                              Subcontractor / Labour Group
-                            </span>
-                          </div>
-                          {isSelected && <Badge status="warning">Selected</Badge>}
-                        </div>
-
-                        <div style={{ display: "flex", gap: "12px", fontSize: "12px", color: "var(--primary-800)", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
-                          <span><strong>{catCount}</strong> Categories</span>
-                          <span>•</span>
-                          <span><strong>{totalWorkers}</strong> Workers</span>
-                        </div>
-
-                        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end", marginTop: "4px" }} onClick={(e) => e.stopPropagation()}>
-                          <Button 
-                            variant="outline" 
-                            size="sm"
-                            onClick={() => {
-                              setSelectedTeamId(team.id);
-                              setSelectedCategoryId("");
-                            }}
-                          >
-                            View Details
-                          </Button>
-                          <Button 
-                            variant="text" 
-                            size="sm"
-                            onClick={() => {
-                              setEditingTeamId(team.id);
-                              setEditingTeamName(team.teamName);
-                            }}
-                            style={{ color: "var(--text-muted)" }}
-                          >
-                            <Edit2 size={13} />
-                          </Button>
-                          <Button 
-                            variant="text" 
-                            size="sm"
-                            onClick={() => handleDeleteTeam(team.id, team.teamName)}
-                            style={{ color: "var(--danger-600)" }}
-                          >
-                            <Trash2 size={13} />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </Card>
-          </div>
-
-          {/* ===================================================================
-              CENTER PANEL (45% approx): SELECTED TEAM DETAILS & CATEGORIES
-              =================================================================== */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {!selectedTeam ? (
-              <Card title="Team Details">
-                <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontStyle: "italic" }}>
-                  Please select a Labour Team from the left panel to view categories and rates.
-                </div>
-              </Card>
-            ) : (
-              <>
-                <Card 
-                  title={`Skill Categories — ${selectedTeam.teamName}`}
-                  subtitle="Configured categories, payment cycles, and base daily rates"
-                  headerActions={<Badge status="success">{Object.keys(selectedTeam.categories || {}).length} Categories</Badge>}
-                >
-                  {Object.keys(selectedTeam.categories || {}).length === 0 ? (
-                    <div style={{ padding: "40px 20px", textAlign: "center", color: "var(--text-muted)", fontStyle: "italic" }}>
-                      No skill categories added to <strong>{selectedTeam.teamName}</strong> yet.
-                      <br />
-                      Use the <strong>Quick Add Category</strong> form on the right to add daily rate categories.
-                    </div>
-                  ) : (
-                    <div style={{ overflowX: "auto" }}>
-                      <table className="data-table" style={{ margin: 0 }}>
-                        <thead>
-                          <tr>
-                            <th>Category Name</th>
-                            <th>Cycle Type</th>
-                            <th style={{ textAlign: "right" }}>Daily Base Wage</th>
-                            <th style={{ textAlign: "right" }}>Actions</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {Object.keys(selectedTeam.categories).map((catId) => {
-                            const cat = selectedTeam.categories[catId];
-                            const isCatSelected = selectedCategoryId === catId;
-                            const isEditingWage = editingCatKey === catId;
-                            const wage = Number(cat.baseWage || cat.wage) || 0;
-
-                            return (
-                              <tr 
-                                key={catId}
-                                style={{ backgroundColor: isCatSelected ? "#fefce8" : "transparent" }}
-                              >
-                                <td>
-                                  <div style={{ fontWeight: "700", color: "var(--primary-950)" }}>
-                                    {cat.name}
-                                  </div>
-                                </td>
-                                <td>
-                                  <Badge status="pending">{cat.paymentType || "Daily"}</Badge>
-                                </td>
-                                <td style={{ textAlign: "right", fontWeight: "800" }} className="font-mono">
-                                  {isEditingWage ? (
-                                    <div style={{ display: "flex", gap: "4px", justifyContent: "flex-end", alignItems: "center" }}>
-                                      <input
-                                        type="number"
-                                        value={editingWage}
-                                        onChange={(e) => setEditingWage(e.target.value)}
-                                        style={{ width: "90px", padding: "4px 8px", fontSize: "12px", border: "1px solid var(--border-color)", borderRadius: "4px", fontWeight: "700" }}
-                                      />
-                                      <button onClick={() => handleUpdateCategoryWage(catId)} style={{ border: "none", background: "none", color: "var(--success-600)", cursor: "pointer" }}><Save size={14} /></button>
-                                      <button onClick={() => setEditingCatKey(null)} style={{ border: "none", background: "none", color: "var(--text-muted)", cursor: "pointer" }}><X size={14} /></button>
-                                    </div>
-                                  ) : (
-                                    <span style={{ color: "var(--success-700)" }}>₹{wage.toLocaleString("en-IN")}</span>
-                                  )}
-                                </td>
-                                <td style={{ textAlign: "right" }}>
-                                  <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      onClick={() => {
-                                        setEditingCatKey(catId);
-                                        setEditingWage(wage);
-                                      }}
-                                    >
-                                      Edit Wage
-                                    </Button>
-                                    <Button
-                                      variant="text"
-                                      size="sm"
-                                      onClick={() => handleDeleteCategoryFromTeam(catId, cat.name)}
-                                      style={{ color: "var(--danger-600)" }}
-                                    >
-                                      <Trash2 size={13} />
-                                    </Button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </Card>
-              </>
-            )}
-          </div>
-
-          {/* ===================================================================
-              RIGHT PANEL (25% approx): QUICK ADD CATEGORY (STICKY)
-              =================================================================== */}
-          <div style={{ position: "sticky", top: "20px" }}>
-            <Card 
-              title="Quick Add Category" 
-              subtitle="Add category & base daily rate"
-              style={{ borderLeft: "4px solid var(--accent-600)" }}
-            >
-              <form onSubmit={handleAddCategory} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                
-                {/* Selected Team Notice */}
-                <div style={{
-                  padding: "10px 12px",
-                  borderRadius: "6px",
-                  backgroundColor: selectedTeam ? "#f0f9ff" : "#fef2f2",
-                  border: `1px solid ${selectedTeam ? "#bae6fd" : "#fecaca"}`,
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  color: selectedTeam ? "#0369a1" : "#991b1b"
-                }}>
-                  {selectedTeam ? `Selected Team: ${selectedTeam.teamName}` : "⚠️ Select a Labour Team first!"}
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", display: "block", marginBottom: "4px" }}>
-                    Category Label
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Mason (Senior)"
-                    value={newCatName}
-                    onChange={(e) => setNewCatName(e.target.value)}
-                    disabled={!selectedTeam}
-                    required
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "13px", outline: "none" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", display: "block", marginBottom: "4px" }}>
-                    Daily Base Wage (₹)
-                  </label>
-                  <input
-                    type="number"
-                    step="any"
-                    min="1"
-                    placeholder="e.g. 850"
-                    value={newCatWage}
-                    onChange={(e) => setNewCatWage(e.target.value)}
-                    disabled={!selectedTeam}
-                    required
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "13px", fontWeight: "700", outline: "none" }}
-                  />
-                </div>
-
-                <div>
-                  <label style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", display: "block", marginBottom: "4px" }}>
-                    Payment Cycle Type
-                  </label>
-                  <select
-                    value={newCatType}
-                    onChange={(e) => setNewCatType(e.target.value)}
-                    disabled={!selectedTeam}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "13px", backgroundColor: "#ffffff", outline: "none" }}
-                  >
-                    <option value="Daily">Daily Rate</option>
-                    <option value="Weekly">Weekly Cycle</option>
-                    <option value="Monthly">Monthly Salary</option>
-                  </select>
-                </div>
-
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={!selectedTeam || submitting}
-                  style={{ width: "100%", height: "44px", marginTop: "6px", fontSize: "13px", fontWeight: "800" }}
-                >
-                  {submitting ? "Saving..." : "Save Category"}
-                </Button>
-              </form>
-            </Card>
-          </div>
-
-        </div>
-
-        {/* Modal for Create Labour Team */}
-        <Modal
-          show={showCreateTeamModal}
-          onClose={() => setShowCreateTeamModal(false)}
-          title="Create New Labour Subcontractor Team"
-        >
-          <form onSubmit={async (e) => {
-            await handleCreateTeam(e);
-            setShowCreateTeamModal(false);
-          }}>
-            <div className="form-group">
-              <label htmlFor="modal-team-name" style={{ fontWeight: "700", fontSize: "13px" }}>Subcontractor / Team Name</label>
+        {/* Left Column: Teams List & Creation */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+          <Card title="Labour Teams" subtitle="Group and manage labor workforces">
+            <form onSubmit={handleCreateTeam} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
               <input
-                id="modal-team-name"
                 type="text"
-                placeholder="e.g. UltraTech Contractors"
+                placeholder="New Team Name"
                 value={newTeamName}
                 onChange={(e) => setNewTeamName(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px", marginTop: "6px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
               />
-            </div>
-            <div className="modal-footer" style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <Button type="button" variant="secondary" onClick={() => setShowCreateTeamModal(false)}>Cancel</Button>
-              <Button type="submit" variant="primary" disabled={submitting}>
-                {submitting ? "Creating..." : "Create Team"}
+              <Button type="submit" size="sm" style={{ backgroundColor: "var(--primary-800)" }}>
+                <Plus size={16} />
               </Button>
-            </div>
-          </form>
-        </Modal>
+            </form>
 
-        {/* Modal for Rename Labour Team */}
-        <Modal
-          show={!!editingTeamId}
-          onClose={() => setEditingTeamId(null)}
-          title="Rename Labour Team"
-        >
-          <form onSubmit={async (e) => {
-            e.preventDefault();
-            await handleRenameTeam(editingTeamId);
-          }}>
-            <div className="form-group">
-              <label htmlFor="modal-rename-name" style={{ fontWeight: "700", fontSize: "13px" }}>Team Name</label>
-              <input
-                id="modal-rename-name"
-                type="text"
-                value={editingTeamName}
-                onChange={(e) => setEditingTeamName(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px", marginTop: "6px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              {teams.length === 0 ? (
+                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontSize: "13px" }}>
+                  No Labour Teams configured.
+                </div>
+              ) : (
+                teams.map(team => {
+                  const isSelected = selectedTeamId === team.id;
+                  const isEditing = editingTeamId === team.id;
+
+                  return (
+                    <div
+                      key={team.id}
+                      onClick={() => {
+                        if (!isEditing) {
+                          setSelectedTeamId(team.id);
+                          setSelectedCategoryId("");
+                        }
+                      }}
+                      style={{
+                        padding: "12px 14px",
+                        borderRadius: "8px",
+                        border: isSelected ? "2px solid var(--primary-600)" : "1px solid var(--border-color)",
+                        backgroundColor: isSelected ? "var(--primary-50)" : "#ffffff",
+                        cursor: "pointer",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {isEditing ? (
+                        <div style={{ display: "flex", gap: "6px", width: "100%", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="text"
+                            value={editingTeamName}
+                            onChange={(e) => setEditingTeamName(e.target.value)}
+                            style={{ flex: 1, padding: "4px 8px", fontSize: "13px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                          />
+                          <button
+                            onClick={() => handleRenameTeam(team.id)}
+                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "4px" }}
+                          >
+                            <Save size={15} />
+                          </button>
+                          <button
+                            onClick={() => {
+                              setEditingTeamId(null);
+                              setEditingTeamName("");
+                            }}
+                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px" }}
+                          >
+                            <X size={15} />
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div style={{ display: "flex", flexDirection: "column" }}>
+                            <span style={{ fontWeight: "700", color: isSelected ? "var(--primary-900)" : "var(--text-main)" }}>
+                              {team.teamName}
+                            </span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                              {Object.keys(team.categories || {}).length} Categories
+                            </span>
+                          </div>
+                          
+                          <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
+                            <button
+                              onClick={() => {
+                                setEditingTeamId(team.id);
+                                setEditingTeamName(team.teamName);
+                              }}
+                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              onClick={() => handleDeleteTeam(team.id, team.teamName)}
+                              style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })
+              )}
             </div>
-            <div className="modal-footer" style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-              <Button type="button" variant="secondary" onClick={() => setEditingTeamId(null)}>Cancel</Button>
-              <Button type="submit" variant="primary" disabled={submitting}>
-                {submitting ? "Saving..." : "Save Rename"}
-              </Button>
-            </div>
-          </form>
-        </Modal>
+          </Card>
+        </div>
+
+        {/* Right Column: Categories and Members details */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+          {selectedTeam ? (
+            <>
+              {/* Category configuration inside selected Team */}
+              <Card 
+                title={`Categories in "${selectedTeam.teamName}"`} 
+                subtitle="Select a category to view/register members."
+              >
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px", alignItems: "start" }}>
+                  
+                  {/* Category List */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {!selectedTeam.categories || Object.keys(selectedTeam.categories).length === 0 ? (
+                      <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                        No categories configured for this team yet. Add one on the right.
+                      </div>
+                    ) : (
+                      Object.keys(selectedTeam.categories).map(catId => {
+                        const cat = selectedTeam.categories[catId];
+                        const isCatSelected = selectedCategoryId === catId;
+                        const isEditingCat = editingCatKey === catId;
+
+                        return (
+                          <div
+                            key={catId}
+                            onClick={() => {
+                              if (!isEditingCat) {
+                                setSelectedCategoryId(catId);
+                              }
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: "6px",
+                              border: isCatSelected ? "1.5px solid var(--primary-600)" : "1px solid var(--border-color)",
+                              backgroundColor: isCatSelected ? "var(--primary-50)" : "#fdfdfd",
+                              cursor: "pointer",
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center"
+                            }}
+                          >
+                            <div style={{ display: "flex", flexDirection: "column" }}>
+                              <span style={{ fontWeight: "700", fontSize: "13.5px" }}>{cat.name}</span>
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                                Cycle: {cat.paymentType} | Base: ₹{cat.baseWage}
+                              </span>
+                            </div>
+
+                            <div style={{ display: "flex", gap: "8px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                              {isEditingCat ? (
+                                <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
+                                  <input
+                                    type="number"
+                                    value={editingWage}
+                                    placeholder="Wage"
+                                    onChange={(e) => setEditingWage(e.target.value)}
+                                    style={{ width: "70px", padding: "4px 6px", fontSize: "12px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                                  />
+                                  <button
+                                    onClick={() => handleUpdateCategoryWage(catId)}
+                                    style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <Save size={14} />
+                                  </button>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCatKey(null);
+                                      setEditingWage("");
+                                    }}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <>
+                                  <button
+                                    onClick={() => {
+                                      setEditingCatKey(catId);
+                                      setEditingWage(cat.baseWage);
+                                    }}
+                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <Edit2 size={12} />
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteCategoryFromTeam(catId, cat.name)}
+                                    style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
+                                  >
+                                    <Trash2 size={12} />
+                                  </button>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {/* Add Category Form */}
+                  <form onSubmit={handleAddCategory} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
+                    <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Add Category</h5>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Category Label</label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Mason, Painter"
+                        value={newCatName}
+                        onChange={(e) => setNewCatName(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Base Wage (₹)</label>
+                      <input
+                        type="number"
+                        placeholder="e.g. 700"
+                        value={newCatWage}
+                        onChange={(e) => setNewCatWage(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                      />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Cycle Type</label>
+                      <select
+                        value={newCatType}
+                        onChange={(e) => setNewCatType(e.target.value)}
+                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", fontSize: "13px", backgroundColor: "#ffffff" }}
+                      >
+                        <option value="Daily">Daily</option>
+                        <option value="Weekly">Weekly</option>
+                        <option value="Monthly">Monthly</option>
+                      </select>
+                    </div>
+                    <Button type="submit" size="sm" style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                      Add Category
+                    </Button>
+                  </form>
+                </div>
+              </Card>
+
+              {/* Members configuration inside selected Category */}
+              {selectedCategory ? (
+                <Card 
+                  title={`Members in "${selectedCategory.name}"`}
+                  subtitle={`Manage registered team members`}
+                >
+                  <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: "20px", alignItems: "start" }}>
+                    
+                    {/* Members List Table */}
+                    <div style={{ overflowX: "auto" }}>
+                      {!selectedCategory.members || Object.keys(selectedCategory.members).length === 0 ? (
+                        <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                          No members registered in this category. Register one on the right.
+                        </div>
+                      ) : (
+                        <table className="data-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr>
+                              <th>ID</th>
+                              <th>Name</th>
+                              <th style={{ textAlign: "right" }}>Wage/Salary</th>
+                              <th style={{ textAlign: "center" }}>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {Object.values(selectedCategory.members).map(member => {
+                              const isEditingMem = editingMemberId === member.memberId;
+                              return (
+                                <tr key={member.memberId}>
+                                  <td className="font-mono" style={{ fontSize: "12px" }}>{member.memberId}</td>
+                                  <td>
+                                    {isEditingMem ? (
+                                      <input
+                                        type="text"
+                                        value={editingMemberName}
+                                        onChange={(e) => setEditingMemberName(e.target.value)}
+                                        style={{ width: "90px", padding: "4px", fontSize: "12px" }}
+                                      />
+                                    ) : (
+                                      <span style={{ fontWeight: "700" }}>{member.name}</span>
+                                    )}
+                                  </td>
+                                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                                    {isEditingMem ? (
+                                      <input
+                                        type="number"
+                                        value={editingMemberSalary}
+                                        onChange={(e) => setEditingMemberSalary(e.target.value)}
+                                        style={{ width: "70px", padding: "4px", fontSize: "12px", textAlign: "right" }}
+                                      />
+                                    ) : (
+                                      `₹${member.salary}`
+                                    )}
+                                  </td>
+                                  <td>
+                                    <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+                                      {isEditingMem ? (
+                                        <>
+                                          <button
+                                            onClick={() => handleUpdateMember(member.memberId)}
+                                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer" }}
+                                          >
+                                            <Save size={13} />
+                                          </button>
+                                          <button
+                                            onClick={() => {
+                                              setEditingMemberId(null);
+                                              setEditingMemberName("");
+                                              setEditingMemberSalary("");
+                                            }}
+                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+                                          >
+                                            <X size={13} />
+                                          </button>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <button
+                                            onClick={() => {
+                                              setEditingMemberId(member.memberId);
+                                              setEditingMemberName(member.name);
+                                              setEditingMemberSalary(member.salary);
+                                            }}
+                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
+                                          >
+                                            <Edit2 size={12} />
+                                          </button>
+                                          <button
+                                            onClick={() => handleDeleteMember(member.memberId, member.name)}
+                                            style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer" }}
+                                          >
+                                            <Trash2 size={12} />
+                                          </button>
+                                        </>
+                                      )}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* Add Member Form */}
+                    <form onSubmit={handleAddMember} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
+                      <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Register Member</h5>
+                      
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Labour Member ID</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. L001"
+                          value={newMemberId}
+                          onChange={(e) => setNewMemberId(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Full Name</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Ramesh Kumar"
+                          value={newMemberName}
+                          onChange={(e) => setNewMemberName(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Specific Wage/Salary (₹)</label>
+                        <input
+                          type="number"
+                          placeholder={`Default: ${selectedCategory.baseWage}`}
+                          value={newMemberSalary}
+                          onChange={(e) => setNewMemberSalary(e.target.value)}
+                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        />
+                      </div>
+
+                      <Button type="submit" size="sm" icon={UserPlus} style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                        Register Member
+                      </Button>
+                    </form>
+                  </div>
+                </Card>
+              ) : (
+                <Card>
+                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontStyle: "italic", fontSize: "13px" }}>
+                    Select a category from the card above to register or view its members.
+                  </div>
+                </Card>
+              )}
+            </>
+          ) : (
+            <Card>
+              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "48px", fontSize: "14px", fontWeight: "600" }}>
+                Please select a Labour Team from the left panel to configure its categories and workers.
+              </div>
+            </Card>
+          )}
+        </div>
 
       </div>
     );
@@ -1124,23 +1147,19 @@ export default function AdminLabour() {
     let totalFullDay = 0;
     let totalHalfDay = 0;
     let totalLabour = 0;
-    let totalUnits = 0;
+
+    let totalWorkUnits = 0;
+    let totalLabourCost = 0;
 
     filteredAttendance.forEach(r => {
       const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
-      const units = r.units !== undefined && r.units !== null && !isNaN(Number(r.units))
-        ? Number(r.units)
-        : (count * (r.attendanceType === "Half Day" ? 0.5 : 1.0));
+      const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wage = Number(r.dailyWage || r.wage || 0);
+      const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
 
-      totalUnits += units;
+      totalWorkUnits += count * units;
+      totalLabourCost += cost;
       totalLabour += count;
-
-      const wUnit = r.workUnit !== undefined ? Number(r.workUnit) : (r.attendanceType === "Half Day" ? 0.5 : 1.0);
-      if (wUnit === 1.0 || r.attendanceType === "Full Day") {
-        totalFullDay += count;
-      } else if (wUnit === 0.5 || r.attendanceType === "Half Day") {
-        totalHalfDay += count;
-      }
     });
 
     const getEntryTimeStr = (record) => {
@@ -1187,21 +1206,8 @@ export default function AdminLabour() {
             flexDirection: "column",
             gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Half Day Workers</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#e65100" }}>{totalHalfDay}</span>
-          </div>
-
-          <div style={{
-            backgroundColor: "#e0f2fe",
-            borderRadius: "16px",
-            padding: "16px",
-            border: "1px solid #bae6fd",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px"
-          }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#0284c7" }}>{totalUnits % 1 === 0 ? totalUnits : totalUnits.toFixed(2)}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
+            <span style={{ fontSize: "24px", fontWeight: "900", color: "#e65100" }}>{totalWorkUnits.toFixed(2)}</span>
           </div>
 
           <div style={{
@@ -1213,8 +1219,8 @@ export default function AdminLabour() {
             flexDirection: "column",
             gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Headcount</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#6750a4" }}>{totalLabour}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Labour Cost</span>
+            <span style={{ fontSize: "24px", fontWeight: "900", color: "#6750a4" }}>₹{totalLabourCost.toLocaleString("en-IN")}</span>
           </div>
         </div>
 
@@ -1252,7 +1258,7 @@ export default function AdminLabour() {
 
             {/* Date Filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Date Filter</span>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Date</span>
               <input 
                 type="date"
                 value={adminFilterDate}
@@ -1264,7 +1270,6 @@ export default function AdminLabour() {
                   border: "1px solid var(--border-color)",
                   backgroundColor: "#ffffff",
                   fontSize: "13.5px",
-                  fontWeight: "600",
                   outline: "none",
                   color: "var(--text-main)"
                 }}
@@ -1273,7 +1278,7 @@ export default function AdminLabour() {
 
             {/* Team Filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Subcontractor Team</span>
+              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Labour Team</span>
               <select
                 value={adminFilterTeamId}
                 onChange={(e) => setAdminFilterTeamId(e.target.value)}
@@ -1289,7 +1294,7 @@ export default function AdminLabour() {
                   color: "var(--text-main)"
                 }}
               >
-                <option value="">All Subcontractor Teams</option>
+                <option value="">All Teams</option>
                 {teams.map(t => (
                   <option key={t.id} value={t.id}>{t.teamName}</option>
                 ))}
@@ -1337,7 +1342,7 @@ export default function AdminLabour() {
               color: "var(--text-muted)",
               fontSize: "14px"
             }}>
-              No attendance records found matching the current filters.
+              No attendance logs found matching the selected filters.
             </div>
           ) : (
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
@@ -1353,8 +1358,8 @@ export default function AdminLabour() {
                 }
                 
                 const workerCount = record.workerCount !== undefined ? record.workerCount : 1;
-                const recWorkUnit = record.workUnit !== undefined ? Number(record.workUnit) : (record.attendanceType === "Half Day" ? 0.5 : 1.0);
-                const recTotalUnits = record.units !== undefined ? Number(record.units) : (workerCount * recWorkUnit);
+                const fullCount = record.workerCount !== undefined ? (record.attendanceType === "Full Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 1.0 ? 1 : 0);
+                const halfCount = record.workerCount !== undefined ? (record.attendanceType === "Half Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 0.5 ? 1 : 0);
                 
                 let formattedDate = record.attendanceDate;
                 try {
@@ -1401,7 +1406,7 @@ export default function AdminLabour() {
                     {/* Counts Grid */}
                     <div style={{
                       display: "grid",
-                      gridTemplateColumns: "repeat(3, 1fr)",
+                      gridTemplateColumns: "repeat(4, 1fr)",
                       gap: "6px",
                       backgroundColor: "#f9f9fa",
                       borderRadius: "10px",
@@ -1410,16 +1415,20 @@ export default function AdminLabour() {
                       marginTop: "4px"
                     }}>
                       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Headcount</span>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Count</span>
                         <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--text-main)" }}>{workerCount}</span>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Work Unit</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--success-600)" }}>{recWorkUnit}</span>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Full</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--success-600)" }}>{fullCount}</span>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Total Units</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)" }}>{recTotalUnits}</span>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Half</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--warning-600)" }}>{halfCount}</span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Total</span>
+                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)" }}>{workerCount}</span>
                       </div>
                     </div>
 

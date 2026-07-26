@@ -827,7 +827,7 @@ export default function DocumentsDashboard() {
                       </tr>
                       <tr>
                         <td>Upload Date:</td>
-                        <td>{selectedDoc.date}</td>
+                        <td>{typeof selectedDoc.date === "object" ? (selectedDoc.date?.seconds ? new Date(selectedDoc.date.seconds * 1000).toLocaleDateString() : "--") : String(selectedDoc.date || "--")}</td>
                       </tr>
                       <tr>
                         <td>Status:</td>

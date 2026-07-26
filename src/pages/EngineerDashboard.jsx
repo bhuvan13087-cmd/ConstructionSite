@@ -25,6 +25,8 @@ import {
   getLabourDailyEntries,
   saveLabourDailyEntries,
   subscribeLabourCategories,
+  subscribeMaterialMaster,
+  subscribeMaterialsDetailed,
   getEngineerAttendanceAndLeaveStats,
   logEngineerLeave,
   getEngineerLeaves,
@@ -53,7 +55,9 @@ import {
   subscribeLabourAttendanceRecords,
   getAttendanceForSite,
   checkLabourSubmissionStatus,
-  submitLabourAttendance
+  submitLabourAttendance,
+  checkMaterialSubmissionStatus,
+  saveBulkMaterialEntry
 } from "../services/firebaseService";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
@@ -100,7 +104,9 @@ import {
   ArrowRightCircle,
   ArrowLeftCircle,
   DollarSign,
-  History
+  History,
+  Truck,
+  Layers
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -183,14 +189,6 @@ const readPhotoMetadata = (file) => {
 
 // Geocode and Address System utilities moved to firebaseService.js
 
-const categorySuggestions = {
-  Cement: ["UltraTech Cement", "ACC Cement", "OPC 53 Grade Cement", "PPC Cement", "White Cement", "Sulphate Resistant Cement"],
-  Steel: ["Tata Steel", "TMT Rebars 12mm", "TMT Rebars 16mm", "Binding Wire", "Structural Steel Section"],
-  Sand: ["River Sand (Fine)", "M-Sand (Manufactured)", "Coarse Sand (Plastering)"],
-  Bricks: ["Red Clay Bricks", "Fly Ash Bricks", "AAC Light Blocks", "Solid Concrete Blocks"],
-  Other: ["Pipes & Fittings", "Painting Primer", "Waterproofing Chemical", "Electrical PVC Conduit"]
-};
-
 export default function EngineerDashboard({ tab = "dashboard" }) {
   const { userProfile, logout, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -272,7 +270,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
     try {
       const records = await getAttendanceForSite(activeSiteId);
-      const locked = new Set(records.filter(r => r.status === "submitted").map(r => r.date));
+      const locked = new Set(
+        records
+          .filter(r => r.status === "submitted" && (r.type === "labour_attendance_lock" || r.id?.startsWith("labour_lock_")))
+          .map(r => r.date)
+      );
       setLockedDates(locked);
     } catch (err) {
       console.error("Failed to load locked dates:", err);
@@ -295,6 +297,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setCustomMaterialCategory("");
     setMaterialQuantity("");
     setMaterialUnit("Bag");
+    setMaterialUnitPrice(0);
     setMaterialSupplier("");
     setMaterialPurchaseDate(new Date().toISOString().split("T")[0]);
     setMaterialNotes("");
@@ -370,6 +373,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [editingCount, setEditingCount] = useState(1);
   const [editingType, setEditingType] = useState("Full Day");
   const [attendanceSelections, setAttendanceSelections] = useState({});
+  const [workUnitsSelections, setWorkUnitsSelections] = useState({});
+  const [workModeSelections, setWorkModeSelections] = useState({});
   const [savingRecordKeys, setSavingRecordKeys] = useState({});
   const [filterDate, setFilterDate] = useState("");
   const [filterDateMode, setFilterDateMode] = useState("This Month");
@@ -384,13 +389,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [customMaterialCategory, setCustomMaterialCategory] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materialUnit, setMaterialUnit] = useState("Bag");
-  const [materialUnitPrice, setMaterialUnitPrice] = useState("");
   const [materialSupplier, setMaterialSupplier] = useState("");
   const [materialPurchaseDate, setMaterialPurchaseDate] = useState(new Date().toISOString().split("T")[0]);
   const [materialNotes, setMaterialNotes] = useState("");
   const [materialInvoiceFile, setMaterialInvoiceFile] = useState(null);
   const [materialInvoicePreview, setMaterialInvoicePreview] = useState(null);
   const [materialSubmitting, setMaterialSubmitting] = useState(false);
+  const [materialUnitPrice, setMaterialUnitPrice] = useState(0);
   const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
   const comboboxRef = useRef(null);
   const [materialFlow, setMaterialFlow] = useState("list"); // "list" or "add"
@@ -400,6 +405,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Material search & filter state
   const [materialSearch, setMaterialSearch] = useState("");
   const [materialDateFilter, setMaterialDateFilter] = useState("");
+  const [materialTabMode, setMaterialTabMode] = useState("master"); // "master" or "logs"
 
   // 4. Site Progress Photo fields
   const [sitePhotoFile, setSitePhotoFile] = useState(null);
@@ -434,6 +440,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [usageQtyVal, setUsageQtyVal] = useState("");
   const [usageDateVal, setUsageDateVal] = useState(new Date().toISOString().split("T")[0]);
   const [usageNotesVal, setUsageNotesVal] = useState("");
+
+  // Bulk Material Entry states
+  const [bulkMaterialDate, setBulkMaterialDate] = useState(new Date().toISOString().split("T")[0]);
+  const [bulkQuantitiesMap, setBulkQuantitiesMap] = useState({});
+  const [isBulkMaterialLocked, setIsBulkMaterialLocked] = useState(false);
+  const [bulkMaterialLockInfo, setBulkMaterialLockInfo] = useState(null);
+  const [bulkMaterialSubmitting, setBulkMaterialSubmitting] = useState(false);
 
   // 7. General Expense states
   const [generalExpenses, setGeneralExpenses] = useState([]);
@@ -708,9 +721,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   }, [tab]);
 
-  // Subscribe to active categories in real-time
+  // Subscribe to active categories and material master in real-time
   useEffect(() => {
-    const unsubscribe = subscribeLabourCategories((categoriesMap) => {
+    const unsubscribeLabour = subscribeLabourCategories((categoriesMap) => {
       const activeCats = Object.keys(categoriesMap)
         .filter(id => categoriesMap[id].status === "Active")
         .map(id => ({
@@ -722,18 +735,43 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setCategories(activeCats);
     });
 
-    const loadMaterials = async () => {
+    const unsubscribeMatMaster = subscribeMaterialMaster((mmList) => {
+      setMaterialMaster(mmList);
+    });
+
+    return () => {
+      unsubscribeLabour();
+      unsubscribeMatMaster();
+    };
+  }, []);
+
+  // Real-time synchronization for site materials logs
+  useEffect(() => {
+    if (!activeSiteId) return;
+    const unsubSiteMats = subscribeMaterialsDetailed(activeSiteId, (siteMats) => {
+      setMaterials(siteMats);
+    });
+    return () => unsubSiteMats();
+  }, [activeSiteId]);
+
+  // Check Bulk Material Entry submission status for selected site and date
+  useEffect(() => {
+    const fetchMaterialLockStatus = async () => {
+      if (!activeSiteId || !bulkMaterialDate) {
+        setIsBulkMaterialLocked(false);
+        setBulkMaterialLockInfo(null);
+        return;
+      }
       try {
-        const mm = await getMaterialMaster();
-        setMaterialMaster(mm);
+        const lockStatus = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
+        setIsBulkMaterialLocked(lockStatus.submitted);
+        setBulkMaterialLockInfo(lockStatus);
       } catch (err) {
-        console.error("Failed to load material master:", err);
+        console.error("Error checking material submission status:", err);
       }
     };
-    loadMaterials();
-
-    return () => unsubscribe();
-  }, []);
+    fetchMaterialLockStatus();
+  }, [activeSiteId, bulkMaterialDate]);
 
   // Sync labour entries & historical summary whenever active site or select date changes
   useEffect(() => {
@@ -1406,35 +1444,25 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Count-based worker attendance handlers
-  const handleCountChange = async (categoryId, attendanceType, increment) => {
+  // Count-based worker attendance handlers with custom work units & daily wage
+  const handleCountChange = async (categoryId, customUnitsVal, increment) => {
     if (lockedDates.has(labourDate) || isLabourSubmitted) {
       showToast("Cannot modify count: Attendance for this date is submitted and locked.", "error");
       return;
     }
 
-    let unitNum = 1.0;
-    if (attendanceType === "Full Day" || attendanceType === "1.0" || attendanceType === 1.0) {
-      unitNum = 1.0;
-    } else if (attendanceType === "Half Day" || attendanceType === "0.5" || attendanceType === 0.5) {
-      unitNum = 0.5;
-    } else {
-      unitNum = Number(attendanceType);
-    }
+    const units = Math.max(0.01, Number(customUnitsVal) || 1.0);
+    const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+    const cat = categories.find(c => c.id === categoryId) || selectedTeamObj?.categories?.find(c => c.id === categoryId);
+    const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
 
-    if (isNaN(unitNum) || unitNum <= 0) {
-      showToast("Please enter a valid positive Work Unit value (e.g. 1.0, 1.25, 1.5, 2.5).", "error");
-      return;
-    }
-
-    const attTypeStr = unitNum === 1.0 ? "Full Day" : (unitNum === 0.5 ? "Half Day" : `${unitNum} Unit(s)`);
-    const record = attendanceRows.find(r => r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr));
+    const record = attendanceRows.find(r => r.categoryId === categoryId);
     const currentCount = record ? Number(record.workerCount) || 0 : 0;
     const newCount = Math.max(0, currentCount + increment);
 
     if (newCount === currentCount) return;
 
-    const key = `${categoryId}_${unitNum}`;
+    const key = `${categoryId}`;
     setSavingRecordKeys(prev => ({ ...prev, [key]: true }));
 
     try {
@@ -1442,26 +1470,31 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         if (record && record.dbId) {
           await deleteLabourAttendanceRecord(record.dbId);
         }
-        setAttendanceRows(prev => prev.filter(r => !(r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr))));
+        setAttendanceRows(prev => prev.filter(r => r.categoryId !== categoryId));
       } else {
+        const calculatedAmount = newCount * units * dailyWage;
         const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
           siteId: activeSiteId,
           teamId: selectedLabourTeamId,
           categoryId,
+          categoryName: cat?.name || "",
           attendanceDate: labourDate,
           workerCount: newCount,
-          workUnit: unitNum,
-          units: unitNum * newCount,
-          attendanceType: attTypeStr,
+          customWorkUnits: units,
+          units: units,
+          dailyWage,
+          wage: dailyWage,
+          calculatedAmount,
+          attendanceType: `${units} Units`,
           createdBy: currentEngineerId
         });
 
         setAttendanceRows(prev => {
-          const exists = prev.some(r => r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr));
+          const exists = prev.some(r => r.categoryId === categoryId);
           if (exists) {
-            return prev.map(r => (r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr)) ? { ...r, workerCount: newCount, workUnit: unitNum, units: unitNum * newCount, dbId, isSaved: true } : r);
+            return prev.map(r => r.categoryId === categoryId ? { ...r, workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true } : r);
           } else {
-            return [...prev, { id: dbId, categoryId, workerCount: newCount, workUnit: unitNum, units: unitNum * newCount, attendanceType: attTypeStr, dbId, isSaved: true }];
+            return [...prev, { id: dbId, categoryId, categoryName: cat?.name || "", workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true }];
           }
         });
       }
@@ -1473,15 +1506,54 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
+  const handleWorkUnitsChange = async (categoryId, newUnitsStr) => {
+    if (lockedDates.has(labourDate) || isLabourSubmitted) {
+      showToast("Cannot modify work units: Attendance for this date is submitted and locked.", "error");
+      return;
+    }
+    const units = Math.max(0.01, Number(newUnitsStr) || 1.0);
+    setWorkUnitsSelections(prev => ({ ...prev, [categoryId]: newUnitsStr }));
+
+    const record = attendanceRows.find(r => r.categoryId === categoryId);
+    if (record && record.workerCount > 0) {
+      const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+      const cat = categories.find(c => c.id === categoryId) || selectedTeamObj?.categories?.find(c => c.id === categoryId);
+      const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
+      const calculatedAmount = record.workerCount * units * dailyWage;
+
+      try {
+        const dbId = await saveLabourAttendanceRecord(record.dbId, {
+          siteId: activeSiteId,
+          teamId: selectedLabourTeamId,
+          categoryId,
+          categoryName: cat?.name || "",
+          attendanceDate: labourDate,
+          workerCount: record.workerCount,
+          customWorkUnits: units,
+          units: units,
+          dailyWage,
+          wage: dailyWage,
+          calculatedAmount,
+          attendanceType: `${units} Units`,
+          createdBy: currentEngineerId
+        });
+
+        setAttendanceRows(prev => prev.map(r => r.categoryId === categoryId ? { ...r, customWorkUnits: units, units, calculatedAmount, dbId, isSaved: true } : r));
+      } catch (err) {
+        console.error("Failed to update work units:", err);
+      }
+    }
+  };
+
   // Attendance History event handlers
   const handleStartEditHistoryRecord = (record) => {
     setEditingRecordId(record.id);
     if (record.workerCount !== undefined) {
       setEditingCount(record.workerCount);
-      setEditingType(record.workUnit !== undefined ? record.workUnit : (record.attendanceType || "Full Day"));
+      setEditingType(record.attendanceType || "Full Day");
     } else {
       setEditingName(record.workerName);
-      setEditingValue(record.workUnit !== undefined ? record.workUnit : record.attendanceValue);
+      setEditingValue(record.attendanceValue);
     }
   };
 
@@ -1492,26 +1564,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot edit: Attendance for this date is submitted and locked.", "error");
       return;
     }
+    if (!record) return;
 
     if (record.workerCount !== undefined) {
       const count = Number(editingCount);
-      let unitNum = Number(editingType);
-      if (isNaN(unitNum) || unitNum <= 0) {
-        if (editingType === "Half Day") unitNum = 0.5;
-        else unitNum = 1.0;
-      }
-
       if (isNaN(count) || count <= 0) {
         showToast("Count must be greater than 0.", "error");
         return;
       }
-      if (isNaN(unitNum) || unitNum <= 0) {
-        showToast("Work Unit must be a positive number (e.g. 1.0, 1.25, 1.5, 2.5).", "error");
-        return;
-      }
-
-      const attTypeStr = unitNum === 1.0 ? "Full Day" : (unitNum === 0.5 ? "Half Day" : `${unitNum} Unit(s)`);
-
       try {
         await saveLabourAttendanceRecord(recordId, {
           attendanceDate: record.attendanceDate,
@@ -1519,9 +1579,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           teamId: record.teamId,
           categoryId: record.categoryId,
           workerCount: count,
-          workUnit: unitNum,
-          units: unitNum * count,
-          attendanceType: attTypeStr,
+          attendanceType: editingType,
           createdBy: record.createdBy || currentEngineerId
         });
         setEditingRecordId(null);
@@ -1668,6 +1726,67 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   // 4. Save Material Receipt
+  const handleBulkMaterialSubmit = async (e) => {
+    e.preventDefault();
+    if (!activeSiteId) {
+      showToast("Please select an active construction site.", "error");
+      return;
+    }
+    if (!bulkMaterialDate) {
+      showToast("Please select entry date.", "error");
+      return;
+    }
+    if (isBulkMaterialLocked) {
+      showToast("Material entry for this site and date is already submitted and locked.", "error");
+      return;
+    }
+
+    const activeMasterItems = materialMaster.filter(m => m.status === "Active");
+    const itemsToSave = [];
+
+    activeMasterItems.forEach(m => {
+      const itemKey = m.id || m.name;
+      const qtyStr = bulkQuantitiesMap[itemKey];
+      const qtyNum = Number(qtyStr);
+      if (qtyStr !== undefined && qtyStr !== null && qtyStr !== "" && !isNaN(qtyNum) && qtyNum > 0) {
+        itemsToSave.push({
+          materialName: m.name,
+          category: m.category,
+          unit: m.unit || "Unit",
+          unitPrice: Number(m.unitPrice) || 0,
+          quantity: qtyNum
+        });
+      }
+    });
+
+    if (itemsToSave.length === 0) {
+      showToast("Please enter a quantity greater than 0 for at least one material item.", "error");
+      return;
+    }
+
+    setBulkMaterialSubmitting(true);
+    try {
+      const engineerId = currentEngineerId || userProfile?.uid || userProfile?.id || "";
+      await saveBulkMaterialEntry({
+        siteId: activeSiteId,
+        dateStr: bulkMaterialDate,
+        engineerId,
+        items: itemsToSave
+      });
+
+      showToast(`Bulk material entry submitted and locked (${itemsToSave.length} material items)!`, "success");
+      setMaterialFlow("list");
+      setBulkQuantitiesMap({});
+      setIsBulkMaterialLocked(true);
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Bulk material submit error:", err);
+      showToast(`Submission failed: ${err.message}`, "error");
+    } finally {
+      setBulkMaterialSubmitting(false);
+    }
+  };
+
   const handleMaterialSubmit = async (e) => {
     e.preventDefault();
     if (!activeSiteId) {
@@ -1695,29 +1814,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
       const categoryToSave = materialCategory === "Other" ? customMaterialCategory.trim() : materialCategory;
-      const qty = Number(materialQuantity) || 0;
-      const price = Number(materialUnitPrice) || (categoryToSave === "Steel" ? 65000 : (categoryToSave === "Cement" ? 380 : 500));
-      const totalAmount = qty * price;
-
       await addMaterial({
         siteId: activeSiteId,
         engineerId,
         materialName: materialName.trim(),
         category: categoryToSave,
-        requiredQuantity: qty,
-        quantity: qty,
+        requiredQuantity: Number(materialQuantity),
+        quantity: 0,
         unit: materialUnit,
-        unitPrice: price,
-        defaultUnitPrice: price,
-        totalAmount: totalAmount,
-        supplierName: materialSupplier.trim() || "Supplier",
+        unitPrice: materialUnitPrice || 0,
+        supplierName: materialSupplier.trim() || "Pending Quote",
         purchaseDate: materialPurchaseDate,
         notes: materialNotes.trim(),
         invoiceUrl: materialInvoicePreview || "",
-        status: "approved"
+        status: "Pending" // Awaiting Admin approval
       });
 
-      showToast("Material entry logged successfully!", "success");
+      showToast("Material request submitted for Admin approval!", "success");
       handleCloseMaterialModal();
       await loadDashboardData();
     } catch (err) {
@@ -2095,7 +2208,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     photos: "Site Inspection Photos",
     progress: "Daily Progress Log Feed"
   };
-  const currentCategorySuggestions = categorySuggestions[materialCategory] || [];
+  const currentCategorySuggestions = materialMaster
+    .filter(m => m.status === "Active" && m.category === materialCategory)
+    .map(m => m.name);
   const filteredSuggestions = currentCategorySuggestions.filter(sug => {
     if (!materialName.trim() || currentCategorySuggestions.some(option => option.toLowerCase() === materialName.trim().toLowerCase())) {
       return true;
@@ -3589,56 +3704,149 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
     };
 
+    const activeMasterItems = materialMaster
+      .filter(m => m.status === "Active")
+      .filter(m => {
+        const query = materialSearch.toLowerCase().trim();
+        if (!query) return true;
+        return (
+          (m.name || "").toLowerCase().includes(query) ||
+          (m.category || "").toLowerCase().includes(query)
+        );
+      });
+
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Navigation Sub-Tabs */}
+        <div style={{ display: "flex", borderBottom: "2px solid #e2e8f0", gap: "8px" }}>
+          <button
+            type="button"
+            onClick={() => setMaterialTabMode("master")}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              border: "none",
+              backgroundColor: "transparent",
+              borderBottom: materialTabMode === "master" ? "3px solid var(--accent-600)" : "3px solid transparent",
+              color: materialTabMode === "master" ? "var(--accent-750)" : "var(--text-muted)",
+              fontWeight: materialTabMode === "master" ? "800" : "600",
+              fontSize: "13px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px"
+            }}
+          >
+            <Package size={16} />
+            <span>Master Catalog ({materialMaster.filter(m => m.status === "Active").length})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setMaterialTabMode("logs")}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              border: "none",
+              backgroundColor: "transparent",
+              borderBottom: materialTabMode === "logs" ? "3px solid var(--accent-600)" : "3px solid transparent",
+              color: materialTabMode === "logs" ? "var(--accent-750)" : "var(--text-muted)",
+              fontWeight: materialTabMode === "logs" ? "800" : "600",
+              fontSize: "13px",
+              cursor: "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "6px"
+            }}
+          >
+            <Truck size={16} />
+            <span>Site Logs ({activeMaterials.length})</span>
+          </button>
+        </div>
+
         {/* Search bar & filter */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
             <Search size={16} style={{ color: "var(--text-muted)" }} />
             <input 
               type="text" 
-              placeholder="Search materials, suppliers..."
+              placeholder={materialTabMode === "master" ? "Search Admin material master catalog..." : "Search site material logs, suppliers..."}
               value={materialSearch}
               onChange={(e) => setMaterialSearch(e.target.value)}
               style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
             />
           </div>
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            <div style={{ flex: 1 }}>
-              <input 
-                type="date" 
-                value={materialDateFilter} 
-                onChange={(e) => setMaterialDateFilter(e.target.value)} 
-                style={{ width: "100%", padding: "8px 12px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
-              />
+          {materialTabMode === "logs" && (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <div style={{ flex: 1 }}>
+                <input 
+                  type="date" 
+                  value={materialDateFilter} 
+                  onChange={(e) => setMaterialDateFilter(e.target.value)} 
+                  style={{ width: "100%", padding: "8px 12px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
+                />
+              </div>
+              {materialDateFilter && (
+                <button 
+                  type="button" 
+                  onClick={() => setMaterialDateFilter("")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--danger-600)",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    textDecoration: "underline"
+                  }}
+                >
+                  Clear Date
+                </button>
+              )}
             </div>
-            {materialDateFilter && (
-              <button 
-                type="button" 
-                onClick={() => setMaterialDateFilter("")}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "var(--danger-600)",
-                  fontSize: "12px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  textDecoration: "underline"
-                }}
-              >
-                Clear Date
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
-        {/* List display */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {activeMaterials.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-              <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
-            </div>
-          ) : (
+        {/* Material Master Catalog View */}
+        {materialTabMode === "master" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {activeMasterItems.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px dashed var(--border-color)" }}>
+                <Package size={36} style={{ color: "var(--text-muted)", marginBottom: "8px", opacity: 0.6 }} />
+                <p style={{ margin: 0, fontWeight: "700", color: "var(--primary-900)", fontSize: "14px" }}>No Active Material Master Items</p>
+                <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
+                  No Material Master items match your filter. The Admin creates and manages material master items in the Admin Dashboard.
+                </p>
+              </div>
+            ) : (
+              activeMasterItems.map(item => (
+                <div key={item.id} className="mobile-material-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
+                  <div>
+                    <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{item.category}</span>
+                    <h4 style={{ margin: "2px 0 4px 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{item.name}</h4>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
+                      <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "700" }}>{item.unit}</span>
+                      <span style={{ fontWeight: "700", color: "var(--success-700)" }}>
+                        {item.unitPrice > 0 ? `₹${Number(item.unitPrice).toLocaleString("en-IN")} / ${item.unit}` : "Price Pending Admin Setup"}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* Site Requisitions & Logs View */}
+        {materialTabMode === "logs" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            {activeMaterials.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
+              </div>
+            ) : (
             activeMaterials.map(m => {
               const processed = processMaterialPaymentAndDelivery(m);
               const isApproved = processed.status === "Approved" || processed.status === "approved";
@@ -3714,6 +3922,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             })
           )}
         </div>
+        )}
 
         {/* Modal: Log Delivery */}
         {showDeliveryModal && selectedMatDelivery && (
@@ -3850,441 +4059,191 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <span>Log New Material</span>
         </button>
 
-        {/* Modal for adding material */}
+        {/* Bulk Material Entry Modal */}
         <Modal
           isOpen={materialFlow === "add"}
           onClose={handleCloseMaterialModal}
-          title="Log New Material"
-          maxWidth="460px"
+          title="Bulk Material Entry"
+          maxWidth="640px"
         >
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div className="mobile-step-indicator" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Step {materialStep} of 3</span>
-              <div style={{ display: "flex", gap: "6px" }}>
-                <div className={`mobile-step-dot ${materialStep >= 1 ? 'active' : ''}`} />
-                <div className={`mobile-step-dot ${materialStep >= 2 ? 'active' : ''}`} />
-                <div className={`mobile-step-dot ${materialStep >= 3 ? 'active' : ''}`} />
+          <form onSubmit={handleBulkMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Site & Date Controls */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Construction Site</span>
+                <select
+                  value={activeSiteId}
+                  onChange={(e) => setActiveSiteId(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}
+                >
+                  {assignedSites.map(s => (
+                    <option key={s.id} value={s.id}>{s.siteName}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <span className="mobile-form-label">Entry Date</span>
+                <input
+                  type="date"
+                  value={bulkMaterialDate}
+                  onChange={(e) => setBulkMaterialDate(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}
+                />
               </div>
             </div>
 
-            {/* Step 1: Category selection */}
-            {materialStep === 1 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <span className="mobile-form-label">Choose Material Category</span>
-                <div className="mobile-category-list">
-                  {Array.from(new Set(materialMaster.filter(m => m.status === "Active").map(m => m.category))).concat("Other").map(cat => {
-                    const emojis = {
-                      Cement: "🧱",
-                      Steel: "🧬",
-                      Sand: "⏳",
-                      Bricks: "🧱",
-                      Other: "📦"
-                    };
-                    const emoji = emojis[cat] || "📦";
-                    return (
-                      <div 
-                        key={cat} 
-                        className={`mobile-category-item ${materialCategory === cat ? 'active' : ''}`}
-                        onClick={() => {
-                          setMaterialCategory(cat);
-                          setMaterialName(""); 
-                          setMaterialStep(2);
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                          <span style={{ fontSize: "20px" }}>{emoji}</span>
-                          <span>{cat}</span>
-                        </div>
-                        <ChevronRight size={18} />
-                      </div>
-                    );
-                  })}
+            {/* Submission Lock Warning */}
+            {isBulkMaterialLocked && (
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", color: "var(--danger-700)", fontSize: "12.5px", fontWeight: "700" }}>
+                <Lock size={18} />
+                <div>
+                  <span>Material entry for this Site and Date is <strong>SUBMITTED & LOCKED</strong>.</span>
+                  <div style={{ fontSize: "11px", fontWeight: "normal", color: "#991b1b", marginTop: "2px" }}>
+                    Duplicate submission disabled.
+                  </div>
                 </div>
               </div>
             )}
 
-            {/* Step 2: Name Input */}
-            {materialStep === 2 && (
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div>
-                  <span className="mobile-form-label">Material Category: <strong style={{ color: "var(--accent-600)" }}>{materialCategory}</strong></span>
+            {/* Scrollable list of Admin Material Master items */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
+              <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-900)", textTransform: "uppercase" }}>
+                Admin Material Master ({materialMaster.filter(m => m.status === "Active").length} Materials Available)
+              </span>
+
+              {materialMaster.filter(m => m.status === "Active").length === 0 ? (
+                <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#f8fafc", borderRadius: "8px" }}>
+                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                    No active materials configured in Admin Material Master yet.
+                  </p>
                 </div>
+              ) : (
+                materialMaster.filter(m => m.status === "Active").map(m => {
+                  const itemKey = m.id || m.name;
+                  const qtyVal = bulkQuantitiesMap[itemKey] || "";
+                  const qtyNum = Number(qtyVal) || 0;
+                  const uPrice = Number(m.unitPrice) || 0;
+                  const itemAmount = qtyNum * uPrice;
 
-                {materialCategory === "Other" && (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                    <span className="mobile-form-label">Specify Material Category <span style={{ color: "var(--danger-500)" }}>*</span></span>
-                    <input
-                      type="text"
-                      placeholder="E.g. Glass, Wood, Tiles"
-                      value={customMaterialCategory}
-                      onChange={(e) => setCustomMaterialCategory(e.target.value)}
-                      required
+                  return (
+                    <div
+                      key={itemKey}
                       style={{
-                        height: "42px",
-                        padding: "10px 12px",
-                        border: "1.5px solid var(--accent-500)",
-                        borderRadius: "var(--radius-sm)",
-                        fontSize: "14px",
-                        outline: "none",
-                        backgroundColor: "#ffffff"
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                        padding: "12px",
+                        borderRadius: "8px",
+                        border: qtyNum > 0 ? "1.5px solid var(--accent-500)" : "1px solid #e2e8f0",
+                        backgroundColor: qtyNum > 0 ? "#f0f9ff" : "#ffffff",
+                        transition: "all 0.15s ease"
                       }}
-                    />
-                  </div>
-                )}
-
-                <div style={{ position: "relative" }} ref={comboboxRef}>
-                  <span className="mobile-form-label">Material Name</span>
-                  <div className="input-wrapper" style={{ marginTop: "4px" }}>
-                    <Package size={18} className="input-icon" />
-                    <input 
-                      type="text" 
-                      placeholder={materialCategory === "Other" ? "Enter custom material name..." : "Search or type material name..."}
-                      value={materialName}
-                      onChange={(e) => {
-                        setMaterialName(e.target.value);
-                        setIsSuggestionsOpen(true);
-                      }}
-                      onFocus={() => setIsSuggestionsOpen(true)}
-                      required 
-                      autoComplete="off"
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                  
-                  {isSuggestionsOpen && materialCategory !== "Other" && (
-                    <div style={{
-                      position: "absolute",
-                      top: "100%",
-                      left: 0,
-                      right: 0,
-                      zIndex: 50,
-                      backgroundColor: "#ffffff",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "var(--radius-sm)",
-                      boxShadow: "var(--shadow-md)",
-                      maxHeight: "180px",
-                      overflowY: "auto",
-                      marginTop: "4px"
-                    }}>
-                      {materialMaster.filter(m => m.status === "Active" && m.category === materialCategory).map(m => m.name).length > 0 ? (
-                        materialMaster.filter(m => m.status === "Active" && m.category === materialCategory).map(m => m.name).map(sug => {
-                          const isSelected = materialName.trim().toLowerCase() === sug.toLowerCase();
-                          return (
-                            <button
-                              type="button"
-                              key={sug}
-                              onClick={() => {
-                                setMaterialName(sug);
-                                setIsSuggestionsOpen(false);
-                              }}
-                              style={{
-                                display: "block",
-                                width: "100%",
-                                padding: "10px 14px",
-                                textAlign: "left",
-                                backgroundColor: isSelected ? "var(--accent-50)" : "#ffffff",
-                                color: isSelected ? "var(--accent-700)" : "var(--primary-800)",
-                                border: "none",
-                                borderBottom: "1px solid #f1f5f9",
-                                fontWeight: isSelected ? "700" : "500",
-                                fontSize: "13px",
-                                cursor: "pointer"
-                              }}
-                            >
-                              {sug}
-                            </button>
-                          );
-                        })
-                      ) : (
-                        <div style={{ padding: "10px 14px", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
-                          Using custom name: "{materialName}"
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{m.category}</span>
+                          <strong style={{ fontSize: "13.5px", color: "var(--primary-950)", display: "block" }}>{m.name}</strong>
                         </div>
-                      )}
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Unit: <strong>{m.unit || "Unit"}</strong></span>
+                          <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)" }}>
+                            {uPrice > 0 ? `₹${uPrice.toLocaleString("en-IN")} / ${m.unit || "Unit"}` : "Price Not Set"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Input Row: Quantity & Calculated Amount */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                        <div>
+                          <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "3px" }}>
+                            Quantity ({m.unit || "Unit"})
+                          </label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder="Enter quantity (0 if none)..."
+                            value={qtyVal}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setBulkQuantitiesMap(prev => ({ ...prev, [itemKey]: val }));
+                            }}
+                            disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                            style={{
+                              width: "100%",
+                              padding: "8px 10px",
+                              borderRadius: "6px",
+                              border: qtyNum > 0 ? "2px solid var(--accent-600)" : "1px solid #cbd5e1",
+                              fontSize: "14px",
+                              fontWeight: "700",
+                              backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
+                              outline: "none"
+                            }}
+                          />
+                        </div>
+
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "3px" }}>
+                            Calculated Amount
+                          </span>
+                          <strong style={{ fontSize: "15px", color: itemAmount > 0 ? "#0369a1" : "var(--text-muted)" }}>
+                            ₹{itemAmount.toLocaleString("en-IN")}
+                          </strong>
+                        </div>
+                      </div>
                     </div>
-                  )}
-                </div>
+                  );
+                })
+              )}
+            </div>
 
-                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    style={{ flex: 1 }}
-                    onClick={() => setMaterialStep(1)}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="button"
-                    style={{ flex: 1 }}
-                    disabled={!materialName.trim()}
-                    onClick={() => setMaterialStep(3)}
-                  >
-                    Next Step
-                  </Button>
-                </div>
-              </div>
-            )}
+            {/* Running Grand Total & Footer Controls */}
+            {(() => {
+              const activeMasterItems = materialMaster.filter(m => m.status === "Active");
+              let totalItemsCount = 0;
+              let grandTotalCost = 0;
 
-            {/* Step 3: Logistics details */}
-            {materialStep === 3 && (
-              <form onSubmit={handleMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Category & Name:</span>
-                  <strong style={{ fontSize: "14px", color: "var(--primary-900)" }}>{materialCategory} • {materialName}</strong>
-                </div>
+              activeMasterItems.forEach(m => {
+                const itemKey = m.id || m.name;
+                const qtyNum = Number(bulkQuantitiesMap[itemKey]) || 0;
+                if (qtyNum > 0) {
+                  totalItemsCount++;
+                  grandTotalCost += qtyNum * (Number(m.unitPrice) || 0);
+                }
+              });
 
-                {/* Units selection */}
-                <div>
-                  <span className="mobile-form-label">Unit Type</span>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "4px" }}>
-                    {["Bag", "Kg", "Ton", "Load", "Pieces", "Meter", "Unit"].map(unitOption => (
-                      <button
-                        type="button"
-                        key={unitOption}
-                        onClick={() => setMaterialUnit(unitOption)}
-                        style={{
-                          flex: "1 0 auto",
-                          padding: "8px 12px",
-                          borderRadius: "6px",
-                          border: materialUnit === unitOption ? "2px solid var(--accent-600)" : "1px solid var(--border-color)",
-                          backgroundColor: materialUnit === unitOption ? "var(--accent-50)" : "#ffffff",
-                          color: materialUnit === unitOption ? "var(--accent-700)" : "var(--primary-800)",
-                          fontWeight: "700",
-                          fontSize: "12px",
-                          cursor: "pointer"
-                        }}
-                      >
-                        {unitOption}
-                      </button>
-                    ))}
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "2px solid #e2e8f0", paddingTop: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", backgroundColor: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#1e40af", display: "block" }}>Selected Materials</span>
+                      <strong style={{ fontSize: "14px", color: "#1e3a8a" }}>{totalItemsCount} Material Items</strong>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#1e40af", display: "block" }}>Running Grand Total</span>
+                      <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>₹{grandTotalCost.toLocaleString("en-IN")}</strong>
+                    </div>
                   </div>
-                </div>
 
-                {/* Counter */}
-                <div>
-                  <span className="mobile-form-label">Quantity</span>
-                  <div style={{
-                    display: "flex",
-                    alignItems: "stretch",
-                    borderRadius: "var(--radius-sm)",
-                    border: "1px solid var(--border-color)",
-                    overflow: "hidden",
-                    backgroundColor: "#ffffff",
-                    height: "44px",
-                    marginTop: "4px"
-                  }}>
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => Math.max(0, (Number(prev) || 0) - 10))}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--danger-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderRight: "1px solid var(--border-color)"
-                      }}
+                  <div style={{ display: "flex", gap: "10px" }}>
+                    <Button type="button" variant="outline" style={{ flex: 1 }} onClick={handleCloseMaterialModal}>
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      style={{ flex: 2 }}
+                      disabled={isBulkMaterialLocked || totalItemsCount === 0 || bulkMaterialSubmitting}
                     >
-                      -10
-                    </button>
-                    <input 
-                      type="number" 
-                      placeholder="0.0"
-                      min="0.01"
-                      step="any"
-                      value={materialQuantity}
-                      onChange={(e) => setMaterialQuantity(e.target.value)}
-                      required 
-                      style={{
-                        border: "none",
-                        outline: "none",
-                        textAlign: "center",
-                        flex: 1,
-                        fontSize: "16px",
-                        fontWeight: "800",
-                        color: "var(--primary-950)",
-                        backgroundColor: "transparent",
-                        margin: 0,
-                        padding: 0
-                      }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setMaterialQuantity(prev => (Number(prev) || 0) + 10)}
-                      style={{
-                        padding: "0 14px",
-                        border: "none",
-                        background: "var(--primary-50)",
-                        color: "var(--success-600)",
-                        cursor: "pointer",
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        borderLeft: "1px solid var(--border-color)"
-                      }}
-                    >
-                      +10
-                    </button>
+                      {bulkMaterialSubmitting ? "Submitting Bulk Entry..." : isBulkMaterialLocked ? "Locked for Selected Date" : `Submit Entry (₹${grandTotalCost.toLocaleString("en-IN")})`}
+                    </Button>
                   </div>
                 </div>
-
-                {/* Unit Price */}
-                <div>
-                  <span className="mobile-form-label">Unit Price (₹)</span>
-                  <input
-                    type="number"
-                    step="any"
-                    min="0"
-                    placeholder="e.g. 380"
-                    value={materialUnitPrice}
-                    onChange={(e) => setMaterialUnitPrice(e.target.value)}
-                    required
-                    style={{
-                      width: "100%",
-                      height: "42px",
-                      padding: "0 12px",
-                      borderRadius: "6px",
-                      border: "1px solid var(--border-color)",
-                      fontSize: "14px",
-                      fontWeight: "700",
-                      color: "var(--primary-950)",
-                      backgroundColor: "#ffffff",
-                      marginTop: "4px"
-                    }}
-                  />
-                </div>
-
-                {/* Live Calculated Total Amount */}
-                <div style={{
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  backgroundColor: "#e0f2fe",
-                  border: "1px solid #bae6fd",
-                  display: "flex",
-                  justify: "space-between",
-                  alignItems: "center"
-                }}>
-                  <span style={{ fontSize: "13px", fontWeight: "700", color: "#0369a1" }}>Total Calculated Amount:</span>
-                  <strong style={{ fontSize: "16px", fontWeight: "900", color: "#0284c7", fontFamily: "monospace" }}>
-                    ₹{((Number(materialQuantity) || 0) * (Number(materialUnitPrice) || 0)).toLocaleString("en-IN")}
-                  </strong>
-                </div>
-
-                {/* Supplier */}
-                <div>
-                  <span className="mobile-form-label">Supplier Company</span>
-                  <div className="input-wrapper">
-                    <Briefcase size={18} className="input-icon" />
-                    <input 
-                      type="text" 
-                      placeholder="Enter supplier name..."
-                      value={materialSupplier}
-                      onChange={(e) => setMaterialSupplier(e.target.value)}
-                      required 
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "8px" }}>
-                    {["UltraTech Suppliers Ltd", "TATA Steel Corp", "National Quarries", "City Brick Kiln Co."].map(sug => (
-                      <button
-                        type="button"
-                        key={sug}
-                        onClick={() => setMaterialSupplier(sug)}
-                        style={{
-                          padding: "4px 10px",
-                          borderRadius: "16px",
-                          border: "1px solid var(--border-color)",
-                          backgroundColor: materialSupplier === sug ? "var(--primary-100)" : "#ffffff",
-                          color: materialSupplier === sug ? "var(--primary-800)" : "var(--text-muted)",
-                          fontSize: "11px",
-                          fontWeight: "600",
-                          cursor: "pointer"
-                        }}
-                      >
-                        {sug}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Date */}
-                <div>
-                  <span className="mobile-form-label">Receipt Date</span>
-                  <div className="input-wrapper">
-                    <Calendar size={18} className="input-icon" />
-                    <input 
-                      type="date" 
-                      value={materialPurchaseDate}
-                      onChange={(e) => setMaterialPurchaseDate(e.target.value)}
-                      required 
-                      style={{ height: "42px", paddingLeft: "40px" }}
-                    />
-                  </div>
-                </div>
-
-                {/* Notes */}
-                <div>
-                  <span className="mobile-form-label">Remarks / Notes</span>
-                  <textarea 
-                    className="mobile-textarea"
-                    placeholder="Challan number, inspection info, etc..."
-                    value={materialNotes}
-                    onChange={(e) => setMaterialNotes(e.target.value)}
-                    style={{ minHeight: "50px" }}
-                  />
-                </div>
-
-                {/* Invoice Photo */}
-                <div>
-                  <span className="mobile-form-label">Upload Challan Photo</span>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "4px" }}>
-                    <label style={{ 
-                      display: "flex", 
-                      flexDirection: "column", 
-                      alignItems: "center", 
-                      gap: "6px", 
-                      padding: "20px 16px", 
-                      border: "2px dashed var(--border-color)", 
-                      borderRadius: "8px", 
-                      cursor: "pointer", 
-                      backgroundColor: "var(--primary-50)",
-                      textAlign: "center"
-                    }}>
-                      <Camera size={24} style={{ color: "var(--primary-600)" }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>Choose or Capture Photo</span>
-                      <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, setMaterialInvoiceFile, setMaterialInvoicePreview)} />
-                    </label>
-                    {materialInvoicePreview && (
-                      <div style={{ position: "relative", width: "100px", height: "70px", borderRadius: "8px", overflow: "hidden", border: "1px solid var(--border-color)", alignSelf: "center" }}>
-                        <img src={materialInvoicePreview} alt="Invoice preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                        <button type="button" onClick={() => { setMaterialInvoiceFile(null); setMaterialInvoicePreview(null); }} style={{ position: "absolute", top: "2px", right: "2px", backgroundColor: "rgba(0,0,0,0.7)", color: "#fff", border: "none", borderRadius: "50%", width: "16px", height: "16px", display: "flex", alignItems: "center", justifyContent: "center" }}><X size={10} /></button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Form Actions */}
-                <div style={{ display: "flex", gap: "10px", marginTop: "12px" }}>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    style={{ flex: 1 }}
-                    onClick={() => setMaterialStep(2)}
-                  >
-                    Back
-                  </Button>
-                  <Button
-                    type="submit"
-                    style={{ flex: 1 }}
-                    disabled={materialSubmitting}
-                  >
-                    {materialSubmitting ? "Saving..." : "Save Delivery"}
-                  </Button>
-                </div>
-              </form>
-            )}
-          </div>
+              );
+            })()}
+          </form>
         </Modal>
       </div>
     );
@@ -4497,15 +4456,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         margin: "0 auto",
         padding: "8px 4px 80px 4px"
       }}>
-        {/* Segmented Control (Material 3 style Tab Selector) */}
+        {/* Segmented Control (Material 3        {/* Segmented Control (Orange / Light Grey Production Theme) */}
         <div style={{
           display: "flex",
-          backgroundColor: "#f3edf7",
+          backgroundColor: "#f1f5f9",
           borderRadius: "24px",
           padding: "4px",
           gap: "4px",
-          border: "1px solid #e7e0ec",
-          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.05)"
+          border: "1px solid #cbd5e1",
+          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)"
         }}>
           <button
             type="button"
@@ -4519,8 +4478,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               border: "none",
               cursor: "pointer",
               backgroundColor: activeWorkforceSubTab === "new-entry" ? "#ffffff" : "transparent",
-              color: activeWorkforceSubTab === "new-entry" ? "#6750a4" : "#49454f",
-              boxShadow: activeWorkforceSubTab === "new-entry" ? "0px 1px 3px rgba(0,0,0,0.15)" : "none",
+              color: activeWorkforceSubTab === "new-entry" ? "#ea580c" : "#64748b",
+              boxShadow: activeWorkforceSubTab === "new-entry" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
               transition: "all 0.2s ease"
             }}
           >
@@ -4538,8 +4497,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               border: "none",
               cursor: "pointer",
               backgroundColor: activeWorkforceSubTab === "history" ? "#ffffff" : "transparent",
-              color: activeWorkforceSubTab === "history" ? "#6750a4" : "#49454f",
-              boxShadow: activeWorkforceSubTab === "history" ? "0px 1px 3px rgba(0,0,0,0.15)" : "none",
+              color: activeWorkforceSubTab === "history" ? "#ea580c" : "#64748b",
+              boxShadow: activeWorkforceSubTab === "history" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
               transition: "all 0.2s ease"
             }}
           >
@@ -4551,27 +4510,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           renderLabourAttendanceHistoryView()
         ) : (
           <>
-            {/* Date Selector (Material 3 style) */}
+            {/* Date Selector */}
             <div style={{
-              backgroundColor: "#f7f2fa",
+              backgroundColor: "#ffffff",
               borderRadius: "16px",
               padding: "16px 20px",
-              border: "1px solid #e7e0ec",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
               display: "flex",
               flexDirection: "column",
               gap: "8px"
             }}>
               <label style={{
                 fontSize: "12px",
-                fontWeight: "700",
-                color: "#6750a4",
+                fontWeight: "750",
+                color: "#ea580c",
                 textTransform: "uppercase",
                 letterSpacing: "0.5px"
               }}>
                 Attendance Date
               </label>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#49454f" }} />
+                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
                 <input 
                   type="date" 
                   value={labourDate} 
@@ -4581,30 +4541,32 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     height: "48px",
                     padding: "12px 14px 12px 44px",
                     borderRadius: "12px",
-                    border: "1px solid #79747e",
+                    border: "1px solid #cbd5e1",
                     backgroundColor: "#ffffff",
-                    fontSize: "16px",
+                    fontSize: "15px",
                     outline: "none",
-                    color: "#1c1b1f"
+                    color: "#0f172a",
+                    fontWeight: "600"
                   }}
                 />
               </div>
             </div>
 
-            {/* Team Selector (Material 3 style) */}
+            {/* Team Selector */}
             <div style={{
-              backgroundColor: "#f7f2fa",
+              backgroundColor: "#ffffff",
               borderRadius: "16px",
               padding: "16px 20px",
-              border: "1px solid #e7e0ec",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
               display: "flex",
               flexDirection: "column",
               gap: "8px"
             }}>
               <label style={{
                 fontSize: "12px",
-                fontWeight: "700",
-                color: "#6750a4",
+                fontWeight: "750",
+                color: "#ea580c",
                 textTransform: "uppercase",
                 letterSpacing: "0.5px"
               }}>
@@ -4618,11 +4580,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   height: "48px",
                   padding: "12px 14px",
                   borderRadius: "12px",
-                  border: "1px solid #79747e",
+                  border: "1px solid #cbd5e1",
                   backgroundColor: "#ffffff",
-                  fontSize: "16px",
+                  fontSize: "15px",
                   outline: "none",
-                  color: "#1c1b1f",
+                  color: "#0f172a",
                   fontWeight: "600"
                 }}
               >
@@ -4638,12 +4600,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{
                 textAlign: "center",
                 padding: "48px 24px",
-                backgroundColor: "#fff",
-                borderRadius: "24px",
-                border: "1px dashed #79747e",
-                color: "#49454f",
+                backgroundColor: "#ffffff",
+                borderRadius: "20px",
+                border: "1px dashed #cbd5e1",
+                color: "#64748b",
                 fontSize: "15px",
-                fontWeight: "500"
+                fontWeight: "600"
               }}>
                 Please select a Labour Team to record attendance
               </div>
@@ -4651,10 +4613,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{
                 textAlign: "center",
                 padding: "48px 24px",
-                backgroundColor: "#fff",
-                borderRadius: "24px",
-                border: "1px dashed #b3261e",
-                color: "#b3261e",
+                backgroundColor: "#ffffff",
+                borderRadius: "20px",
+                border: "1px dashed #ef4444",
+                color: "#b91c1c",
                 fontSize: "15px",
                 fontWeight: "600"
               }}>
@@ -4664,11 +4626,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {isLabourSubmitted && (
                   <div style={{
-                    backgroundColor: "#e8f5e9",
-                    color: "#2e7d32",
+                    backgroundColor: "#f0fdf4",
+                    color: "#166534",
                     padding: "16px",
                     borderRadius: "16px",
-                    border: "1px solid #c8e6c9",
+                    border: "1px solid #bbf7d0",
                     fontSize: "14px",
                     fontWeight: "700",
                     textAlign: "center"
@@ -4677,49 +4639,53 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   </div>
                 )}
                 {teamCategories.map(cat => {
-                  const currentType = attendanceSelections[cat.id] || "Full Day";
-                  const record = attendanceRows.find(r => r.categoryId === cat.id && r.attendanceType === currentType);
+                  const record = attendanceRows.find(r => r.categoryId === cat.id);
                   const count = record ? record.workerCount : 0;
-                  const isSaving = savingRecordKeys[`${cat.id}_${currentType}`] || false;
+                  const currentUnitsStr = workUnitsSelections[cat.id] !== undefined ? workUnitsSelections[cat.id] : (record?.customWorkUnits || record?.units || "1.0");
+                  const currentUnits = Math.max(0.01, Number(currentUnitsStr) || 1.0);
+                  const dailyWage = Number(cat.wage || cat.salaryAmount || cat.baseWage || 0);
+                  const rowAmount = count * currentUnits * dailyWage;
+                  const isSaving = savingRecordKeys[`${cat.id}`] || false;
                   
                   return (
                     <div key={cat.id} style={{
                       backgroundColor: "#ffffff",
-                      borderRadius: "20px",
-                      border: "1px solid #e7e0ec",
+                      borderRadius: "16px",
+                      border: count > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
                       padding: "18px 20px",
-                      boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)",
+                      boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.05)",
                       display: "flex",
                       flexDirection: "column",
                       gap: "14px"
                     }}>
-                      {/* Category Header */}
+                      {/* Category Header & Wage Info */}
                       <div style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
-                        borderBottom: "1px solid #e7e0ec",
+                        borderBottom: "1px solid #e2e8f0",
                         paddingBottom: "8px"
                       }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <span style={{
-                            fontSize: "16px",
-                            fontWeight: "750",
-                            color: "#1c1b1f"
-                          }}>
+                          <span style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
                             {cat.name}
                           </span>
                           {isSaving && (
                             <span style={{
                               width: "14px",
                               height: "14px",
-                              border: "2px solid #6750a4",
+                              border: "2px solid #ea580c",
                               borderTop: "2px solid transparent",
                               borderRadius: "50%",
                               animation: "spin 0.8s linear infinite",
                               display: "inline-block"
                             }} />
                           )}
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "12px", fontWeight: "750", color: "#166534", backgroundColor: "#f0fdf4", padding: "4px 8px", borderRadius: "8px" }}>
+                            {dailyWage > 0 ? `₹${dailyWage.toLocaleString("en-IN")} / Day` : "Wage Pending Setup"}
+                          </span>
                         </div>
                       </div>
 
@@ -4730,63 +4696,51 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         alignItems: "center",
                         padding: "4px 0"
                       }}>
-                        <span style={{
-                          fontSize: "14px",
-                          fontWeight: "700",
-                          color: "#49454f"
-                        }}>
-                          Count : <span style={{ fontSize: "16px", color: "#1c1b1f", marginLeft: "4px" }}>{count}</span>
+                        <span style={{ fontSize: "14px", fontWeight: "700", color: "#334155" }}>
+                          Worker Count : <span style={{ fontSize: "16px", color: "#0f172a", marginLeft: "4px", fontWeight: "800" }}>{count}</span>
                         </span>
 
-                        <div style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "12px"
-                        }}>
-                          {/* Decrement Button */}
+                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                           <button
                             type="button"
-                            onClick={() => handleCountChange(cat.id, currentType, -1)}
+                            onClick={() => handleCountChange(cat.id, currentUnitsStr, -1)}
                             disabled={count <= 0 || isSaving || isLabourSubmitted}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: "1px solid #79747e",
-                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f1f1" : "#ffffff",
-                              color: isLabourSubmitted ? "#aaa" : "#6750a4",
+                              border: "1px solid #cbd5e1",
+                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f5f9" : "#ffffff",
+                              color: isLabourSubmitted ? "#94a3b8" : "#475569",
                               fontWeight: "900",
                               cursor: (count <= 0 || isLabourSubmitted) ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              transition: "all 0.1s ease",
                               outline: "none"
                             }}
                           >
                             -
                           </button>
 
-                          {/* Increment Button */}
                           <button
                             type="button"
-                            onClick={() => handleCountChange(cat.id, currentType, 1)}
+                            onClick={() => handleCountChange(cat.id, currentUnitsStr, 1)}
                             disabled={isSaving || isLabourSubmitted}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: "1px solid #6750a4",
-                              backgroundColor: isLabourSubmitted ? "#e2e2e2" : "#6750a4",
-                              color: isLabourSubmitted ? "#aaa" : "#ffffff",
+                              border: "1px solid #ea580c",
+                              backgroundColor: isLabourSubmitted ? "#cbd5e1" : "#ea580c",
+                              color: isLabourSubmitted ? "#94a3b8" : "#ffffff",
                               fontWeight: "900",
                               cursor: isLabourSubmitted ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              transition: "all 0.1s ease",
                               outline: "none"
                             }}
                           >
@@ -4795,106 +4749,147 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </div>
                       </div>
 
-                      {/* Attendance / Work Unit Selection */}
+                      {/* Work Units Single Editable Numeric Field */}
                       <div style={{
                         display: "flex",
                         flexDirection: "column",
                         gap: "8px",
-                        borderTop: "1px solid #e7e0ec",
+                        borderTop: "1px solid #e2e8f0",
                         paddingTop: "10px"
                       }}>
-                        <span style={{
-                          fontSize: "12px",
-                          fontWeight: "700",
-                          color: "#6750a4",
-                          textTransform: "uppercase",
-                          letterSpacing: "0.5px"
-                        }}>
-                          Work Unit Input
-                        </span>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                          <span style={{ fontSize: "12px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                            Work Units
+                          </span>
+                          <span style={{ fontSize: "14px", fontWeight: "800", color: rowAmount > 0 ? "#0369a1" : "#64748b" }}>
+                            Calculated Amount: ₹{rowAmount.toLocaleString("en-IN")}
+                          </span>
+                        </div>
 
-                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
-                          {/* Full Day Quick Select Button (1.0) */}
-                          <button
-                            type="button"
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "12px", border: "1px solid #cbd5e1" }}>
+                          <input
+                            type="number"
+                            step="any"
+                            min="0.01"
+                            placeholder="1.0"
+                            value={currentUnitsStr}
+                            onChange={(e) => handleWorkUnitsChange(cat.id, e.target.value)}
                             disabled={isLabourSubmitted}
-                            onClick={() => {
-                              setAttendanceSelections(prev => ({ ...prev, [cat.id]: 1.0 }));
-                            }}
                             style={{
-                              padding: "6px 14px",
+                              width: "110px",
+                              padding: "8px 12px",
                               borderRadius: "8px",
-                              border: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "2px solid #2e7d32" : "1px solid #79747e",
-                              backgroundColor: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "#e8f5e9" : "#ffffff",
-                              color: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "#1b5e20" : "#49454f",
-                              fontSize: "13px",
-                              fontWeight: "750",
-                              cursor: isLabourSubmitted ? "not-allowed" : "pointer"
+                              border: "1.5px solid #ea580c",
+                              fontSize: "15px",
+                              fontWeight: "800",
+                              textAlign: "center",
+                              backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
+                              outline: "none"
                             }}
-                          >
-                            ✓ Full Day (1.0)
-                          </button>
-
-                          {/* Custom Work Unit Numeric Input */}
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: "600", color: "#49454f" }}>Custom Unit:</span>
-                            <input
-                              type="number"
-                              step="0.05"
-                              min="0.01"
-                              value={currentType === "Full Day" ? "1.0" : (currentType === "Half Day" ? "0.5" : currentType)}
-                              onChange={(e) => {
-                                const val = e.target.value;
-                                setAttendanceSelections(prev => ({ ...prev, [cat.id]: val }));
-                              }}
-                              disabled={isLabourSubmitted}
-                              placeholder="e.g. 1.25, 2.5"
-                              style={{
-                                width: "95px",
-                                padding: "5px 8px",
-                                borderRadius: "6px",
-                                border: "1px solid #79747e",
-                                fontSize: "13px",
-                                fontWeight: "700",
-                                outline: "none",
-                                backgroundColor: isLabourSubmitted ? "#f1f1f1" : "#ffffff"
-                              }}
-                            />
-                          </div>
-
-                          {/* Quick Preset Chips */}
-                          <div style={{ display: "flex", gap: "4px" }}>
-                            {[0.5, 1.25, 1.5, 2.0, 2.5, 3.0, 3.75].map(preset => {
-                              const valNum = Number(currentType === "Full Day" ? 1.0 : (currentType === "Half Day" ? 0.5 : currentType));
-                              const isSelected = valNum === preset;
-                              return (
-                                <button
-                                  key={preset}
-                                  type="button"
-                                  disabled={isLabourSubmitted}
-                                  onClick={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: preset }))}
-                                  style={{
-                                    padding: "4px 8px",
-                                    borderRadius: "4px",
-                                    fontSize: "11px",
-                                    fontWeight: "700",
-                                    border: isSelected ? "1.5px solid #6750a4" : "1px solid #cbd5e1",
-                                    backgroundColor: isSelected ? "#f3edf7" : "#ffffff",
-                                    color: isSelected ? "#6750a4" : "#64748b",
-                                    cursor: isLabourSubmitted ? "not-allowed" : "pointer"
-                                  }}
-                                >
-                                  {preset}
-                                </button>
-                              );
-                            })}
-                          </div>
+                          />
                         </div>
                       </div>
 
                     </div>
                   );
                 })}
+
+                {/* Production Workforce Summary Dashboard (Orange Palette) */}
+                {(() => {
+                  let totalWorkers = 0;
+                  let presentCategoriesCount = 0;
+                  let totalWorkUnits = 0;
+                  let totalLabourCost = 0;
+
+                  attendanceRows.forEach(r => {
+                    const count = Number(r.workerCount) || 0;
+                    if (count > 0) presentCategoriesCount += 1;
+                    const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : 1.0)) || 1.0;
+                    const wage = Number(r.dailyWage || r.wage || 0);
+                    const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+
+                    totalWorkers += count;
+                    totalWorkUnits += count * units;
+                    totalLabourCost += cost;
+                  });
+
+                  const avgUnits = totalWorkers > 0 ? (totalWorkUnits / totalWorkers).toFixed(2) : "0.00";
+
+                  return (
+                    <div style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "14px",
+                      padding: "20px",
+                      backgroundColor: "#ffffff",
+                      borderRadius: "16px",
+                      border: "1.5px solid #cbd5e1",
+                      boxShadow: "0px 2px 6px rgba(0,0,0,0.04)",
+                      marginTop: "10px"
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          Workforce Daily Summary
+                        </span>
+                        <span style={{
+                          fontSize: "12px",
+                          fontWeight: "750",
+                          padding: "4px 10px",
+                          borderRadius: "12px",
+                          backgroundColor: isLabourSubmitted ? "#fef2f2" : "#f0fdf4",
+                          color: isLabourSubmitted ? "#b91c1c" : "#166534",
+                          border: isLabourSubmitted ? "1px solid #fca5a5" : "1px solid #bbf7d0",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "6px"
+                        }}>
+                          {isLabourSubmitted ? "🔒 Submitted & Locked" : "🟢 Open & Editable"}
+                        </span>
+                      </div>
+
+                      {/* Metric Grid */}
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "10px" }}>
+                        <div style={{ backgroundColor: "#fff7ed", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #ffedd5" }}>
+                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase" }}>Total Workers</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#9a3412", marginTop: "2px" }}>{totalWorkers}</div>
+                        </div>
+
+                        <div style={{ backgroundColor: "#f0fdf4", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #dcfce7" }}>
+                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#166534", textTransform: "uppercase" }}>Active Groups</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#14532d", marginTop: "2px" }}>{presentCategoriesCount}</div>
+                        </div>
+
+                        <div style={{ backgroundColor: "#f0f9ff", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #e0f2fe" }}>
+                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase" }}>Avg Work Units</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#075985", marginTop: "2px" }}>{avgUnits}</div>
+                        </div>
+
+                        <div style={{ backgroundColor: "#fefce8", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #fef9c3" }}>
+                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase" }}>Work Units Sum</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#854d0e", marginTop: "2px" }}>{totalWorkUnits.toFixed(2)}</div>
+                        </div>
+                      </div>
+
+                      {/* Total Cost Banner */}
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "14px 18px",
+                        backgroundColor: "#ea580c",
+                        borderRadius: "12px",
+                        color: "#ffffff"
+                      }}>
+                        <span style={{ fontSize: "13px", fontWeight: "750", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          Calculated Amount
+                        </span>
+                        <span style={{ fontSize: "22px", fontWeight: "900" }}>
+                          ₹{totalLabourCost.toLocaleString("en-IN")}
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })()}
 
                 {!isLabourSubmitted && (
                   <button
@@ -4905,7 +4900,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       width: "100%",
                       padding: "14px 16px",
                       borderRadius: "14px",
-                      backgroundColor: "#6750a4",
+                      backgroundColor: "#ea580c",
                       color: "#ffffff",
                       border: "none",
                       fontSize: "16px",
@@ -4913,7 +4908,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       cursor: labourSubmitting || attendanceRows.length === 0 ? "not-allowed" : "pointer",
                       opacity: labourSubmitting || attendanceRows.length === 0 ? 0.6 : 1,
                       marginTop: "16px",
-                      boxShadow: "0px 1px 3px rgba(0,0,0,0.15)",
+                      boxShadow: "0px 2px 4px rgba(234,88,12,0.2)",
                       transition: "all 0.2s ease"
                     }}
                   >
@@ -4972,15 +4967,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     // 1. Filter records in memory
     const filteredRecords = labourHistoryRecords.filter(r => {
-      if (r.createdBy !== currentEngineerId) {
+      if (r.createdBy && r.createdBy !== currentEngineerId) {
         return false;
       }
 
       if (filterSearch.trim()) {
         const queryStr = filterSearch.trim().toLowerCase();
         const teamObj = labourTeams.find(t => t.id === r.teamId);
-        const catObj = teamObj?.categories?.[r.categoryId];
-        const catName = catObj ? catObj.name : "";
+        const catObj = teamObj?.categories?.[r.categoryId] || categories.find(c => c.id === r.categoryId);
+        const catName = catObj ? catObj.name : (r.categoryName || "");
         
         const workerNameMatch = r.workerName && r.workerName.toLowerCase().includes(queryStr);
         const categoryNameMatch = catName && catName.toLowerCase().includes(queryStr);
@@ -5013,50 +5008,35 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return true;
     });
 
-    // 2. Calculate dynamic summary counts from filtered records
-    let summaryFullDay = 0;
-    let summaryHalfDay = 0;
-    let summaryTotal = 0;
+    // 2. Calculate dynamic grand totals from filtered records
+    let grandTotalWorkers = 0;
+    let grandTotalWorkUnits = 0;
+    let grandTotalLabourCost = 0;
 
     filteredRecords.forEach(r => {
       const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
-      if (r.workerCount !== undefined) {
-        if (r.attendanceType === "Full Day") {
-          summaryFullDay += count;
-        } else if (r.attendanceType === "Half Day") {
-          summaryHalfDay += count;
-        }
-      } else {
-        if (Number(r.attendanceValue) === 1.0) {
-          summaryFullDay += count;
-        } else {
-          summaryHalfDay += count;
-        }
-      }
-      summaryTotal += count;
+      const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const teamObj = labourTeams.find(t => t.id === r.teamId);
+      const catObj = teamObj?.categories?.[r.categoryId] || categories.find(c => c.id === r.categoryId);
+      const wage = Number(r.dailyWage || r.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
+      const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+
+      grandTotalWorkers += count;
+      grandTotalWorkUnits += count * units;
+      grandTotalLabourCost += cost;
     });
 
-    // 3. Group by Date -> Team -> Category
+    // 3. Group by Date
     const groupedByDate = {};
     filteredRecords.forEach(r => {
-      const date = r.attendanceDate;
+      const date = r.attendanceDate || "Unknown Date";
       if (!groupedByDate[date]) {
-        groupedByDate[date] = {};
+        groupedByDate[date] = [];
       }
-      const dateGroup = groupedByDate[date];
-      
-      const teamId = r.teamId;
-      if (!dateGroup[teamId]) {
-        dateGroup[teamId] = {};
-      }
-      const teamGroup = dateGroup[teamId];
-      
-      const catId = r.categoryId;
-      if (!teamGroup[catId]) {
-        teamGroup[catId] = [];
-      }
-      teamGroup[catId].push(r);
+      groupedByDate[date].push(r);
     });
+
+    const sortedDates = Object.keys(groupedByDate).sort((a, b) => b.localeCompare(a));
 
     const allCategories = [];
     const catSeen = new Set();
@@ -5073,52 +5053,52 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     allCategories.sort((a, b) => a.name.localeCompare(b.name));
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         
-        {/* Dynamic Summary Cards */}
+        {/* Production Grand Total Summary Cards (Orange / Neutral Theme) */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "1fr 1fr 1fr",
+          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
           gap: "12px",
           width: "100%"
         }}>
           <div style={{
-            backgroundColor: "#e8f5e9",
+            backgroundColor: "#fff7ed",
             borderRadius: "16px",
-            padding: "12px 14px",
-            border: "1px solid #c8e6c9",
+            padding: "14px 16px",
+            border: "1px solid #ffedd5",
             display: "flex",
             flexDirection: "column",
-            gap: "2px"
+            gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#2e7d32", textTransform: "uppercase", letterSpacing: "0.5px" }}>Full Day</span>
-            <span style={{ fontSize: "20px", fontWeight: "900", color: "#1b5e20" }}>{summaryFullDay}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>Grand Total Workers</span>
+            <span style={{ fontSize: "22px", fontWeight: "900", color: "#9a3412" }}>{grandTotalWorkers}</span>
           </div>
 
           <div style={{
-            backgroundColor: "#fff3e0",
+            backgroundColor: "#f0f9ff",
             borderRadius: "16px",
-            padding: "12px 14px",
-            border: "1px solid #ffe0b2",
+            padding: "14px 16px",
+            border: "1px solid #e0f2fe",
             display: "flex",
             flexDirection: "column",
-            gap: "2px"
+            gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Half Day</span>
-            <span style={{ fontSize: "20px", fontWeight: "900", color: "#e65100" }}>{summaryHalfDay}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
+            <span style={{ fontSize: "22px", fontWeight: "900", color: "#075985" }}>{grandTotalWorkUnits.toFixed(2)}</span>
           </div>
 
           <div style={{
-            backgroundColor: "#f3edf7",
+            backgroundColor: "#f0fdf4",
             borderRadius: "16px",
-            padding: "12px 14px",
-            border: "1px solid #e7e0ec",
+            padding: "14px 16px",
+            border: "1px solid #dcfce7",
             display: "flex",
             flexDirection: "column",
-            gap: "2px"
+            gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Labour</span>
-            <span style={{ fontSize: "20px", fontWeight: "900", color: "#6750a4" }}>{summaryTotal}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#166534", textTransform: "uppercase", letterSpacing: "0.5px" }}>Grand Total Cost</span>
+            <span style={{ fontSize: "22px", fontWeight: "900", color: "#14532d" }}>₹{grandTotalLabourCost.toLocaleString("en-IN")}</span>
           </div>
         </div>
 
@@ -5126,18 +5106,46 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         <div style={{
           backgroundColor: "#ffffff",
           borderRadius: "16px",
-          padding: "16px",
-          border: "1px solid #e7e0ec",
+          padding: "18px",
+          border: "1px solid #cbd5e1",
           display: "flex",
           flexDirection: "column",
-          gap: "12px",
-          boxShadow: "0px 1px 2px rgba(0, 0, 0, 0.05)"
+          gap: "14px",
+          boxShadow: "0px 2px 6px rgba(0, 0, 0, 0.04)"
         }}>
-          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#6750a4" }}>Filter History</h4>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              Filter & Search History
+            </h4>
+            {(filterSearch || (filterDateMode === "Custom Date" && filterDate) || filterDateMode !== "This Month" || filterTeamId || filterCategory) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setFilterSearch("");
+                  setFilterDate("");
+                  setFilterDateMode("This Month");
+                  setFilterTeamId("");
+                  setFilterCategory("");
+                }}
+                style={{
+                  backgroundColor: "#fff7ed",
+                  color: "#ea580c",
+                  border: "1px solid #ffedd5",
+                  borderRadius: "8px",
+                  fontSize: "12px",
+                  fontWeight: "750",
+                  cursor: "pointer",
+                  padding: "4px 10px"
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
+          </div>
           
-          {/* Search Category */}
+          {/* Search Input */}
           <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-            <Search size={18} style={{ position: "absolute", left: "12px", color: "#49454f" }} />
+            <Search size={18} style={{ position: "absolute", left: "14px", color: "#ea580c" }} />
             <input 
               type="text"
               placeholder="Search category name..."
@@ -5145,34 +5153,34 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               onChange={(e) => setFilterSearch(e.target.value)}
               style={{
                 width: "100%",
-                height: "40px",
-                padding: "8px 12px 8px 38px",
-                borderRadius: "8px",
-                border: "1px solid #79747e",
+                height: "44px",
+                padding: "8px 12px 8px 42px",
+                borderRadius: "12px",
+                border: "1px solid #cbd5e1",
                 backgroundColor: "#ffffff",
                 fontSize: "14px",
                 outline: "none",
-                color: "#1c1b1f"
+                color: "#0f172a"
               }}
             />
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            {/* Date range mode filter */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+            {/* Time Period Filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Time Period</span>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569" }}>Time Period</span>
               <select
                 value={filterDateMode}
                 onChange={(e) => setFilterDateMode(e.target.value)}
                 style={{
-                  height: "40px",
-                  padding: "8px",
-                  borderRadius: "8px",
-                  border: "1px solid #79747e",
+                  height: "42px",
+                  padding: "8px 12px",
+                  borderRadius: "10px",
+                  border: "1px solid #cbd5e1",
                   backgroundColor: "#ffffff",
                   fontSize: "13px",
                   outline: "none",
-                  color: "#1c1b1f",
+                  color: "#0f172a",
                   fontWeight: "600"
                 }}
               >
@@ -5184,69 +5192,42 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </select>
             </div>
 
-            {/* Custom Date Picker (shown only when mode is Custom Date) */}
+            {/* Custom Date Picker */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: filterDateMode === "Custom Date" ? 1 : 0.5 }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Custom Date</span>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569" }}>Custom Date</span>
               <input 
                 type="date"
                 value={filterDate}
                 disabled={filterDateMode !== "Custom Date"}
                 onChange={(e) => setFilterDate(e.target.value)}
                 style={{
-                  height: "40px",
-                  padding: "8px 10px",
-                  borderRadius: "8px",
-                  border: "1px solid #79747e",
-                  backgroundColor: filterDateMode === "Custom Date" ? "#ffffff" : "#f1f1f1",
+                  height: "42px",
+                  padding: "8px 12px",
+                  borderRadius: "10px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: filterDateMode === "Custom Date" ? "#ffffff" : "#f1f5f9",
                   fontSize: "13px",
                   outline: "none",
-                  color: "#1c1b1f"
+                  color: "#0f172a"
                 }}
               />
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
-            {/* Team Filter */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Team</span>
-              <select
-                value={filterTeamId}
-                onChange={(e) => setFilterTeamId(e.target.value)}
-                style={{
-                  height: "40px",
-                  padding: "8px",
-                  borderRadius: "8px",
-                  border: "1px solid #79747e",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13px",
-                  outline: "none",
-                  color: "#1c1b1f",
-                  fontWeight: "600"
-                }}
-              >
-                <option value="">All Teams</option>
-                {labourTeams.map(t => (
-                  <option key={t.id} value={t.id}>{t.teamName}</option>
-                ))}
-              </select>
             </div>
 
             {/* Category Filter */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <span style={{ fontSize: "11px", fontWeight: "700", color: "#49454f" }}>Category</span>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569" }}>Category Filter</span>
               <select
                 value={filterCategory}
                 onChange={(e) => setFilterCategory(e.target.value)}
                 style={{
-                  height: "40px",
-                  padding: "8px",
-                  borderRadius: "8px",
-                  border: "1px solid #79747e",
+                  height: "42px",
+                  padding: "8px 12px",
+                  borderRadius: "10px",
+                  border: "1px solid #cbd5e1",
                   backgroundColor: "#ffffff",
                   fontSize: "13px",
                   outline: "none",
-                  color: "#1c1b1f",
+                  color: "#0f172a",
                   fontWeight: "600"
                 }}
               >
@@ -5257,62 +5238,43 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </select>
             </div>
           </div>
-
-          {/* Reset Filters button */}
-          {(filterSearch || (filterDateMode === "Custom Date" && filterDate) || filterDateMode !== "This Month" || filterTeamId || filterCategory) && (
-            <button
-              type="button"
-              onClick={() => {
-                setFilterSearch("");
-                setFilterDate("");
-                setFilterDateMode("This Month");
-                setFilterTeamId("");
-                setFilterCategory("");
-              }}
-              style={{
-                alignSelf: "flex-end",
-                backgroundColor: "transparent",
-                color: "#6750a4",
-                border: "none",
-                fontSize: "12px",
-                fontWeight: "700",
-                cursor: "pointer",
-                padding: "4px 8px"
-              }}
-            >
-              Clear Filters
-            </button>
-          )}
         </div>
 
-        {/* History Records List */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {Object.keys(groupedByDate).length === 0 ? (
+        {/* History Timeline Cards */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+          {sortedDates.length === 0 ? (
             <div style={{
               textAlign: "center",
-              padding: "40px 16px",
+              padding: "48px 20px",
               backgroundColor: "#ffffff",
               borderRadius: "16px",
-              border: "1px solid #e7e0ec",
-              color: "#49454f",
-              fontSize: "14px"
+              border: "1px dashed #cbd5e1",
+              color: "#64748b",
+              fontSize: "15px",
+              fontWeight: "600"
             }}>
               {labourHistoryRecords.length === 0 
-                ? "No attendance records found for this site yet." 
-                : "No records match the selected filters."}
+                ? "No workforce attendance records recorded yet." 
+                : "No attendance records match your filter criteria."}
             </div>
           ) : (
-            Object.keys(groupedByDate).map(dateStr => {
-              const isExpanded = expandedDates.includes(dateStr);
-              const dateTeams = groupedByDate[dateStr];
-              
-              let dateTotalWorkers = 0;
-              Object.values(dateTeams).forEach(teamCats => {
-                Object.values(teamCats).forEach(records => {
-                  records.forEach(r => {
-                    dateTotalWorkers += r.workerCount !== undefined ? Number(r.workerCount) : 1;
-                  });
-                });
+            sortedDates.map(dateStr => {
+              const records = groupedByDate[dateStr];
+              const isLocked = lockedDates.has(dateStr);
+
+              let dateWorkers = 0;
+              let dateCost = 0;
+
+              records.forEach(r => {
+                const count = Number(r.workerCount) || 1;
+                const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : 1.0)) || 1.0;
+                const teamObj = labourTeams.find(t => t.id === r.teamId);
+                const catObj = teamObj?.categories?.[r.categoryId] || categories.find(c => c.id === r.categoryId);
+                const wage = Number(r.dailyWage || r.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
+                const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+
+                dateWorkers += count;
+                dateCost += cost;
               });
 
               let displayDateStr = dateStr;
@@ -5325,390 +5287,98 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <div key={dateStr} style={{
                   backgroundColor: "#ffffff",
                   borderRadius: "16px",
-                  border: "1px solid #e7e0ec",
-                  overflow: "hidden",
-                  boxShadow: "0px 1px 3px rgba(0, 0, 0, 0.1)",
-                  transition: "all 0.2s"
+                  border: "1px solid #cbd5e1",
+                  boxShadow: "0px 2px 6px rgba(0, 0, 0, 0.04)",
+                  overflow: "hidden"
                 }}>
-                  {/* Expandable Card Header */}
-                  <div 
-                    onClick={() => {
-                      setExpandedDates(prev => 
-                        prev.includes(dateStr) 
-                          ? prev.filter(d => d !== dateStr) 
-                          : [...prev, dateStr]
-                      );
-                    }}
-                    style={{
-                      padding: "16px 20px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      backgroundColor: isExpanded ? "#f3edf7" : "#ffffff",
-                      cursor: "pointer",
-                      borderBottom: isExpanded ? "1px solid #e7e0ec" : "none",
-                      transition: "background-color 0.2s"
-                    }}
-                  >
-                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                      <span style={{ fontSize: "16px", fontWeight: "800", color: "#1d1b20" }}>{displayDateStr}</span>
-                      <span style={{ fontSize: "12px", color: "#49454f", fontWeight: "600" }}>
-                        {dateTotalWorkers} Workers Present
+                  {/* Date Card Header */}
+                  <div style={{
+                    padding: "16px 20px",
+                    backgroundColor: "#f8fafc",
+                    borderBottom: "1px solid #e2e8f0",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <Calendar size={20} style={{ color: "#ea580c" }} />
+                      <span style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>{displayDateStr}</span>
+                      <span style={{
+                        fontSize: "11px",
+                        fontWeight: "750",
+                        padding: "2px 8px",
+                        borderRadius: "10px",
+                        backgroundColor: isLocked ? "#fef2f2" : "#f0fdf4",
+                        color: isLocked ? "#b91c1c" : "#166534",
+                        border: isLocked ? "1px solid #fca5a5" : "1px solid #bbf7d0"
+                      }}>
+                        {isLocked ? "🔒 Locked" : "🟢 Open"}
                       </span>
                     </div>
-                    <span style={{
-                      transform: isExpanded ? "rotate(90deg)" : "rotate(0deg)",
-                      transition: "transform 0.2s",
-                      fontSize: "18px",
-                      color: "#49454f"
-                    }}>
-                      ▶
-                    </span>
+
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "14px", fontWeight: "900", color: "#ea580c" }}>
+                        ₹{dateCost.toLocaleString("en-IN")}
+                      </span>
+                      <div style={{ fontSize: "11px", color: "#64748b", fontWeight: "700" }}>
+                        {dateWorkers} Workers
+                      </div>
+                    </div>
                   </div>
 
-                  {/* Expandable Card Content */}
-                  {isExpanded && (
-                    <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "20px" }}>
-                      {Object.keys(dateTeams).map(teamId => {
-                        const teamCats = dateTeams[teamId];
-                        const teamObj = labourTeams.find(t => t.id === teamId);
-                        const teamName = teamObj ? teamObj.teamName : "Unknown Team";
+                  {/* List of Category Entries */}
+                  <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {records.map(record => {
+                      const count = Number(record.workerCount) || 1;
+                      const units = Number(record.customWorkUnits !== undefined ? record.customWorkUnits : (record.units !== undefined ? record.units : 1.0)) || 1.0;
+                      const teamObj = labourTeams.find(t => t.id === record.teamId);
+                      const catObj = teamObj?.categories?.[record.categoryId] || categories.find(c => c.id === record.categoryId);
+                      const catName = catObj ? catObj.name : (record.categoryName || record.category || "Labour Category");
+                      const wage = Number(record.dailyWage || record.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
+                      const cost = record.calculatedAmount !== undefined && record.calculatedAmount !== null ? Number(record.calculatedAmount) : (count * units * wage);
 
-                        return (
-                          <div key={teamId} style={{
-                            display: "flex",
-                            flexDirection: "column",
-                            gap: "12px",
-                            border: "1px solid #e7e0ec",
-                            borderRadius: "12px",
-                            padding: "12px"
-                          }}>
-                            {/* Team Header */}
-                            <div style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                              borderBottom: "1.5px solid #6750a4",
-                              paddingBottom: "6px"
-                            }}>
-                              <span style={{ fontSize: "14px", fontWeight: "800", color: "#6750a4" }}>
-                                Team: {teamName}
+                      return (
+                        <div key={record.id || `${record.categoryId}_${record.attendanceDate}`} style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          padding: "14px 16px",
+                          backgroundColor: "#f8fafc",
+                          borderRadius: "12px",
+                          border: "1px solid #e2e8f0"
+                        }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <span style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{catName}</span>
+                              <span style={{
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                padding: "2px 8px",
+                                borderRadius: "6px",
+                                backgroundColor: "#fff7ed",
+                                color: "#c2410c",
+                                border: "1px solid #ffedd5"
+                              }}>
+                                {units} Work Unit(s)
                               </span>
-                              {!lockedDates.has(dateStr) && (
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteTeamHistoryRecords(dateStr, teamId)}
-                                  style={{
-                                    border: "none",
-                                    backgroundColor: "transparent",
-                                    color: "#b3261e",
-                                    cursor: "pointer",
-                                    fontSize: "11px",
-                                    fontWeight: "700",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "4px"
-                                  }}
-                                  title="Delete entire team attendance for this date"
-                                >
-                                  <Trash2 size={14} /> Delete Team
-                                </button>
-                              )}
                             </div>
-
-                            {/* Categories under Team */}
-                            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                              {Object.keys(teamCats).map(catId => {
-                                const records = teamCats[catId];
-                                const catObj = teamObj?.categories?.[catId];
-                                const catName = catObj ? catObj.name : "Unknown Category";
-
-                                return (
-                                  <div key={catId} style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                    {/* Category Subheader */}
-                                    <div style={{
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      alignItems: "center",
-                                      backgroundColor: "#f7f2fa",
-                                      padding: "4px 8px",
-                                      borderRadius: "6px"
-                                    }}>
-                                      <span style={{ fontSize: "13px", fontWeight: "700", color: "#1c1b1f" }}>
-                                        {catName}
-                                      </span>
-                                      {!lockedDates.has(dateStr) && (
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDeleteCategoryHistoryRecords(dateStr, teamId, catId)}
-                                          style={{
-                                            border: "none",
-                                            backgroundColor: "transparent",
-                                            color: "#b3261e",
-                                            cursor: "pointer",
-                                            fontSize: "11px",
-                                            fontWeight: "700",
-                                            display: "flex",
-                                            alignItems: "center",
-                                            gap: "4px"
-                                          }}
-                                          title="Delete category attendance for this date"
-                                        >
-                                          <Trash2 size={13} /> Delete Category
-                                        </button>
-                                      )}
-                                    </div>
-
-                                    {/* Workers under Category */}
-                                    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                                      {records.map(record => {
-                                        const isEditing = editingRecordId === record.id;
-                                        const siteObj = assignedSites.find(s => s.id === record.siteId) || allSites.find(s => s.id === record.siteId);
-                                        const siteName = siteObj ? siteObj.siteName : "Unknown Site";
-                                        
-                                        return (
-                                          <div key={record.id} style={{
-                                            display: "flex",
-                                            flexDirection: "column",
-                                            gap: "8px",
-                                            padding: "12px 14px",
-                                            backgroundColor: "#fbfafe",
-                                            borderRadius: "12px",
-                                            border: "1px solid #e7e0ec"
-                                          }}>
-                                            {isEditing ? (
-                                              <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
-                                                {record.workerCount !== undefined ? (
-                                                  <>
-                                                    <div style={{ display: "flex", alignItems: "center", gap: "6px", flex: 2 }}>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setEditingCount(prev => Math.max(1, prev - 1))}
-                                                        style={{
-                                                          width: "32px",
-                                                          height: "32px",
-                                                          borderRadius: "50%",
-                                                          border: "1px solid #79747e",
-                                                          backgroundColor: "#ffffff",
-                                                          color: "#6750a4",
-                                                          fontWeight: "bold",
-                                                          cursor: "pointer",
-                                                          fontSize: "16px",
-                                                          display: "flex",
-                                                          alignItems: "center",
-                                                          justifyContent: "center"
-                                                        }}
-                                                      >-</button>
-                                                      <span style={{ fontSize: "14px", fontWeight: "700", minWidth: "24px", textAlign: "center", color: "#1c1b1f" }}>
-                                                        {editingCount}
-                                                      </span>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => setEditingCount(prev => prev + 1)}
-                                                        style={{
-                                                          width: "32px",
-                                                          height: "32px",
-                                                          borderRadius: "50%",
-                                                          border: "1px solid #79747e",
-                                                          backgroundColor: "#ffffff",
-                                                          color: "#6750a4",
-                                                          fontWeight: "bold",
-                                                          cursor: "pointer",
-                                                          fontSize: "16px",
-                                                          display: "flex",
-                                                          alignItems: "center",
-                                                          justifyContent: "center"
-                                                        }}
-                                                      >+</button>
-                                                    </div>
-                                                    <select
-                                                      value={editingType}
-                                                      onChange={(e) => setEditingType(e.target.value)}
-                                                      style={{
-                                                        flex: 1.5,
-                                                        height: "32px",
-                                                        padding: "4px",
-                                                        borderRadius: "6px",
-                                                        border: "1px solid #79747e",
-                                                        fontSize: "13px",
-                                                        fontWeight: "600",
-                                                        backgroundColor: "#ffffff",
-                                                        color: "#1c1b1f"
-                                                      }}
-                                                    >
-                                                      <option value="Full Day">Full Day</option>
-                                                      <option value="Half Day">Half Day</option>
-                                                    </select>
-                                                  </>
-                                                ) : (
-                                                  <>
-                                                    <input 
-                                                      type="text"
-                                                      value={editingName}
-                                                      onChange={(e) => setEditingName(e.target.value)}
-                                                      style={{
-                                                        flex: 2,
-                                                        height: "32px",
-                                                        padding: "4px 8px",
-                                                        borderRadius: "6px",
-                                                        border: "1px solid #79747e",
-                                                        fontSize: "13px",
-                                                        backgroundColor: "#ffffff",
-                                                        color: "#1c1b1f"
-                                                      }}
-                                                    />
-                                                    <select
-                                                      value={editingValue}
-                                                      onChange={(e) => setEditingValue(Number(e.target.value))}
-                                                      style={{
-                                                        flex: 1.2,
-                                                        height: "32px",
-                                                        padding: "4px",
-                                                        borderRadius: "6px",
-                                                        border: "1px solid #79747e",
-                                                        fontSize: "13px",
-                                                        fontWeight: "600",
-                                                        backgroundColor: "#ffffff",
-                                                        color: "#1c1b1f"
-                                                      }}
-                                                    >
-                                                      <option value={1.0}>Full Day</option>
-                                                      <option value={0.5}>Half Day</option>
-                                                    </select>
-                                                  </>
-                                                )}
-                                                <button
-                                                  type="button"
-                                                  onClick={() => handleSaveHistoryRecord(record.id)}
-                                                  style={{
-                                                    backgroundColor: "#2e7d32",
-                                                    color: "#ffffff",
-                                                    border: "none",
-                                                    borderRadius: "6px",
-                                                    padding: "4px 8px",
-                                                    fontSize: "12px",
-                                                    fontWeight: "700",
-                                                    cursor: "pointer"
-                                                  }}
-                                                >
-                                                  Save
-                                                </button>
-                                                <button
-                                                  type="button"
-                                                  onClick={() => setEditingRecordId(null)}
-                                                  style={{
-                                                    backgroundColor: "transparent",
-                                                    color: "#49454f",
-                                                    border: "none",
-                                                    fontSize: "12px",
-                                                    fontWeight: "700",
-                                                    cursor: "pointer"
-                                                  }}
-                                                >
-                                                  Cancel
-                                                </button>
-                                              </div>
-                                            ) : (
-                                              <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                                                {/* Row 1: Site Name & Status */}
-                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
-                                                  <span style={{ fontSize: "13px", fontWeight: "750", color: "#1c1b1f" }}>
-                                                    {siteName}
-                                                  </span>
-                                                  <span style={{
-                                                    fontSize: "11px",
-                                                    fontWeight: "700",
-                                                    color: "#2e7d32",
-                                                    backgroundColor: "#e8f5e9",
-                                                    padding: "2px 8px",
-                                                    borderRadius: "12px"
-                                                  }}>
-                                                    Present
-                                                  </span>
-                                                </div>
-
-                                                {/* Row 2: Team, Category, and Entry Time */}
-                                                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#49454f" }}>
-                                                  <span>Team: <strong>{teamName}</strong> | Cat: <strong>{catName}</strong></span>
-                                                  <span>Time: {getEntryTimeStr(record)}</span>
-                                                </div>
-
-                                                {/* Row 3: Count details (Worker Count, Full Day Count, Half Day Count, Total Labour) */}
-                                                <div style={{
-                                                  display: "grid",
-                                                  gridTemplateColumns: "repeat(4, 1fr)",
-                                                  gap: "6px",
-                                                  backgroundColor: "#ffffff",
-                                                  borderRadius: "8px",
-                                                  padding: "8px",
-                                                  border: "1px solid #e7e0ec",
-                                                  textAlign: "center"
-                                                }}>
-                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Worker Count</span>
-                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#1c1b1f" }}>{record.workerCount !== undefined ? record.workerCount : 1}</span>
-                                                  </div>
-                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Full Day</span>
-                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#2e7d32" }}>{record.workerCount !== undefined ? (record.attendanceType === "Full Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 1.0 ? 1 : 0)}</span>
-                                                  </div>
-                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Half Day</span>
-                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#e65100" }}>{record.workerCount !== undefined ? (record.attendanceType === "Half Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 0.5 ? 1 : 0)}</span>
-                                                  </div>
-                                                  <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                                    <span style={{ fontSize: "10px", fontWeight: "700", color: "#79747e" }}>Total</span>
-                                                    <span style={{ fontSize: "13px", fontWeight: "800", color: "#6750a4" }}>{record.workerCount !== undefined ? record.workerCount : 1}</span>
-                                                  </div>
-                                                  {/* Actions */}
-                                                  {!lockedDates.has(record.attendanceDate) && (
-                                                    <div style={{ display: "flex", justifyContent: "flex-end", gap: "12px", borderTop: "1px solid #e7e0ec", paddingTop: "6px", marginTop: "2px" }}>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleStartEditHistoryRecord(record)}
-                                                        style={{
-                                                          border: "none",
-                                                          backgroundColor: "transparent",
-                                                          color: "#6750a4",
-                                                          cursor: "pointer",
-                                                          fontSize: "12px",
-                                                          fontWeight: "800"
-                                                        }}
-                                                      >
-                                                        Edit
-                                                      </button>
-                                                      <button
-                                                        type="button"
-                                                        onClick={() => handleDeleteHistoryRecord(record.id)}
-                                                        style={{
-                                                          border: "none",
-                                                          backgroundColor: "transparent",
-                                                          color: "#b3261e",
-                                                          cursor: "pointer",
-                                                          fontSize: "12px",
-                                                          fontWeight: "800"
-                                                        }}
-                                                      >
-                                                        Delete
-                                                      </button>
-                                                    </div>
-                                                  )}
-                                                </div>
-                                              </div>
-                                            )}
-                                          </div>
-                                        );
-                                      })}
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                            <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
+                              {count} Worker(s) @ ₹{wage.toLocaleString("en-IN")} / Day
+                            </span>
+                            <span style={{ fontSize: "11px", color: "#94a3b8" }}>
+                              Submitted at {getEntryTimeStr(record)} by {record.createdBy || "Engineer"}
+                            </span>
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+
+                          <div style={{ textAlign: "right" }}>
+                            <span style={{ fontSize: "16px", fontWeight: "900", color: "#0369a1" }}>
+                              Calculated Amount: ₹{cost.toLocaleString("en-IN")}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })

@@ -4,6 +4,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import Modal from "../components/common/Modal";
 import { useAuth } from "../context/AuthContext";
 import {
   getSites,
@@ -11,8 +12,16 @@ import {
   updateMaterial,
   getMaterialMaster,
   saveMaterialMaster,
+  subscribeMaterialMaster,
+  subscribeMaterialsDetailed,
   logMaterialUsage,
-  logMaterialPayment
+  logMaterialPayment,
+  createMaterialGroup,
+  renameMaterialGroup,
+  deleteMaterialGroup,
+  createMaterialItem,
+  updateMaterialItem,
+  deleteMaterialItem
 } from "../services/firebaseService";
 import {
   processMaterialPaymentAndDelivery
@@ -50,10 +59,13 @@ export default function AdminMaterials() {
   
   // Modals state
   const [showAddMasterModal, setShowAddMasterModal] = useState(false);
-  const [newMasterItem, setNewMasterItem] = useState({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "" });
-  const [showEditMasterModal, setShowEditMasterModal] = useState(false);
-  const [editingMasterIndex, setEditingMasterIndex] = useState(null);
-  const [editingMasterItem, setEditingMasterItem] = useState({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "", status: "Active" });
+  const [newMasterItem, setNewMasterItem] = useState({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "" });
+  const [showAddGroupModal, setShowAddGroupModal] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [showRenameGroupModal, setShowRenameGroupModal] = useState(false);
+  const [oldGroupName, setOldGroupName] = useState("");
+  const [renamingGroupName, setRenamingGroupName] = useState("");
+
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [approvalQty, setApprovalQty] = useState("");
@@ -79,50 +91,131 @@ export default function AdminMaterials() {
     }, 4000);
   };
 
-  const loadData = async () => {
+  const [showEditMasterModal, setShowEditMasterModal] = useState(false);
+  const [editingMasterIndex, setEditingMasterIndex] = useState(null);
+  const [editingMasterItem, setEditingMasterItem] = useState({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "", status: "Active" });
+
+  const [showDeleteMasterModal, setShowDeleteMasterModal] = useState(false);
+  const [deletingMasterIndex, setDeletingMasterIndex] = useState(null);
+
+  useEffect(() => {
+    let unsubMaster;
+    let unsubMaterials;
+    
+    const initSubscriptions = async () => {
+      try {
+        setLoading(true);
+        const adminId = userProfile?.uid || userProfile?.id || null;
+        const fetchedSites = await getSites(adminId);
+        setSites(fetchedSites);
+        
+        unsubMaster = subscribeMaterialMaster((mmList) => {
+          setMaterialMaster(mmList);
+        });
+        
+        unsubMaterials = subscribeMaterialsDetailed(null, (mats) => {
+          setAllMaterials(mats);
+        });
+      } catch (err) {
+        console.error("Failed to load materials data:", err);
+        showToast(`Error syncing logs: ${err.message}`, "error");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    initSubscriptions();
+
+    return () => {
+      if (unsubMaster) unsubMaster();
+      if (unsubMaterials) unsubMaterials();
+    };
+  }, [userProfile]);
+
+  const handleAddGroup = async (e) => {
+    e.preventDefault();
+    if (!newGroupName.trim()) return;
     try {
-      setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      const [fetchedSites, fetchedMaster, fetchedMaterials] = await Promise.all([
-        getSites(adminId),
-        getMaterialMaster(),
-        getMaterialsDetailed(null) // Fetch all materials across all sites
-      ]);
-      setSites(Array.isArray(fetchedSites) ? fetchedSites : []);
-      setMaterialMaster(Array.isArray(fetchedMaster) ? fetchedMaster : []);
-      setAllMaterials(Array.isArray(fetchedMaterials) ? fetchedMaterials : []);
+      await createMaterialGroup(newGroupName.trim());
+      setNewGroupName("");
+      setShowAddGroupModal(false);
+      showToast(`Material Group "${newGroupName.trim()}" created successfully!`, "success");
     } catch (err) {
-      console.error("Failed to load materials data:", err);
-      showToast(`Error syncing logs: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
+      showToast(`Failed: ${err.message}`, "error");
     }
   };
 
-  useEffect(() => {
-    loadData();
-  }, []);
+  const handleRenameGroup = async (e) => {
+    e.preventDefault();
+    if (!renamingGroupName.trim() || !oldGroupName) return;
+    try {
+      await renameMaterialGroup(oldGroupName, renamingGroupName.trim());
+      setShowRenameGroupModal(false);
+      setOldGroupName("");
+      setRenamingGroupName("");
+      showToast("Material Group renamed successfully!", "success");
+    } catch (err) {
+      showToast(`Failed: ${err.message}`, "error");
+    }
+  };
 
   const handleAddMaster = async (e) => {
     e.preventDefault();
     if (!newMasterItem.name.trim()) return;
     try {
-      const price = Number(newMasterItem.defaultUnitPrice) || 0;
-      const updatedList = [
-        ...materialMaster,
-        {
-          name: newMasterItem.name.trim(),
-          category: newMasterItem.category,
-          unit: newMasterItem.unit,
-          defaultUnitPrice: price,
-          status: "Active"
-        }
-      ];
-      await saveMaterialMaster(updatedList);
-      setMaterialMaster(updatedList);
-      setNewMasterItem({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "" });
+      const catName = newMasterItem.category === "Other" && newMasterItem.customCategory?.trim() ? newMasterItem.customCategory.trim() : newMasterItem.category;
+      await createMaterialItem({
+        name: newMasterItem.name.trim(),
+        category: catName,
+        unit: newMasterItem.unit,
+        unitPrice: Number(newMasterItem.unitPrice) || 0,
+        status: "Active"
+      });
+      setNewMasterItem({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "" });
       setShowAddMasterModal(false);
       showToast("Lookup material added successfully!", "success");
+    } catch (err) {
+      showToast(`Failed: ${err.message}`, "error");
+    }
+  };
+
+  const handleEditMaster = async (e) => {
+    e.preventDefault();
+    if (editingMasterIndex === null || !editingMasterItem.name.trim()) return;
+    try {
+      const catName = editingMasterItem.category === "Other" && editingMasterItem.customCategory?.trim() ? editingMasterItem.customCategory.trim() : editingMasterItem.category;
+      const updatedList = [...materialMaster];
+      updatedList[editingMasterIndex] = {
+        ...updatedList[editingMasterIndex],
+        name: editingMasterItem.name.trim(),
+        category: catName,
+        unit: editingMasterItem.unit,
+        unitPrice: Number(editingMasterItem.unitPrice) || 0,
+        status: editingMasterItem.status
+      };
+      await saveMaterialMaster(updatedList);
+      setShowEditMasterModal(false);
+      setEditingMasterIndex(null);
+      showToast("Lookup material updated successfully!", "success");
+    } catch (err) {
+      showToast(`Failed: ${err.message}`, "error");
+    }
+  };
+
+  const handleDeleteMasterItem = (index) => {
+    setDeletingMasterIndex(index);
+    setShowDeleteMasterModal(true);
+  };
+
+  const handleConfirmDeleteMaster = async () => {
+    if (deletingMasterIndex === null) return;
+    const itemToDelete = materialMaster[deletingMasterIndex];
+    try {
+      const updatedList = materialMaster.filter((_, idx) => idx !== deletingMasterIndex);
+      await saveMaterialMaster(updatedList);
+      setShowDeleteMasterModal(false);
+      setDeletingMasterIndex(null);
+      showToast(`Material "${itemToDelete?.name || ''}" removed successfully!`, "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
@@ -133,66 +226,9 @@ export default function AdminMaterials() {
       const updatedList = [...materialMaster];
       updatedList[index].status = updatedList[index].status === "Active" ? "Inactive" : "Active";
       await saveMaterialMaster(updatedList);
-      setMaterialMaster(updatedList);
       showToast("Lookup status modified!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
-    }
-  };
-
-  const handleOpenEditMaster = (index) => {
-    const item = materialMaster[index];
-    setEditingMasterIndex(index);
-    setEditingMasterItem({
-      name: item.name || "",
-      category: item.category || "Cement",
-      unit: item.unit || "Bag",
-      defaultUnitPrice: item.defaultUnitPrice !== undefined ? item.defaultUnitPrice : (item.unitPrice || 0),
-      status: item.status || "Active"
-    });
-    setShowEditMasterModal(true);
-  };
-
-  const handleSaveEditMaster = async (e) => {
-    e.preventDefault();
-    if (!editingMasterItem.name.trim()) {
-      showToast("Material Name cannot be empty.", "error");
-      return;
-    }
-    try {
-      const price = Number(editingMasterItem.defaultUnitPrice) || 0;
-      const updatedList = [...materialMaster];
-      updatedList[editingMasterIndex] = {
-        name: editingMasterItem.name.trim(),
-        category: editingMasterItem.category,
-        unit: editingMasterItem.unit,
-        defaultUnitPrice: price,
-        status: editingMasterItem.status
-      };
-      await saveMaterialMaster(updatedList);
-      setMaterialMaster(updatedList);
-      setShowEditMasterModal(false);
-      setEditingMasterIndex(null);
-      showToast(`Material type "${editingMasterItem.name}" updated in Database!`, "success");
-    } catch (err) {
-      console.error("Error updating material master:", err);
-      showToast(`Failed to update in Database: ${err.message}`, "error");
-    }
-  };
-
-  const handleDeleteMaster = async (index) => {
-    const targetItem = materialMaster[index];
-    if (!window.confirm(`Are you sure you want to delete material type "${targetItem.name}" from the Material Master database?`)) {
-      return;
-    }
-    try {
-      const updatedList = materialMaster.filter((_, idx) => idx !== index);
-      await saveMaterialMaster(updatedList);
-      setMaterialMaster(updatedList);
-      showToast(`Material type "${targetItem.name}" deleted from Database!`, "success");
-    } catch (err) {
-      console.error("Error deleting material master:", err);
-      showToast(`Failed to delete from Database: ${err.message}`, "error");
     }
   };
 
@@ -419,39 +455,66 @@ export default function AdminMaterials() {
         {activeTab === "master" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             <Card 
-              title="Material Types Master configuration" 
-              subtitle="Lookup database types for site engineers."
+              title="Material Master Lookup & Groups Configuration" 
+              subtitle="Single source of truth for site engineer material requisitions."
               headerActions={
-                <Button onClick={() => setShowAddMasterModal(true)} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Plus size={16} />
-                  <span>Add Material</span>
-                </Button>
+                <div style={{ display: "flex", gap: "10px" }}>
+                  <Button onClick={() => setShowAddGroupModal(true)} variant="secondary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Plus size={16} />
+                    <span>Create Group</span>
+                  </Button>
+                  <Button onClick={() => setShowAddMasterModal(true)} variant="primary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Plus size={16} />
+                    <span>Add Material</span>
+                  </Button>
+                </div>
               }
             >
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Material Name</th>
-                      <th>Category</th>
-                      <th>Unit of Measure</th>
-                      <th style={{ textAlign: "right" }}>Default Unit Price</th>
-                      <th>Lookup Status</th>
-                      <th style={{ textAlign: "right" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materialMaster.map((item, idx) => {
-                      const price = Number(item.defaultUnitPrice !== undefined ? item.defaultUnitPrice : (item.unitPrice || (item.category === "Steel" ? 65000 : 380)));
-                      return (
-                        <tr key={idx}>
-                          <td style={{ fontWeight: "700" }}>{item.name}</td>
+              {materialMaster.length === 0 ? (
+                <div style={{ padding: "48px 24px", textAlign: "center" }}>
+                  <Package size={48} style={{ color: "var(--text-muted)", marginBottom: "12px", opacity: 0.6 }} />
+                  <h4 style={{ margin: "0 0 6px 0", color: "var(--primary-900)", fontWeight: "700" }}>No Material Master Records Found</h4>
+                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic" }}>
+                    No Material Groups or Materials have been configured in Firestore. Click "Create Group" or "Add Material" above to populate the production master database.
+                  </p>
+                </div>
+              ) : (
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" style={{ margin: 0 }}>
+                    <thead>
+                      <tr>
+                        <th>Material Group</th>
+                         <th>Material Name</th>
+                         <th>Unit of Measure</th>
+                         <th style={{ textAlign: "right" }}>Unit Price (₹)</th>
+                         <th>Lookup Status</th>
+                         <th style={{ textAlign: "right" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {materialMaster.map((item, idx) => (
+                        <tr key={item.id || idx}>
                           <td>
-                            <Badge status="pending">{item.category}</Badge>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <Badge status="pending">{item.category}</Badge>
+                              <button 
+                                type="button"
+                                onClick={() => {
+                                  setOldGroupName(item.category);
+                                  setRenamingGroupName(item.category);
+                                  setShowRenameGroupModal(true);
+                                }}
+                                title="Rename Material Group"
+                                style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px" }}
+                              >
+                                <Edit2 size={12} />
+                              </button>
+                            </div>
                           </td>
+                          <td style={{ fontWeight: "700" }}>{item.name}</td>
                           <td className="font-mono">{item.unit}</td>
-                          <td style={{ textAlign: "right", fontWeight: "700" }} className="font-mono">
-                            ₹{price.toLocaleString("en-IN")}
+                          <td style={{ textAlign: "right", fontWeight: "700", color: "var(--success-700)" }}>
+                            {item.unitPrice > 0 ? `₹${Number(item.unitPrice).toLocaleString("en-IN")}` : <span style={{ color: "var(--danger-600)", fontStyle: "italic", fontWeight: 400 }}>Not Set</span>}
                           </td>
                           <td>
                             <Badge status={item.status === "Active" ? "success" : "danger"}>{item.status}</Badge>
@@ -459,37 +522,38 @@ export default function AdminMaterials() {
                           <td style={{ textAlign: "right" }}>
                             <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
                               <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => handleOpenEditMaster(idx)}
-                                style={{ display: "flex", alignItems: "center", gap: "4px" }}
-                              >
-                                <Edit2 size={13} />
-                                <span>Edit</span>
-                              </Button>
-                              <Button 
                                 variant="secondary" 
                                 size="sm" 
                                 onClick={() => handleToggleMasterStatus(idx)}
                               >
-                                {item.status === "Active" ? "Deactivate" : "Activate"}
+                                Toggle Status
                               </Button>
                               <Button 
-                                variant="text" 
+                                variant="outline" 
                                 size="sm" 
-                                onClick={() => handleDeleteMaster(idx)}
-                                style={{ color: "var(--danger-600)" }}
+                                onClick={() => {
+                                  setEditingMasterIndex(idx);
+                                  setEditingMasterItem({ ...item, customCategory: "" });
+                                  setShowEditMasterModal(true);
+                                }}
                               >
-                                <Trash2 size={13} />
+                                Edit
+                              </Button>
+                              <Button 
+                                variant="danger" 
+                                size="sm" 
+                                onClick={() => handleDeleteMasterItem(idx)}
+                              >
+                                Delete
                               </Button>
                             </div>
                           </td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -758,85 +822,325 @@ export default function AdminMaterials() {
 
       </div>
 
-      {/* Modal: Add master Lookup item */}
-      {showAddMasterModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "450px" }}>
-            <div className="modal-header">
-              <h3>Create Master Material Type</h3>
-              <button className="modal-close" onClick={() => setShowAddMasterModal(false)}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleAddMaster}>
-              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div className="form-group">
-                  <label htmlFor="master-name">Material Name</label>
-                  <input
-                    id="master-name"
-                    type="text"
-                    placeholder="e.g. 53 Grade Cement, 10mm TMT Steel"
-                    value={newMasterItem.name}
-                    onChange={(e) => setNewMasterItem(prev => ({ ...prev, name: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-                
-                <div className="form-group">
-                  <label htmlFor="master-cat">Category Type</label>
-                  <select
-                    id="master-cat"
-                    value={newMasterItem.category}
-                    onChange={(e) => setNewMasterItem(prev => ({ ...prev, category: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Cement">Cement</option>
-                    <option value="Steel">Steel</option>
-                    <option value="Sand">Sand</option>
-                    <option value="Bricks">Bricks</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="master-unit">Unit Type</label>
-                  <select
-                    id="master-unit"
-                    value={newMasterItem.unit}
-                    onChange={(e) => setNewMasterItem(prev => ({ ...prev, unit: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Bag">Bag</option>
-                    <option value="Ton">Ton</option>
-                    <option value="Load">Load</option>
-                    <option value="Piece">Piece</option>
-                    <option value="Meter">Meter</option>
-                    <option value="Unit">Unit</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="master-price">Default Unit Price (₹)</label>
-                  <input
-                    id="master-price"
-                    type="number"
-                    step="any"
-                    min="0"
-                    placeholder="e.g. 380"
-                    value={newMasterItem.defaultUnitPrice}
-                    onChange={(e) => setNewMasterItem(prev => ({ ...prev, defaultUnitPrice: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-              </div>
-              <div className="modal-footer">
-                <Button type="button" variant="secondary" onClick={() => setShowAddMasterModal(false)}>Cancel</Button>
-                <Button type="submit" variant="primary">Create Type</Button>
-              </div>
-            </form>
+      {/* Modal: Create Material Group */}
+      <Modal
+        isOpen={showAddGroupModal}
+        onClose={() => setShowAddGroupModal(false)}
+        title="Create Material Group"
+        maxWidth="450px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => setShowAddGroupModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="add-group-form" variant="primary">
+              Create Group
+            </Button>
           </div>
+        }
+      >
+        <form id="add-group-form" onSubmit={handleAddGroup}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="group-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Group Name</label>
+              <input
+                id="group-name"
+                type="text"
+                placeholder="e.g. Electricals, Plumbing, Aggregates, Structural Steel"
+                value={newGroupName}
+                onChange={(e) => setNewGroupName(e.target.value)}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Rename Material Group */}
+      <Modal
+        isOpen={showRenameGroupModal}
+        onClose={() => setShowRenameGroupModal(false)}
+        title={`Rename Material Group (${oldGroupName})`}
+        maxWidth="450px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => setShowRenameGroupModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="rename-group-form" variant="primary">
+              Save Group Name
+            </Button>
+          </div>
+        }
+      >
+        <form id="rename-group-form" onSubmit={handleRenameGroup}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="rename-group-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>New Material Group Name</label>
+              <input
+                id="rename-group-name"
+                type="text"
+                placeholder="e.g. Sanitary & Plumbing"
+                value={renamingGroupName}
+                onChange={(e) => setRenamingGroupName(e.target.value)}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Create Master Material Type */}
+      <Modal
+        isOpen={showAddMasterModal}
+        onClose={() => setShowAddMasterModal(false)}
+        title="Create Master Material Type"
+        maxWidth="480px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => setShowAddMasterModal(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" form="add-master-form" variant="primary">
+              Create Type
+            </Button>
+          </div>
+        }
+      >
+        <form id="add-master-form" onSubmit={handleAddMaster}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="master-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
+              <input
+                id="master-name"
+                type="text"
+                placeholder="e.g. 53 Grade Cement, 10mm TMT Steel"
+                value={newMasterItem.name}
+                onChange={(e) => setNewMasterItem(prev => ({ ...prev, name: e.target.value }))}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="master-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Category Type (Material Group)</label>
+              <select
+                id="master-cat"
+                value={newMasterItem.category}
+                onChange={(e) => setNewMasterItem(prev => ({ ...prev, category: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+              >
+                <option value="Cement">Cement</option>
+                <option value="Steel">Steel</option>
+                <option value="Sand">Sand</option>
+                <option value="Bricks">Bricks</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {newMasterItem.category === "Other" && (
+              <div className="form-group">
+                <label htmlFor="master-custom-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Specify Custom Category</label>
+                <input
+                  id="master-custom-cat"
+                  type="text"
+                  placeholder="e.g. Tiles, Glass, Paints"
+                  value={newMasterItem.customCategory || ""}
+                  onChange={(e) => setNewMasterItem(prev => ({ ...prev, customCategory: e.target.value }))}
+                  required
+                  style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                />
+              </div>
+            )}
+
+            <div className="form-group">
+              <label htmlFor="master-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Type</label>
+              <select
+                id="master-unit"
+                value={newMasterItem.unit}
+                onChange={(e) => setNewMasterItem(prev => ({ ...prev, unit: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+              >
+                <option value="Bag">Bag</option>
+                <option value="Ton">Ton</option>
+                <option value="Load">Load</option>
+                <option value="Piece">Piece</option>
+                <option value="Meter">Meter</option>
+                <option value="Unit">Unit</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="master-unit-price" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Price (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
+              <input
+                id="master-unit-price"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g. 420"
+                value={newMasterItem.unitPrice}
+                onChange={(e) => setNewMasterItem(prev => ({ ...prev, unitPrice: e.target.value }))}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>This price will auto-populate on the Site Engineer material entry form.</span>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Edit Master Material Type */}
+      <Modal
+        isOpen={showEditMasterModal}
+        onClose={() => {
+          setShowEditMasterModal(false);
+          setEditingMasterIndex(null);
+        }}
+        title="Edit Master Material Type"
+        maxWidth="480px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => {
+              setShowEditMasterModal(false);
+              setEditingMasterIndex(null);
+            }}>
+              Cancel
+            </Button>
+            <Button type="submit" form="edit-master-form" variant="primary">
+              Save Changes
+            </Button>
+          </div>
+        }
+      >
+        <form id="edit-master-form" onSubmit={handleEditMaster}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="form-group">
+              <label htmlFor="edit-master-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
+              <input
+                id="edit-master-name"
+                type="text"
+                placeholder="e.g. 53 Grade Cement, 10mm TMT Steel"
+                value={editingMasterItem.name}
+                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, name: e.target.value }))}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="edit-master-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Category Type (Material Group)</label>
+              <select
+                id="edit-master-cat"
+                value={editingMasterItem.category}
+                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, category: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+              >
+                <option value="Cement">Cement</option>
+                <option value="Steel">Steel</option>
+                <option value="Sand">Sand</option>
+                <option value="Bricks">Bricks</option>
+                <option value="Other">Other</option>
+              </select>
+            </div>
+
+            {editingMasterItem.category === "Other" && (
+              <div className="form-group">
+                <label htmlFor="edit-master-custom-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Specify Custom Category</label>
+                <input
+                  id="edit-master-custom-cat"
+                  type="text"
+                  placeholder="e.g. Tiles, Glass, Paints"
+                  value={editingMasterItem.customCategory || ""}
+                  onChange={(e) => setEditingMasterItem(prev => ({ ...prev, customCategory: e.target.value }))}
+                  required
+                  style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                />
+              </div>
+            )}
+
+            <div className="form-group">
+              <label htmlFor="edit-master-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Type</label>
+              <select
+                id="edit-master-unit"
+                value={editingMasterItem.unit}
+                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unit: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+              >
+                <option value="Bag">Bag</option>
+                <option value="Ton">Ton</option>
+                <option value="Load">Load</option>
+                <option value="Piece">Piece</option>
+                <option value="Meter">Meter</option>
+                <option value="Unit">Unit</option>
+              </select>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="edit-master-unit-price" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Price (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
+              <input
+                id="edit-master-unit-price"
+                type="number"
+                min="0"
+                step="0.01"
+                placeholder="e.g. 420"
+                value={editingMasterItem.unitPrice ?? ""}
+                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unitPrice: e.target.value }))}
+                required
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+              />
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>This price will auto-populate on the Site Engineer material entry form.</span>
+            </div>
+
+            <div className="form-group">
+              <label htmlFor="edit-master-status" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Status</label>
+              <select
+                id="edit-master-status"
+                value={editingMasterItem.status}
+                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, status: e.target.value }))}
+                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+              >
+                <option value="Active">Active</option>
+                <option value="Inactive">Inactive</option>
+              </select>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: Delete master Lookup item confirmation */}
+      <Modal
+        isOpen={showDeleteMasterModal && deletingMasterIndex !== null}
+        onClose={() => {
+          setShowDeleteMasterModal(false);
+          setDeletingMasterIndex(null);
+        }}
+        title="Delete Material Master Item"
+        maxWidth="440px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => {
+              setShowDeleteMasterModal(false);
+              setDeletingMasterIndex(null);
+            }}>
+              Cancel
+            </Button>
+            <Button type="button" variant="danger" onClick={handleConfirmDeleteMaster}>
+              Delete Item
+            </Button>
+          </div>
+        }
+      >
+        <div style={{ padding: "8px 0" }}>
+          <p style={{ margin: 0, fontSize: "14px", color: "var(--primary-900)", lineHeight: "1.5" }}>
+            Are you sure you want to delete <strong>{materialMaster[deletingMasterIndex]?.name}</strong> ({materialMaster[deletingMasterIndex]?.category}) from the Material Master lookup configuration?
+          </p>
+          <p style={{ margin: "12px 0 0 0", fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
+            This change will immediately sync and remove the item across all site engineer dashboards.
+          </p>
         </div>
-      )}
+      </Modal>
 
       {/* Modal: Process Requisition */}
       {showApprovalModal && selectedRequest && (
@@ -1018,106 +1322,6 @@ export default function AdminMaterials() {
               <div className="modal-footer">
                 <Button type="button" variant="secondary" onClick={() => setShowPaymentModal(false)}>Cancel</Button>
                 <Button type="submit" variant="primary">Log Payment</Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Modal: Edit Material Master Item */}
-      {showEditMasterModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "450px" }}>
-            <div className="modal-header">
-              <h3>Edit Material Master Item</h3>
-              <button className="modal-close" onClick={() => setShowEditMasterModal(false)}><X size={18} /></button>
-            </div>
-            <form onSubmit={handleSaveEditMaster}>
-              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div className="form-group">
-                  <label htmlFor="edit-master-name" style={{ fontWeight: "700", fontSize: "13px" }}>Material Name</label>
-                  <input
-                    id="edit-master-name"
-                    type="text"
-                    value={editingMasterItem.name}
-                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, name: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="edit-master-category" style={{ fontWeight: "700", fontSize: "13px" }}>Category</label>
-                  <select
-                    id="edit-master-category"
-                    value={editingMasterItem.category}
-                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, category: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Cement">Cement</option>
-                    <option value="Steel">Steel</option>
-                    <option value="Sand">Sand</option>
-                    <option value="Bricks">Bricks</option>
-                    <option value="Aggregates">Aggregates</option>
-                    <option value="Plumbing">Plumbing</option>
-                    <option value="Electrical">Electrical</option>
-                    <option value="Paints">Paints</option>
-                    <option value="Finishing">Finishing</option>
-                    <option value="Other">Other</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="edit-master-unit" style={{ fontWeight: "700", fontSize: "13px" }}>Unit of Measure</label>
-                  <select
-                    id="edit-master-unit"
-                    value={editingMasterItem.unit}
-                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unit: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Bag">Bag</option>
-                    <option value="Ton">Ton</option>
-                    <option value="Load">Load</option>
-                    <option value="Piece">Piece</option>
-                    <option value="Kg">Kg</option>
-                    <option value="Litre">Litre</option>
-                    <option value="Sq.Ft">Sq.Ft</option>
-                    <option value="Meter">Meter</option>
-                    <option value="Nos">Nos</option>
-                    <option value="Packet">Packet</option>
-                  </select>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="edit-master-price" style={{ fontWeight: "700", fontSize: "13px" }}>Default Unit Price (₹)</label>
-                  <input
-                    id="edit-master-price"
-                    type="number"
-                    step="any"
-                    min="0"
-                    value={editingMasterItem.defaultUnitPrice}
-                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, defaultUnitPrice: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontWeight: "700" }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="edit-master-status" style={{ fontWeight: "700", fontSize: "13px" }}>Lookup Status</label>
-                  <select
-                    id="edit-master-status"
-                    value={editingMasterItem.status}
-                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, status: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Active">Active</option>
-                    <option value="Inactive">Inactive</option>
-                  </select>
-                </div>
-              </div>
-              <div className="modal-footer" style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
-                <Button type="button" variant="secondary" onClick={() => setShowEditMasterModal(false)}>Cancel</Button>
-                <Button type="submit" variant="primary">Save Changes in Database</Button>
               </div>
             </form>
           </div>

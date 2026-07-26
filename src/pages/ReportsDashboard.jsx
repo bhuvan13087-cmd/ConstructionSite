@@ -46,50 +46,51 @@ import {
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
-// Helper function to safely format dates/Timestamps to YYYY-MM-DD string
-function formatDateToString(dateVal) {
-  if (!dateVal) return "";
-  
-  // 1. If it's a Firestore Timestamp (has seconds property)
-  if (typeof dateVal === "object" && dateVal.seconds !== undefined) {
-    try {
+// Universal date string normalizer (handles strings, numbers, Date objects, and Firestore Timestamps)
+const normalizeDateStr = (dateVal) => {
+  if (dateVal === null || dateVal === undefined) return "";
+  if (typeof dateVal === "string") return dateVal;
+  if (typeof dateVal === "number") return new Date(dateVal).toISOString().split("T")[0];
+  if (dateVal instanceof Date) return dateVal.toISOString().split("T")[0];
+  if (typeof dateVal === "object") {
+    if (typeof dateVal.toDate === "function") {
+      try {
+        return dateVal.toDate().toISOString().split("T")[0];
+      } catch (e) {
+        return "";
+      }
+    }
+    if (typeof dateVal.seconds === "number") {
       return new Date(dateVal.seconds * 1000).toISOString().split("T")[0];
-    } catch (e) {
-      return "";
     }
   }
+  return String(dateVal || "");
+};
 
-  // 2. If it has toDate function (Firestore Timestamp in some SDKs)
-  if (typeof dateVal === "object" && typeof dateVal.toDate === "function") {
-    try {
-      return dateVal.toDate().toISOString().split("T")[0];
-    } catch (e) {
-      return "";
+// Safe JSX child renderer to prevent "Objects are not valid as a React child" errors
+const safeRender = (val, fallback = "--") => {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+    return val;
+  }
+  if (typeof val === "object") {
+    if (typeof val.toDate === "function") {
+      try {
+        return val.toDate().toLocaleDateString();
+      } catch (e) {
+        return fallback;
+      }
     }
-  }
-
-  // 3. If it is a JS Date object
-  if (dateVal instanceof Date) {
-    try {
-      return dateVal.toISOString().split("T")[0];
-    } catch (e) {
-      return "";
+    if (typeof val.seconds === "number") {
+      return new Date(val.seconds * 1000).toLocaleDateString();
     }
+    if (val.name) return String(val.name);
+    if (val.label) return String(val.label);
+    if (val.title) return String(val.title);
+    return fallback;
   }
-
-  // 4. If it's a string, clean it
-  if (typeof dateVal === "string") {
-    return dateVal.split("T")[0];
-  }
-
-  // Fallback
-  try {
-    return String(dateVal).split("T")[0];
-  } catch (e) {
-    return "";
-  }
-}
-
+  return String(val);
+};
 
 // ==========================================================================
 // SVG CHART COMPONENTS (No external library dependencies)
@@ -543,7 +544,7 @@ export default function ReportsDashboard() {
 
   // Apply Date Range, Month, and Year Filter helper
   const matchesDateFilters = (dateInput) => {
-    const cleanDate = formatDateToString(dateInput);
+    const cleanDate = normalizeDateStr(dateInput);
     if (!cleanDate) return false;
     
     // 1. Date Range
@@ -571,11 +572,12 @@ export default function ReportsDashboard() {
 
   // Helper date utilities
   const isDateInWeek = (dateInput, anchorInput) => {
-    const dateStr = formatDateToString(dateInput);
-    const anchorStr = formatDateToString(anchorInput);
+    const dateStr = normalizeDateStr(dateInput);
+    const anchorStr = normalizeDateStr(anchorInput);
     if (!dateStr || !anchorStr) return false;
     const date = new Date(dateStr);
     const anchor = new Date(anchorStr);
+    if (isNaN(date.getTime()) || isNaN(anchor.getTime())) return false;
     
     // Find monday of the anchor week
     const day = anchor.getDay();
@@ -591,8 +593,8 @@ export default function ReportsDashboard() {
   };
 
   const isDateInMonth = (dateInput, anchorInput) => {
-    const dateStr = formatDateToString(dateInput);
-    const anchorStr = formatDateToString(anchorInput);
+    const dateStr = normalizeDateStr(dateInput);
+    const anchorStr = normalizeDateStr(anchorInput);
     if (!dateStr || !anchorStr) return false;
     return dateStr.substring(0, 7) === anchorStr.substring(0, 7);
   };
@@ -690,9 +692,8 @@ export default function ReportsDashboard() {
           let cost = Number(m.totalAmount) || (Number(m.quantity) * 500);
           materialCost += cost;
           
-          const purchaseDateStr = formatDateToString(m.purchaseDate);
-          if (purchaseDateStr && isWithinDateRange(purchaseDateStr)) {
-            const mKey = purchaseDateStr.substring(0, 7); // YYYY-MM
+          if (m.purchaseDate && isWithinDateRange(m.purchaseDate)) {
+            const mKey = m.purchaseDate.substring(0, 7); // YYYY-MM
             monthlyMap[mKey] = (monthlyMap[mKey] || 0) + cost;
           }
         }
@@ -700,8 +701,7 @@ export default function ReportsDashboard() {
 
       // Labour Cost aggregation
       siteLabour.forEach(l => {
-        const attDateStr = formatDateToString(l.attendanceDate);
-        if (!attDateStr || !isWithinDateRange(attDateStr)) return;
+        if (!isWithinDateRange(l.attendanceDate)) return;
 
         const teamObj = teams.find(t => t.id === l.teamId);
         const categoryObj = teamObj?.categories?.[l.categoryId];
@@ -711,7 +711,7 @@ export default function ReportsDashboard() {
         const wages = count * factor * dailyWage;
 
         labourCost += wages;
-        const mKey = attDateStr.substring(0, 7);
+        const mKey = l.attendanceDate.substring(0, 7);
         monthlyMap[mKey] = (monthlyMap[mKey] || 0) + wages;
       });
 
@@ -719,9 +719,8 @@ export default function ReportsDashboard() {
       siteGenExpenses.forEach(g => {
         if (g.status === "Approved" || g.status === "approved") {
           otherCost += g.amount;
-          const gDateStr = formatDateToString(g.date);
-          if (gDateStr && isWithinDateRange(gDateStr)) {
-            const mKey = gDateStr.substring(0, 7);
+          if (g.date && isWithinDateRange(g.date)) {
+            const mKey = g.date.substring(0, 7);
             monthlyMap[mKey] = (monthlyMap[mKey] || 0) + g.amount;
           }
         }
@@ -760,7 +759,7 @@ export default function ReportsDashboard() {
     filteredSites.forEach(site => {
       const siteDprs = allDprs.filter(d => d.siteId === site.id);
       siteDprs.forEach(d => {
-        const dDate = formatDateToString(d.date || d.createdAt);
+        const dDate = d.date || (d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
         if (isWithinDateRange(dDate)) {
           list.push({
             ...d,
@@ -787,8 +786,7 @@ export default function ReportsDashboard() {
     labourAttendance.forEach(r => {
       if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
       if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
-      const attDateStr = formatDateToString(r.attendanceDate);
-      if (!isDateInMonth(attDateStr, anchor)) return;
+      if (!isDateInMonth(r.attendanceDate, anchor)) return;
 
       // Enforce site engineer project assignment boundary
       if (!allowedSiteIds.has(r.siteId)) return;
@@ -821,15 +819,13 @@ export default function ReportsDashboard() {
       const lvs = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
 
       atts.forEach(a => {
-        const attDateStr = formatDateToString(a.date);
-        if (isDateInMonth(attDateStr, anchor)) {
+        if (isDateInMonth(a.date, anchor)) {
           engineerSalaryTotal += dailySalary;
         }
       });
 
       lvs.forEach(l => {
-        const lvDateStr = formatDateToString(l.date);
-        if (l.type === "half_day" && isDateInMonth(lvDateStr, anchor)) {
+        if (l.type === "half_day" && isDateInMonth(l.date, anchor)) {
           engineerSalaryTotal += dailySalary * 0.5;
         }
       });
@@ -841,8 +837,7 @@ export default function ReportsDashboard() {
       Object.keys(t.categories || {}).forEach(catId => {
         let amount = 0;
         labourAttendance.forEach(r => {
-          const attDateStr = formatDateToString(r.attendanceDate);
-          if (r.teamId === t.id && r.categoryId === catId && isDateInMonth(attDateStr, anchor)) {
+          if (r.teamId === t.id && r.categoryId === catId && isDateInMonth(r.attendanceDate, anchor)) {
             if (!allowedSiteIds.has(r.siteId)) return;
             const teamObj = teams.find(team => team.id === r.teamId);
             const categoryObj = teamObj?.categories?.[r.categoryId];
@@ -879,15 +874,13 @@ export default function ReportsDashboard() {
       const lvs = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
 
       atts.forEach(a => {
-        const attDateStr = formatDateToString(a.date);
-        if (isDateInMonth(attDateStr, anchor)) {
+        if (isDateInMonth(a.date, anchor)) {
           amount += dailySalary;
         }
       });
 
       lvs.forEach(l => {
-        const lvDateStr = formatDateToString(l.date);
-        if (l.type === "half_day" && isDateInMonth(lvDateStr, anchor)) {
+        if (l.type === "half_day" && isDateInMonth(l.date, anchor)) {
           amount += dailySalary * 0.5;
         }
       });
@@ -912,153 +905,6 @@ export default function ReportsDashboard() {
     };
   }, [labourAttendance, engineerAttendance, engineerLeaves, payrollStatuses, teams, engineers, filterStartDate, filterSiteId, filterTeamId, filterEngineerId, allowedSiteIds, isSuperAdmin]);
 
-  // Dynamic Labour Report Data (Date Range, Live Data, Single Data Source)
-  const labourReportData = useMemo(() => {
-    const categoryMap = {};
-
-    let grandTotalCost = 0;
-    let grandTotalUnits = 0;
-    let grandTotalFullDays = 0;
-    let grandTotalHalfDays = 0;
-
-    labourAttendance.forEach(r => {
-      // 1. Site Filter & Security Scope
-      if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
-      if (!allowedSiteIds.has(r.siteId)) return;
-
-      // 2. Team Filter if selected
-      if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
-
-      // 3. Date Range Filter (From Date -> To Date)
-      const recordDate = formatDateToString(r.attendanceDate || r.date);
-      if (!recordDate) return;
-      if (filterStartDate && recordDate < filterStartDate) return;
-      if (filterEndDate && recordDate > filterEndDate) return;
-
-      // Determine category key and display name
-      const teamObj = teams.find(t => t.id === r.teamId);
-      const categoryKey = r.categoryId || r.categoryName || "Uncategorized";
-      let categoryName = r.categoryName || categoryKey;
-
-      if (teamObj?.categories?.[categoryKey]?.name) {
-        categoryName = teamObj.categories[categoryKey].name;
-      } else if (labourMaster[categoryKey]?.name) {
-        categoryName = labourMaster[categoryKey].name;
-      }
-
-      // Determine Daily Rate (Wage)
-      let dailyRate = 0;
-      if (r.wage !== undefined && r.wage !== null && Number(r.wage) > 0) {
-        dailyRate = Number(r.wage);
-      } else if (teamObj?.categories?.[categoryKey]?.baseWage !== undefined) {
-        dailyRate = Number(teamObj.categories[categoryKey].baseWage) || 0;
-      } else if (teamObj?.categories?.[categoryKey]?.wage !== undefined) {
-        dailyRate = Number(teamObj.categories[categoryKey].wage) || 0;
-      } else if (labourMaster[categoryKey]?.wage !== undefined) {
-        dailyRate = Number(labourMaster[categoryKey].wage) || 0;
-      }
-
-      // Determine worker count, units, full days, half days
-      const count = Number(r.workerCount) || 1;
-      const isHalfDay = r.attendanceType === "Half Day" || r.units === 0.5;
-      const factor = isHalfDay ? 0.5 : 1.0;
-
-      let units = 0;
-      let fullDays = 0;
-      let halfDays = 0;
-
-      if (r.units !== undefined && r.units !== null && !r.workerCount) {
-        units = Number(r.units) || 0;
-        if (units === 0.5) {
-          halfDays = 1;
-        } else {
-          fullDays = 1;
-        }
-      } else {
-        units = count * factor;
-        if (isHalfDay) {
-          halfDays = count;
-        } else {
-          fullDays = count;
-        }
-      }
-
-      if (!categoryMap[categoryKey]) {
-        categoryMap[categoryKey] = {
-          categoryKey,
-          categoryName,
-          dailyRate,
-          fullDays: 0,
-          halfDays: 0,
-          totalWorkingUnits: 0,
-          totalAmount: 0
-        };
-      }
-
-      if (categoryMap[categoryKey].dailyRate === 0 && dailyRate > 0) {
-        categoryMap[categoryKey].dailyRate = dailyRate;
-      }
-
-      categoryMap[categoryKey].fullDays += fullDays;
-      categoryMap[categoryKey].halfDays += halfDays;
-      categoryMap[categoryKey].totalWorkingUnits += units;
-    });
-
-    const categoriesList = Object.values(categoryMap).map(cat => {
-      const totalAmount = cat.totalWorkingUnits * cat.dailyRate;
-      grandTotalCost += totalAmount;
-      grandTotalUnits += cat.totalWorkingUnits;
-      grandTotalFullDays += cat.fullDays;
-      grandTotalHalfDays += cat.halfDays;
-      return {
-        ...cat,
-        totalAmount
-      };
-    });
-
-    categoriesList.sort((a, b) => a.categoryName.localeCompare(b.categoryName));
-
-    let selectedSiteName = "All Sites (Aggregated)";
-    if (filterSiteId !== "all") {
-      const sObj = sites.find(s => s.id === filterSiteId);
-      if (sObj) selectedSiteName = sObj.siteName;
-    }
-
-    let periodString = "All Available Dates";
-    if (filterStartDate && filterEndDate) {
-      periodString = `${filterStartDate} to ${filterEndDate}`;
-    } else if (filterStartDate) {
-      periodString = `From ${filterStartDate}`;
-    } else if (filterEndDate) {
-      periodString = `Up to ${filterEndDate}`;
-    }
-
-    let totalAdvancePaid = 0;
-    labourPayments.forEach(p => {
-      if (filterSiteId !== "all" && p.siteId !== filterSiteId) return;
-      if (filterTeamId !== "all" && p.teamId && p.teamId !== filterTeamId) return;
-      const pDate = formatDateToString(p.date);
-      if (filterStartDate && pDate < filterStartDate) return;
-      if (filterEndDate && pDate > filterEndDate) return;
-      totalAdvancePaid += Number(p.amount) || 0;
-    });
-
-    const netPayable = Math.max(0, grandTotalCost - totalAdvancePaid);
-
-    return {
-      categories: categoriesList,
-      grandTotalCost,
-      totalAdvancePaid,
-      netPayable,
-      grandTotalUnits,
-      grandTotalFullDays,
-      grandTotalHalfDays,
-      selectedSiteName,
-      periodString,
-      hasRecords: categoriesList.length > 0
-    };
-  }, [labourAttendance, labourPayments, teams, labourMaster, filterSiteId, filterTeamId, filterStartDate, filterEndDate, allowedSiteIds, sites]);
-
   // Dynamic Expense Report Data
   const expenseReportData = useMemo(() => {
     let siteExpense = 0;
@@ -1078,7 +924,7 @@ export default function ReportsDashboard() {
           cost = Number(m.totalAmount) || 0;
         } else {
           let unitCost = 500;
-          if (m.category === "Steel") unitCost = 5000;
+          if (m.category === "Steel") fillUnitCost = 5000;
           cost = (Number(m.quantity) || 0) * unitCost;
         }
         materialExpense += cost;
@@ -1150,86 +996,6 @@ export default function ReportsDashboard() {
     };
   }, [filteredSites, generalExpenses]);
 
-  // Dynamic Material Report Data (Date Range, Live Data, Single Data Source)
-  const materialReportData = useMemo(() => {
-    let grandTotalCost = 0;
-    let totalQuantity = 0;
-    const records = [];
-
-    materials.forEach(m => {
-      // 1. Site Filter & Security Scope
-      if (filterSiteId !== "all" && m.siteId !== filterSiteId) return;
-      if (!allowedSiteIds.has(m.siteId)) return;
-
-      // 2. Date Range Filter (From Date -> To Date)
-      const recordDate = formatDateToString(m.purchaseDate || m.date);
-      if (!recordDate) return;
-      if (filterStartDate && recordDate < filterStartDate) return;
-      if (filterEndDate && recordDate > filterEndDate) return;
-
-      // 3. Status filter (only approved or valid logs)
-      const isApproved = m.status === "approved" || m.status === "Approved" || m.status === undefined;
-      if (!isApproved) return;
-
-      const sObj = sites.find(s => s.id === m.siteId);
-      const siteName = sObj ? sObj.siteName : "Unknown Site";
-      const quantity = Number(m.quantity) || 0;
-      let unitPrice = Number(m.unitPrice !== undefined ? m.unitPrice : m.defaultUnitPrice);
-      if (isNaN(unitPrice) || unitPrice <= 0) {
-        if (m.totalAmount && quantity > 0) {
-          unitPrice = Number(m.totalAmount) / quantity;
-        } else {
-          unitPrice = m.category === "Steel" ? 65000 : (m.category === "Cement" ? 380 : 500);
-        }
-      }
-
-      let totalAmount = Number(m.totalAmount);
-      if (isNaN(totalAmount) || totalAmount <= 0) {
-        totalAmount = quantity * unitPrice;
-      }
-
-      grandTotalCost += totalAmount;
-      totalQuantity += quantity;
-
-      records.push({
-        id: m.id,
-        purchaseDate: recordDate,
-        siteName,
-        materialName: m.materialName || "Material",
-        unit: m.unit || "Unit",
-        quantity,
-        unitPrice,
-        totalAmount
-      });
-    });
-
-    records.sort((a, b) => b.purchaseDate.localeCompare(a.purchaseDate));
-
-    let selectedSiteName = "All Sites (Aggregated)";
-    if (filterSiteId !== "all") {
-      const sObj = sites.find(s => s.id === filterSiteId);
-      if (sObj) selectedSiteName = sObj.siteName;
-    }
-
-    let periodString = "All Available Dates";
-    if (filterStartDate && filterEndDate) {
-      periodString = `${filterStartDate} to ${filterEndDate}`;
-    } else if (filterStartDate) {
-      periodString = `From ${filterStartDate}`;
-    } else if (filterEndDate) {
-      periodString = `Up to ${filterEndDate}`;
-    }
-
-    return {
-      records,
-      grandTotalCost,
-      totalQuantity,
-      selectedSiteName,
-      periodString,
-      hasRecords: records.length > 0
-    };
-  }, [materials, filterSiteId, filterStartDate, filterEndDate, allowedSiteIds, sites]);
-
   // Excel and CSV Exporter
   const exportToExcel = (type, extension = "xls") => {
     let headers = [];
@@ -1264,30 +1030,53 @@ export default function ReportsDashboard() {
       });
     } else if (type === "labour") {
       filename = `Labour_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
-      headers = ["Labour Category", "Daily Rate (INR)", "Full Days (1.0)", "Half Days (0.5)", "Total Working Units", "Total Amount (INR)"];
+      headers = ["Labour Team", "Labour Category", "Worker Count", "Daily Units", "Weekly Units", "Monthly Units"];
 
-      if (labourReportData.categories.length === 0) {
-        rows.push(["No attendance records found for the selected date range.", "", "", "", "", ""]);
-      } else {
-        labourReportData.categories.forEach(cat => {
-          rows.push([
-            `"${cat.categoryName}"`,
-            cat.dailyRate,
-            cat.fullDays,
-            cat.halfDays,
-            cat.totalWorkingUnits.toFixed(1),
-            cat.totalAmount.toFixed(2)
-          ]);
-        });
+      const grouped = {};
+      labourAttendance.forEach(r => {
+        if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
+        if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
+        if (!allowedSiteIds.has(r.siteId)) return;
+        
+        const key = `${r.teamId}_${r.categoryId}`;
+        if (!grouped[key]) {
+          grouped[key] = {
+            teamId: r.teamId,
+            categoryId: r.categoryId,
+            dailyUnits: 0,
+            weeklyUnits: 0,
+            monthlyUnits: 0,
+            workerCount: 0
+          };
+        }
+
+        const count = Number(r.workerCount) || 1;
+        const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+        const units = count * factor;
+
+        if (r.attendanceDate === anchor) {
+          grouped[key].dailyUnits += units;
+          grouped[key].workerCount += count;
+        }
+        if (isDateInWeek(r.attendanceDate, anchor)) {
+          grouped[key].weeklyUnits += units;
+        }
+        if (isDateInMonth(r.attendanceDate, anchor)) {
+          grouped[key].monthlyUnits += units;
+        }
+      });
+
+      Object.values(grouped).forEach(row => {
+        const teamObj = teams.find(t => t.id === row.teamId) || { teamName: "Unknown Team" };
         rows.push([
-          '"Grand Total"',
-          "-",
-          labourReportData.grandTotalFullDays,
-          labourReportData.grandTotalHalfDays,
-          labourReportData.grandTotalUnits.toFixed(1),
-          labourReportData.grandTotalCost.toFixed(2)
+          `"${teamObj.teamName}"`,
+          row.categoryId,
+          row.workerCount,
+          row.dailyUnits.toFixed(1),
+          row.weeklyUnits.toFixed(1),
+          row.monthlyUnits.toFixed(1)
         ]);
-      }
+      });
     } else if (type === "salary") {
       filename = `Salary_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
       headers = ["Site Engineer Salary", "Labour Salary", "Paid Payouts", "Pending Payouts", "Total Payroll"];
@@ -1317,25 +1106,6 @@ export default function ReportsDashboard() {
         budgetReportData.remainingBudget,
         budgetReportData.usagePercent.toFixed(1) + "%"
       ]);
-    } else if (type === "material_report" || type === "material") {
-      filename = `Material_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
-      headers = ["Date", "Site Name", "Material Name", "Unit", "Quantity Used", "Unit Price (INR)", "Total Amount (INR)"];
-      if (materialReportData.records.length === 0) {
-        rows.push(["No material records found for the selected date range.", "", "", "", "", "", ""]);
-      } else {
-        materialReportData.records.forEach(r => {
-          rows.push([
-            r.purchaseDate,
-            `"${r.siteName}"`,
-            `"${r.materialName}"`,
-            r.unit,
-            r.quantity,
-            r.unitPrice,
-            r.totalAmount
-          ]);
-        });
-        rows.push(["TOTAL", `"${materialReportData.selectedSiteName}"`, "", "", materialReportData.totalQuantity, "", materialReportData.grandTotalCost]);
-      }
     }
 
     let csvContent = "";
@@ -1518,7 +1288,7 @@ export default function ReportsDashboard() {
 
             {/* Date range inputs */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>From Date</label>
+              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Start Date</label>
               <input
                 type="date"
                 value={filterStartDate}
@@ -1528,7 +1298,7 @@ export default function ReportsDashboard() {
             </div>
 
             <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>To Date</label>
+              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>End Date</label>
               <input
                 type="date"
                 value={filterEndDate}
@@ -1669,25 +1439,6 @@ export default function ReportsDashboard() {
         >
           <Users size={16} />
           Labour Report
-        </button>
-        <button
-          onClick={() => setActiveTab("material_report")}
-          style={{
-            padding: "8px 16px",
-            border: "none",
-            backgroundColor: "transparent",
-            borderBottom: activeTab === "material_report" ? "3px solid var(--primary-600)" : "3px solid transparent",
-            color: activeTab === "material_report" ? "var(--primary-900)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "6px"
-          }}
-        >
-          <FileText size={16} />
-          Material Report
         </button>
         <button
           onClick={() => setActiveTab("salary_report")}
@@ -1942,14 +1693,14 @@ export default function ReportsDashboard() {
                       const teamObj = teams.find(t => t.id === r.teamId) || { teamName: "Unknown Team" };
                       return (
                         <tr key={r.id}>
-                          <td className="font-mono">{r.attendanceDate}</td>
-                          <td style={{ fontWeight: "700" }}>{siteObj.siteName}</td>
-                          <td>{teamObj.teamName}</td>
-                          <td>{r.categoryId}</td>
+                          <td className="font-mono">{normalizeDateStr(r.attendanceDate) || "--"}</td>
+                          <td style={{ fontWeight: "700" }}>{safeRender(siteObj.siteName)}</td>
+                          <td>{safeRender(teamObj.teamName)}</td>
+                          <td>{safeRender(r.categoryId)}</td>
                           <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{r.workerCount || 1}</td>
                           <td>
                             <Badge status={r.attendanceType === "Full Day" ? "success" : "warning"}>
-                              {r.attendanceType || "Full Day"}
+                              {safeRender(r.attendanceType, "Full Day")}
                             </Badge>
                           </td>
                         </tr>
@@ -1981,12 +1732,13 @@ export default function ReportsDashboard() {
                       
                       const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
                       atts.forEach(a => {
+                        const normDate = normalizeDateStr(a.date);
                         if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
                         if (!allowedSiteIds.has(a.siteId)) return;
-                        if (!matchesDateFilters(a.date)) return;
+                        if (!matchesDateFilters(normDate)) return;
                         records.push({
-                          id: `att_${eng.id}_${a.date}`,
-                          date: a.date,
+                          id: `att_${eng.id}_${normDate}`,
+                          date: normDate,
                           name: eng.fullName,
                           time: a.checkInTime || "--",
                           status: "Present",
@@ -1996,10 +1748,11 @@ export default function ReportsDashboard() {
 
                       const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
                       leavesList.forEach(l => {
-                        if (!matchesDateFilters(l.date)) return;
+                        const normDate = normalizeDateStr(l.date);
+                        if (!matchesDateFilters(normDate)) return;
                         records.push({
-                          id: `lv_${eng.id}_${l.date}`,
-                          date: l.date,
+                          id: `lv_${eng.id}_${normDate}`,
+                          date: normDate,
                           name: eng.fullName,
                           time: "--",
                           status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
@@ -2008,7 +1761,7 @@ export default function ReportsDashboard() {
                       });
                     });
 
-                    records.sort((a, b) => b.date.localeCompare(a.date));
+                    records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
                     if (records.length === 0) {
                       return (
@@ -2022,9 +1775,9 @@ export default function ReportsDashboard() {
 
                     return records.map((rec) => (
                       <tr key={rec.id}>
-                        <td className="font-mono">{rec.date}</td>
-                        <td style={{ fontWeight: "700" }}>{rec.name}</td>
-                        <td className="font-mono">{rec.time}</td>
+                        <td className="font-mono">{safeRender(rec.date)}</td>
+                        <td style={{ fontWeight: "700" }}>{safeRender(rec.name)}</td>
+                        <td className="font-mono">{safeRender(rec.time)}</td>
                         <td>
                           <Badge status={rec.status === "Present" ? "success" : "danger"}>
                             {rec.status}
@@ -2059,10 +1812,8 @@ export default function ReportsDashboard() {
         <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
           <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Labour Report (Date Range)</h3>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>
-                Accrued labor working units and total cost calculated from live attendance records
-              </p>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Labour Units &amp; Allocation Report</h3>
+              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Accrued units of labor categorized by team, active worker counts, and period totals</p>
             </div>
             <div style={{ display: "flex", gap: "10px" }}>
               <Button onClick={() => exportToExcel("labour", "xls")} variant="outline" icon={Download}>Export Excel</Button>
@@ -2070,211 +1821,85 @@ export default function ReportsDashboard() {
             </div>
           </div>
           
-          {/* Professional Summary Section at Top */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
-            <Card style={{ borderLeft: "4px solid var(--primary-600)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Report Period</span>
-              <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "8px" }}>
-                {labourReportData.periodString}
-              </div>
-            </Card>
+          <Card title="Labour Allocation Summary" variant="table">
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Labour Team</th>
+                    <th>Labour Category</th>
+                    <th style={{ textAlign: "right" }}>Worker Count (Anchor Date)</th>
+                    <th style={{ textAlign: "right" }}>Daily Units</th>
+                    <th style={{ textAlign: "right" }}>Weekly Units</th>
+                    <th style={{ textAlign: "right" }}>Monthly Units</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const anchor = filterStartDate || new Date().toISOString().split("T")[0];
+                    const grouped = {};
 
-            <Card style={{ borderLeft: "4px solid var(--accent-600)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Site Name</span>
-              <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "8px" }}>
-                {labourReportData.selectedSiteName}
-              </div>
-            </Card>
+                    labourAttendance.forEach(r => {
+                      if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
+                      if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
+                      if (!allowedSiteIds.has(r.siteId)) return;
+                      
+                      const key = `${r.teamId}_${r.categoryId}`;
+                      if (!grouped[key]) {
+                        grouped[key] = {
+                          teamId: r.teamId,
+                          categoryId: r.categoryId,
+                          dailyUnits: 0,
+                          weeklyUnits: 0,
+                          monthlyUnits: 0,
+                          workerCount: 0
+                        };
+                      }
 
-            <Card style={{ borderLeft: "4px solid #3b82f6" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Gross Amount</span>
-              <div style={{ fontSize: "20px", fontWeight: "900", color: "#1e40af", marginTop: "6px" }}>
-                {formatINR(labourReportData.grandTotalCost)}
-              </div>
-            </Card>
+                      const count = Number(r.workerCount) || 1;
+                      const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+                      const units = count * factor;
 
-            <Card style={{ borderLeft: "4px solid #eab308" }}>
-              <span style={{ fontSize: "11px", color: "#854d0e", fontWeight: "700", textTransform: "uppercase" }}>Advance Paid</span>
-              <div style={{ fontSize: "20px", fontWeight: "900", color: "#ca8a04", marginTop: "6px" }}>
-                {formatINR(labourReportData.totalAdvancePaid)}
-              </div>
-            </Card>
+                      if (r.attendanceDate === anchor) {
+                        grouped[key].dailyUnits += units;
+                        grouped[key].workerCount += count;
+                      }
+                      if (isDateInWeek(r.attendanceDate, anchor)) {
+                        grouped[key].weeklyUnits += units;
+                      }
+                      if (isDateInMonth(r.attendanceDate, anchor)) {
+                        grouped[key].monthlyUnits += units;
+                      }
+                    });
 
-            <Card style={{ borderLeft: "4px solid #22c55e" }}>
-              <span style={{ fontSize: "11px", color: "#15803d", fontWeight: "700", textTransform: "uppercase" }}>Net Payable</span>
-              <div style={{ fontSize: "20px", fontWeight: "900", color: "#16a34a", marginTop: "6px" }}>
-                {formatINR(labourReportData.netPayable)}
-              </div>
-            </Card>
-          </div>
+                    const rows = Object.values(grouped);
+                    if (rows.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={6} style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)" }}>
+                            No active labor allocation logs found matching the selected parameters.
+                          </td>
+                        </tr>
+                      );
+                    }
 
-          {/* Validation: If no records exist */}
-          {!labourReportData.hasRecords ? (
-            <div style={{
-              padding: "32px",
-              textAlign: "center",
-              backgroundColor: "#fefce8",
-              border: "1px solid #fef08a",
-              borderRadius: "8px",
-              color: "#854d0e"
-            }}>
-              <AlertTriangle size={32} style={{ marginBottom: "12px", color: "#ca8a04" }} />
-              <h4 style={{ margin: "0 0 6px 0", fontSize: "16px", fontWeight: "700" }}>No Attendance Records Found</h4>
-              <p style={{ margin: 0, fontSize: "13.5px" }}>No attendance records found for the selected date range.</p>
+                    return rows.map((row, i) => {
+                      const teamObj = teams.find(t => t.id === row.teamId) || { teamName: "Unknown Team" };
+                      return (
+                        <tr key={i}>
+                          <td style={{ fontWeight: "700" }}>{teamObj.teamName}</td>
+                          <td style={{ fontWeight: "600", color: "var(--primary-600)" }}>{row.categoryId}</td>
+                          <td style={{ textAlign: "right", fontFamily: "monospace" }}>{row.workerCount}</td>
+                          <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{row.dailyUnits.toFixed(1)}</td>
+                          <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{row.weeklyUnits.toFixed(1)}</td>
+                          <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{row.monthlyUnits.toFixed(1)}</td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
             </div>
-          ) : (
-            <Card title="Labour Category Cost &amp; Working Units Breakdown" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Labour Category</th>
-                      <th style={{ textAlign: "right" }}>Daily Rate</th>
-                      <th style={{ textAlign: "right" }}>Full Days (1.0)</th>
-                      <th style={{ textAlign: "right" }}>Half Days (0.5)</th>
-                      <th style={{ textAlign: "right" }}>Total Working Units</th>
-                      <th style={{ textAlign: "right" }}>Total Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {labourReportData.categories.map((row, i) => (
-                      <tr key={i}>
-                        <td style={{ fontWeight: "700", color: "var(--primary-900)" }}>{row.categoryName}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(row.dailyRate)}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{row.fullDays}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{row.halfDays}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{row.totalWorkingUnits.toFixed(1)}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "800", color: "var(--success-700)" }}>
-                          {formatINR(row.totalAmount)}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ backgroundColor: "#f8fafc", fontWeight: "800" }}>
-                      <td style={{ fontWeight: "800", fontSize: "14px", color: "var(--primary-950)" }}>Gross Labour Cost</td>
-                      <td style={{ textAlign: "right" }}>-</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{labourReportData.grandTotalFullDays}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{labourReportData.grandTotalHalfDays}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "14px" }}>{labourReportData.grandTotalUnits.toFixed(1)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "15px", color: "#1e40af" }}>
-                        {formatINR(labourReportData.grandTotalCost)}
-                      </td>
-                    </tr>
-                    <tr style={{ backgroundColor: "#fefce8", fontWeight: "800" }}>
-                      <td colSpan={5} style={{ color: "#854d0e" }}>Less: Labour Advance Paid</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "14px", color: "#ca8a04" }}>
-                        - {formatINR(labourReportData.totalAdvancePaid)}
-                      </td>
-                    </tr>
-                    <tr style={{ backgroundColor: "#f0fdf4", fontWeight: "900" }}>
-                      <td colSpan={5} style={{ color: "#15803d", fontSize: "14px" }}>NET PAYABLE TO LABOUR / SUBCONTRACTOR</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "16px", color: "#16a34a" }}>
-                        {formatINR(labourReportData.netPayable)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </Card>
-          )}
-        </div>
-      )}
-
-      {/* ==================================================================== */}
-      {/* MATERIAL REPORT TAB PANEL */}
-      {/* ==================================================================== */}
-      {activeTab === "material_report" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-          <Card
-            title={`Material Consumption & Procurement Report — ${materialReportData.selectedSiteName}`}
-            subtitle={`Filtered by Date Range (${materialReportData.periodString}). Single Data Source (Firestore live entries).`}
-            headerActions={
-              <div style={{ display: "flex", gap: "8px" }}>
-                <Button variant="outline" size="sm" onClick={() => exportToExcel("material_report", "csv")} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Download size={14} />
-                  <span>Export CSV</span>
-                </Button>
-                <Button variant="secondary" size="sm" onClick={() => handlePrintReport("material_report")} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <Printer size={14} />
-                  <span>Print PDF</span>
-                </Button>
-              </div>
-            }
-          >
-            {/* Metric Overview Grid */}
-            <div style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: "16px",
-              marginBottom: "24px"
-            }}>
-              <div style={{ backgroundColor: "#f8fafc", padding: "16px", borderRadius: "12px", border: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase" }}>Report Period</span>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginTop: "4px" }}>{materialReportData.periodString}</div>
-              </div>
-              <div style={{ backgroundColor: "#f0f9ff", padding: "16px", borderRadius: "12px", border: "1px solid #bae6fd" }}>
-                <span style={{ fontSize: "11px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase" }}>Total Logged Records</span>
-                <div style={{ fontSize: "22px", fontWeight: "900", color: "#0284c7", marginTop: "4px" }}>{materialReportData.records.length}</div>
-              </div>
-              <div style={{ backgroundColor: "#f0fdf4", padding: "16px", borderRadius: "12px", border: "1px solid #bbf7d0" }}>
-                <span style={{ fontSize: "11px", fontWeight: "750", color: "#15803d", textTransform: "uppercase" }}>Total Material Quantity</span>
-                <div style={{ fontSize: "22px", fontWeight: "900", color: "#16a34a", marginTop: "4px" }}>{materialReportData.totalQuantity}</div>
-              </div>
-              <div style={{ backgroundColor: "#faf5ff", padding: "16px", borderRadius: "12px", border: "1px solid #e9d5ff" }}>
-                <span style={{ fontSize: "11px", fontWeight: "750", color: "#7e22ce", textTransform: "uppercase" }}>Grand Total Cost</span>
-                <div style={{ fontSize: "22px", fontWeight: "900", color: "#9333ea", marginTop: "4px", fontFamily: "monospace" }}>{formatINR(materialReportData.grandTotalCost)}</div>
-              </div>
-            </div>
-
-            {!materialReportData.hasRecords ? (
-              <p style={{ textAlign: "center", color: "var(--text-muted)", fontStyle: "italic", padding: "40px 0", margin: 0 }}>
-                No material records found for the selected date range.
-              </p>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Site Name</th>
-                      <th>Material Name</th>
-                      <th>Unit</th>
-                      <th style={{ textAlign: "right" }}>Quantity Used</th>
-                      <th style={{ textAlign: "right" }}>Unit Price</th>
-                      <th style={{ textAlign: "right" }}>Total Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materialReportData.records.map((r, idx) => (
-                      <tr key={r.id || idx}>
-                        <td className="font-mono">{r.purchaseDate}</td>
-                        <td style={{ fontWeight: "700" }}>{r.siteName}</td>
-                        <td style={{ fontWeight: "700" }}>{r.materialName}</td>
-                        <td><Badge status="pending">{r.unit}</Badge></td>
-                        <td style={{ textAlign: "right", fontWeight: "700" }} className="font-mono">{r.quantity}</td>
-                        <td style={{ textAlign: "right" }} className="font-mono">₹{r.unitPrice.toLocaleString("en-IN")}</td>
-                        <td style={{ textAlign: "right", fontWeight: "800" }} className="font-mono">{formatINR(r.totalAmount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                  <tfoot>
-                    <tr style={{ backgroundColor: "#f8fafc", fontWeight: "900" }}>
-                      <td colSpan={4} style={{ textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                        Totals ({materialReportData.selectedSiteName})
-                      </td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "14px", color: "#16a34a" }}>
-                        {materialReportData.totalQuantity}
-                      </td>
-                      <td style={{ textAlign: "right" }}>—</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "15px", color: "#9333ea" }}>
-                        {formatINR(materialReportData.grandTotalCost)}
-                      </td>
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            )}
           </Card>
         </div>
       )}
@@ -2466,11 +2091,12 @@ export default function ReportsDashboard() {
                     if (filterEngineerId !== "all" && eng.id !== filterEngineerId) return;
                     const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
                     atts.forEach(a => {
+                      const normDate = normalizeDateStr(a.date);
                       if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
-                      if (!matchesDateFilters(a.date)) return;
+                      if (!matchesDateFilters(normDate)) return;
                       records.push({
-                        id: `att_${eng.id}_${a.date}`,
-                        date: a.date,
+                        id: `att_${eng.id}_${normDate}`,
+                        date: normDate,
                         name: eng.fullName,
                         time: a.checkInTime || "--",
                         status: "Present",
@@ -2479,10 +2105,11 @@ export default function ReportsDashboard() {
                     });
                     const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
                     leavesList.forEach(l => {
-                      if (!matchesDateFilters(l.date)) return;
+                      const normDate = normalizeDateStr(l.date);
+                      if (!matchesDateFilters(normDate)) return;
                       records.push({
-                        id: `lv_${eng.id}_${l.date}`,
-                        date: l.date,
+                        id: `lv_${eng.id}_${normDate}`,
+                        date: normDate,
                         name: eng.fullName,
                         time: "--",
                         status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
@@ -2490,16 +2117,16 @@ export default function ReportsDashboard() {
                       });
                     });
                   });
-                  records.sort((a, b) => b.date.localeCompare(a.date));
+                  records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
                   if (records.length === 0) {
                     return <tr><td colSpan={5} style={{ textAlign: "center" }}>No check-in logs registered.</td></tr>;
                   }
                   return records.map(r => (
                     <tr key={r.id}>
-                      <td>{r.date}</td>
-                      <td>{r.name}</td>
-                      <td>{r.time}</td>
-                      <td>{r.status}</td>
+                      <td>{safeRender(r.date)}</td>
+                      <td>{safeRender(r.name)}</td>
+                      <td>{safeRender(r.time)}</td>
+                      <td>{safeRender(r.status)}</td>
                       <td>{r.photoUrl ? "Photo Captured" : "No Photo"}</td>
                     </tr>
                   ));
@@ -2534,12 +2161,12 @@ export default function ReportsDashboard() {
                     const teamObj = teams.find(t => t.id === r.teamId) || { teamName: "Unknown Team" };
                     return (
                       <tr key={r.id}>
-                        <td>{r.attendanceDate}</td>
-                        <td>{siteObj.siteName}</td>
-                        <td>{teamObj.teamName}</td>
-                        <td>{r.categoryId}</td>
+                        <td>{normalizeDateStr(r.attendanceDate) || "--"}</td>
+                        <td>{safeRender(siteObj.siteName)}</td>
+                        <td>{safeRender(teamObj.teamName)}</td>
+                        <td>{safeRender(r.categoryId)}</td>
                         <td style={{ textAlign: "right" }}>{r.workerCount || 1}</td>
-                        <td>{r.attendanceType || "Full Day"}</td>
+                        <td>{safeRender(r.attendanceType, "Full Day")}</td>
                       </tr>
                     );
                   });
@@ -2673,126 +2300,72 @@ export default function ReportsDashboard() {
           </div>
         )}
 
-        {/* PDF TEMPLATE: MATERIAL REPORT */}
-        {(reportTemplate === "material_report" || activeTab === "material_report") && (
-          <div>
-            <div style={{ marginBottom: "16px", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "6px", backgroundColor: "#f8fafc" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "12px" }}>
-                <span><strong>Report Period:</strong> {materialReportData.periodString}</span>
-                <span><strong>Site Name:</strong> {materialReportData.selectedSiteName}</span>
-              </div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px" }}>
-                <span><strong>Total Material Quantity Used:</strong> {materialReportData.totalQuantity}</span>
-                <span><strong>Grand Total Material Cost:</strong> {formatINR(materialReportData.grandTotalCost)}</span>
-              </div>
-            </div>
-
-            {!materialReportData.hasRecords ? (
-              <div style={{ padding: "20px", textAlign: "center", fontStyle: "italic", color: "#64748b" }}>
-                No material records found for the selected date range.
-              </div>
-            ) : (
-              <table className="printable-table">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Site Name</th>
-                    <th>Material Name</th>
-                    <th>Unit</th>
-                    <th style={{ textAlign: "right" }}>Quantity Used</th>
-                    <th style={{ textAlign: "right" }}>Unit Price</th>
-                    <th style={{ textAlign: "right" }}>Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {materialReportData.records.map((row, idx) => (
-                    <tr key={idx}>
-                      <td>{row.purchaseDate}</td>
-                      <td>{row.siteName}</td>
-                      <td>{row.materialName}</td>
-                      <td>{row.unit}</td>
-                      <td style={{ textAlign: "right" }}>{row.quantity}</td>
-                      <td style={{ textAlign: "right" }}>₹{row.unitPrice.toLocaleString("en-IN")}</td>
-                      <td style={{ textAlign: "right" }}>{formatINR(row.totalAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ fontWeight: "bold", backgroundColor: "#f1f5f9" }}>
-                    <td colSpan={4}>Grand Total</td>
-                    <td style={{ textAlign: "right" }}>{materialReportData.totalQuantity}</td>
-                    <td style={{ textAlign: "right" }}>-</td>
-                    <td style={{ textAlign: "right" }}>{formatINR(materialReportData.grandTotalCost)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            )}
-          </div>
-        )}
-
         {/* PDF TEMPLATE: LABOUR REPORT */}
         {reportTemplate === "labour" && (
           <div>
-            <div style={{ marginBottom: "16px", padding: "12px", border: "1px solid #cbd5e1", borderRadius: "6px", backgroundColor: "#f8fafc" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px", fontSize: "12px" }}>
-                <span><strong>Report Period:</strong> {labourReportData.periodString}</span>
-                <span><strong>Site Name:</strong> {labourReportData.selectedSiteName}</span>
-              </div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", marginTop: "8px", fontSize: "12px" }}>
-                <div><strong>Gross Amount:</strong> {formatINR(labourReportData.grandTotalCost)}</div>
-                <div><strong>Advance Paid:</strong> {formatINR(labourReportData.totalAdvancePaid)}</div>
-                <div><strong>Net Payable:</strong> {formatINR(labourReportData.netPayable)}</div>
-              </div>
-            </div>
-
-            {!labourReportData.hasRecords ? (
-              <div style={{ padding: "20px", textAlign: "center", fontStyle: "italic", color: "#64748b" }}>
-                No attendance records found for the selected date range.
-              </div>
-            ) : (
-              <table className="printable-table">
-                <thead>
-                  <tr>
-                    <th>Labour Category</th>
-                    <th style={{ textAlign: "right" }}>Daily Rate</th>
-                    <th style={{ textAlign: "right" }}>Full Days (1.0)</th>
-                    <th style={{ textAlign: "right" }}>Half Days (0.5)</th>
-                    <th style={{ textAlign: "right" }}>Total Working Units</th>
-                    <th style={{ textAlign: "right" }}>Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {labourReportData.categories.map((row, idx) => (
-                    <tr key={idx}>
-                      <td>{row.categoryName}</td>
-                      <td style={{ textAlign: "right" }}>{formatINR(row.dailyRate)}</td>
-                      <td style={{ textAlign: "right" }}>{row.fullDays}</td>
-                      <td style={{ textAlign: "right" }}>{row.halfDays}</td>
-                      <td style={{ textAlign: "right" }}>{row.totalWorkingUnits.toFixed(1)}</td>
-                      <td style={{ textAlign: "right" }}>{formatINR(row.totalAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ fontWeight: "bold", backgroundColor: "#f1f5f9" }}>
-                    <td>Gross Labour Cost</td>
-                    <td style={{ textAlign: "right" }}>-</td>
-                    <td style={{ textAlign: "right" }}>{labourReportData.grandTotalFullDays}</td>
-                    <td style={{ textAlign: "right" }}>{labourReportData.grandTotalHalfDays}</td>
-                    <td style={{ textAlign: "right" }}>{labourReportData.grandTotalUnits.toFixed(1)}</td>
-                    <td style={{ textAlign: "right" }}>{formatINR(labourReportData.grandTotalCost)}</td>
-                  </tr>
-                  <tr style={{ fontWeight: "bold", backgroundColor: "#fefce8" }}>
-                    <td colSpan={5}>Less: Labour Advance Paid</td>
-                    <td style={{ textAlign: "right", color: "#ca8a04" }}>- {formatINR(labourReportData.totalAdvancePaid)}</td>
-                  </tr>
-                  <tr style={{ fontWeight: "bold", backgroundColor: "#f0fdf4" }}>
-                    <td colSpan={5}>Net Payable to Labour / Subcontractor</td>
-                    <td style={{ textAlign: "right", color: "#16a34a" }}>{formatINR(labourReportData.netPayable)}</td>
-                  </tr>
-                </tfoot>
-              </table>
-            )}
+            <table className="printable-table">
+              <thead>
+                <tr>
+                  <th>Labour Team</th>
+                  <th>Labour Category</th>
+                  <th style={{ textAlign: "right" }}>Worker Count (Anchor Date)</th>
+                  <th style={{ textAlign: "right" }}>Daily Units</th>
+                  <th style={{ textAlign: "right" }}>Weekly Units</th>
+                  <th style={{ textAlign: "right" }}>Monthly Units</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const anchor = filterStartDate || new Date().toISOString().split("T")[0];
+                  const grouped = {};
+                  labourAttendance.forEach(r => {
+                    if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
+                    if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
+                    if (!allowedSiteIds.has(r.siteId)) return;
+                    
+                    const key = `${r.teamId}_${r.categoryId}`;
+                    if (!grouped[key]) {
+                      grouped[key] = {
+                        teamId: r.teamId,
+                        categoryId: r.categoryId,
+                        dailyUnits: 0,
+                        weeklyUnits: 0,
+                        monthlyUnits: 0,
+                        workerCount: 0
+                      };
+                    }
+                    const count = Number(r.workerCount) || 1;
+                    const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+                    const units = count * factor;
+                    if (r.attendanceDate === anchor) {
+                      grouped[key].dailyUnits += units;
+                      grouped[key].workerCount += count;
+                    }
+                    if (isDateInWeek(r.attendanceDate, anchor)) {
+                      grouped[key].weeklyUnits += units;
+                    }
+                    if (isDateInMonth(r.attendanceDate, anchor)) {
+                      grouped[key].monthlyUnits += units;
+                    }
+                  });
+                  const rows = Object.values(grouped);
+                  if (rows.length === 0) return <tr><td colSpan={6} style={{ textAlign: "center" }}>No labour logs available.</td></tr>;
+                  return rows.map((row, idx) => {
+                    const teamObj = teams.find(t => t.id === row.teamId) || { teamName: "Unknown Team" };
+                    return (
+                      <tr key={idx}>
+                        <td>{teamObj.teamName}</td>
+                        <td>{row.categoryId}</td>
+                        <td style={{ textAlign: "right" }}>{row.workerCount}</td>
+                        <td style={{ textAlign: "right" }}>{row.dailyUnits.toFixed(1)}</td>
+                        <td style={{ textAlign: "right" }}>{row.weeklyUnits.toFixed(1)}</td>
+                        <td style={{ textAlign: "right" }}>{row.monthlyUnits.toFixed(1)}</td>
+                      </tr>
+                    );
+                  });
+                })()}
+              </tbody>
+            </table>
           </div>
         )}
 
@@ -3074,14 +2647,14 @@ export default function ReportsDashboard() {
                         const teamObj = teams.find(t => t.id === r.teamId) || { teamName: "Unknown Team" };
                         return (
                           <tr key={r.id}>
-                            <td className="font-mono">{r.attendanceDate}</td>
-                            <td style={{ fontWeight: "700" }}>{siteObj.siteName}</td>
-                            <td>{teamObj.teamName}</td>
-                            <td>{r.categoryId}</td>
+                            <td className="font-mono">{normalizeDateStr(r.attendanceDate) || "--"}</td>
+                            <td style={{ fontWeight: "700" }}>{safeRender(siteObj.siteName)}</td>
+                            <td>{safeRender(teamObj.teamName)}</td>
+                            <td>{safeRender(r.categoryId)}</td>
                             <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{r.workerCount || 1}</td>
                             <td>
                               <Badge status={r.attendanceType === "Full Day" ? "success" : "warning"}>
-                                {r.attendanceType || "Full Day"}
+                                {safeRender(r.attendanceType, "Full Day")}
                               </Badge>
                             </td>
                           </tr>
@@ -3113,12 +2686,13 @@ export default function ReportsDashboard() {
                         
                         const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
                         atts.forEach(a => {
+                          const normDate = normalizeDateStr(a.date);
                           if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
                           if (!allowedSiteIds.has(a.siteId)) return;
-                          if (!matchesDateFilters(a.date)) return;
+                          if (!matchesDateFilters(normDate)) return;
                           records.push({
-                            id: `att_${eng.id}_${a.date}`,
-                            date: a.date,
+                            id: `att_${eng.id}_${normDate}`,
+                            date: normDate,
                             name: eng.fullName,
                             time: a.checkInTime || "--",
                             status: "Present",
@@ -3128,10 +2702,11 @@ export default function ReportsDashboard() {
 
                         const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
                         leavesList.forEach(l => {
-                          if (!matchesDateFilters(l.date)) return;
+                          const normDate = normalizeDateStr(l.date);
+                          if (!matchesDateFilters(normDate)) return;
                           records.push({
-                            id: `lv_${eng.id}_${l.date}`,
-                            date: l.date,
+                            id: `lv_${eng.id}_${normDate}`,
+                            date: normDate,
                             name: eng.fullName,
                             time: "--",
                             status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
@@ -3140,7 +2715,7 @@ export default function ReportsDashboard() {
                         });
                       });
 
-                      records.sort((a, b) => b.date.localeCompare(a.date));
+                      records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
                       if (records.length === 0) {
                         return (
@@ -3154,9 +2729,9 @@ export default function ReportsDashboard() {
 
                       return records.map((rec) => (
                         <tr key={rec.id}>
-                          <td className="font-mono">{rec.date}</td>
-                          <td style={{ fontWeight: "700" }}>{rec.name}</td>
-                          <td className="font-mono">{rec.time}</td>
+                          <td className="font-mono">{safeRender(rec.date)}</td>
+                          <td style={{ fontWeight: "700" }}>{safeRender(rec.name)}</td>
+                          <td className="font-mono">{safeRender(rec.time)}</td>
                           <td>
                             <Badge status={rec.status === "Present" ? "success" : "danger"}>
                               {rec.status}

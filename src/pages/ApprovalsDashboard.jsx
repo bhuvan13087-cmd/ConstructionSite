@@ -239,40 +239,7 @@ export default function ApprovalsDashboard() {
           </div>
         </div>
 
-        {/* Metrics Grid */}
-        <div className="erp-kpi-grid" style={{ marginBottom: "24px" }}>
-          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--warning-500)" }}>
-            <div className="erp-kpi-content">
-              <span className="erp-kpi-label">Pending Action</span>
-              <span className="erp-kpi-num">{pendingCount}</span>
-              <span className="erp-kpi-footer" style={{ color: "var(--warning-600)" }}>Awaiting verification review</span>
-            </div>
-          </div>
 
-          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--success-500)" }}>
-            <div className="erp-kpi-content">
-              <span className="erp-kpi-label">Total Approved</span>
-              <span className="erp-kpi-num">{approvedCount}</span>
-              <span className="erp-kpi-footer" style={{ color: "var(--success-600)" }}>Audits verified resolved</span>
-            </div>
-          </div>
-
-          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--danger-500)" }}>
-            <div className="erp-kpi-content">
-              <span className="erp-kpi-label">Total Rejected</span>
-              <span className="erp-kpi-num">{rejectedCount}</span>
-              <span className="erp-kpi-footer" style={{ color: "var(--danger-600)" }}>Denied audits logged</span>
-            </div>
-          </div>
-
-          <div className="erp-kpi-card" style={{ borderLeft: "4px solid var(--accent-500)" }}>
-            <div className="erp-kpi-content">
-              <span className="erp-kpi-label">Total Submissions</span>
-              <span className="erp-kpi-num">{totalCount}</span>
-              <span className="erp-kpi-footer">Overall console submissions</span>
-            </div>
-          </div>
-        </div>
 
         {/* Filters Panel */}
         <Card style={{ padding: "16px", marginBottom: "20px", backgroundColor: "#fff" }}>
