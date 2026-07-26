@@ -1548,18 +1548,25 @@ export async function addMaterial(materialData) {
   const newMaterialRef = doc(materialsColl);
   const matId = newMaterialRef.id;
   
+  const quantity = Number(materialData.quantity) || 0;
+  const unitPrice = Number(materialData.unitPrice !== undefined ? materialData.unitPrice : (materialData.defaultUnitPrice || (materialData.category === "Steel" ? 65000 : (materialData.category === "Cement" ? 380 : 500))));
+  const totalAmount = materialData.totalAmount !== undefined ? Number(materialData.totalAmount) : (quantity * unitPrice);
+
   await setDoc(newMaterialRef, {
     siteId: materialData.siteId,
     engineerId: materialData.engineerId,
     materialName: materialData.materialName,
     category: materialData.category,
-    quantity: Number(materialData.quantity),
-    unit: materialData.unit,
-    supplierName: materialData.supplierName,
+    quantity: quantity,
+    unit: materialData.unit || "Unit",
+    unitPrice: unitPrice,
+    defaultUnitPrice: unitPrice,
+    totalAmount: totalAmount,
+    supplierName: materialData.supplierName || "",
     purchaseDate: materialData.purchaseDate,
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
-    status: "pending", // Default to pending approval
+    status: materialData.status || "approved", // approved or pending
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   });
@@ -1581,43 +1588,37 @@ export async function addMaterial(materialData) {
     }
   } catch (e) {}
 
-  const details = `${materialData.materialName} (${materialData.category}) - Qty: ${materialData.quantity} ${materialData.unit}`;
-
-  await saveApprovalRequest({
-    id: matId,
+  const details = `${materialData.materialName} (${materialData.category}) - Qty: ${quantity} ${materialData.unit || 'Units'} @ ₹${unitPrice}/unit (Total: ₹${totalAmount})`;
+  await createApprovalRequest({
     type: "Material",
-    requestedBy: engineerName,
+    siteName,
     engineerId: materialData.engineerId,
+    engineerName,
     siteId: materialData.siteId,
-    siteName: siteName,
-    details: details,
-    amount: 0,
+    amount: totalAmount,
+    details,
     requestDate: materialData.purchaseDate || new Date().toISOString().split("T")[0],
-    status: "pending",
-    raw: { id: matId }
+    referenceId: matId
   });
 
-  await logSystemActivity(
+  await logActivity(
     materialData.engineerId,
     engineerName,
-    "site_engineer",
     materialData.siteId,
     siteName,
-    "Create",
-    `${engineerName} requested ${details} for ${siteName}`,
-    "Material",
-    { materialId: matId }
+    "Material Log Added",
+    { materialId: matId, totalAmount }
   );
 
-  await notifyAdmins(
+  await createNotification(
     "New Material Requisition Request",
-    `${engineerName} submitted a new request for ${details} at ${siteName}.`,
+    `Material requisition of ${quantity} ${materialData.unit || 'Units'} ${materialData.materialName} created for ${siteName}.`,
     "Material",
     materialData.siteId,
-    siteName,
-    materialData.engineerId,
-    engineerName
+    materialData.engineerId
   );
+
+  return matId;
 }
 
 // Get materials, optionally filtered by siteId, and resolve names
@@ -2829,10 +2830,10 @@ export async function getMaterialMaster() {
     return docSnap.data().materialsList || [];
   }
   const defaultList = [
-    { name: "Cement", category: "Cement", unit: "Bag", status: "Active" },
-    { name: "Steel", category: "Steel", unit: "Ton", status: "Active" },
-    { name: "Sand", category: "Sand", unit: "Load", status: "Active" },
-    { name: "Bricks", category: "Bricks", unit: "Piece", status: "Active" }
+    { name: "Cement", category: "Cement", unit: "Bag", defaultUnitPrice: 380, status: "Active" },
+    { name: "Steel", category: "Steel", unit: "Ton", defaultUnitPrice: 65000, status: "Active" },
+    { name: "Sand", category: "Sand", unit: "Load", defaultUnitPrice: 1200, status: "Active" },
+    { name: "Bricks", category: "Bricks", unit: "Piece", defaultUnitPrice: 9, status: "Active" }
   ];
   return defaultList;
 }
@@ -4121,7 +4122,18 @@ export async function getLabourMemberAttendanceSummary(siteId) {
 // Save/Update a single labour attendance record (Auto-save row-by-row)
 export async function saveLabourAttendanceRecord(recordId, recordData) {
   const db = getDb();
-  const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${recordData.attendanceType.replace(/\s+/g, "_")}_${recordData.attendanceDate}`;
+  
+  const workerCount = Number(recordData.workerCount) || 1;
+  const rawWorkUnit = recordData.workUnit !== undefined && recordData.workUnit !== null 
+    ? recordData.workUnit 
+    : (recordData.units !== undefined && recordData.units !== null ? (Number(recordData.units) / workerCount) : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0));
+  
+  const workUnit = Number(rawWorkUnit) > 0 ? Number(rawWorkUnit) : 1.0;
+  const totalUnits = recordData.units !== undefined && recordData.units !== null ? Number(recordData.units) : (workUnit * workerCount);
+  
+  const attType = recordData.attendanceType || (workUnit === 1.0 ? "Full Day" : (workUnit === 0.5 ? "Half Day" : `${workUnit} Unit(s)`));
+  const docKeyType = String(workUnit).replace(/\./g, "_");
+  const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${docKeyType}_${recordData.attendanceDate}`;
   const docRef = doc(db, "labourMemberAttendance", docId);
   
   const payload = {
@@ -4129,8 +4141,10 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
     teamId: recordData.teamId,
     categoryId: recordData.categoryId,
     attendanceDate: recordData.attendanceDate,
-    workerCount: Number(recordData.workerCount),
-    attendanceType: recordData.attendanceType,
+    workerCount: workerCount,
+    workUnit: workUnit,
+    units: totalUnits,
+    attendanceType: attType,
     createdBy: recordData.createdBy
   };
 

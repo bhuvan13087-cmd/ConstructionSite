@@ -91,6 +91,23 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     }, 4000);
   };
 
+  const loadStaticData = async () => {
+    try {
+      const [fetchedLeaves, fetchedLabourMaster, fetchedLabourPayments, fetchedSysActivities] = await Promise.all([
+        getAllLeaves(),
+        getLabourMaster(),
+        getLabourPayments(),
+        getSystemActivities()
+      ]);
+      setLeaves(fetchedLeaves);
+      setLabourMaster(fetchedLabourMaster);
+      setLabourPayments(fetchedLabourPayments);
+      setSystemActivities(fetchedSysActivities);
+    } catch (err) {
+      console.error("Static data load error:", err);
+    }
+  };
+
   useEffect(() => {
     const db = getFirebaseDb();
 
@@ -203,22 +220,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     // Central load for static / metadata entities
-    const loadStaticData = async () => {
-      try {
-        const [fetchedLeaves, fetchedLabourMaster, fetchedLabourPayments, fetchedSysActivities] = await Promise.all([
-          getAllLeaves(),
-          getLabourMaster(),
-          getLabourPayments(),
-          getSystemActivities()
-        ]);
-        setLeaves(fetchedLeaves);
-        setLabourMaster(fetchedLabourMaster);
-        setLabourPayments(fetchedLabourPayments);
-        setSystemActivities(fetchedSysActivities);
-      } catch (err) {
-        console.error("Static data load error:", err);
-      }
-    };
     loadStaticData();
 
     return () => {
@@ -289,7 +290,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     try {
       await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request approved successfully.`, "success");
-      await loadData();
+      await loadStaticData();
     } catch (err) {
       console.error("Approve failed:", err);
       showToast(`Approval failed: ${err.message}`, "error");
@@ -304,7 +305,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     try {
       await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
       showToast(`${req.type} request rejected.`, "info");
-      await loadData();
+      await loadStaticData();
     } catch (err) {
       console.error("Reject failed:", err);
       showToast(`Rejection failed: ${err.message}`, "error");

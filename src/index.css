@@ -5880,3 +5880,1029 @@ body:has(.landing-page-container) {
   color: var(--accent-600, #e65100);
   border-bottom-color: var(--accent-600, #e65100);
 }
+
+/* ==========================================================================
+   ENTERPRISE ERP UI SYSTEM — PRODUCTION DESIGN TOKENS & UTILITIES
+   ========================================================================== */
+
+/* Additional color tokens */
+:root {
+  --success-700: hsl(142, 72%, 22%);
+  --warning-700: hsl(38, 90%, 28%);
+  --danger-700:  hsl(0, 75%, 38%);
+  --accent-400:  hsl(32, 92%, 62%);
+  --primary-400: hsl(220, 20%, 63%);
+  --bg-surface:  #f1f5f9;
+}
+
+/* ==========================================================================
+   ERP PAGE HEADER
+   ========================================================================== */
+
+.erp-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 0 0 20px 0;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 24px;
+}
+
+.erp-page-title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.erp-page-title {
+  font-family: var(--font-family-title);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--primary-950);
+  letter-spacing: -0.025em;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.erp-page-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.erp-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   ERP KPI CARDS
+   ========================================================================== */
+
+.erp-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 14px;
+}
+
+.erp-kpi-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+  min-height: 96px;
+}
+
+.erp-kpi-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.erp-kpi-content {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-kpi-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+}
+
+.erp-kpi-num {
+  font-family: var(--font-family-title);
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--primary-950);
+  line-height: 1.1;
+}
+
+.erp-kpi-footer {
+  font-size: 11.5px;
+  color: #94a3b8;
+  margin-top: 2px;
+}
+
+/* ==========================================================================
+   ERP SECTION HEADER
+   ========================================================================== */
+
+.erp-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+
+.erp-section-title {
+  font-family: var(--font-family-title);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary-900);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.erp-section-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0 0;
+}
+
+/* ==========================================================================
+   ERP FILTERS BAR
+   ========================================================================== */
+
+.erp-filters-bar {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 20px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.03);
+}
+
+.erp-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 160px;
+}
+
+.erp-filter-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.erp-filter-input,
+.erp-filter-select {
+  height: 36px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background-color: #ffffff;
+  font-size: 13px;
+  color: var(--primary-900);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  font-family: var(--font-family-body);
+}
+
+.erp-filter-input:focus,
+.erp-filter-select:focus {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+/* ==========================================================================
+   ERP TABLE CONTAINER
+   ========================================================================== */
+
+.erp-table-container {
+  width: 100%;
+  overflow-x: auto;
+  border-radius: 0 0 10px 10px;
+}
+
+.erp-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+}
+
+.erp-table thead th {
+  background-color: #f8fafc !important;
+  color: #475569 !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.5px !important;
+  text-transform: uppercase !important;
+  padding: 10px 16px !important;
+  border-bottom: 1px solid #e2e8f0 !important;
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.erp-table tbody td {
+  padding: 11px 16px !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  color: #334155 !important;
+  vertical-align: middle;
+  font-size: 13px;
+}
+
+.erp-table tbody tr:last-child td {
+  border-bottom: none !important;
+}
+
+.erp-table tbody tr:hover td {
+  background-color: #f8fafc !important;
+}
+
+.erp-table tfoot td {
+  background-color: #f8fafc !important;
+  font-weight: 700 !important;
+  padding: 11px 16px !important;
+  border-top: 2px solid #e2e8f0 !important;
+  color: var(--primary-900) !important;
+}
+
+/* ==========================================================================
+   ERP CONTENT AREA  
+   ========================================================================== */
+
+.erp-content-area {
+  padding: 24px 28px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+@media (max-width: 1024px) {
+  .erp-content-area {
+    padding: 20px;
+  }
+}
+
+@media (max-width: 768px) {
+  .erp-content-area {
+    padding: 16px;
+    gap: 16px;
+  }
+}
+
+/* ==========================================================================
+   ERP STAT BADGE / PILL
+   ========================================================================== */
+
+.erp-stat-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 50px;
+  font-size: 11.5px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.erp-stat-pill.success {
+  background-color: #dcfce7;
+  color: #15803d;
+}
+
+.erp-stat-pill.warning {
+  background-color: #fef9c3;
+  color: #a16207;
+}
+
+.erp-stat-pill.danger {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.erp-stat-pill.info {
+  background-color: #dbeafe;
+  color: #1d4ed8;
+}
+
+.erp-stat-pill.neutral {
+  background-color: #f1f5f9;
+  color: #475569;
+}
+
+/* ==========================================================================
+   IMPROVED DASHBOARD LAYOUT
+   ========================================================================== */
+
+.dashboard-layout {
+  display: grid !important;
+  grid-template-columns: 260px 1fr !important;
+  min-height: 100vh;
+  width: 100%;
+  overflow: hidden;
+}
+
+.main-content {
+  background-color: var(--bg-app, #f8fafc);
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  height: 100vh;
+}
+
+.dashboard-content {
+  padding: 24px 28px;
+  max-width: 1400px;
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+}
+
+@media (max-width: 1024px) {
+  .dashboard-layout {
+    grid-template-columns: 1fr !important;
+  }
+  .dashboard-content {
+    padding: 20px;
+  }
+}
+
+/* ==========================================================================
+   IMPROVED TOP BAR / NAVBAR
+   ========================================================================== */
+
+.top-bar {
+  display: flex !important;
+  justify-content: space-between !important;
+  align-items: center !important;
+  padding: 14px 28px !important;
+  border-bottom: 1px solid var(--border-color) !important;
+  background-color: #ffffff !important;
+  min-height: 64px;
+  flex-shrink: 0;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.page-title {
+  font-family: var(--font-family-title) !important;
+  font-size: 18px !important;
+  font-weight: 800 !important;
+  color: var(--primary-950) !important;
+  letter-spacing: -0.02em !important;
+  margin: 0 !important;
+}
+
+.page-description {
+  color: var(--text-muted) !important;
+  font-size: 12px !important;
+  margin: 0 !important;
+  line-height: 1.4 !important;
+}
+
+.page-title-area {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* ==========================================================================
+   IMPROVED KPI METRICS GRID (legacy .metric-card)
+   ========================================================================== */
+
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+}
+
+.metric-card {
+  background: #ffffff;
+  padding: 18px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.metric-card:hover {
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
+}
+
+.metric-value {
+  font-family: var(--font-family-title);
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--primary-950);
+  line-height: 1;
+}
+
+.metric-title {
+  font-size: 11px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.metric-subtext {
+  font-size: 11.5px;
+  color: #94a3b8;
+}
+
+/* ==========================================================================
+   IMPROVED SIDEBAR HEADER
+   ========================================================================== */
+
+.sidebar-header {
+  padding: 18px 16px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+/* ==========================================================================
+   IMPROVED DETAIL CARD
+   ========================================================================== */
+
+.detail-card {
+  background-color: #ffffff;
+  border-radius: 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+  overflow: hidden;
+}
+
+.table-card {
+  background-color: #ffffff;
+  border-radius: 10px !important;
+  border: 1px solid #e2e8f0 !important;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04) !important;
+  overflow: hidden;
+}
+
+/* ==========================================================================
+   IMPROVED SYSTEM TIME
+   ========================================================================== */
+
+.system-time {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: #f8fafc;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-700);
+  border: 1px solid #e2e8f0;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   ERP SITE CARD (for Sites listing)
+   ========================================================================== */
+
+.erp-site-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.15s ease, transform 0.15s ease, border-color 0.15s ease;
+  cursor: pointer;
+}
+
+.erp-site-card:hover {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+  border-color: var(--accent-400, #fbbf24);
+  transform: translateY(-2px);
+}
+
+.erp-site-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.erp-site-card-title {
+  font-family: var(--font-family-title);
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--primary-950);
+  margin: 0;
+  line-height: 1.3;
+}
+
+.erp-site-card-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.erp-site-card-metrics {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.erp-site-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-site-metric-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.erp-site-metric-value {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary-900);
+}
+
+.erp-sites-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* ==========================================================================
+   ERP ENGINEER CARD
+   ========================================================================== */
+
+.erp-engineer-card {
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.erp-engineer-card:hover {
+  box-shadow: 0 4px 16px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
+}
+
+.erp-engineer-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.erp-engineer-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #0f172a, #334155);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-family-title);
+  font-size: 15px;
+  font-weight: 800;
+  flex-shrink: 0;
+  border: 2px solid #f1f5f9;
+}
+
+.erp-engineer-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--primary-950);
+  margin: 0;
+}
+
+.erp-engineer-email {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 2px 0 0 0;
+}
+
+.erp-engineers-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+/* ==========================================================================
+   ERP SEARCH BAR
+   ========================================================================== */
+
+.erp-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 0 12px;
+  height: 38px;
+  flex: 1;
+  max-width: 400px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.erp-search-bar:focus-within {
+  border-color: var(--accent-500);
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.12);
+}
+
+.erp-search-bar input {
+  border: none !important;
+  outline: none !important;
+  background: none !important;
+  font-size: 13px !important;
+  color: var(--primary-900) !important;
+  flex: 1;
+  height: 100% !important;
+  padding: 0 !important;
+  box-shadow: none !important;
+}
+
+/* ==========================================================================
+   ERP EMPTY STATE
+   ========================================================================== */
+
+.erp-empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  text-align: center;
+  gap: 12px;
+}
+
+.erp-empty-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background-color: #f1f5f9;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.erp-empty-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--primary-800);
+  margin: 0;
+}
+
+.erp-empty-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin: 0;
+  max-width: 320px;
+}
+
+/* ==========================================================================
+   ERP ACTIVITY TIMELINE
+   ========================================================================== */
+
+.erp-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.erp-timeline-item {
+  display: flex;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f1f5f9;
+  position: relative;
+}
+
+.erp-timeline-item:last-child {
+  border-bottom: none;
+}
+
+.erp-timeline-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--accent-500);
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+
+.erp-timeline-dot.success { background-color: #10b981; }
+.erp-timeline-dot.danger { background-color: #ef4444; }
+.erp-timeline-dot.warning { background-color: #f59e0b; }
+.erp-timeline-dot.info { background-color: #3b82f6; }
+
+.erp-timeline-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.erp-timeline-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--primary-900);
+}
+
+.erp-timeline-meta {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* ==========================================================================
+   IMPROVED BADGE CLASSES
+   ========================================================================== */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 50px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   RESPONSIVE ADJUSTMENTS
+   ========================================================================== */
+
+@media (max-width: 768px) {
+  .erp-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .erp-kpi-num {
+    font-size: 22px;
+  }
+  
+  .erp-filters-bar {
+    gap: 10px;
+  }
+  
+  .erp-filter-group {
+    min-width: 140px;
+    flex: 1 1 140px;
+  }
+  
+  .erp-sites-grid,
+  .erp-engineers-grid {
+    grid-template-columns: 1fr;
+  }
+  
+  .erp-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .top-bar {
+    padding: 12px 16px !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .erp-kpi-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+/* ==========================================================================
+   ADMIN DASHBOARD LAYOUT HELPERS
+   ========================================================================== */
+
+.admin-dashboard-main-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 20px;
+  margin-bottom: 20px;
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .admin-dashboard-main-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Utilization bars */
+.erp-utilization-bar-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 120px;
+}
+
+.erp-utilization-metrics {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.erp-utilization-track {
+  width: 100%;
+  height: 5px;
+  background-color: #e2e8f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+/* Alert items */
+.erp-alert-item {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border-left: 3px solid transparent;
+  background-color: #f8fafc;
+  font-size: 12px;
+  border: 1px solid #e2e8f0;
+}
+
+.erp-alert-item.danger {
+  border-left-color: #ef4444;
+  background-color: #fef2f2;
+  border-color: rgba(239, 68, 68, 0.15);
+}
+
+.erp-alert-item.warning {
+  border-left-color: #f59e0b;
+  background-color: #fffbeb;
+  border-color: rgba(245, 158, 11, 0.15);
+}
+
+/* Engineer badge chip */
+.erp-badge-container {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.erp-badge-eng {
+  font-size: 10.5px;
+  padding: 2px 7px;
+  font-weight: 700;
+  background-color: #f1f5f9;
+  color: #334155;
+  border-radius: 4px;
+  border: 1px solid #e2e8f0;
+}
+
+/* KPI icon wrapper in AdminDashboard */
+.erp-kpi-icon {
+  width: 42px;
+  height: 42px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Text ellipsis helper */
+.text-ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Dashboard content layout */
+.dashboard-content-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px 28px 28px;
+}
+
+@media (max-width: 768px) {
+  .dashboard-content-body {
+    padding: 16px;
+    gap: 16px;
+  }
+}
+
+/* ==========================================================================
+   ENTERPRISE ERP UNIFIED PAGE ARCHITECTURE
+   ========================================================================== */
+
+.erp-page-header-container {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.erp-page-header-title {
+  font-family: var(--font-family-title);
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--primary-950);
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.erp-page-header-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  font-weight: 500;
+}
+
+.erp-page-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.erp-kpi-grid-container {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.erp-kpi-card-box {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 12px;
+  height: 100%;
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.erp-kpi-card-box:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md);
+}
+
+.erp-filter-toolbar {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  margin-bottom: 24px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+.erp-data-table-container {
+  overflow-x: auto;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 24px;
+}
+
+
+

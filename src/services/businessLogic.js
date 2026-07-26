@@ -763,19 +763,23 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
   // Compile labour expenses from headcounts and member-level attendance records
   const siteLabour = labourHistory.filter(l => l.siteId === site.id);
   siteLabour.forEach(l => {
-    if (l.memberId !== undefined) {
-      // New member-level attendance record
-      const cost = (Number(l.wage) || 0) * (Number(l.units) || 0);
+    if (l.memberId !== undefined || l.categoryId !== undefined || l.units !== undefined) {
+      const count = Number(l.workerCount) || 1;
+      const units = l.units !== undefined && l.units !== null && !isNaN(Number(l.units))
+        ? Number(l.units)
+        : (count * (l.workUnit !== undefined ? Number(l.workUnit) : (l.attendanceType === "Half Day" ? 0.5 : 1.0)));
+      const wage = Number(l.wage) || 0;
+      const cost = wage > 0 ? (units * wage) : 0;
       labourExpenseTotal += cost;
       if (cost > 0) {
         expenses.push({
-          id: l.id || `labour_${l.memberId}_${l.date}`,
+          id: l.id || `labour_${l.memberId || l.categoryId}_${l.date || l.attendanceDate}`,
           type: "Expense",
           category: "Labour Expense",
-          name: `${l.memberName} (${l.categoryName || 'Worker'})`,
-          date: l.date,
+          name: `${l.memberName || l.categoryName || 'Worker'} (${units} units)`,
+          date: l.date || l.attendanceDate,
           amount: cost,
-          description: `Labour Attendance: ${l.units} day(s) @ ₹${l.wage}/day`,
+          description: `Labour Attendance: ${units} unit(s) @ ₹${wage}/unit`,
           status: "Approved"
         });
       }

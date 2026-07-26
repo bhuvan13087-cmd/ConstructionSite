@@ -34,7 +34,8 @@ import {
   Layers,
   MapPin,
   Clock,
-  Printer
+  Printer,
+  Trash2
 } from "lucide-react";
 
 export default function AdminMaterials() {
@@ -49,7 +50,10 @@ export default function AdminMaterials() {
   
   // Modals state
   const [showAddMasterModal, setShowAddMasterModal] = useState(false);
-  const [newMasterItem, setNewMasterItem] = useState({ name: "", category: "Cement", unit: "Bag" });
+  const [newMasterItem, setNewMasterItem] = useState({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "" });
+  const [showEditMasterModal, setShowEditMasterModal] = useState(false);
+  const [editingMasterIndex, setEditingMasterIndex] = useState(null);
+  const [editingMasterItem, setEditingMasterItem] = useState({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "", status: "Active" });
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [approvalQty, setApprovalQty] = useState("");
@@ -84,9 +88,9 @@ export default function AdminMaterials() {
         getMaterialMaster(),
         getMaterialsDetailed(null) // Fetch all materials across all sites
       ]);
-      setSites(fetchedSites);
-      setMaterialMaster(fetchedMaster);
-      setAllMaterials(fetchedMaterials);
+      setSites(Array.isArray(fetchedSites) ? fetchedSites : []);
+      setMaterialMaster(Array.isArray(fetchedMaster) ? fetchedMaster : []);
+      setAllMaterials(Array.isArray(fetchedMaterials) ? fetchedMaterials : []);
     } catch (err) {
       console.error("Failed to load materials data:", err);
       showToast(`Error syncing logs: ${err.message}`, "error");
@@ -103,18 +107,20 @@ export default function AdminMaterials() {
     e.preventDefault();
     if (!newMasterItem.name.trim()) return;
     try {
+      const price = Number(newMasterItem.defaultUnitPrice) || 0;
       const updatedList = [
         ...materialMaster,
         {
           name: newMasterItem.name.trim(),
           category: newMasterItem.category,
           unit: newMasterItem.unit,
+          defaultUnitPrice: price,
           status: "Active"
         }
       ];
       await saveMaterialMaster(updatedList);
       setMaterialMaster(updatedList);
-      setNewMasterItem({ name: "", category: "Cement", unit: "Bag" });
+      setNewMasterItem({ name: "", category: "Cement", unit: "Bag", defaultUnitPrice: "" });
       setShowAddMasterModal(false);
       showToast("Lookup material added successfully!", "success");
     } catch (err) {
@@ -131,6 +137,62 @@ export default function AdminMaterials() {
       showToast("Lookup status modified!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
+    }
+  };
+
+  const handleOpenEditMaster = (index) => {
+    const item = materialMaster[index];
+    setEditingMasterIndex(index);
+    setEditingMasterItem({
+      name: item.name || "",
+      category: item.category || "Cement",
+      unit: item.unit || "Bag",
+      defaultUnitPrice: item.defaultUnitPrice !== undefined ? item.defaultUnitPrice : (item.unitPrice || 0),
+      status: item.status || "Active"
+    });
+    setShowEditMasterModal(true);
+  };
+
+  const handleSaveEditMaster = async (e) => {
+    e.preventDefault();
+    if (!editingMasterItem.name.trim()) {
+      showToast("Material Name cannot be empty.", "error");
+      return;
+    }
+    try {
+      const price = Number(editingMasterItem.defaultUnitPrice) || 0;
+      const updatedList = [...materialMaster];
+      updatedList[editingMasterIndex] = {
+        name: editingMasterItem.name.trim(),
+        category: editingMasterItem.category,
+        unit: editingMasterItem.unit,
+        defaultUnitPrice: price,
+        status: editingMasterItem.status
+      };
+      await saveMaterialMaster(updatedList);
+      setMaterialMaster(updatedList);
+      setShowEditMasterModal(false);
+      setEditingMasterIndex(null);
+      showToast(`Material type "${editingMasterItem.name}" updated in Database!`, "success");
+    } catch (err) {
+      console.error("Error updating material master:", err);
+      showToast(`Failed to update in Database: ${err.message}`, "error");
+    }
+  };
+
+  const handleDeleteMaster = async (index) => {
+    const targetItem = materialMaster[index];
+    if (!window.confirm(`Are you sure you want to delete material type "${targetItem.name}" from the Material Master database?`)) {
+      return;
+    }
+    try {
+      const updatedList = materialMaster.filter((_, idx) => idx !== index);
+      await saveMaterialMaster(updatedList);
+      setMaterialMaster(updatedList);
+      showToast(`Material type "${targetItem.name}" deleted from Database!`, "success");
+    } catch (err) {
+      console.error("Error deleting material master:", err);
+      showToast(`Failed to delete from Database: ${err.message}`, "error");
     }
   };
 
@@ -373,32 +435,58 @@ export default function AdminMaterials() {
                       <th>Material Name</th>
                       <th>Category</th>
                       <th>Unit of Measure</th>
+                      <th style={{ textAlign: "right" }}>Default Unit Price</th>
                       <th>Lookup Status</th>
                       <th style={{ textAlign: "right" }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {materialMaster.map((item, idx) => (
-                      <tr key={idx}>
-                        <td style={{ fontWeight: "700" }}>{item.name}</td>
-                        <td>
-                          <Badge status="pending">{item.category}</Badge>
-                        </td>
-                        <td className="font-mono">{item.unit}</td>
-                        <td>
-                          <Badge status={item.status === "Active" ? "success" : "danger"}>{item.status}</Badge>
-                        </td>
-                        <td style={{ textAlign: "right" }}>
-                          <Button 
-                            variant="secondary" 
-                            size="sm" 
-                            onClick={() => handleToggleMasterStatus(idx)}
-                          >
-                            Toggle Status
-                          </Button>
-                        </td>
-                      </tr>
-                    ))}
+                    {materialMaster.map((item, idx) => {
+                      const price = Number(item.defaultUnitPrice !== undefined ? item.defaultUnitPrice : (item.unitPrice || (item.category === "Steel" ? 65000 : 380)));
+                      return (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: "700" }}>{item.name}</td>
+                          <td>
+                            <Badge status="pending">{item.category}</Badge>
+                          </td>
+                          <td className="font-mono">{item.unit}</td>
+                          <td style={{ textAlign: "right", fontWeight: "700" }} className="font-mono">
+                            ₹{price.toLocaleString("en-IN")}
+                          </td>
+                          <td>
+                            <Badge status={item.status === "Active" ? "success" : "danger"}>{item.status}</Badge>
+                          </td>
+                          <td style={{ textAlign: "right" }}>
+                            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                onClick={() => handleOpenEditMaster(idx)}
+                                style={{ display: "flex", alignItems: "center", gap: "4px" }}
+                              >
+                                <Edit2 size={13} />
+                                <span>Edit</span>
+                              </Button>
+                              <Button 
+                                variant="secondary" 
+                                size="sm" 
+                                onClick={() => handleToggleMasterStatus(idx)}
+                              >
+                                {item.status === "Active" ? "Deactivate" : "Activate"}
+                              </Button>
+                              <Button 
+                                variant="text" 
+                                size="sm" 
+                                onClick={() => handleDeleteMaster(idx)}
+                                style={{ color: "var(--danger-600)" }}
+                              >
+                                <Trash2 size={13} />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -725,6 +813,21 @@ export default function AdminMaterials() {
                     <option value="Unit">Unit</option>
                   </select>
                 </div>
+
+                <div className="form-group">
+                  <label htmlFor="master-price">Default Unit Price (₹)</label>
+                  <input
+                    id="master-price"
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 380"
+                    value={newMasterItem.defaultUnitPrice}
+                    onChange={(e) => setNewMasterItem(prev => ({ ...prev, defaultUnitPrice: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  />
+                </div>
               </div>
               <div className="modal-footer">
                 <Button type="button" variant="secondary" onClick={() => setShowAddMasterModal(false)}>Cancel</Button>
@@ -915,6 +1018,106 @@ export default function AdminMaterials() {
               <div className="modal-footer">
                 <Button type="button" variant="secondary" onClick={() => setShowPaymentModal(false)}>Cancel</Button>
                 <Button type="submit" variant="primary">Log Payment</Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit Material Master Item */}
+      {showEditMasterModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content" style={{ maxWidth: "450px" }}>
+            <div className="modal-header">
+              <h3>Edit Material Master Item</h3>
+              <button className="modal-close" onClick={() => setShowEditMasterModal(false)}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSaveEditMaster}>
+              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                <div className="form-group">
+                  <label htmlFor="edit-master-name" style={{ fontWeight: "700", fontSize: "13px" }}>Material Name</label>
+                  <input
+                    id="edit-master-name"
+                    type="text"
+                    value={editingMasterItem.name}
+                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-master-category" style={{ fontWeight: "700", fontSize: "13px" }}>Category</label>
+                  <select
+                    id="edit-master-category"
+                    value={editingMasterItem.category}
+                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, category: e.target.value }))}
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
+                  >
+                    <option value="Cement">Cement</option>
+                    <option value="Steel">Steel</option>
+                    <option value="Sand">Sand</option>
+                    <option value="Bricks">Bricks</option>
+                    <option value="Aggregates">Aggregates</option>
+                    <option value="Plumbing">Plumbing</option>
+                    <option value="Electrical">Electrical</option>
+                    <option value="Paints">Paints</option>
+                    <option value="Finishing">Finishing</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-master-unit" style={{ fontWeight: "700", fontSize: "13px" }}>Unit of Measure</label>
+                  <select
+                    id="edit-master-unit"
+                    value={editingMasterItem.unit}
+                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unit: e.target.value }))}
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
+                  >
+                    <option value="Bag">Bag</option>
+                    <option value="Ton">Ton</option>
+                    <option value="Load">Load</option>
+                    <option value="Piece">Piece</option>
+                    <option value="Kg">Kg</option>
+                    <option value="Litre">Litre</option>
+                    <option value="Sq.Ft">Sq.Ft</option>
+                    <option value="Meter">Meter</option>
+                    <option value="Nos">Nos</option>
+                    <option value="Packet">Packet</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-master-price" style={{ fontWeight: "700", fontSize: "13px" }}>Default Unit Price (₹)</label>
+                  <input
+                    id="edit-master-price"
+                    type="number"
+                    step="any"
+                    min="0"
+                    value={editingMasterItem.defaultUnitPrice}
+                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, defaultUnitPrice: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontWeight: "700" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-master-status" style={{ fontWeight: "700", fontSize: "13px" }}>Lookup Status</label>
+                  <select
+                    id="edit-master-status"
+                    value={editingMasterItem.status}
+                    onChange={(e) => setEditingMasterItem(prev => ({ ...prev, status: e.target.value }))}
+                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
+                  >
+                    <option value="Active">Active</option>
+                    <option value="Inactive">Inactive</option>
+                  </select>
+                </div>
+              </div>
+              <div className="modal-footer" style={{ marginTop: "20px", display: "flex", gap: "10px", justifyContent: "flex-end" }}>
+                <Button type="button" variant="secondary" onClick={() => setShowEditMasterModal(false)}>Cancel</Button>
+                <Button type="submit" variant="primary">Save Changes in Database</Button>
               </div>
             </form>
           </div>

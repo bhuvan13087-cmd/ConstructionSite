@@ -15,7 +15,10 @@ import {
   subscribePhotosForSite, 
   updateMaterial,
   deleteMaterial,
-  subscribeGeneralExpenses
+  subscribeGeneralExpenses,
+  getLabourPayments,
+  saveLabourPayment,
+  getLabourTeams
 } from "../services/firebaseService";
 import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress } from "../services/businessLogic";
 import { 
@@ -34,7 +37,8 @@ import {
   Activity,
   User,
   Edit3,
-  Trash2
+  Trash2,
+  DollarSign
 } from "lucide-react";
 
 export default function SiteDetails({ siteId, onBack }) {
@@ -163,18 +167,24 @@ export default function SiteDetails({ siteId, onBack }) {
         mats,
         labour,
         attend,
-        progress
+        progress,
+        payments,
+        fetchedTeams
       ] = await Promise.all([
         getMaterialsDetailed(siteId),
         getLabourDailyCountsSummary(siteId),
         getAttendanceForSite(siteId),
-        getDailyUpdatesForSite(siteId)
+        getDailyUpdatesForSite(siteId),
+        getLabourPayments(siteId),
+        getLabourTeams()
       ]);
 
       setMaterials(mats);
       setLabourHistory(labour);
       setAttendance(attend);
       setProgressUpdates(progress);
+      setSitePayments(payments || []);
+      setTeams(fetchedTeams || []);
 
     } catch (err) {
       console.error("Error loading site details:", err);
@@ -328,6 +338,7 @@ export default function SiteDetails({ siteId, onBack }) {
     { id: "overview", label: "Overview", icon: Building2 },
     { id: "materials", label: "Material Log", icon: Package },
     { id: "labour", label: "Labour Log", icon: Users },
+    { id: "labour_advance", label: "Labour Advance", icon: DollarSign },
     { id: "attendance", label: "Attendance / Entry Exit", icon: ClipboardCheck },
     { id: "progress", label: "Progress", icon: FileText },
     { id: "photos", label: "Photos", icon: Camera },
@@ -344,6 +355,170 @@ export default function SiteDetails({ siteId, onBack }) {
           <div className={`toast toast-${toast.type}`}>
             <span className="toast-message">{toast.message}</span>
           </div>
+        </div>
+      )}
+
+      {/* ===================================================================
+          TAB: LABOUR ADVANCE (AUTOMATIC TEAM RESOLUTION)
+          =================================================================== */}
+      {activeTab === "labour_advance" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
+          
+          {/* Financial Summary KPI Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
+            <Card style={{ borderLeft: "4px solid #3b82f6" }}>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase" }}>Gross Labour Amount</span>
+              <div style={{ fontSize: "22px", fontWeight: "900", color: "#0f172a", marginTop: "6px", fontFamily: "monospace" }}>
+                ₹{siteLabourFinancials.grossAmount.toLocaleString("en-IN")}
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>Total calculated from attendance</span>
+            </Card>
+
+            <Card style={{ borderLeft: "4px solid #eab308" }}>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#854d0e", textTransform: "uppercase" }}>Total Advances Paid</span>
+              <div style={{ fontSize: "22px", fontWeight: "900", color: "#ca8a04", marginTop: "6px", fontFamily: "monospace" }}>
+                ₹{siteLabourFinancials.advancePaid.toLocaleString("en-IN")}
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>Sum of advances issued for this site</span>
+            </Card>
+
+            <Card style={{ borderLeft: "4px solid #22c55e" }}>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#15803d", textTransform: "uppercase" }}>Net Payable Amount</span>
+              <div style={{ fontSize: "22px", fontWeight: "900", color: "#16a34a", marginTop: "6px", fontFamily: "monospace" }}>
+                ₹{siteLabourFinancials.netPayable.toLocaleString("en-IN")}
+              </div>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>Gross Amount minus Advance Paid</span>
+            </Card>
+          </div>
+
+          {/* Auto-Resolved Team Notice Banner */}
+          <div style={{
+            padding: "14px 18px",
+            borderRadius: "10px",
+            backgroundColor: "#f0f9ff",
+            border: "1px solid #bae6fd",
+            display: "flex",
+            alignItems: "center",
+            justify: "space-between",
+            flexWrap: "wrap",
+            gap: "10px"
+          }}>
+            <div>
+              <span style={{ fontSize: "12px", fontWeight: "800", color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Automatically Resolved Labour Team
+              </span>
+              <div style={{ fontSize: "15px", fontWeight: "900", color: "#0284c7", marginTop: "2px" }}>
+                {autoTeam.teamName}
+              </div>
+              <span style={{ fontSize: "11.5px", color: "#0369a1" }}>
+                Resolved automatically from site attendance records in Firestore. No manual team selection required.
+              </span>
+            </div>
+            <Badge status="success">Auto-Resolved</Badge>
+          </div>
+
+          {/* Labour Advance Entry Form */}
+          <Card title="Record New Labour Advance" subtitle={`Post an advance payment linked to ${site.siteName}`}>
+            <form onSubmit={handleSaveLabourAdvance} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", alignItems: "flex-end" }}>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="adv-date" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Date</label>
+                <input
+                  id="adv-date"
+                  type="date"
+                  value={advanceDate}
+                  onChange={(e) => setAdvanceDate(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="adv-amt" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Amount (₹)</label>
+                <input
+                  id="adv-amt"
+                  type="number"
+                  step="any"
+                  min="1"
+                  placeholder="e.g. 5000"
+                  value={advanceAmount}
+                  onChange={(e) => setAdvanceAmount(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px", fontWeight: "700" }}
+                />
+              </div>
+
+              <div className="form-group" style={{ margin: 0 }}>
+                <label htmlFor="adv-notes" style={{ fontSize: "12px", fontWeight: "700" }}>Notes / Remarks (Optional)</label>
+                <input
+                  id="adv-notes"
+                  type="text"
+                  placeholder="e.g. Weekly advance for Masons"
+                  value={advanceNotes}
+                  onChange={(e) => setAdvanceNotes(e.target.value)}
+                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
+                />
+              </div>
+
+              <div>
+                <Button type="submit" disabled={savingAdvance} style={{ width: "100%", height: "42px" }}>
+                  {savingAdvance ? "Saving..." : "Save Labour Advance"}
+                </Button>
+              </div>
+            </form>
+          </Card>
+
+          {/* Advances History Table */}
+          <Card
+            variant="table"
+            title="Labour Advance Transaction Ledger"
+            headerActions={
+              <Badge status="info">{sitePayments.length} Advances Logged</Badge>
+            }
+          >
+            <div style={{ overflowX: "auto" }}>
+              <table className="data-table" style={{ margin: 0 }}>
+                <thead>
+                  <tr>
+                    <th>Advance Date</th>
+                    <th>Auto-Resolved Team</th>
+                    <th style={{ textAlign: "right" }}>Advance Amount (₹)</th>
+                    <th>Notes / Remarks</th>
+                    <th>Logged By</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sitePayments.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", fontStyle: "italic", padding: "30px" }}>
+                        No labour advances logged for this site yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    sitePayments.map((p, idx) => (
+                      <tr key={p.id || idx}>
+                        <td className="font-mono">{p.date || "--"}</td>
+                        <td style={{ fontWeight: "700" }}>{autoTeam.teamName}</td>
+                        <td style={{ textAlign: "right", fontWeight: "800", color: "#ca8a04" }} className="font-mono">
+                          ₹{(Number(p.amount) || 0).toLocaleString("en-IN")}
+                        </td>
+                        <td style={{ color: "var(--text-muted)", fontSize: "13px" }}>{p.notes || "—"}</td>
+                        <td style={{ fontSize: "12px" }}>{p.loggedBy || "Admin"}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+                <tfoot>
+                  <tr style={{ backgroundColor: "#f8fafc", fontWeight: "900" }}>
+                    <td colSpan={2}>Total Advances Issued ({site.siteName})</td>
+                    <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "15px", color: "#ca8a04" }}>
+                      ₹{siteLabourFinancials.advancePaid.toLocaleString("en-IN")}
+                    </td>
+                    <td colSpan={2}>—</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          </Card>
         </div>
       )}
 

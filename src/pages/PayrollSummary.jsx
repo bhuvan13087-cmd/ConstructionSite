@@ -172,8 +172,10 @@ export default function PayrollSummary() {
       const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
 
       const count = Number(r.workerCount) || 1;
-      const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
-      const amount = count * factor * dailyWage;
+      const units = r.units !== undefined && r.units !== null && !isNaN(Number(r.units))
+        ? Number(r.units)
+        : (count * (r.workUnit !== undefined ? Number(r.workUnit) : (r.attendanceType === "Half Day" ? 0.5 : 1.0)));
+      const amount = units * dailyWage;
 
       // Daily
       if (r.attendanceDate === anchorDate) {

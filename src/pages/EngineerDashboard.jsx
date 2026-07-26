@@ -384,6 +384,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [customMaterialCategory, setCustomMaterialCategory] = useState("");
   const [materialQuantity, setMaterialQuantity] = useState("");
   const [materialUnit, setMaterialUnit] = useState("Bag");
+  const [materialUnitPrice, setMaterialUnitPrice] = useState("");
   const [materialSupplier, setMaterialSupplier] = useState("");
   const [materialPurchaseDate, setMaterialPurchaseDate] = useState(new Date().toISOString().split("T")[0]);
   const [materialNotes, setMaterialNotes] = useState("");
@@ -1407,17 +1408,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Count-based worker attendance handlers
   const handleCountChange = async (categoryId, attendanceType, increment) => {
-    if (lockedDates.has(labourDate)) {
+    if (lockedDates.has(labourDate) || isLabourSubmitted) {
       showToast("Cannot modify count: Attendance for this date is submitted and locked.", "error");
       return;
     }
-    const record = attendanceRows.find(r => r.categoryId === categoryId && r.attendanceType === attendanceType);
+
+    let unitNum = 1.0;
+    if (attendanceType === "Full Day" || attendanceType === "1.0" || attendanceType === 1.0) {
+      unitNum = 1.0;
+    } else if (attendanceType === "Half Day" || attendanceType === "0.5" || attendanceType === 0.5) {
+      unitNum = 0.5;
+    } else {
+      unitNum = Number(attendanceType);
+    }
+
+    if (isNaN(unitNum) || unitNum <= 0) {
+      showToast("Please enter a valid positive Work Unit value (e.g. 1.0, 1.25, 1.5, 2.5).", "error");
+      return;
+    }
+
+    const attTypeStr = unitNum === 1.0 ? "Full Day" : (unitNum === 0.5 ? "Half Day" : `${unitNum} Unit(s)`);
+    const record = attendanceRows.find(r => r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr));
     const currentCount = record ? Number(record.workerCount) || 0 : 0;
     const newCount = Math.max(0, currentCount + increment);
 
     if (newCount === currentCount) return;
 
-    const key = `${categoryId}_${attendanceType}`;
+    const key = `${categoryId}_${unitNum}`;
     setSavingRecordKeys(prev => ({ ...prev, [key]: true }));
 
     try {
@@ -1425,7 +1442,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         if (record && record.dbId) {
           await deleteLabourAttendanceRecord(record.dbId);
         }
-        setAttendanceRows(prev => prev.filter(r => !(r.categoryId === categoryId && r.attendanceType === attendanceType)));
+        setAttendanceRows(prev => prev.filter(r => !(r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr))));
       } else {
         const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
           siteId: activeSiteId,
@@ -1433,16 +1450,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           categoryId,
           attendanceDate: labourDate,
           workerCount: newCount,
-          attendanceType,
+          workUnit: unitNum,
+          units: unitNum * newCount,
+          attendanceType: attTypeStr,
           createdBy: currentEngineerId
         });
 
         setAttendanceRows(prev => {
-          const exists = prev.some(r => r.categoryId === categoryId && r.attendanceType === attendanceType);
+          const exists = prev.some(r => r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr));
           if (exists) {
-            return prev.map(r => (r.categoryId === categoryId && r.attendanceType === attendanceType) ? { ...r, workerCount: newCount, dbId, isSaved: true } : r);
+            return prev.map(r => (r.categoryId === categoryId && (Number(r.workUnit || r.units) === unitNum || r.attendanceType === attTypeStr)) ? { ...r, workerCount: newCount, workUnit: unitNum, units: unitNum * newCount, dbId, isSaved: true } : r);
           } else {
-            return [...prev, { id: dbId, categoryId, workerCount: newCount, attendanceType, dbId, isSaved: true }];
+            return [...prev, { id: dbId, categoryId, workerCount: newCount, workUnit: unitNum, units: unitNum * newCount, attendanceType: attTypeStr, dbId, isSaved: true }];
           }
         });
       }
@@ -1459,10 +1478,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setEditingRecordId(record.id);
     if (record.workerCount !== undefined) {
       setEditingCount(record.workerCount);
-      setEditingType(record.attendanceType || "Full Day");
+      setEditingType(record.workUnit !== undefined ? record.workUnit : (record.attendanceType || "Full Day"));
     } else {
       setEditingName(record.workerName);
-      setEditingValue(record.attendanceValue);
+      setEditingValue(record.workUnit !== undefined ? record.workUnit : record.attendanceValue);
     }
   };
 
@@ -1473,14 +1492,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot edit: Attendance for this date is submitted and locked.", "error");
       return;
     }
-    if (!record) return;
 
     if (record.workerCount !== undefined) {
       const count = Number(editingCount);
+      let unitNum = Number(editingType);
+      if (isNaN(unitNum) || unitNum <= 0) {
+        if (editingType === "Half Day") unitNum = 0.5;
+        else unitNum = 1.0;
+      }
+
       if (isNaN(count) || count <= 0) {
         showToast("Count must be greater than 0.", "error");
         return;
       }
+      if (isNaN(unitNum) || unitNum <= 0) {
+        showToast("Work Unit must be a positive number (e.g. 1.0, 1.25, 1.5, 2.5).", "error");
+        return;
+      }
+
+      const attTypeStr = unitNum === 1.0 ? "Full Day" : (unitNum === 0.5 ? "Half Day" : `${unitNum} Unit(s)`);
+
       try {
         await saveLabourAttendanceRecord(recordId, {
           attendanceDate: record.attendanceDate,
@@ -1488,7 +1519,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           teamId: record.teamId,
           categoryId: record.categoryId,
           workerCount: count,
-          attendanceType: editingType,
+          workUnit: unitNum,
+          units: unitNum * count,
+          attendanceType: attTypeStr,
           createdBy: record.createdBy || currentEngineerId
         });
         setEditingRecordId(null);
@@ -1662,22 +1695,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
       const categoryToSave = materialCategory === "Other" ? customMaterialCategory.trim() : materialCategory;
+      const qty = Number(materialQuantity) || 0;
+      const price = Number(materialUnitPrice) || (categoryToSave === "Steel" ? 65000 : (categoryToSave === "Cement" ? 380 : 500));
+      const totalAmount = qty * price;
+
       await addMaterial({
         siteId: activeSiteId,
         engineerId,
         materialName: materialName.trim(),
         category: categoryToSave,
-        requiredQuantity: Number(materialQuantity),
-        quantity: 0,
+        requiredQuantity: qty,
+        quantity: qty,
         unit: materialUnit,
-        supplierName: materialSupplier.trim() || "Pending Quote",
+        unitPrice: price,
+        defaultUnitPrice: price,
+        totalAmount: totalAmount,
+        supplierName: materialSupplier.trim() || "Supplier",
         purchaseDate: materialPurchaseDate,
         notes: materialNotes.trim(),
         invoiceUrl: materialInvoicePreview || "",
-        status: "Pending" // Awaiting Admin approval
+        status: "approved"
       });
 
-      showToast("Material request submitted for Admin approval!", "success");
+      showToast("Material entry logged successfully!", "success");
       handleCloseMaterialModal();
       await loadDashboardData();
     } catch (err) {
@@ -4089,6 +4129,48 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   </div>
                 </div>
 
+                {/* Unit Price */}
+                <div>
+                  <span className="mobile-form-label">Unit Price (₹)</span>
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    placeholder="e.g. 380"
+                    value={materialUnitPrice}
+                    onChange={(e) => setMaterialUnitPrice(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      height: "42px",
+                      padding: "0 12px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-color)",
+                      fontSize: "14px",
+                      fontWeight: "700",
+                      color: "var(--primary-950)",
+                      backgroundColor: "#ffffff",
+                      marginTop: "4px"
+                    }}
+                  />
+                </div>
+
+                {/* Live Calculated Total Amount */}
+                <div style={{
+                  padding: "12px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "#e0f2fe",
+                  border: "1px solid #bae6fd",
+                  display: "flex",
+                  justify: "space-between",
+                  alignItems: "center"
+                }}>
+                  <span style={{ fontSize: "13px", fontWeight: "700", color: "#0369a1" }}>Total Calculated Amount:</span>
+                  <strong style={{ fontSize: "16px", fontWeight: "900", color: "#0284c7", fontFamily: "monospace" }}>
+                    ₹{((Number(materialQuantity) || 0) * (Number(materialUnitPrice) || 0)).toLocaleString("en-IN")}
+                  </strong>
+                </div>
+
                 {/* Supplier */}
                 <div>
                   <span className="mobile-form-label">Supplier Company</span>
@@ -4713,11 +4795,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </div>
                       </div>
 
-                      {/* Attendance Radio Buttons */}
+                      {/* Attendance / Work Unit Selection */}
                       <div style={{
                         display: "flex",
                         flexDirection: "column",
-                        gap: "6px",
+                        gap: "8px",
                         borderTop: "1px solid #e7e0ec",
                         paddingTop: "10px"
                       }}>
@@ -4728,51 +4810,85 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           textTransform: "uppercase",
                           letterSpacing: "0.5px"
                         }}>
-                          Attendance
+                          Work Unit Input
                         </span>
 
-                        <div style={{ display: "flex", gap: "24px" }}>
-                          <label style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            fontSize: "14px",
-                            fontWeight: "700",
-                            cursor: isLabourSubmitted ? "not-allowed" : "pointer",
-                            color: isLabourSubmitted ? "#777" : "#1c1b1f"
-                          }}>
-                            <input
-                              type="radio"
-                              name={`attendance-type-${cat.id}`}
-                              value="Full Day"
-                              checked={currentType === "Full Day"}
-                              onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Full Day" }))}
-                              disabled={isLabourSubmitted}
-                              style={{ width: "18px", height: "18px", accentColor: "#6750a4", cursor: isLabourSubmitted ? "not-allowed" : "pointer" }}
-                            />
-                            Full Day
-                          </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "10px" }}>
+                          {/* Full Day Quick Select Button (1.0) */}
+                          <button
+                            type="button"
+                            disabled={isLabourSubmitted}
+                            onClick={() => {
+                              setAttendanceSelections(prev => ({ ...prev, [cat.id]: 1.0 }));
+                            }}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: "8px",
+                              border: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "2px solid #2e7d32" : "1px solid #79747e",
+                              backgroundColor: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "#e8f5e9" : "#ffffff",
+                              color: (currentType === 1.0 || currentType === "1.0" || currentType === "1" || currentType === "Full Day") ? "#1b5e20" : "#49454f",
+                              fontSize: "13px",
+                              fontWeight: "750",
+                              cursor: isLabourSubmitted ? "not-allowed" : "pointer"
+                            }}
+                          >
+                            ✓ Full Day (1.0)
+                          </button>
 
-                          <label style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "8px",
-                            fontSize: "14px",
-                            fontWeight: "700",
-                            cursor: isLabourSubmitted ? "not-allowed" : "pointer",
-                            color: isLabourSubmitted ? "#777" : "#1c1b1f"
-                          }}>
+                          {/* Custom Work Unit Numeric Input */}
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "600", color: "#49454f" }}>Custom Unit:</span>
                             <input
-                              type="radio"
-                              name={`attendance-type-${cat.id}`}
-                              value="Half Day"
-                              checked={currentType === "Half Day"}
-                              onChange={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: "Half Day" }))}
+                              type="number"
+                              step="0.05"
+                              min="0.01"
+                              value={currentType === "Full Day" ? "1.0" : (currentType === "Half Day" ? "0.5" : currentType)}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setAttendanceSelections(prev => ({ ...prev, [cat.id]: val }));
+                              }}
                               disabled={isLabourSubmitted}
-                              style={{ width: "18px", height: "18px", accentColor: "#6750a4", cursor: isLabourSubmitted ? "not-allowed" : "pointer" }}
+                              placeholder="e.g. 1.25, 2.5"
+                              style={{
+                                width: "95px",
+                                padding: "5px 8px",
+                                borderRadius: "6px",
+                                border: "1px solid #79747e",
+                                fontSize: "13px",
+                                fontWeight: "700",
+                                outline: "none",
+                                backgroundColor: isLabourSubmitted ? "#f1f1f1" : "#ffffff"
+                              }}
                             />
-                            Half Day
-                          </label>
+                          </div>
+
+                          {/* Quick Preset Chips */}
+                          <div style={{ display: "flex", gap: "4px" }}>
+                            {[0.5, 1.25, 1.5, 2.0, 2.5, 3.0, 3.75].map(preset => {
+                              const valNum = Number(currentType === "Full Day" ? 1.0 : (currentType === "Half Day" ? 0.5 : currentType));
+                              const isSelected = valNum === preset;
+                              return (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  disabled={isLabourSubmitted}
+                                  onClick={() => setAttendanceSelections(prev => ({ ...prev, [cat.id]: preset }))}
+                                  style={{
+                                    padding: "4px 8px",
+                                    borderRadius: "4px",
+                                    fontSize: "11px",
+                                    fontWeight: "700",
+                                    border: isSelected ? "1.5px solid #6750a4" : "1px solid #cbd5e1",
+                                    backgroundColor: isSelected ? "#f3edf7" : "#ffffff",
+                                    color: isSelected ? "#6750a4" : "#64748b",
+                                    cursor: isLabourSubmitted ? "not-allowed" : "pointer"
+                                  }}
+                                >
+                                  {preset}
+                                </button>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
 
