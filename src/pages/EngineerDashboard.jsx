@@ -1728,12 +1728,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // 4. Save Material Receipt
   const handleBulkMaterialSubmit = async (e) => {
     e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (bulkMaterialSubmitting) return;
     if (!activeSiteId) {
-      showToast("Please select an active construction site.", "error");
-      return;
-    }
-    if (!bulkMaterialDate) {
-      showToast("Please select entry date.", "error");
+      showToast("Please select construction site.", "error");
       return;
     }
     if (isBulkMaterialLocked) {
@@ -1741,12 +1739,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    const activeMasterItems = materialMaster.filter(m => m.status === "Active");
     const itemsToSave = [];
-
-    activeMasterItems.forEach(m => {
-      const itemKey = m.id || m.name;
-      const qtyStr = bulkQuantitiesMap[itemKey];
+    (materialMaster || []).forEach(m => {
+      const qtyStr = bulkQuantitiesMap[m.id];
       const qtyNum = Number(qtyStr);
       if (qtyStr !== undefined && qtyStr !== null && qtyStr !== "" && !isNaN(qtyNum) && qtyNum > 0) {
         itemsToSave.push({
@@ -1788,7 +1783,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleMaterialSubmit = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
+    if (materialSubmitting) return;
     if (!activeSiteId) {
       showToast("Please choose active project.", "error");
       return;

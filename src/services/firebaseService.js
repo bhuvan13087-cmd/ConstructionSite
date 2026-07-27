@@ -1544,14 +1544,19 @@ export async function removeEngineerFromSite(assignmentId) {
 // Add a new material log
 export async function addMaterial(materialData) {
   const db = getDb();
-  const materialsColl = collection(db, "materials");
-  const newMaterialRef = doc(materialsColl);
+  const matName = (materialData.materialName || "").trim();
+  const matSlug = matName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+  const purchaseDate = materialData.purchaseDate || new Date().toISOString().split("T")[0];
+  
+  // Use deterministic ID if available, or custom id, or fallback
+  const docId = materialData.id || `mat_log_${materialData.siteId}_${matSlug}_${purchaseDate}`;
+  const newMaterialRef = doc(db, "materials", docId);
   const matId = newMaterialRef.id;
   
   await setDoc(newMaterialRef, {
     siteId: materialData.siteId,
     engineerId: materialData.engineerId,
-    materialName: materialData.materialName,
+    materialName: matName,
     category: materialData.category,
     quantity: Number(materialData.quantity),
     requiredQuantity: Number(materialData.requiredQuantity || materialData.quantity),
@@ -1559,13 +1564,14 @@ export async function addMaterial(materialData) {
     unitPrice: Number(materialData.unitPrice) || 0,
     totalAmount: Number(materialData.totalAmount) || (Number(materialData.quantity) * (Number(materialData.unitPrice) || 0)),
     supplierName: materialData.supplierName,
-    purchaseDate: materialData.purchaseDate,
+    purchaseDate: purchaseDate,
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
     status: materialData.status || "Approved",
+    type: "material_log",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
-  });
+  }, { merge: true });
 
   // central approvals integration
   let siteName = "Unknown Site";
@@ -3019,12 +3025,15 @@ export function subscribeMaterialsDetailed(siteId, onUpdate) {
     const list = [];
     snapshot.forEach(d => {
       const data = d.data();
+      if (d.id.startsWith("lock_") || d.id === "__material_master__" || data.type === "material_lock" || data.type === "labour_attendance_lock") {
+        return;
+      }
       list.push({
         id: d.id,
         ...data,
         receivedQuantity: Number(data.receivedQuantity) || Number(data.quantity) || 0,
         consumedQuantity: Number(data.consumedQuantity) || 0,
-        unitCost: Number(data.unitCost) || 0,
+        unitCost: Number(data.unitCost) || Number(data.unitPrice) || 0,
         totalCost: Number(data.totalCost) || Number(data.totalAmount) || 0
       });
     });
@@ -3411,6 +3420,8 @@ export async function markAllNotificationsAsRead(userId) {
 }
 
 export async function logSystemActivity(userId, userName, userRole, siteId, siteName, actionType, description, moduleType, details = {}) {
+  if (moduleType === "Material" || moduleType === "Auth") return null;
+
   const db = getDb();
   const docRef = doc(collection(db, "activities"));
   const now = new Date();
@@ -3440,7 +3451,10 @@ export async function getSystemActivities() {
   const snap = await getDocs(q);
   const list = [];
   snap.forEach(d => {
-    list.push({ id: d.id, ...d.data() });
+    const data = d.data();
+    if (data.moduleType !== "Material" && data.moduleType !== "Auth") {
+      list.push({ id: d.id, ...data });
+    }
   });
   return list.sort((a, b) => {
     const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
@@ -4572,16 +4586,20 @@ export async function saveBulkMaterialEntry(bulkData) {
 
   const db = getDb();
 
-  // Save each material item to materials collection
+  // Save each material item to materials collection using deterministic document ID
   for (const item of validItems) {
     const qty = Number(item.quantity);
     const uPrice = Number(item.unitPrice) || 0;
     const totAmount = qty * uPrice;
+    const matName = (item.materialName || item.name || "").trim();
+    const matSlug = matName.toLowerCase().replace(/[^a-z0-9]/g, "_");
+    const docId = `bulk_log_${siteId}_${matSlug}_${dateStr}`;
+    const docRef = doc(db, "materials", docId);
 
-    await addMaterial({
+    await setDoc(docRef, {
       siteId,
       engineerId,
-      materialName: (item.materialName || item.name || "").trim(),
+      materialName: matName,
       category: item.category || "General",
       quantity: qty,
       requiredQuantity: qty,
@@ -4592,13 +4610,16 @@ export async function saveBulkMaterialEntry(bulkData) {
       purchaseDate: dateStr,
       notes: item.notes?.trim() || `Bulk Entry on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
-      status: "Approved" // Automatically approved bulk log
-    });
+      status: "Approved", // Automatically approved bulk log
+      type: "material_log",
+      updatedAt: serverTimestamp()
+    }, { merge: true });
   }
 
   // Create submission lock document
   const lockRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
   await setDoc(lockRef, {
+    type: "material_lock",
     engineerId: engineerId,
     siteId: siteId,
     date: dateStr,
@@ -4608,7 +4629,7 @@ export async function saveBulkMaterialEntry(bulkData) {
     itemsCount: validItems.length,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
-  });
+  }, { merge: true });
 
   return { success: true, count: validItems.length };
 }

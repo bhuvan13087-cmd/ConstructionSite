@@ -485,133 +485,189 @@ export default function AdminLabour() {
     const selectedTeam = teams.find(t => t.id === selectedTeamId);
     const selectedCategory = selectedTeam?.categories?.[selectedCategoryId];
 
+    // Filter teams by search
+    const filteredTeams = teams.filter(t => 
+      t.teamName?.toLowerCase().includes(teamSearchQuery.toLowerCase().trim())
+    );
+
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1.2fr 2fr", gap: "24px", alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "30% 70%", gap: "20px", alignItems: "start" }}>
         
-        {/* Left Column: Teams List & Creation */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          <Card title="Labour Teams" subtitle="Group and manage labor workforces">
-            <form onSubmit={handleCreateTeam} style={{ display: "flex", gap: "8px", marginBottom: "16px" }}>
-              <input
-                type="text"
-                placeholder="New Team Name"
-                value={newTeamName}
-                onChange={(e) => setNewTeamName(e.target.value)}
-                style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
-              <Button type="submit" size="sm" style={{ backgroundColor: "var(--primary-800)" }}>
-                <Plus size={16} />
-              </Button>
-            </form>
+        {/* LEFT PANEL (30%): LABOUR TEAMS */}
+        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 16px", display: "flex", flexDirection: "column", height: "650px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+              <Users size={16} style={{ color: "#2563eb" }} /> Labour Teams
+            </h3>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>{teams.length} Teams</span>
+          </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {teams.length === 0 ? (
-                <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontSize: "13px" }}>
-                  No Labour Teams configured.
-                </div>
-              ) : (
-                teams.map(team => {
-                  const isSelected = selectedTeamId === team.id;
-                  const isEditing = editingTeamId === team.id;
+          {/* New Team Creation Form */}
+          <form onSubmit={handleCreateTeam} style={{ display: "flex", gap: "8px", marginBottom: "12px" }}>
+            <input
+              type="text"
+              placeholder="New Team Name"
+              value={newTeamName}
+              onChange={(e) => setNewTeamName(e.target.value)}
+              style={{ flex: 1, padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
+            />
+            <Button type="submit" size="sm" style={{ backgroundColor: "#2563eb", padding: "8px 12px" }}>
+              <Plus size={16} />
+            </Button>
+          </form>
 
-                  return (
-                    <div
-                      key={team.id}
-                      onClick={() => {
-                        if (!isEditing) {
-                          setSelectedTeamId(team.id);
-                          setSelectedCategoryId("");
-                        }
-                      }}
-                      style={{
-                        padding: "12px 14px",
-                        borderRadius: "8px",
-                        border: isSelected ? "2px solid var(--primary-600)" : "1px solid var(--border-color)",
-                        backgroundColor: isSelected ? "var(--primary-50)" : "#ffffff",
-                        cursor: "pointer",
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        transition: "all 0.2s ease"
-                      }}
-                    >
-                      {isEditing ? (
-                        <div style={{ display: "flex", gap: "6px", width: "100%", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
-                          <input
-                            type="text"
-                            value={editingTeamName}
-                            onChange={(e) => setEditingTeamName(e.target.value)}
-                            style={{ flex: 1, padding: "4px 8px", fontSize: "13px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
-                          />
-                          <button
-                            onClick={() => handleRenameTeam(team.id)}
-                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "4px" }}
-                          >
-                            <Save size={15} />
-                          </button>
+          {/* Team Search Input */}
+          <div className="input-wrapper" style={{ marginBottom: "12px" }}>
+            <Search className="input-icon" size={14} />
+            <input 
+              type="text" 
+              placeholder="Search teams..."
+              value={teamSearchQuery}
+              onChange={(e) => setTeamSearchQuery(e.target.value)}
+              style={{ paddingLeft: "36px", fontSize: "12px" }}
+            />
+          </div>
+
+          {/* Teams List */}
+          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
+            {filteredTeams.length === 0 ? (
+              <div style={{ textAlign: "center", color: "#64748b", padding: "24px", fontSize: "12px" }}>
+                No Labour Teams found.
+              </div>
+            ) : (
+              filteredTeams.map(team => {
+                const isSelected = selectedTeamId === team.id;
+                const isEditing = editingTeamId === team.id;
+                const catCount = Object.keys(team.categories || {}).length;
+                let workerCount = 0;
+                if (team.categories) {
+                  Object.values(team.categories).forEach(c => {
+                    workerCount += Object.keys(c.members || {}).length;
+                  });
+                }
+
+                return (
+                  <div
+                    key={team.id}
+                    onClick={() => {
+                      if (!isEditing) {
+                        setSelectedTeamId(team.id);
+                        setSelectedCategoryId("");
+                      }
+                    }}
+                    style={{
+                      padding: "12px 14px",
+                      borderRadius: "8px",
+                      border: isSelected ? "1.5px solid #2563eb" : "1px solid #e2e8f0",
+                      backgroundColor: isSelected ? "#eff6ff" : "#ffffff",
+                      cursor: "pointer",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    {isEditing ? (
+                      <div style={{ display: "flex", gap: "6px", width: "100%", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                        <input
+                          type="text"
+                          value={editingTeamName}
+                          onChange={(e) => setEditingTeamName(e.target.value)}
+                          style={{ flex: 1, padding: "4px 8px", fontSize: "12.5px", border: "1px solid #cbd5e1", borderRadius: "4px" }}
+                        />
+                        <button
+                          onClick={() => handleRenameTeam(team.id)}
+                          style={{ background: "none", border: "none", color: "#16a34a", cursor: "pointer", padding: "4px" }}
+                        >
+                          <Save size={15} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setEditingTeamId(null);
+                            setEditingTeamName("");
+                          }}
+                          style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                        >
+                          <X size={15} />
+                        </button>
+                      </div>
+                    ) : (
+                      <>
+                        <div style={{ display: "flex", flexDirection: "column" }}>
+                          <strong style={{ fontSize: "13px", color: isSelected ? "#1e40af" : "#0f172a" }}>
+                            {team.teamName}
+                          </strong>
+                          <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                            {catCount} Categories • {workerCount} Workers
+                          </span>
+                        </div>
+                        
+                        <div style={{ display: "flex", gap: "4px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
                           <button
                             onClick={() => {
-                              setEditingTeamId(null);
-                              setEditingTeamName("");
+                              setEditingTeamId(team.id);
+                              setEditingTeamName(team.teamName);
                             }}
-                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "4px" }}
+                            style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "4px" }}
+                            title="Edit team name"
                           >
-                            <X size={15} />
+                            <Edit2 size={13} />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteTeam(team.id, team.teamName)}
+                            style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", padding: "4px" }}
+                            title="Delete team"
+                          >
+                            <Trash2 size={13} />
                           </button>
                         </div>
-                      ) : (
-                        <>
-                          <div style={{ display: "flex", flexDirection: "column" }}>
-                            <span style={{ fontWeight: "700", color: isSelected ? "var(--primary-900)" : "var(--text-main)" }}>
-                              {team.teamName}
-                            </span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                              {Object.keys(team.categories || {}).length} Categories
-                            </span>
-                          </div>
-                          
-                          <div style={{ display: "flex", gap: "6px" }} onClick={(e) => e.stopPropagation()}>
-                            <button
-                              onClick={() => {
-                                setEditingTeamId(team.id);
-                                setEditingTeamName(team.teamName);
-                              }}
-                              style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
-                            >
-                              <Edit2 size={13} />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteTeam(team.id, team.teamName)}
-                              style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </Card>
-        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </Card>
 
-        {/* Right Column: Categories and Members details */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        {/* RIGHT PANEL (70%): TEAM INFORMATION & WORKER MASTER */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           {selectedTeam ? (
             <>
-              {/* Category configuration inside selected Team */}
-              <Card 
-                title={`Categories in "${selectedTeam.teamName}"`} 
-                subtitle="Select a category to view/register members."
-              >
-                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px", alignItems: "start" }}>
+              {/* TEAM INFORMATION CARD */}
+              <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>{selectedTeam.teamName}</h3>
+                    <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>
+                      Trade workforce group configuration & worker roster
+                    </p>
+                  </div>
+                  <div style={{ display: "flex", gap: "12px" }}>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "10.5px", color: "#64748b", textTransform: "uppercase", fontWeight: "700", display: "block" }}>Categories</span>
+                      <strong style={{ fontSize: "14px", color: "#0f172a" }}>{Object.keys(selectedTeam.categories || {}).length}</strong>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "10.5px", color: "#64748b", textTransform: "uppercase", fontWeight: "700", display: "block" }}>Status</span>
+                      <Badge status="active" />
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* TRADE CATEGORIES CARD */}
+              <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Users size={16} style={{ color: "#ea580c" }} /> Trade Categories in "{selectedTeam.teamName}"
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: "20px", alignItems: "start" }}>
                   
-                  {/* Category List */}
+                  {/* Categories List */}
                   <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
                     {!selectedTeam.categories || Object.keys(selectedTeam.categories).length === 0 ? (
-                      <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                      <div style={{ color: "#64748b", fontStyle: "italic", fontSize: "12px", padding: "16px", textAlign: "center", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         No categories configured for this team yet. Add one on the right.
                       </div>
                     ) : (
@@ -630,9 +686,9 @@ export default function AdminLabour() {
                             }}
                             style={{
                               padding: "10px 12px",
-                              borderRadius: "6px",
-                              border: isCatSelected ? "1.5px solid var(--primary-600)" : "1px solid var(--border-color)",
-                              backgroundColor: isCatSelected ? "var(--primary-50)" : "#fdfdfd",
+                              borderRadius: "8px",
+                              border: isCatSelected ? "1.5px solid #2563eb" : "1px solid #e2e8f0",
+                              backgroundColor: isCatSelected ? "#eff6ff" : "#ffffff",
                               cursor: "pointer",
                               display: "flex",
                               justifyContent: "space-between",
@@ -640,13 +696,13 @@ export default function AdminLabour() {
                             }}
                           >
                             <div style={{ display: "flex", flexDirection: "column" }}>
-                              <span style={{ fontWeight: "700", fontSize: "13.5px" }}>{cat.name}</span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                                Cycle: {cat.paymentType} | Base: ₹{cat.baseWage}
+                              <strong style={{ fontSize: "13px", color: isCatSelected ? "#1e40af" : "#0f172a" }}>{cat.name}</strong>
+                              <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>
+                                Cycle: {cat.paymentType} • Base Wage: ₹{cat.baseWage}
                               </span>
                             </div>
 
-                            <div style={{ display: "flex", gap: "8px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
+                            <div style={{ display: "flex", gap: "6px", alignItems: "center" }} onClick={(e) => e.stopPropagation()}>
                               {isEditingCat ? (
                                 <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
                                   <input
@@ -654,11 +710,11 @@ export default function AdminLabour() {
                                     value={editingWage}
                                     placeholder="Wage"
                                     onChange={(e) => setEditingWage(e.target.value)}
-                                    style={{ width: "70px", padding: "4px 6px", fontSize: "12px", border: "1px solid var(--border-color)", borderRadius: "4px" }}
+                                    style={{ width: "70px", padding: "4px 6px", fontSize: "12px", border: "1px solid #cbd5e1", borderRadius: "4px" }}
                                   />
                                   <button
                                     onClick={() => handleUpdateCategoryWage(catId)}
-                                    style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer", padding: "2px" }}
+                                    style={{ background: "none", border: "none", color: "#16a34a", cursor: "pointer", padding: "2px" }}
                                   >
                                     <Save size={14} />
                                   </button>
@@ -667,7 +723,7 @@ export default function AdminLabour() {
                                       setEditingCatKey(null);
                                       setEditingWage("");
                                     }}
-                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "2px" }}
                                   >
                                     <X size={14} />
                                   </button>
@@ -679,15 +735,17 @@ export default function AdminLabour() {
                                       setEditingCatKey(catId);
                                       setEditingWage(cat.baseWage);
                                     }}
-                                    style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer", padding: "2px" }}
+                                    style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer", padding: "2px" }}
+                                    title="Edit wage rate"
                                   >
-                                    <Edit2 size={12} />
+                                    <Edit2 size={13} />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteCategoryFromTeam(catId, cat.name)}
-                                    style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer", padding: "2px" }}
+                                    style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", padding: "2px" }}
+                                    title="Delete category"
                                   >
-                                    <Trash2 size={12} />
+                                    <Trash2 size={13} />
                                   </button>
                                 </>
                               )}
@@ -699,208 +757,224 @@ export default function AdminLabour() {
                   </div>
 
                   {/* Add Category Form */}
-                  <form onSubmit={handleAddCategory} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
-                    <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Add Category</h5>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Category Label</label>
+                  <form onSubmit={handleAddCategory} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>Add Trade Category</strong>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Category Label</label>
                       <input
                         type="text"
                         placeholder="e.g. Mason, Painter"
                         value={newCatName}
                         onChange={(e) => setNewCatName(e.target.value)}
-                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
                       />
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Base Wage (₹)</label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Base Wage (₹)</label>
                       <input
                         type="number"
                         placeholder="e.g. 700"
                         value={newCatWage}
                         onChange={(e) => setNewCatWage(e.target.value)}
-                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                        style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
                       />
                     </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                      <label style={{ fontSize: "11px", fontWeight: "700" }}>Cycle Type</label>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                      <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Cycle Type</label>
                       <select
                         value={newCatType}
                         onChange={(e) => setNewCatType(e.target.value)}
-                        style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", fontSize: "13px", backgroundColor: "#ffffff" }}
+                        style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", backgroundColor: "#ffffff" }}
                       >
                         <option value="Daily">Daily</option>
                         <option value="Weekly">Weekly</option>
                         <option value="Monthly">Monthly</option>
                       </select>
                     </div>
-                    <Button type="submit" size="sm" style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                    <Button type="submit" size="sm" style={{ marginTop: "4px", backgroundColor: "#2563eb" }}>
                       Add Category
                     </Button>
                   </form>
                 </div>
               </Card>
 
-              {/* Members configuration inside selected Category */}
+              {/* MEMBERS MASTER TABLE CARD */}
               {selectedCategory ? (
-                <Card 
-                  title={`Members in "${selectedCategory.name}"`}
-                  subtitle={`Manage registered team members`}
-                >
-                  <div style={{ display: "grid", gridTemplateColumns: "1.3fr 1fr", gap: "20px", alignItems: "start" }}>
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <UserCheck size={16} style={{ color: "#16a34a" }} /> Members Master in "{selectedCategory.name}"
+                    </div>
+                    <div className="input-wrapper" style={{ width: "200px" }}>
+                      <Search className="input-icon" size={13} />
+                      <input 
+                        type="text" 
+                        placeholder="Search member..."
+                        value={memberSearchQuery}
+                        onChange={(e) => setMemberSearchQuery(e.target.value)}
+                        style={{ paddingLeft: "34px", fontSize: "11.5px" }}
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: "20px", alignItems: "start" }}>
                     
                     {/* Members List Table */}
                     <div style={{ overflowX: "auto" }}>
                       {!selectedCategory.members || Object.keys(selectedCategory.members).length === 0 ? (
-                        <div style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", padding: "8px" }}>
+                        <div style={{ color: "#64748b", fontStyle: "italic", fontSize: "12px", padding: "16px", textAlign: "center", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                           No members registered in this category. Register one on the right.
                         </div>
                       ) : (
-                        <table className="data-table" style={{ margin: 0 }}>
+                        <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
                           <thead>
-                            <tr>
-                              <th>ID</th>
-                              <th>Name</th>
-                              <th style={{ textAlign: "right" }}>Wage/Salary</th>
-                              <th style={{ textAlign: "center" }}>Actions</th>
+                            <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                              <th style={{ padding: "8px 10px", textAlign: "left", fontSize: "10.5px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>ID</th>
+                              <th style={{ padding: "8px 10px", textAlign: "left", fontSize: "10.5px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Worker Name</th>
+                              <th style={{ padding: "8px 10px", textAlign: "right", fontSize: "10.5px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Wage</th>
+                              <th style={{ padding: "8px 10px", textAlign: "center", fontSize: "10.5px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Actions</th>
                             </tr>
                           </thead>
                           <tbody>
-                            {Object.values(selectedCategory.members).map(member => {
-                              const isEditingMem = editingMemberId === member.memberId;
-                              return (
-                                <tr key={member.memberId}>
-                                  <td className="font-mono" style={{ fontSize: "12px" }}>{member.memberId}</td>
-                                  <td>
-                                    {isEditingMem ? (
-                                      <input
-                                        type="text"
-                                        value={editingMemberName}
-                                        onChange={(e) => setEditingMemberName(e.target.value)}
-                                        style={{ width: "90px", padding: "4px", fontSize: "12px" }}
-                                      />
-                                    ) : (
-                                      <span style={{ fontWeight: "700" }}>{member.name}</span>
-                                    )}
-                                  </td>
-                                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                                    {isEditingMem ? (
-                                      <input
-                                        type="number"
-                                        value={editingMemberSalary}
-                                        onChange={(e) => setEditingMemberSalary(e.target.value)}
-                                        style={{ width: "70px", padding: "4px", fontSize: "12px", textAlign: "right" }}
-                                      />
-                                    ) : (
-                                      `₹${member.salary}`
-                                    )}
-                                  </td>
-                                  <td>
-                                    <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+                            {Object.values(selectedCategory.members)
+                              .filter(m => m.name?.toLowerCase().includes(memberSearchQuery.toLowerCase().trim()) || m.memberId?.toLowerCase().includes(memberSearchQuery.toLowerCase().trim()))
+                              .map(member => {
+                                const isEditingMem = editingMemberId === member.memberId;
+                                return (
+                                  <tr key={member.memberId} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                    <td style={{ padding: "8px 10px", fontSize: "11px", fontFamily: "monospace", color: "#64748b" }}>{member.memberId}</td>
+                                    <td style={{ padding: "8px 10px" }}>
                                       {isEditingMem ? (
-                                        <>
-                                          <button
-                                            onClick={() => handleUpdateMember(member.memberId)}
-                                            style={{ background: "none", border: "none", color: "var(--success-600)", cursor: "pointer" }}
-                                          >
-                                            <Save size={13} />
-                                          </button>
-                                          <button
-                                            onClick={() => {
-                                              setEditingMemberId(null);
-                                              setEditingMemberName("");
-                                              setEditingMemberSalary("");
-                                            }}
-                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
-                                          >
-                                            <X size={13} />
-                                          </button>
-                                        </>
+                                        <input
+                                          type="text"
+                                          value={editingMemberName}
+                                          onChange={(e) => setEditingMemberName(e.target.value)}
+                                          style={{ width: "100px", padding: "4px", fontSize: "12px", border: "1px solid #cbd5e1", borderRadius: "4px" }}
+                                        />
                                       ) : (
-                                        <>
-                                          <button
-                                            onClick={() => {
-                                              setEditingMemberId(member.memberId);
-                                              setEditingMemberName(member.name);
-                                              setEditingMemberSalary(member.salary);
-                                            }}
-                                            style={{ background: "none", border: "none", color: "var(--text-muted)", cursor: "pointer" }}
-                                          >
-                                            <Edit2 size={12} />
-                                          </button>
-                                          <button
-                                            onClick={() => handleDeleteMember(member.memberId, member.name)}
-                                            style={{ background: "none", border: "none", color: "var(--danger-600)", cursor: "pointer" }}
-                                          >
-                                            <Trash2 size={12} />
-                                          </button>
-                                        </>
+                                        <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>{member.name}</strong>
                                       )}
-                                    </div>
-                                  </td>
-                                </tr>
-                              );
-                            })}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>
+                                      {isEditingMem ? (
+                                        <input
+                                          type="number"
+                                          value={editingMemberSalary}
+                                          onChange={(e) => setEditingMemberSalary(e.target.value)}
+                                          style={{ width: "70px", padding: "4px", fontSize: "12px", textAlign: "right", border: "1px solid #cbd5e1", borderRadius: "4px" }}
+                                        />
+                                      ) : (
+                                        `₹${member.salary}`
+                                      )}
+                                    </td>
+                                    <td style={{ padding: "8px 10px", textAlign: "center" }}>
+                                      <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
+                                        {isEditingMem ? (
+                                          <>
+                                            <button
+                                              onClick={() => handleUpdateMember(member.memberId)}
+                                              style={{ background: "none", border: "none", color: "#16a34a", cursor: "pointer" }}
+                                            >
+                                              <Save size={13} />
+                                            </button>
+                                            <button
+                                              onClick={() => {
+                                                setEditingMemberId(null);
+                                                setEditingMemberName("");
+                                                setEditingMemberSalary("");
+                                              }}
+                                              style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}
+                                            >
+                                              <X size={13} />
+                                            </button>
+                                          </>
+                                        ) : (
+                                          <>
+                                            <button
+                                              onClick={() => {
+                                                setEditingMemberId(member.memberId);
+                                                setEditingMemberName(member.name);
+                                                setEditingMemberSalary(member.salary);
+                                              }}
+                                              style={{ background: "none", border: "none", color: "#64748b", cursor: "pointer" }}
+                                              title="Edit member"
+                                            >
+                                              <Edit2 size={12} />
+                                            </button>
+                                            <button
+                                              onClick={() => handleDeleteMember(member.memberId, member.name)}
+                                              style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer" }}
+                                              title="Delete member"
+                                            >
+                                              <Trash2 size={12} />
+                                            </button>
+                                          </>
+                                        )}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
                           </tbody>
                         </table>
                       )}
                     </div>
 
                     {/* Add Member Form */}
-                    <form onSubmit={handleAddMember} style={{ display: "flex", flexDirection: "column", gap: "12px", padding: "14px", borderLeft: "1px solid var(--border-color)" }}>
-                      <h5 style={{ margin: 0, fontWeight: "800", color: "var(--primary-800)" }}>Register Member</h5>
+                    <form onSubmit={handleAddMember} style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>Register Worker Member</strong>
                       
-                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Labour Member ID</label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Member ID</label>
                         <input
                           type="text"
                           placeholder="e.g. L001"
                           value={newMemberId}
                           onChange={(e) => setNewMemberId(e.target.value)}
-                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                          style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
                         />
                       </div>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Full Name</label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Full Name</label>
                         <input
                           type="text"
                           placeholder="e.g. Ramesh Kumar"
                           value={newMemberName}
                           onChange={(e) => setNewMemberName(e.target.value)}
-                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                          style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
                         />
                       </div>
 
-                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                        <label style={{ fontSize: "11px", fontWeight: "700" }}>Specific Wage/Salary (₹)</label>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                        <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Wage / Salary (₹)</label>
                         <input
                           type="number"
                           placeholder={`Default: ${selectedCategory.baseWage}`}
                           value={newMemberSalary}
                           onChange={(e) => setNewMemberSalary(e.target.value)}
-                          style={{ padding: "8px", borderRadius: "4px", border: "1px solid var(--border-color)", outline: "none", fontSize: "13px" }}
+                          style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
                         />
                       </div>
 
-                      <Button type="submit" size="sm" icon={UserPlus} style={{ marginTop: "6px", backgroundColor: "var(--primary-800)" }}>
+                      <Button type="submit" size="sm" icon={UserPlus} style={{ marginTop: "4px", backgroundColor: "#2563eb" }}>
                         Register Member
                       </Button>
                     </form>
+
                   </div>
                 </Card>
               ) : (
-                <Card>
-                  <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "16px", fontStyle: "italic", fontSize: "13px" }}>
-                    Select a category from the card above to register or view its members.
-                  </div>
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "20px", textAlign: "center", color: "#64748b", fontSize: "12.5px" }}>
+                  Select a category card above to view and manage its registered worker members.
                 </Card>
               )}
             </>
           ) : (
-            <Card>
-              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "48px", fontSize: "14px", fontWeight: "600" }}>
-                Please select a Labour Team from the left panel to configure its categories and workers.
-              </div>
+            <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "40px", textAlign: "center", color: "#64748b" }}>
+              <Users size={32} style={{ color: "#cbd5e1", marginBottom: "8px" }} />
+              <strong style={{ display: "block", fontSize: "14px", color: "#0f172a", marginBottom: "4px" }}>Select a Labour Team</strong>
+              <span style={{ fontSize: "12px" }}>Choose a labour team from the left panel to configure categories and worker members.</span>
             </Card>
           )}
         </div>
@@ -911,44 +985,49 @@ export default function AdminLabour() {
 
   const renderAssignmentsTab = () => {
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
-        <Card title="Company Labour Registry Lookup" subtitle="Hierarchical breakdown of all registered Labour Teams, Categories and Members.">
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "20px" }}>
+          <div style={{ marginBottom: "16px" }}>
+            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Company Labour Registry Lookup</h3>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>Hierarchical breakdown of all registered Labour Teams, Categories and Members.</p>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
             {teams.length === 0 ? (
-              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
+              <div style={{ textAlign: "center", color: "#64748b", padding: "32px", fontSize: "13px" }}>
                 No Labour Teams configured in the Master tab.
               </div>
             ) : (
               teams.map(team => {
                 const cats = team.categories ? Object.values(team.categories) : [];
                 return (
-                  <div key={team.id} style={{ border: "1px solid var(--border-color)", borderRadius: "8px", padding: "20px", backgroundColor: "#fcfcfc" }}>
-                    <h3 style={{ margin: "0 0 16px 0", color: "var(--primary-900)", fontWeight: "800", fontSize: "18px", borderBottom: "1.5px solid var(--border-color)", paddingBottom: "8px" }}>
+                  <div key={team.id} style={{ border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", backgroundColor: "#f8fafc" }}>
+                    <h4 style={{ margin: "0 0 12px 0", color: "#0f172a", fontWeight: "800", fontSize: "15px", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px" }}>
                       {team.teamName}
-                    </h3>
+                    </h4>
                     {cats.length === 0 ? (
-                      <p style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "13px", margin: 0 }}>No categories registered inside this team.</p>
+                      <p style={{ color: "#64748b", fontStyle: "italic", fontSize: "12px", margin: 0 }}>No categories registered inside this team.</p>
                     ) : (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
                         {cats.map(cat => {
                           const membersList = cat.members ? Object.values(cat.members) : [];
                           return (
-                            <div key={cat.id} style={{ marginLeft: "12px", borderLeft: "2px solid var(--primary-200)", paddingLeft: "16px" }}>
-                              <h4 style={{ margin: "0 0 8px 0", color: "var(--primary-700)", fontWeight: "700", fontSize: "14.5px" }}>
-                                {cat.name} <span style={{ fontSize: "11px", fontWeight: "600", color: "var(--text-muted)" }}>(Base Wage: ₹{cat.baseWage} / Cycle: {cat.paymentType})</span>
-                              </h4>
+                            <div key={cat.id || cat.name} style={{ marginLeft: "8px", borderLeft: "2px solid #3b82f6", paddingLeft: "14px" }}>
+                              <h5 style={{ margin: "0 0 8px 0", color: "#1e40af", fontWeight: "700", fontSize: "13.5px" }}>
+                                {cat.name} <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>(Base Wage: ₹{cat.baseWage} / Cycle: {cat.paymentType})</span>
+                              </h5>
                               {membersList.length === 0 ? (
-                                <p style={{ color: "var(--text-muted)", fontStyle: "italic", fontSize: "12px", margin: 0 }}>No workers registered in this category.</p>
+                                <p style={{ color: "#64748b", fontStyle: "italic", fontSize: "11.5px", margin: 0 }}>No workers registered in this category.</p>
                               ) : (
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "12px" }}>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "10px" }}>
                                   {membersList.map(m => (
-                                    <div key={m.memberId} style={{ padding: "8px 12px", borderRadius: "6px", backgroundColor: "#ffffff", border: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                    <div key={m.memberId} style={{ padding: "8px 12px", borderRadius: "6px", backgroundColor: "#ffffff", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                                       <div style={{ display: "flex", flexDirection: "column" }}>
-                                        <span style={{ fontWeight: "700", fontSize: "12.5px" }}>{m.name}</span>
-                                        <span style={{ fontSize: "10.5px", fontFamily: "monospace", color: "var(--text-muted)" }}>ID: {m.memberId}</span>
+                                        <strong style={{ fontSize: "12px", color: "#0f172a" }}>{m.name}</strong>
+                                        <span style={{ fontSize: "10.5px", fontFamily: "monospace", color: "#64748b" }}>ID: {m.memberId}</span>
                                       </div>
-                                      <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--success-700)", fontFamily: "monospace" }}>₹{m.salary}</span>
+                                      <span style={{ fontSize: "12px", fontWeight: "800", color: "#16a34a", fontFamily: "monospace" }}>₹{m.salary}</span>
                                     </div>
                                   ))}
                                 </div>
@@ -979,148 +1058,170 @@ export default function AdminLabour() {
       };
     });
 
+    const totalWagesOwed = siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.totalCost, 0);
+    const totalPaidOut = siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.paidAmount, 0);
+    const totalPendingBal = siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.pendingAmount, 0);
+
     return (
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "24px", alignItems: "start" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
-        {/* Log Payment Form */}
-        <Card title="Log Labour Salary Payment">
-          <form onSubmit={handleLogPayment} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="pay-site" style={{ fontSize: "12.5px", fontWeight: "700" }}>Construction Site</label>
-              <select
-                id="pay-site"
-                value={paymentSiteId}
-                onChange={(e) => setPaymentSiteId(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff" }}
-              >
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
+        {/* Salary Summary Cards */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px" }}>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Wages Owed</span>
+            <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", marginTop: "4px", fontFamily: "monospace" }}>
+              ₹{totalWagesOwed.toLocaleString("en-IN")}
             </div>
+            <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>Cumulative labour cost</span>
+          </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="pay-amount" style={{ fontSize: "12.5px", fontWeight: "700" }}>Payment Amount (₹)</label>
-                <input
-                  id="pay-amount"
-                  type="number"
-                  placeholder="e.g. 15000"
-                  value={paymentAmount}
-                  onChange={(e) => setPaymentAmount(e.target.value)}
-                  style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-                />
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                <label htmlFor="pay-date" style={{ fontSize: "12.5px", fontWeight: "700" }}>Payment Date</label>
-                <input
-                  id="pay-date"
-                  type="date"
-                  value={paymentDate}
-                  onChange={(e) => setPaymentDate(e.target.value)}
-                  style={{ padding: "9px", borderRadius: "6px", border: "1px solid var(--border-color)" }}
-                />
-              </div>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Paid Out</span>
+            <div style={{ fontSize: "24px", fontWeight: "800", color: "#16a34a", marginTop: "4px", fontFamily: "monospace" }}>
+              ₹{totalPaidOut.toLocaleString("en-IN")}
             </div>
+            <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "4px", display: "block" }}>Total disbursements logged</span>
+          </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="pay-ref" style={{ fontSize: "12.5px", fontWeight: "700" }}>Payment Reference / Receipt ID</label>
-              <input
-                id="pay-ref"
-                type="text"
-                placeholder="e.g. TXN-1928374 or Cash"
-                value={paymentReference}
-                onChange={(e) => setPaymentReference(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Pending Balance</span>
+            <div style={{ fontSize: "24px", fontWeight: "800", color: "#ef4444", marginTop: "4px", fontFamily: "monospace" }}>
+              ₹{totalPendingBal.toLocaleString("en-IN")}
             </div>
+            <span style={{ fontSize: "11px", color: "#ef4444", marginTop: "4px", display: "block" }}>Unsettled labour balance</span>
+          </div>
+        </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <label htmlFor="pay-notes" style={{ fontSize: "12.5px", fontWeight: "700" }}>Additional Notes</label>
-              <textarea
-                id="pay-notes"
-                placeholder="Details of payout..."
-                rows={3}
-                value={paymentNotes}
-                onChange={(e) => setPaymentNotes(e.target.value)}
-                style={{ padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", outline: "none" }}
-              />
-            </div>
-
-            <Button type="submit" icon={DollarSign} style={{ marginTop: "10px", backgroundColor: "var(--primary-800)" }}>
-              Log Payment
-            </Button>
-          </form>
-        </Card>
-
-        {/* Ledger overview & payment history logs */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px", alignItems: "start" }}>
           
-          {/* Ledger Table */}
-          <Card title="Corporate Site-wise Labor Salary Audit Ledger" variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Site Name</th>
-                    <th style={{ textAlign: "right" }}>Total Wages Owed</th>
-                    <th style={{ textAlign: "right" }}>Total Paid Out</th>
-                    <th style={{ textAlign: "right" }}>Pending Balance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {siteLabourFinancials.map(({ site, stats }) => (
-                    <tr key={site.id}>
-                      <td style={{ fontWeight: "700" }}>{site.siteName}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>₹{stats.totalCost}</td>
-                      <td style={{ textAlign: "right", color: "var(--success-700)", fontFamily: "monospace" }}>₹{stats.paidAmount}</td>
-                      <td style={{ textAlign: "right", color: "var(--danger-700)", fontWeight: "700", fontFamily: "monospace" }}>₹{stats.pendingAmount}</td>
-                    </tr>
+          {/* Log Payment Form */}
+          <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+            <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px" }}>Log Labour Salary Payment</div>
+            <form onSubmit={handleLogPayment} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label htmlFor="pay-site" style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b" }}>Construction Site</label>
+                <select
+                  id="pay-site"
+                  value={paymentSiteId}
+                  onChange={(e) => setPaymentSiteId(e.target.value)}
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px" }}
+                >
+                  {sites.map(s => (
+                    <option key={s.id} value={s.id}>{s.siteName}</option>
                   ))}
-                  
-                  {/* Totals */}
-                  <tr style={{ backgroundColor: "var(--primary-50)", fontWeight: "800" }}>
-                    <td>Aggregate Summary</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                      ₹{siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.totalCost, 0)}
-                    </td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                      ₹{siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.paidAmount, 0)}
-                    </td>
-                    <td style={{ textAlign: "right", color: "var(--danger-800)", fontFamily: "monospace" }}>
-                      ₹{siteLabourFinancials.reduce((acc, curr) => acc + curr.stats.pendingAmount, 0)}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
+                </select>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label htmlFor="pay-amount" style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b" }}>Amount (₹)</label>
+                  <input
+                    id="pay-amount"
+                    type="number"
+                    placeholder="e.g. 15000"
+                    value={paymentAmount}
+                    onChange={(e) => setPaymentAmount(e.target.value)}
+                    style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label htmlFor="pay-date" style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b" }}>Payment Date</label>
+                  <input
+                    id="pay-date"
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label htmlFor="pay-ref" style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b" }}>Reference / Receipt ID</label>
+                <input
+                  id="pay-ref"
+                  type="text"
+                  placeholder="e.g. TXN-1928374 or Cash"
+                  value={paymentReference}
+                  onChange={(e) => setPaymentReference(e.target.value)}
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
+                />
+              </div>
+
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label htmlFor="pay-notes" style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b" }}>Notes</label>
+                <textarea
+                  id="pay-notes"
+                  placeholder="Details of payout..."
+                  rows={2}
+                  value={paymentNotes}
+                  onChange={(e) => setPaymentNotes(e.target.value)}
+                  style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", outline: "none", fontSize: "12.5px" }}
+                />
+              </div>
+
+              <Button type="submit" icon={DollarSign} style={{ marginTop: "4px", backgroundColor: "#16a34a" }}>
+                Log Payment
+              </Button>
+            </form>
           </Card>
 
-          {/* Payment history list */}
-          <Card title="Corporate Labor Payout Transaction History">
-            {payments.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center" }}>No payout transactions recorded yet.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "300px", overflowY: "auto" }}>
-                {payments.map((p, idx) => {
-                  const site = sites.find(s => s.id === p.siteId) || { siteName: "Unknown Site" };
-                  return (
-                    <div key={p.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px", fontSize: "12.5px" }}>
-                      <div>
-                        Paid <strong style={{ color: "var(--success-700)" }}>₹{p.amount}</strong> to workers at <strong>{site.siteName}</strong>
-                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "2px" }}>Ref: {p.reference || "none"} | Notes: {p.notes || "none"}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", alignItems: "end", fontSize: "11px", color: "var(--text-muted)" }}>
-                        <span>By: {p.loggedBy}</span>
-                        <span className="font-mono">{p.date}</span>
-                      </div>
-                    </div>
-                  );
-                })}
+          {/* Ledger Table & Payout Logs */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+            <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden" }}>
+              <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", backgroundColor: "#f8fafc" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Site-wise Salary Audit Ledger</h3>
               </div>
-            )}
-          </Card>
+              <div style={{ overflowX: "auto" }}>
+                <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Site Name</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Wages Owed</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Paid Out</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Pending Balance</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {siteLabourFinancials.map(({ site, stats }) => (
+                      <tr key={site.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "10px 14px", fontSize: "12.5px", fontWeight: "700", color: "#0f172a" }}>{site.siteName}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", fontSize: "12.5px" }}>₹{stats.totalCost.toLocaleString("en-IN")}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "#16a34a", fontFamily: "monospace", fontSize: "12.5px", fontWeight: "700" }}>₹{stats.paidAmount.toLocaleString("en-IN")}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", color: "#ef4444", fontWeight: "700", fontFamily: "monospace", fontSize: "12.5px" }}>₹{stats.pendingAmount.toLocaleString("en-IN")}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+
+            <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+              <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "12px" }}>Payout Transaction History</div>
+              {payments.length === 0 ? (
+                <p style={{ color: "#64748b", fontStyle: "italic", textAlign: "center", fontSize: "12px", margin: 0 }}>No payout transactions recorded yet.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "250px", overflowY: "auto" }}>
+                  {payments.map((p, idx) => {
+                    const site = sites.find(s => s.id === p.siteId) || { siteName: "Unknown Site" };
+                    return (
+                      <div key={p.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px", fontSize: "12px" }}>
+                        <div>
+                          Paid <strong style={{ color: "#16a34a" }}>₹{p.amount?.toLocaleString("en-IN")}</strong> to <strong>{site.siteName}</strong>
+                          <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Ref: {p.reference || "N/A"}</span>
+                        </div>
+                        <div style={{ textAlign: "right", fontSize: "10.5px", color: "#64748b" }}>
+                          <span>{p.date}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Card>
+          </div>
+
         </div>
       </div>
     );
@@ -1131,24 +1232,15 @@ export default function AdminLabour() {
   // -------------------------------------------------------------
   const renderAttendanceTab = () => {
     const filteredAttendance = allLabourAttendance.filter(r => {
-      if (adminFilterSiteId && r.siteId !== adminFilterSiteId) {
-        return false;
-      }
-      if (adminFilterDate && r.attendanceDate !== adminFilterDate) {
-        return false;
-      }
-      if (adminFilterTeamId && r.teamId !== adminFilterTeamId) {
-        return false;
-      }
-      const isAllowedSite = sites.some(s => s.id === r.siteId);
-      return isAllowedSite;
+      if (adminFilterSiteId && r.siteId !== adminFilterSiteId) return false;
+      if (adminFilterDate && r.attendanceDate !== adminFilterDate) return false;
+      if (adminFilterTeamId && r.teamId !== adminFilterTeamId) return false;
+      return sites.some(s => s.id === r.siteId);
     });
 
     let totalFullDay = 0;
     let totalHalfDay = 0;
     let totalLabour = 0;
-
-    let totalWorkUnits = 0;
     let totalLabourCost = 0;
 
     filteredAttendance.forEach(r => {
@@ -1157,283 +1249,123 @@ export default function AdminLabour() {
       const wage = Number(r.dailyWage || r.wage || 0);
       const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
 
-      totalWorkUnits += count * units;
+      if (r.attendanceType === "Full Day" || units >= 1) totalFullDay += count;
+      else if (r.attendanceType === "Half Day" || units === 0.5) totalHalfDay += count;
       totalLabourCost += cost;
       totalLabour += count;
     });
 
     const getEntryTimeStr = (record) => {
       if (!record.createdAt) return "-";
-      let dateObj;
-      if (record.createdAt.seconds) {
-        dateObj = new Date(record.createdAt.seconds * 1000);
-      } else {
-        dateObj = new Date(record.createdAt);
-      }
+      let dateObj = record.createdAt.seconds ? new Date(record.createdAt.seconds * 1000) : new Date(record.createdAt);
       if (isNaN(dateObj.getTime())) return "-";
       return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     };
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
         
-        {/* Dynamic Summary Stats Grid */}
-        <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-          gap: "16px",
-          width: "100%"
-        }}>
-          <div style={{
-            backgroundColor: "#e8f5e9",
-            borderRadius: "16px",
-            padding: "16px",
-            border: "1px solid #c8e6c9",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px"
-          }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#2e7d32", textTransform: "uppercase", letterSpacing: "0.5px" }}>Full Day Workers</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#1b5e20" }}>{totalFullDay}</span>
+        {/* Dynamic Summary Stats Row */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px" }}>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Check-ins</span>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{totalLabour}</div>
           </div>
-
-          <div style={{
-            backgroundColor: "#fff3e0",
-            borderRadius: "16px",
-            padding: "16px",
-            border: "1px solid #ffe0b2",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px"
-          }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#e65100", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#e65100" }}>{totalWorkUnits.toFixed(2)}</span>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#16a34a", textTransform: "uppercase" }}>Full Day Shifts</span>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{totalFullDay}</div>
           </div>
-
-          <div style={{
-            backgroundColor: "#f3edf7",
-            borderRadius: "16px",
-            padding: "16px",
-            border: "1px solid #e7e0ec",
-            display: "flex",
-            flexDirection: "column",
-            gap: "4px"
-          }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#6750a4", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Labour Cost</span>
-            <span style={{ fontSize: "24px", fontWeight: "900", color: "#6750a4" }}>₹{totalLabourCost.toLocaleString("en-IN")}</span>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#b45309", textTransform: "uppercase" }}>Half Day Shifts</span>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#b45309", marginTop: "2px" }}>{totalHalfDay}</div>
+          </div>
+          <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#2563eb", textTransform: "uppercase" }}>Calculated Cost</span>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#2563eb", marginTop: "2px", fontFamily: "monospace" }}>₹{totalLabourCost.toLocaleString("en-IN")}</div>
           </div>
         </div>
 
-        {/* Filters Card */}
-        <Card title="Filter Site Attendance History" subtitle="Filter real-time attendance logs for assigned construction sites.">
-          <div style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-            gap: "16px"
-          }}>
-            {/* Site Filter */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Construction Site</span>
+        {/* Filter Controls Card */}
+        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "16px 20px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: "12px", alignItems: "end" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Construction Site</label>
               <select
                 value={adminFilterSiteId}
                 onChange={(e) => setAdminFilterSiteId(e.target.value)}
-                style={{
-                  height: "40px",
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13.5px",
-                  fontWeight: "600",
-                  outline: "none",
-                  color: "var(--text-main)"
-                }}
+                style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
               >
-                <option value="">All Sites</option>
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
+                <option value="">All Construction Sites</option>
+                {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
               </select>
             </div>
 
-            {/* Date Filter */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Date</span>
-              <input 
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Attendance Date</label>
+              <input
                 type="date"
                 value={adminFilterDate}
                 onChange={(e) => setAdminFilterDate(e.target.value)}
-                style={{
-                  height: "40px",
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13.5px",
-                  outline: "none",
-                  color: "var(--text-main)"
-                }}
+                style={{ padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
               />
             </div>
 
-            {/* Team Filter */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--text-muted)" }}>Labour Team</span>
+            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+              <label style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Labour Team</label>
               <select
                 value={adminFilterTeamId}
                 onChange={(e) => setAdminFilterTeamId(e.target.value)}
-                style={{
-                  height: "40px",
-                  padding: "8px 12px",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-color)",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13.5px",
-                  fontWeight: "600",
-                  outline: "none",
-                  color: "var(--text-main)"
-                }}
+                style={{ padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
               >
-                <option value="">All Teams</option>
-                {teams.map(t => (
-                  <option key={t.id} value={t.id}>{t.teamName}</option>
-                ))}
+                <option value="">All Labour Teams</option>
+                {teams.map(t => <option key={t.id} value={t.id}>{t.teamName}</option>)}
               </select>
             </div>
-          </div>
 
-          {/* Reset Filters */}
-          {(adminFilterSiteId || adminFilterDate || adminFilterTeamId) && (
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px" }}>
-              <button
-                type="button"
-                onClick={() => {
-                  setAdminFilterSiteId("");
-                  setAdminFilterDate("");
-                  setAdminFilterTeamId("");
-                }}
-                style={{
-                  backgroundColor: "transparent",
-                  color: "var(--primary-800)",
-                  border: "none",
-                  fontSize: "12.5px",
-                  fontWeight: "700",
-                  cursor: "pointer",
-                  padding: "4px 8px"
-                }}
-              >
+            {(adminFilterSiteId || adminFilterDate || adminFilterTeamId) && (
+              <Button type="button" variant="outline" size="sm" onClick={() => { setAdminFilterSiteId(""); setAdminFilterDate(""); setAdminFilterTeamId(""); }}>
                 Clear Filters
-              </button>
-            </div>
-          )}
+              </Button>
+            )}
+          </div>
         </Card>
 
-        {/* History Cards Logs */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-          <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--text-main)" }}>Detailed Attendance Logs</h3>
+        {/* Detailed Attendance Logs Grid */}
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Detailed Attendance Logs</h3>
           
           {filteredAttendance.length === 0 ? (
-            <div style={{
-              textAlign: "center",
-              padding: "48px 24px",
-              backgroundColor: "#ffffff",
-              borderRadius: "16px",
-              border: "1px dashed var(--border-color)",
-              color: "var(--text-muted)",
-              fontSize: "14px"
-            }}>
+            <div style={{ textAlign: "center", padding: "32px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px dashed #cbd5e1", color: "#64748b", fontSize: "12.5px" }}>
               No attendance logs found matching the selected filters.
             </div>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "14px" }}>
               {filteredAttendance.map((record, index) => {
                 const site = sites.find(s => s.id === record.siteId) || { siteName: "Unknown Site" };
                 const team = teams.find(t => t.id === record.teamId) || { teamName: "Unknown Team" };
-                
-                let catName = "Unknown";
-                if (team.categories && team.categories[record.categoryId]) {
-                  catName = team.categories[record.categoryId].name;
-                } else if (record.categoryId) {
-                  catName = record.categoryId;
-                }
-                
                 const workerCount = record.workerCount !== undefined ? record.workerCount : 1;
-                const fullCount = record.workerCount !== undefined ? (record.attendanceType === "Full Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 1.0 ? 1 : 0);
-                const halfCount = record.workerCount !== undefined ? (record.attendanceType === "Half Day" ? record.workerCount : 0) : (Number(record.attendanceValue) === 0.5 ? 1 : 0);
-                
-                let formattedDate = record.attendanceDate;
-                try {
-                  const [y, m, d] = record.attendanceDate.split("-");
-                  if (y && m && d) formattedDate = `${d}-${m}-${y}`;
-                } catch (e) {}
 
                 return (
-                  <div key={record.id || index} style={{
-                    backgroundColor: "#ffffff",
-                    borderRadius: "16px",
-                    border: "1px solid var(--border-color)",
-                    padding: "16px",
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "10px",
-                    boxShadow: "0px 1px 3px rgba(0,0,0,0.05)"
-                  }}>
+                  <div key={record.id || index} style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "14px", display: "flex", flexDirection: "column", gap: "8px", boxShadow: "0 2px 6px rgba(0,0,0,0.03)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontSize: "14px", fontWeight: "800", color: "var(--text-main)" }}>
-                        {site.siteName}
-                      </span>
-                      <span style={{
-                        fontSize: "11px",
-                        fontWeight: "700",
-                        color: "var(--success-700)",
-                        backgroundColor: "var(--success-50)",
-                        padding: "2px 8px",
-                        borderRadius: "12px"
-                      }}>
+                      <strong style={{ fontSize: "13.5px", color: "#0f172a" }}>{site.siteName}</strong>
+                      <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "100px" }}>
                         Present
                       </span>
                     </div>
 
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", color: "var(--text-muted)" }}>
-                      <span>Date: <strong>{formattedDate}</strong></span>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "#64748b" }}>
+                      <span>Date: <strong>{record.attendanceDate}</strong></span>
                       <span>Time: {getEntryTimeStr(record)}</span>
                     </div>
 
-                    <div style={{ fontSize: "13px", color: "var(--text-muted)", borderTop: "1px solid var(--border-color)", paddingTop: "8px" }}>
-                      Team: <strong style={{ color: "var(--text-main)" }}>{team.teamName}</strong> | Category: <strong style={{ color: "var(--text-main)" }}>{catName}</strong>
+                    <div style={{ fontSize: "12px", color: "#475569", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
+                      Team: <strong style={{ color: "#0f172a" }}>{team.teamName}</strong>
                     </div>
 
-                    {/* Counts Grid */}
-                    <div style={{
-                      display: "grid",
-                      gridTemplateColumns: "repeat(4, 1fr)",
-                      gap: "6px",
-                      backgroundColor: "#f9f9fa",
-                      borderRadius: "10px",
-                      padding: "8px",
-                      textAlign: "center",
-                      marginTop: "4px"
-                    }}>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Count</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--text-main)" }}>{workerCount}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Full</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--success-600)" }}>{fullCount}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Half</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--warning-600)" }}>{halfCount}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <span style={{ fontSize: "9px", fontWeight: "700", color: "var(--text-muted)" }}>Total</span>
-                        <span style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)" }}>{workerCount}</span>
-                      </div>
-                    </div>
-
-                    <div style={{ fontSize: "11px", color: "var(--text-muted)", borderTop: "1px solid var(--border-color)", paddingTop: "8px", marginTop: "4px", textAlign: "right" }}>
-                      Logged By: {record.loggedBy || "Site Engineer"}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px", fontSize: "11.5px" }}>
+                      <span style={{ color: "#64748b" }}>Worker Count</span>
+                      <strong style={{ color: "#0f172a" }}>{workerCount} workers</strong>
                     </div>
                   </div>
                 );
@@ -1448,8 +1380,8 @@ export default function AdminLabour() {
 
   return (
     <Layout
-      title="Labour & Wage Administration console"
-      description="Define corporate trade wage rates, assign workers to site checklists, and track pending salary balances."
+      title="Labour Management"
+      description="Define trade teams, assign workers to site checklists, and manage field payroll."
     >
       {toast.show && (
         <div id="toast-container" className="toast-container">
@@ -1459,8 +1391,83 @@ export default function AdminLabour() {
         </div>
       )}
 
-      {/* Tabs Menu navigation */}
-      <div className="erp-tabs-list no-print" style={{ marginBottom: "24px" }}>
+      {/* ── TOP SUMMARY CARDS (EXACT 5 COMPACT CARDS) ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "14px", marginBottom: "20px" }}>
+        
+        {/* Card 1: Total Labour Teams */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Teams</span>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+              <Users size={16} style={{ margin: "auto" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{teams.length}</div>
+          <span style={{ fontSize: "10.5px", color: "#64748b", marginTop: "6px", display: "block" }}>Trade labor groups</span>
+        </div>
+
+        {/* Card 2: Total Workers */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Workers</span>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+              <UserCheck size={16} style={{ margin: "auto" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{workers.length}</div>
+          <span style={{ fontSize: "10.5px", color: "#16a34a", marginTop: "6px", display: "block", fontWeight: "600" }}>Registered workforce</span>
+        </div>
+
+        {/* Card 3: Active Workers Today */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Active Today</span>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+              <Activity size={16} style={{ margin: "auto" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+            {allLabourAttendance.filter(r => r.attendanceDate === new Date().toISOString().split("T")[0]).length}
+          </div>
+          <span style={{ fontSize: "10.5px", color: "#ea580c", marginTop: "6px", display: "block", fontWeight: "600" }}>On-site active workers</span>
+        </div>
+
+        {/* Card 4: Pending Salary */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Pending Salary</span>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#fef2f2", color: "#ef4444", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+              <DollarSign size={16} style={{ margin: "auto" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: "20px", fontWeight: "800", color: "#ef4444", lineHeight: "1", fontFamily: "monospace" }}>
+            ₹{sites.reduce((acc, site) => {
+              const hist = allLabourHistory[site.id] || [];
+              const stats = calculateLabourFinancials(site.id, hist, labourMaster.categories, payments);
+              return acc + stats.pendingAmount;
+            }, 0).toLocaleString("en-IN")}
+          </div>
+          <span style={{ fontSize: "10.5px", color: "#64748b", marginTop: "6px", display: "block" }}>Unsettled wages</span>
+        </div>
+
+        {/* Card 5: Attendance Today */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Attendance Today</span>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#f3e8ff", color: "#8b5cf6", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+              <Calendar size={16} style={{ margin: "auto" }} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+            {allLabourAttendance.filter(r => r.attendanceDate === new Date().toISOString().split("T")[0]).length}
+          </div>
+          <span style={{ fontSize: "10.5px", color: "#8b5cf6", marginTop: "6px", display: "block", fontWeight: "600" }}>Check-ins logged</span>
+        </div>
+
+      </div>
+
+      {/* Sticky Tabs Navigation */}
+      <div className="erp-tabs-list no-print" style={{ position: "sticky", top: "10px", zIndex: 90, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", padding: "8px 12px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", marginBottom: "20px" }}>
         <button
           onClick={() => setActiveTab("master")}
           className={`erp-tab-button ${activeTab === "master" ? "active" : ""}`}
@@ -1487,7 +1494,7 @@ export default function AdminLabour() {
           className={`erp-tab-button ${activeTab === "attendance" ? "active" : ""}`}
         >
           <Calendar size={14} style={{ marginRight: "6px", display: "inline-block", verticalAlign: "middle" }} />
-          <span style={{ verticalAlign: "middle" }}>Attendance History</span>
+          <span style={{ verticalAlign: "middle" }}>Attendance</span>
         </button>
       </div>
 

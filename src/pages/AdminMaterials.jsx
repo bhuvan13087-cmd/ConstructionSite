@@ -381,7 +381,6 @@ export default function AdminMaterials() {
       <div style={{ display: "flex", gap: "12px", borderBottom: "2px solid #e2e8f0", paddingBottom: "2px", marginBottom: "20px" }}>
         {[
           { id: "master", label: "Material Master lookup", icon: Database },
-          { id: "requests", label: `Approval Queue (${pendingRequests.length})`, icon: Clock },
           { id: "inventory", label: "Inventory & Consumption", icon: Package },
           { id: "payments", label: "Supplier Payments ledger", icon: DollarSign }
         ].map(t => {

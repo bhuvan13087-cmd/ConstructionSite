@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import Layout from "../components/layout/Layout";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
@@ -50,10 +50,92 @@ export default function SiteDetails({ siteId, onBack }) {
   const [progressUpdates, setProgressUpdates] = useState([]);
   const [photos, setPhotos] = useState([]);
   const [expenses, setExpenses] = useState([]);
+  const [sitePayments, setSitePayments] = useState([]);
+  const [teams, setTeams] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+
+  const siteLabourFinancials = useMemo(() => {
+    let grossAmount = 0;
+    (labourHistory || []).forEach(row => {
+      if (row.totalAmount) {
+        grossAmount += Number(row.totalAmount) || 0;
+      } else if (row.calculatedAmount) {
+        grossAmount += Number(row.calculatedAmount) || 0;
+      } else if (row.workerCount) {
+        const wage = Number(row.dailyWage || row.wage || 500);
+        const units = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1));
+        grossAmount += Number(row.workerCount) * units * wage;
+      } else {
+        grossAmount += (Number(row.wage) || 500) * (Number(row.units) || 1);
+      }
+    });
+
+    const advancePaid = (sitePayments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const netPayable = Math.max(0, grossAmount - advancePaid);
+
+    return {
+      grossAmount,
+      advancePaid,
+      netPayable
+    };
+  }, [labourHistory, sitePayments]);
+
+  const [advanceDate, setAdvanceDate] = useState(new Date().toISOString().split("T")[0]);
+  const [advanceAmount, setAdvanceAmount] = useState("");
+  const [advanceNotes, setAdvanceNotes] = useState("");
+  const [savingAdvance, setSavingAdvance] = useState(false);
+
+  const autoTeam = useMemo(() => {
+    if (teams && teams.length > 0) {
+      const siteTeamId = site?.teamId;
+      if (siteTeamId) {
+        const found = teams.find(t => t.id === siteTeamId);
+        if (found) return found;
+      }
+      const foundInAtt = (attendance || []).find(a => a.teamId);
+      if (foundInAtt) {
+        const found = teams.find(t => t.id === foundInAtt.teamId);
+        if (found) return found;
+      }
+      if (teams[0]) return teams[0];
+    }
+    return {
+      id: "auto_team",
+      teamName: `${site?.siteName || "Site"} Workforce Team`
+    };
+  }, [teams, site, attendance]);
+
+  const handleSaveLabourAdvance = async (e) => {
+    e.preventDefault();
+    if (!advanceAmount || isNaN(Number(advanceAmount)) || Number(advanceAmount) <= 0) {
+      showToast("Please enter a valid advance amount.", "error");
+      return;
+    }
+    setSavingAdvance(true);
+    try {
+      await saveLabourPayment({
+        siteId,
+        teamId: autoTeam.id,
+        teamName: autoTeam.teamName,
+        amount: Number(advanceAmount),
+        date: advanceDate,
+        notes: advanceNotes.trim()
+      });
+      showToast("Labour advance saved successfully!", "success");
+      setAdvanceAmount("");
+      setAdvanceNotes("");
+      const refreshedPayments = await getLabourPayments(siteId);
+      setSitePayments(refreshedPayments || []);
+    } catch (err) {
+      console.error("Failed to save advance:", err);
+      showToast(`Failed to save advance: ${err.message}`, "error");
+    } finally {
+      setSavingAdvance(false);
+    }
+  };
 
   // Filters State
   const [materialDateFilter, setMaterialDateFilter] = useState("");
@@ -339,7 +421,7 @@ export default function SiteDetails({ siteId, onBack }) {
     { id: "materials", label: "Material Log", icon: Package },
     { id: "labour", label: "Labour Log", icon: Users },
     { id: "labour_advance", label: "Labour Advance", icon: DollarSign },
-    { id: "attendance", label: "Attendance / Entry Exit", icon: ClipboardCheck },
+    { id: "attendance", label: "Attendance", icon: ClipboardCheck },
     { id: "progress", label: "Progress", icon: FileText },
     { id: "photos", label: "Photos", icon: Camera },
     { id: "reports", label: "Reports", icon: Printer }
@@ -522,50 +604,43 @@ export default function SiteDetails({ siteId, onBack }) {
         </div>
       )}
 
-      {/* Header Back Bar (Breadcrumbs) */}
-      <div className="erp-breadcrumbs no-print" style={{ marginBottom: "16px", display: "flex", alignItems: "center", width: "100%" }}>
-        <span className="clickable" onClick={onBack}>Construction Sites</span>
-        <span className="erp-breadcrumbs-separator">/</span>
-        <span className="erp-breadcrumbs-current">{site.siteName}</span>
-        <span style={{ marginLeft: "auto", fontSize: "13px", fontWeight: "600", color: "var(--text-muted)" }}>
-          Site Status: <Badge status={site.status || "Planning"} />
-        </span>
-      </div>
-
-      {/* Site Header Panel */}
-      <div style={{
-        backgroundColor: "#ffffff",
-        borderRadius: "var(--radius-md)",
-        border: "1px solid var(--border-color)",
-        padding: "24px",
-        marginBottom: "24px",
-        boxShadow: "var(--shadow-sm)",
-        display: "flex",
-        flexDirection: "column",
-        gap: "16px"
-      }} className="no-print">
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "24px", fontWeight: "800", color: "var(--primary-950)" }}>{site.siteName}</h2>
-            <p style={{ margin: "4px 0 0 0", fontSize: "14px", color: "var(--text-muted)", fontWeight: "500", display: "flex", alignItems: "center", gap: "6px" }}>
-              <MapPin size={16} /> {site.location}
-            </p>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px", textAlign: "right" }}>
+      {/* Header Bar */}
+      <div className="no-print" style={{ backgroundColor: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", marginBottom: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <button type="button" onClick={onBack} className="btn btn-outline" style={{ padding: "6px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+              <ArrowLeft size={14} /> Back
+            </button>
             <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Start Date</span>
-              <strong style={{ fontSize: "14px", color: "var(--primary-900)" }} className="font-mono">{site.startDate || "--"}</strong>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: "#0f172a" }}>{site.siteName}</h2>
+                <Badge status={site.status || "active"} />
+              </div>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b", display: "flex", alignItems: "center", gap: "4px" }}>
+                <MapPin size={13} style={{ color: "#ea580c" }} /> {site.location}
+              </p>
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Expected End</span>
-              <strong style={{ fontSize: "14px", color: "var(--primary-900)" }} className="font-mono">{site.expectedEndDate || "--"}</strong>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "24px", flexWrap: "wrap" }}>
+            <div style={{ fontSize: "12px" }}>
+              <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Client</span>
+              <strong style={{ color: "#0f172a", fontWeight: "700" }}>{site.clientName || "Internal Project"}</strong>
+            </div>
+            <div style={{ fontSize: "12px" }}>
+              <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Assigned Engineer</span>
+              <strong style={{ color: "#0f172a", fontWeight: "700" }}>{engineers.map(e => e.fullName).join(", ") || "Unassigned"}</strong>
+            </div>
+            <div style={{ fontSize: "12px", textAlign: "right" }}>
+              <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Progress</span>
+              <strong style={{ color: "#16a34a", fontWeight: "800", fontSize: "16px" }}>{Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%</strong>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs Switcher */}
-      <div className="erp-tabs-list no-print">
+      {/* Sticky Tabs Switcher */}
+      <div className="erp-tabs-list no-print" style={{ position: "sticky", top: "10px", zIndex: 90, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", padding: "8px 12px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", marginBottom: "20px" }}>
         {tabs.map(tab => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -589,156 +664,225 @@ export default function SiteDetails({ siteId, onBack }) {
             TAB: OVERVIEW
             =================================================================== */}
         {activeTab === "overview" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-            {/* Quick Metrics Grid */}
-            <div className="erp-kpi-grid" style={{ marginBottom: "24px" }}>
-              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #3b82f6" }}>
-                <div className="erp-kpi-content">
-                  <span className="erp-kpi-label">Material Shipments</span>
-                  <span className="erp-kpi-num">{materials.length}</span>
-                  <span className="erp-kpi-footer">total registered ledger inputs</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+            
+            {/* EXACT 4 COMPACT KPI CARDS */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+              
+              {/* KPI 1: Today's Labour */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Labour</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+                    <Users size={18} style={{ margin: "auto" }} />
+                  </div>
                 </div>
-              </div>
-              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #10b981" }}>
-                <div className="erp-kpi-content">
-                  <span className="erp-kpi-label">Labor logs</span>
-                  <span className="erp-kpi-num">{labourHistory.length}</span>
-                  <span className="erp-kpi-footer">active days reported</span>
+                <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+                  {attendance.filter(a => a.date === new Date().toISOString().split("T")[0]).length || labourHistory.length}
                 </div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Attendance check-ins today</span>
               </div>
-              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #f59e0b" }}>
-                <div className="erp-kpi-content">
-                  <span className="erp-kpi-label">Progress Updates</span>
-                  <span className="erp-kpi-num">{progressUpdates.length}</span>
-                  <span className="erp-kpi-footer">milestones logged</span>
+
+              {/* KPI 2: Today's Material Entries */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Material Entries</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+                    <Package size={18} style={{ margin: "auto" }} />
+                  </div>
                 </div>
+                <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{processedMaterials.length}</div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Registered material items</span>
               </div>
-              <div className="erp-kpi-card" style={{ borderLeft: "4px solid #ec4899" }}>
-                <div className="erp-kpi-content">
-                  <span className="erp-kpi-label">Uploaded Photos</span>
-                  <span className="erp-kpi-num">{photos.length}</span>
-                  <span className="erp-kpi-footer">site inspection snaps</span>
+
+              {/* KPI 3: Today's Expenses */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Expenses</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fef3c7", color: "#b45309", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+                    <DollarSign size={18} style={{ margin: "auto" }} />
+                  </div>
                 </div>
+                <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>₹{totalExpense.toLocaleString("en-IN")}</div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Approved site expenses</span>
               </div>
+
+              {/* KPI 4: Overall Progress */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Overall Progress</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#e0f2fe", color: "#0369a1", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+                    <Activity size={18} style={{ margin: "auto" }} />
+                  </div>
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+                  {Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%
+                </div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Milestone completion meter</span>
+              </div>
+
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-              {/* Budget Tracking Card */}
-              <Card title="Financial & Budget Audit" subtitle="Real-time site budget utilization against actual expenses">
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Total Site Budget</span>
-                    <span style={{ fontWeight: "800", color: "var(--primary-900)", fontFamily: "monospace" }}>₹{budget.toLocaleString("en-IN")}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Total Approved Expense</span>
-                    <span style={{ fontWeight: "800", color: "var(--primary-900)", fontFamily: "monospace" }}>₹{totalExpense.toLocaleString("en-IN")}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Remaining Budget</span>
-                    <span style={{ fontWeight: "800", color: remainingBudget < 0 ? "var(--danger-700)" : "var(--success-700)", fontFamily: "monospace" }}>
-                      ₹{remainingBudget.toLocaleString("en-IN")}
+            {/* TWO-COLUMN RESPONSIVE LAYOUT */}
+            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px" }}>
+              
+              {/* LEFT COLUMN: PROGRESS SUMMARY & SITE INFORMATION */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                
+                {/* PROGRESS SUMMARY (LATEST DPR) */}
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                    <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                      <FileText size={16} style={{ color: "#ea580c" }} /> Progress Summary (Latest DPR)
                     </span>
+                    <button type="button" onClick={() => setActiveTab("progress")} className="btn btn-outline" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                      View All DPRs →
+                    </button>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: "700" }}>
-                      <span style={{ color: "var(--text-muted)" }}>Budget Utilization</span>
-                      <span style={{ color: budgetUtilization > 100 ? "var(--danger-700)" : (budgetUtilization > 80 ? "var(--warning-700)" : "var(--success-700)") }}>
-                        {budgetUtilization.toFixed(1)}%
+
+                  {progressUpdates.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "20px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: "12.5px", color: "#64748b" }}>No daily progress reports logged for this site yet.</span>
+                    </div>
+                  ) : (
+                    <div style={{ backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "14px 16px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>Work Summary ({progressUpdates[0].date || "Today"})</strong>
+                        <span style={{ fontSize: "11px", fontWeight: "700", backgroundColor: "#dcfce7", color: "#16a34a", padding: "2px 8px", borderRadius: "100px" }}>
+                          By: {progressUpdates[0].engineerName || "Site Engineer"}
+                        </span>
+                      </div>
+                      <p style={{ margin: "0 0 8px 0", fontSize: "12px", color: "#334155", lineHeight: "1.4" }}>
+                        {progressUpdates[0].workDone || progressUpdates[0].description || "Daily progress updates logged successfully."}
+                      </p>
+                      {progressUpdates[0].remarks && (
+                        <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic", borderTop: "1px solid #e2e8f0", paddingTop: "6px" }}>
+                          Remarks: {progressUpdates[0].remarks}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+
+                {/* SITE INFORMATION */}
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Building2 size={16} style={{ color: "#ea580c" }} /> Site Information
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ color: "#64748b", fontWeight: "600" }}>Client / Owner</span>
+                      <strong style={{ color: "#0f172a" }}>{site.clientName || "Internal Project"}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ color: "#64748b", fontWeight: "600" }}>Site Address</span>
+                      <strong style={{ color: "#0f172a", textAlign: "right", maxWidth: "200px" }}>{site.location}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ color: "#64748b", fontWeight: "600" }}>Start Date</span>
+                      <strong style={{ color: "#0f172a" }}>{site.startDate || "--"}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ color: "#64748b", fontWeight: "600" }}>Expected End</span>
+                      <strong style={{ color: "#0f172a" }}>{site.expectedEndDate || "--"}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ color: "#64748b", fontWeight: "600" }}>GPS Radius</span>
+                      <strong style={{ color: "#0f172a" }}>{site.radius ? `${site.radius}m` : "100m"}</strong>
+                    </div>
+                  </div>
+                </Card>
+
+              </div>
+
+              {/* RIGHT COLUMN: BUDGET SUMMARY & PENDING ACTIONS */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+                
+                {/* BUDGET SUMMARY CARD */}
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <DollarSign size={16} style={{ color: "#16a34a" }} /> Budget Summary
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Total Budget</span>
+                      <strong style={{ fontSize: "13px", color: "#0f172a", fontFamily: "monospace" }}>₹{budget.toLocaleString("en-IN")}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Approved Expense</span>
+                      <strong style={{ fontSize: "13px", color: "#0f172a", fontFamily: "monospace" }}>₹{totalExpense.toLocaleString("en-IN")}</strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
+                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Remaining</span>
+                      <strong style={{ fontSize: "13px", color: remainingBudget < 0 ? "#ef4444" : "#16a34a", fontFamily: "monospace" }}>₹{remainingBudget.toLocaleString("en-IN")}</strong>
+                    </div>
+
+                    <div style={{ marginTop: "4px" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
+                        <span style={{ color: "#64748b" }}>Utilization</span>
+                        <span style={{ color: budgetUtilization > 100 ? "#ef4444" : "#16a34a" }}>{budgetUtilization.toFixed(1)}%</span>
+                      </div>
+                      <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                        <div style={{ width: `${Math.min(budgetUtilization, 100)}%`, height: "100%", backgroundColor: budgetUtilization > 100 ? "#ef4444" : (budgetUtilization > 80 ? "#f97316" : "#16a34a") }} />
+                      </div>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* IMPROVED SITE-SPECIFIC PENDING ACTIONS CARD */}
+                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
+                    <ClipboardCheck size={16} style={{ color: "#b45309" }} /> Pending Actions
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px" }}>
+                    {/* 1. Pending Daily Progress */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Daily Progress</span>
+                      {progressUpdates.some(p => p.date === new Date().toISOString().split("T")[0]) ? (
+                        <span style={{ fontWeight: "700", color: "#16a34a", fontSize: "11px" }}>Logged Today ✓</span>
+                      ) : (
+                        <span style={{ fontWeight: "700", color: "#b45309", fontSize: "11px" }}>Pending Today's DPR</span>
+                      )}
+                    </div>
+
+                    {/* 2. Pending Material Approval */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Material Approval</span>
+                      <span style={{ fontWeight: "700", color: totalPendingDel > 0 ? "#b45309" : "#16a34a", fontSize: "11px" }}>
+                        {totalPendingDel > 0 ? `${totalPendingDel} Deliveries Pending` : "All Delivered ✓"}
                       </span>
                     </div>
-                    {/* Clean Progress Bar */}
-                    <div style={{ width: "100%", height: "10px", backgroundColor: "#e2e8f0", borderRadius: "5px", overflow: "hidden" }}>
-                      <div style={{
-                        width: `${Math.min(budgetUtilization, 100)}%`,
-                        height: "100%",
-                        backgroundColor: budgetUtilization > 100 ? "#b3261e" : (budgetUtilization > 80 ? "#e65100" : "#2e7d32"),
-                        borderRadius: "5px",
-                        transition: "width 0.4s ease"
-                      }} />
-                    </div>
-                  </div>
-                  
-                  {/* Warning Alerts */}
-                  {budgetUtilization > 100 ? (
-                    <div style={{ backgroundColor: "#fde8e8", border: "1px solid #f8b4b4", borderRadius: "8px", padding: "10px", color: "#b3261e", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <AlertCircle size={16} /> ⚠️ DANGER: site expenses have exceeded 100% of the allocated budget!
-                    </div>
-                  ) : budgetUtilization > 80 ? (
-                    <div style={{ backgroundColor: "#fff3e0", border: "1px solid #ffe0b2", borderRadius: "8px", padding: "10px", color: "#e65100", fontSize: "12px", fontWeight: "600", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <AlertCircle size={16} /> ⚠️ WARNING: site expenses have exceeded 80% of the allocated budget.
-                    </div>
-                  ) : null}
-                </div>
-              </Card>
 
-              {/* Site Details card */}
-              <Card title="Site Specifications">
-                <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Client / Owner</span>
-                    <span style={{ fontWeight: "700", color: "var(--primary-900)" }}>{site.clientName || "--"}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Site Address</span>
-                    <span style={{ fontWeight: "700", color: "var(--primary-900)", textAlign: "right", maxWidth: "200px" }}>{site.location}</span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Established GPS Coordinates</span>
-                    <span style={{ fontWeight: "700", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                      {site.latitude && site.longitude ? `${Number(site.latitude).toFixed(6)}, ${Number(site.longitude).toFixed(6)}` : "Not Established"}
-                    </span>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", paddingBottom: "4px" }}>
-                    <span style={{ fontWeight: "600", color: "var(--text-muted)" }}>Fence Radius</span>
-                    <span style={{ fontWeight: "700", color: "var(--primary-900)" }}>{site.radius ? `${site.radius} meters` : "100 meters"}</span>
-                  </div>
-                </div>
-              </Card>
+                    {/* 3. Pending Labour Update */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Labour Update</span>
+                      <span style={{ fontWeight: "700", color: siteLabourFinancials.netPayable > 0 ? "#2563eb" : "#16a34a", fontSize: "11px" }}>
+                        ₹{siteLabourFinancials.netPayable.toLocaleString("en-IN")} Net Payable
+                      </span>
+                    </div>
 
-              {/* Assigned Site Engineers card */}
-              <Card title="Assigned Site Engineers" subtitle="Personnel designated to capture site records">
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {engineers.length === 0 ? (
-                    <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", margin: 0 }}>
-                      No engineers assigned to this site currently.
-                    </p>
-                  ) : (
-                    engineers.map(eng => (
-                      <div key={eng.id} style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        padding: "10px 14px",
-                        borderRadius: "8px",
-                        backgroundColor: "var(--primary-50)",
-                        border: "1px solid var(--border-color)"
-                      }}>
-                        <div style={{
-                          width: "32px",
-                          height: "32px",
-                          borderRadius: "50%",
-                          backgroundColor: "var(--primary-200)",
-                          color: "var(--primary-800)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontWeight: "800",
-                          fontSize: "12px"
-                        }}>
-                          {eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE"}
-                        </div>
-                        <div style={{ display: "flex", flexDirection: "column", flexGrow: 1 }}>
-                          <span style={{ fontSize: "13.5px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{eng.email} • {eng.phoneNumber}</span>
-                        </div>
-                        <Badge status={eng.status || "active"} />
-                      </div>
-                    ))
-                  )}
-                </div>
-              </Card>
+                    {/* 4. Pending Expense Approval */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Expense Approval</span>
+                      {(() => {
+                        const pendingExpCount = expenses.filter(e => e.status === "Pending" || e.status === "pending").length;
+                        return (
+                          <span style={{ fontWeight: "700", color: pendingExpCount > 0 ? "#ef4444" : "#16a34a", fontSize: "11px" }}>
+                            {pendingExpCount > 0 ? `${pendingExpCount} Pending Approval` : "All Approved ✓"}
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                </Card>
+
+              </div>
+
             </div>
+
           </div>
         )}
 

@@ -162,6 +162,9 @@ export default function ApprovalsDashboard() {
 
   // Apply filters
   const filteredRequests = allRequests.filter(r => {
+    // Material approvals are removed from UI
+    if (r.type === "Material") return false;
+
     const rStatus = (r.status || "").toLowerCase();
     const fStatus = filterStatus.toLowerCase();
     
@@ -259,7 +262,6 @@ export default function ApprovalsDashboard() {
                 <option value="all">All Request Types</option>
                 <option value="Leave">Leaves</option>
                 <option value="Location">Locations</option>
-                <option value="Material">Materials</option>
                 <option value="Payment">Payments & Expenses</option>
                 <option value="Labour">Labour Requests</option>
               </select>

@@ -90,21 +90,22 @@ export default function Sidebar({ isOpen, onClose }) {
         }
 
         .nav-item.active {
-          background-color: rgba(255, 255, 255, 0.08) !important;
-          border-color: rgba(255, 255, 255, 0.08) !important;
-          color: #f59e0b !important;
-          box-shadow: none;
+          background: linear-gradient(135deg, #f97316 0%, #ea580c 100%) !important;
+          border-color: transparent !important;
+          color: #ffffff !important;
+          box-shadow: 0 4px 14px 0 rgba(249, 115, 22, 0.35) !important;
+          font-weight: 700 !important;
         }
 
         .nav-item svg {
-          opacity: 0.8;
+          opacity: 0.85;
           transition: transform 0.2s ease;
           color: currentColor;
         }
 
         .nav-item:hover svg {
           opacity: 1;
-          transform: translateX(1px);
+          transform: translateX(2px);
         }
 
         .sidebar-footer {
@@ -121,17 +122,18 @@ export default function Sidebar({ isOpen, onClose }) {
         }
 
         .user-avatar {
-          width: 34px;
-          height: 34px;
-          background: linear-gradient(135deg, #f59e0b, #d97706);
+          width: 36px;
+          height: 36px;
+          background: linear-gradient(135deg, #f97316, #ea580c);
           color: #ffffff;
           border-radius: 50%;
           display: flex;
           align-items: center;
           justify-content: center;
           font-weight: 800;
-          font-size: 12px;
-          border: 1px solid rgba(255,255,255,0.15);
+          font-size: 13px;
+          box-shadow: 0 2px 8px rgba(249, 115, 22, 0.3);
+          border: 1px solid rgba(255,255,255,0.2);
         }
 
         .user-name {
@@ -181,7 +183,7 @@ export default function Sidebar({ isOpen, onClose }) {
       <nav className="sidebar-nav">
         {userProfile?.role === "super_admin" || userProfile?.role === "superadmin" ? (
           <>
-            <NavGroupTitle>Executive Console</NavGroupTitle>
+            <NavGroupTitle>ERP Navigation</NavGroupTitle>
             <NavLink 
               to="/superadmin" 
               end 
@@ -189,114 +191,17 @@ export default function Sidebar({ isOpen, onClose }) {
               onClick={onClose}
             >
               <LayoutDashboard size={18} />
-              <span>Executive Overview</span>
+              <span>Dashboard</span>
             </NavLink>
             
-            <NavGroupTitle>Operations &amp; Finance</NavGroupTitle>
+            <NavGroupTitle>Projects</NavGroupTitle>
             <NavLink 
               to="/superadmin/sites" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
             >
               <MapPin size={18} />
-              <span>Site Monitoring</span>
-            </NavLink>
-
-            <NavLink 
-              to="/superadmin/finance" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <DollarSign size={18} />
-              <span>Financial Monitoring</span>
-            </NavLink>
-
-            <NavLink 
-              to="/superadmin/payroll" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <FileText size={18} />
-              <span>Payroll Summary</span>
-            </NavLink>
-
-            <NavGroupTitle>Approvals &amp; Progress</NavGroupTitle>
-            <NavLink 
-              to="/superadmin/progress" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <TrendingUp size={18} />
-              <span>Progress Tracking</span>
-            </NavLink>
-
-            <NavLink 
-              to="/superadmin/approvals" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <CheckSquare size={18} />
-              <span>Approval Center</span>
-            </NavLink>
-
-            <NavGroupTitle>Information Ledger</NavGroupTitle>
-            <NavLink 
-              to="/superadmin/reports" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <FileText size={18} />
-              <span>Management Reports</span>
-            </NavLink>
-
-            <NavLink 
-              to="/superadmin/documents" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <FolderOpen size={18} />
-              <span>Project Documents</span>
-            </NavLink>
-          </>
-        ) : hasPermission(userProfile?.role, "view", "approvals") ? (
-          <>
-            <NavGroupTitle>Core Console</NavGroupTitle>
-            <NavLink 
-              to="/admin" 
-              end 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <LayoutDashboard size={18} />
-              <span>Overview Dashboard</span>
-            </NavLink>
-            
-            <NavLink 
-              to="/admin/approvals" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <CheckSquare size={18} />
-              <span>Approval Dashboard</span>
-            </NavLink>
-
-            <NavGroupTitle>Operations</NavGroupTitle>
-            <NavLink 
-              to="/admin/sites" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <MapPin size={18} />
               <span>Construction Sites</span>
-            </NavLink>
-
-            <NavLink 
-              to="/admin/engineers" 
-              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
-              onClick={onClose}
-            >
-              <Users size={18} />
-              <span>Site Engineers</span>
             </NavLink>
 
             <NavLink 
@@ -308,14 +213,130 @@ export default function Sidebar({ isOpen, onClose }) {
               <span>Site Assignments</span>
             </NavLink>
 
-            <NavGroupTitle>Logistics &amp; Workforce</NavGroupTitle>
+            <NavGroupTitle>Workforce &amp; Logistics</NavGroupTitle>
+            <NavLink 
+              to="/admin/engineers" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Engineers</span>
+            </NavLink>
+
             <NavLink 
               to="/admin/labour" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
             >
               <Users size={18} />
-              <span>Labour Master</span>
+              <span>Labour</span>
+            </NavLink>
+
+            <NavLink 
+              to="/superadmin/finance" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Package size={18} />
+              <span>Materials</span>
+            </NavLink>
+
+            <NavGroupTitle>Finance &amp; Audit</NavGroupTitle>
+            <NavLink 
+              to="/superadmin/payroll" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <DollarSign size={18} />
+              <span>Expenses</span>
+            </NavLink>
+
+            <NavLink 
+              to="/superadmin/payroll" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FileText size={18} />
+              <span>Payroll</span>
+            </NavLink>
+
+            <NavGroupTitle>Ledger &amp; System</NavGroupTitle>
+            <NavLink 
+              to="/superadmin/reports" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <TrendingUp size={18} />
+              <span>Reports</span>
+            </NavLink>
+
+            <NavLink 
+              to="/superadmin/approvals" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <CheckSquare size={18} />
+              <span>Approval Center</span>
+            </NavLink>
+
+            <NavLink 
+              to="/superadmin/documents" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FolderOpen size={18} />
+              <span>Settings &amp; Documents</span>
+            </NavLink>
+          </>
+        ) : hasPermission(userProfile?.role, "view", "approvals") ? (
+          <>
+            <NavGroupTitle>Main Console</NavGroupTitle>
+            <NavLink 
+              to="/admin" 
+              end 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <LayoutDashboard size={18} />
+              <span>Dashboard</span>
+            </NavLink>
+
+            <NavGroupTitle>Projects</NavGroupTitle>
+            <NavLink 
+              to="/admin/sites" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <MapPin size={18} />
+              <span>Construction Sites</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/assignments" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <ClipboardCheck size={18} />
+              <span>Site Assignments</span>
+            </NavLink>
+
+            <NavGroupTitle>Workforce &amp; Logistics</NavGroupTitle>
+            <NavLink 
+              to="/admin/engineers" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Engineers</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/labour" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Users size={18} />
+              <span>Labour</span>
             </NavLink>
 
             <NavLink 
@@ -324,7 +345,7 @@ export default function Sidebar({ isOpen, onClose }) {
               onClick={onClose}
             >
               <Package size={18} />
-              <span>Materials Management</span>
+              <span>Materials</span>
             </NavLink>
 
             <NavGroupTitle>Finance &amp; Audit</NavGroupTitle>
@@ -334,7 +355,7 @@ export default function Sidebar({ isOpen, onClose }) {
               onClick={onClose}
             >
               <DollarSign size={18} />
-              <span>Payments &amp; Expenses</span>
+              <span>Expenses</span>
             </NavLink>
 
             <NavLink 
@@ -343,17 +364,17 @@ export default function Sidebar({ isOpen, onClose }) {
               onClick={onClose}
             >
               <FileText size={18} />
-              <span>Payroll Summary</span>
+              <span>Payroll</span>
             </NavLink>
 
-            <NavGroupTitle>Analytics &amp; Records</NavGroupTitle>
+            <NavGroupTitle>Ledger &amp; System</NavGroupTitle>
             <NavLink 
-              to="/admin/documents" 
+              to="/admin/approvals" 
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
             >
-              <FolderOpen size={18} />
-              <span>Project Documents</span>
+              <CheckSquare size={18} />
+              <span>Approval Center</span>
             </NavLink>
 
             <NavLink 
@@ -361,8 +382,17 @@ export default function Sidebar({ isOpen, onClose }) {
               className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
               onClick={onClose}
             >
-              <FileText size={18} />
-              <span>Management Reports</span>
+              <TrendingUp size={18} />
+              <span>Reports</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/documents" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <FolderOpen size={18} />
+              <span>Settings</span>
             </NavLink>
           </>
         ) : (

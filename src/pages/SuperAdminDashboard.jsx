@@ -267,9 +267,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     engineersMap[e.id] = e.fullName;
   });
 
-  // Approvals workflow mappings
+  // Approvals workflow mappings (Material approvals removed from UI)
   const allApprovalRequests = approvals
-    .filter(r => (r.status || "").toLowerCase() === "pending")
+    .filter(r => (r.status || "").toLowerCase() === "pending" && r.type !== "Material")
     .map(r => ({
       id: r.id,
       type: r.type,
@@ -795,8 +795,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--border-color)", paddingTop: "14px" }}>
                   <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Budget &amp; Expense Status</h4>
                   {(() => {
-                    const budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : 0;
-                    const siteExpenses = generalExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
+                    const budget = selectedSite.budget !== undefined && selectedSite.budget !== null ? Number(selectedSite.budget) : 0;
+                    const siteExpenses = generalExpenses.filter(e => e.siteId === selectedSite.id && (e.status === "Approved" || e.status === "approved"));
                     const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
                     const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
                     const remaining = budget - totalExpense;
@@ -1039,55 +1039,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
         </Card>
 
-        {/* Daily progress logs timeline */}
-        <Card title="Corporate Daily Construction Timeline logs">
-          {dprsSorted.length === 0 ? (
-            <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "20px" }}>No progress logs registered yet.</p>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", paddingLeft: "10px", borderLeft: "2px solid var(--border-color)", marginLeft: "8px" }}>
-              {dprsSorted.slice(0, 10).map((update, idx) => {
-                const site = sites.find(s => s.id === update.siteId) || { siteName: "Unknown Site" };
-                const formattedDate = update.createdAt
-                  ? (update.createdAt.seconds
-                      ? new Date(update.createdAt.seconds * 1000).toLocaleDateString()
-                      : new Date(update.createdAt).toLocaleDateString())
-                  : "--";
-                const engName = engineersMap[update.engineerId] || `Engineer (ID: ${update.engineerId})`;
-                
-                return (
-                  <div key={update.id || idx} style={{ position: "relative", paddingLeft: "14px" }}>
-                    <div style={{
-                      position: "absolute",
-                      left: "-21px",
-                      top: "4px",
-                      width: "10px",
-                      height: "10px",
-                      borderRadius: "50%",
-                      backgroundColor: "var(--primary-600)",
-                      border: "2px solid #ffffff",
-                      boxShadow: "0 0 0 2px var(--primary-100)"
-                    }} />
-                    
-                    <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", fontSize: "12px", color: "var(--text-muted)" }}>
-                      <div>
-                        <strong>{site.siteName}</strong> • {engName}
-                      </div>
-                      <span className="font-mono">{formattedDate}</span>
-                    </div>
 
-                    <h4 style={{ margin: "4px 0 2px 0", fontSize: "14px", color: "var(--primary-900)", display: "flex", alignItems: "center", gap: "8px" }}>
-                      <span>Progress reported: {update.progress}</span>
-                    </h4>
-
-                    <p style={{ margin: 0, fontSize: "13px", color: "#334155" }}>
-                      {update.description}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
 
       </div>
     );
@@ -1099,7 +1051,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         
         <div className="dash-section-label" style={{ marginBottom: "16px" }}><span>Central Approvals Gateway</span></div>
 
-        <Card title="Pending Approvals Ledger" subtitle="Approve or Reject locations setup, leaves, and materials purchases.">
+        <Card title="Pending Approvals Ledger" subtitle="Approve or Reject locations setup, leaves, and site requisitions.">
           {allApprovalRequests.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
               <CheckCircle2 size={32} style={{ color: "var(--success-500)", marginBottom: "8px" }} />
@@ -1131,9 +1083,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                           <span>{req.details}</span>
                           {req.type === "Location" && (
                             <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Proposed coordinates: {req.latitude.toFixed(6)}, {req.longitude.toFixed(6)}</span>
-                          )}
-                          {req.type === "Material" && (
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Quantity: {req.quantity} | Supplier: {req.supplier}</span>
                           )}
                         </div>
                       </td>
