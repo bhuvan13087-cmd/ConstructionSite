@@ -101,6 +101,10 @@ export default function AdminLabour() {
   const [adminFilterDate, setAdminFilterDate] = useState("");
   const [adminFilterTeamId, setAdminFilterTeamId] = useState("");
 
+  // Search states for teams and members filtering
+  const [teamSearchQuery, setTeamSearchQuery] = useState("");
+  const [memberSearchQuery, setMemberSearchQuery] = useState("");
+
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
     setTimeout(() => {
