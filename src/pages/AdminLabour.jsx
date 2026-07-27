@@ -24,6 +24,8 @@ import {
 } from "../services/businessLogic";
 import {
   Users,
+  UserCheck,
+  Activity,
   Plus,
   Edit2,
   DollarSign,
