@@ -28,7 +28,7 @@ export default function Navbar({ title = "Dashboard", description = "Control Pan
   useEffect(() => {
     const updateClock = () => {
       const now = new Date();
-      setTime(now.toLocaleTimeString());
+      setTime(now.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }));
     };
     
     updateClock();
@@ -160,12 +160,12 @@ export default function Navbar({ title = "Dashboard", description = "Control Pan
                 ) : (
                   notifications.map(n => {
                     const timeStr = n.createdAt?.seconds 
-                      ? new Date(n.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-                      : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                      ? new Date(n.createdAt.seconds * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+                      : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true });
                     
                     const dateStr = n.createdAt?.seconds
-                      ? new Date(n.createdAt.seconds * 1000).toLocaleDateString([], { month: 'short', day: 'numeric' })
-                      : new Date().toLocaleDateString([], { month: 'short', day: 'numeric' });
+                      ? new Date(n.createdAt.seconds * 1000).toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' })
+                      : new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', month: 'short', day: 'numeric' });
 
                     const isHigh = n.priority === "high";
 

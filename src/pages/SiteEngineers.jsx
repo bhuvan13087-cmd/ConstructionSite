@@ -756,7 +756,7 @@ export default function SiteEngineers() {
                 
                 <Button 
                   onClick={async () => {
-                    if (window.confirm(`Are you sure you want to toggle status to ${selectedEngineer.status === "active" ? "inactive" : "active"}?`)) {
+                    if (window.confirm(`Are you sure you want to change status to ${selectedEngineer.status === "active" ? "inactive" : "active"}?`)) {
                       await handleToggleStatus(selectedEngineer.id, selectedEngineer.status);
                       setSelectedEngineer(prev => ({
                         ...prev,

@@ -525,7 +525,7 @@ export default function AdminMaterials() {
                                 size="sm" 
                                 onClick={() => handleToggleMasterStatus(idx)}
                               >
-                                Toggle Status
+                                Change Status
                               </Button>
                               <Button 
                                 variant="outline" 

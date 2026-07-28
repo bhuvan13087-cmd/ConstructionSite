@@ -1352,314 +1352,233 @@ export default function ReportsDashboard() {
         }
       `}</style>
 
-      {/* FILTER & DATE CONTROLS BAR (Hidden in print) */}
-      <Card variant="default" className="filters-card no-print" style={{ marginBottom: "24px", padding: "16px" }}>
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-end", justifyContent: "space-between" }}>
-          
-          <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", flex: 1 }}>
-            {/* Site selector dropdown */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "150px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Project</label>
-              <select
-                value={filterSiteId}
-                onChange={(e) => setFilterSiteId(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              >
-                <option value="all">All Assigned Sites</option>
-                {userSites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
+      {/* ── 1. ENTERPRISE PAGE HEADER & ACTIONS ── */}
+      <div className="no-print" style={{
+        background: "#ffffff",
+        border: "1px solid #e2e8f0",
+        borderRadius: "12px",
+        padding: "20px 24px",
+        marginBottom: "20px",
+        boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Site Reports Dashboard</h2>
+              <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #bfdbfe" }}>
+                {activeTab.replace("_report", "").toUpperCase()} REPORT
+              </span>
             </div>
-
-            {/* Team selector dropdown */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "150px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Labour Team</label>
-              <select
-                value={filterTeamId}
-                onChange={(e) => setFilterTeamId(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              >
-                <option value="all">All Labour Teams</option>
-                {teams.map(t => (
-                  <option key={t.id} value={t.id}>{t.teamName}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Site Engineer selector dropdown */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "150px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Site Engineer</label>
-              <select
-                value={filterEngineerId}
-                onChange={(e) => setFilterEngineerId(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              >
-                <option value="all">All Engineers</option>
-                {engineers.map(eng => (
-                  <option key={eng.id} value={eng.id}>{eng.fullName}</option>
-                ))}
-              </select>
-            </div>
-
-            {/* Date range inputs */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Start Date</label>
-              <input
-                type="date"
-                value={filterStartDate}
-                onChange={(e) => setFilterStartDate(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              />
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>End Date</label>
-              <input
-                type="date"
-                value={filterEndDate}
-                onChange={(e) => setFilterEndDate(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              />
-            </div>
-
-            {/* Month selector */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "100px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Month</label>
-              <select
-                value={filterMonthVal}
-                onChange={(e) => setFilterMonthVal(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              >
-                <option value="all">All Months</option>
-                <option value="01">January</option>
-                <option value="02">February</option>
-                <option value="03">March</option>
-                <option value="04">April</option>
-                <option value="05">May</option>
-                <option value="06">June</option>
-                <option value="07">July</option>
-                <option value="08">August</option>
-                <option value="09">September</option>
-                <option value="10">October</option>
-                <option value="11">November</option>
-                <option value="12">December</option>
-              </select>
-            </div>
-
-            {/* Year selector */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "95px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-700)", textTransform: "uppercase" }}>Year</label>
-              <select
-                value={filterYearVal}
-                onChange={(e) => setFilterYearVal(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px" }}
-              >
-                <option value="all">All Years</option>
-                <option value="2024">2024</option>
-                <option value="2025">2025</option>
-                <option value="2026">2026</option>
-                <option value="2027">2027</option>
-              </select>
-            </div>
-
+            <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748b" }}>
+              Comprehensive audit reports, labor attendance analytics, material consumption logs, expense statements, and project progress metrics.
+            </p>
           </div>
 
-          {/* Report template selector */}
-          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px", minWidth: "200px" }}>
-              <label style={{ fontSize: "11px", fontWeight: "800", color: "var(--accent-700)", textTransform: "uppercase" }}>PDF Template Select</label>
-              <select
-                value={reportTemplate}
-                onChange={(e) => setReportTemplate(e.target.value)}
-                style={{ padding: "8px 12px", borderRadius: "6px", border: "1.5px solid var(--accent-500)", backgroundColor: "#ffffff", outline: "none", fontSize: "13px", fontWeight: "700" }}
-              >
-                <option value="daily_attendance">Daily Attendance Report</option>
-                <option value="weekly_attendance">Weekly Attendance Report</option>
-                <option value="monthly_attendance">Monthly Attendance Report</option>
-                <option value="labour">Labour Allocation Report</option>
-                <option value="material">Material Log Report</option>
-                <option value="salary">Salary &amp; Payroll Report</option>
-                <option value="expense">Expense Report</option>
-                <option value="budget">Budget Report</option>
-              </select>
-            </div>
-
-            <Button
-              variant="primary"
-              icon={Printer}
-              onClick={handlePrint}
-              style={{ fontSize: "12px", padding: "8px 12.5px", backgroundColor: "var(--accent-600)" }}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <select
+              value={reportTemplate}
+              onChange={(e) => setReportTemplate(e.target.value)}
+              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "700", color: "#0f172a", outline: "none" }}
             >
-              Generate PDF Report
+              <option value="daily_attendance">Daily Attendance Report</option>
+              <option value="weekly_attendance">Weekly Attendance Report</option>
+              <option value="monthly_attendance">Monthly Attendance Report</option>
+              <option value="labour">Labour Allocation Report</option>
+              <option value="material">Material Log Report</option>
+              <option value="salary">Salary &amp; Payroll Report</option>
+              <option value="expense">Expense Report</option>
+              <option value="budget">Budget Report</option>
+            </select>
+            <Button onClick={handlePrint} variant="primary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <Printer size={16} />
+              <span>Generate PDF</span>
             </Button>
+            <Button onClick={() => exportToExcel(activeTab.replace("_report", ""), "csv")} variant="outline" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <Download size={16} />
+              <span>Export CSV</span>
+            </Button>
+          </div>
+        </div>
+
+        {/* ── ADVANCED FILTER PANEL ── */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "14px", marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #f1f5f9" }}>
+          
+          {/* Site Filter */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Construction Site</label>
+            <select
+              value={filterSiteId}
+              onChange={(e) => setFilterSiteId(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
+            >
+              <option value="all">All Sites Scope</option>
+              {userSites.map(s => (
+                <option key={s.id} value={s.id}>{s.siteName}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Report Category Filter */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Report Category</label>
+            <select
+              value={activeTab}
+              onChange={(e) => setActiveTab(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
+            >
+              <option value="overview">Management Overview</option>
+              <option value="labour_report">Labour Reports</option>
+              <option value="material_report">Material Reports</option>
+              <option value="expense_report">Expense Reports</option>
+              <option value="progress_report">Progress Reports</option>
+            </select>
+          </div>
+
+          {/* Team Filter */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Labour Team</label>
+            <select
+              value={filterTeamId}
+              onChange={(e) => setFilterTeamId(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
+            >
+              <option value="all">All Labour Teams</option>
+              {teams.map(t => (
+                <option key={t.id} value={t.id}>{t.teamName}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Site Engineer Filter */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Site Engineer</label>
+            <select
+              value={filterEngineerId}
+              onChange={(e) => setFilterEngineerId(e.target.value)}
+              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
+            >
+              <option value="all">All Engineers</option>
+              {engineers.map(eng => (
+                <option key={eng.id} value={eng.id}>{eng.fullName}</option>
+              ))}
+            </select>
+          </div>
+
+          {/* Start Date */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Start Date</label>
+            <input
+              type="date"
+              value={filterStartDate}
+              onChange={(e) => setFilterStartDate(e.target.value)}
+              style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", outline: "none" }}
+            />
+          </div>
+
+          {/* End Date */}
+          <div>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>End Date</label>
+            <input
+              type="date"
+              value={filterEndDate}
+              onChange={(e) => setFilterEndDate(e.target.value)}
+              style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", outline: "none" }}
+            />
           </div>
 
         </div>
-      </Card>
+      </div>
 
-      {/* TABS NAVIGATION */}
-      <div className="no-print" style={{ display: "flex", gap: "8px", marginBottom: "24px", borderBottom: "2px solid var(--border-color)", paddingBottom: "8px", overflowX: "auto" }}>
-        <button
-          onClick={() => setActiveTab("overview")}
-          className={`erp-tab-button ${activeTab === "overview" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "overview" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "overview" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "overview" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <Grid size={16} />
-          Management Overview
-        </button>
+      {/* ── 2. COMPACT KPI SUMMARY CARDS (EXACTLY 4 COMPACT CARDS) ── */}
+      <div className="no-print" style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "20px" }}>
+        
+        {/* KPI 1: Sites In Scope */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Sites In Scope</span>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Building2 size={16} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{overallMetrics.totalSites}</div>
+          <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>{overallMetrics.activeSites} active • {overallMetrics.completedSites} completed</span>
+        </div>
 
-        <button
-          onClick={() => setActiveTab("labour_report")}
-          className={`erp-tab-button ${activeTab === "labour_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "labour_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "labour_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "labour_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <Users size={16} />
-          Labour Report
-        </button>
+        {/* KPI 2: Total Accrued Expenses */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Accrued Expenses</span>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <DollarSign size={16} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(overallMetrics.totalExpenses)}</div>
+          <span style={{ fontSize: "11px", color: "#2563eb", marginTop: "4px", display: "block", fontWeight: "600" }}>Total site cost accrued</span>
+        </div>
 
-        <button
-          onClick={() => setActiveTab("material_report")}
-          className={`erp-tab-button ${activeTab === "material_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "material_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "material_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "material_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <Package size={16} />
-          Material Report
-        </button>
+        {/* KPI 3: Labour Workforce Units */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Labour Headcount</span>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#faf5ff", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Users size={16} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>
+            {labourDateRangeReportData?.categories ? labourDateRangeReportData.categories.reduce((acc, c) => acc + (c.totalWorkers || 0), 0) : 0}
+          </div>
+          <span style={{ fontSize: "11px", color: "#9333ea", marginTop: "4px", display: "block", fontWeight: "600" }}>Attendance units logged</span>
+        </div>
 
-        <button
-          onClick={() => setActiveTab("attendance_report")}
-          className={`erp-tab-button ${activeTab === "attendance_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "attendance_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "attendance_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "attendance_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <ClipboardCheck size={16} />
-          Attendance Report
-        </button>
+        {/* KPI 4: Avg Progress */}
+        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Avg Site Progress</span>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Activity size={16} />
+            </div>
+          </div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{overallMetrics.overallProgress}%</div>
+          <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "4px", display: "block", fontWeight: "600" }}>Overall completion standing</span>
+        </div>
 
-        <button
-          onClick={() => setActiveTab("expense_report")}
-          className={`erp-tab-button ${activeTab === "expense_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "expense_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "expense_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "expense_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <TrendingUp size={16} />
-          Expense Report
-        </button>
+      </div>
 
-        <button
-          onClick={() => setActiveTab("salary_report")}
-          className={`erp-tab-button ${activeTab === "salary_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "salary_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "salary_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "salary_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <DollarSign size={16} />
-          Salary Report
-        </button>
-
-        <button
-          onClick={() => setActiveTab("budget_report")}
-          className={`erp-tab-button ${activeTab === "budget_report" ? "active" : ""}`}
-          style={{
-            padding: "9px 18px",
-            border: "none",
-            backgroundColor: activeTab === "budget_report" ? "var(--brand-orange-light, #fff7ed)" : "transparent",
-            borderBottom: activeTab === "budget_report" ? "3px solid var(--brand-orange, #f97316)" : "3px solid transparent",
-            color: activeTab === "budget_report" ? "var(--brand-orange-hover, #ea580c)" : "var(--text-muted)",
-            fontWeight: "700",
-            fontSize: "13px",
-            borderRadius: "8px 8px 0 0",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            transition: "all 0.15s ease"
-          }}
-        >
-          <Building2 size={16} />
-          Budget Report
-        </button>
+      {/* ── 3. CLEAR REPORT CATEGORIES TABS ── */}
+      <div className="no-print" style={{ display: "flex", gap: "8px", marginBottom: "20px", borderBottom: "1px solid #e2e8f0", paddingBottom: "0", overflowX: "auto" }}>
+        {[
+          { id: "overview", label: "Management Overview", icon: Grid },
+          { id: "labour_report", label: "Labour Reports", icon: Users },
+          { id: "material_report", label: "Material Reports", icon: Package },
+          { id: "expense_report", label: "Expense Reports", icon: TrendingUp },
+          { id: "progress_report", label: "Progress Reports", icon: Activity }
+        ].map(tab => {
+          const TabIcon = tab.icon;
+          const isActive = activeTab === tab.id || (tab.id === "progress_report" && activeTab === "attendance_report");
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: "10px 18px",
+                border: "none",
+                backgroundColor: "transparent",
+                borderBottom: isActive ? "3px solid #f97316" : "3px solid transparent",
+                color: isActive ? "#ea580c" : "#64748b",
+                fontWeight: isActive ? "700" : "600",
+                fontSize: "13px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <TabIcon size={16} />
+              <span>{tab.label}</span>
+            </button>
+          );
+        })}
       </div>
 
       {/* ==================================================================== */}
@@ -2292,7 +2211,7 @@ export default function ReportsDashboard() {
             </div>
           </div>
           <div style={{ textAlign: "right", fontSize: "10px", color: "#475569" }}>
-            <div><strong>Report Date:</strong> {new Date().toLocaleDateString()} {new Date().toLocaleTimeString()}</div>
+            <div><strong>Report Date:</strong> {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })} {new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })} IST</div>
             <div><strong>Generated By:</strong> {userProfile?.fullName || "System Admin"} ({userProfile?.role || "Admin"})</div>
           </div>
         </div>
@@ -2695,606 +2614,6 @@ export default function ReportsDashboard() {
         </div>
 
       </div>
-
-      {/* TABS CONTAINER */}
-      <div className="no-print">
-        {activeTab === "overview" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            {/* Main Key Indicators Cards */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px" }}>
-              
-              <Card style={{ borderLeft: "4px solid var(--primary-500)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Corporate Projects</span>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-                  <span style={{ fontSize: "28px", fontWeight: "800", color: "var(--primary-950)" }}>{overallMetrics.totalSites}</span>
-                  <div style={{ fontSize: "11px", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
-                    <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.completedSites} Done</span>
-                    <span>•</span>
-                    <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.activeSites} Active</span>
-                  </div>
-                </div>
-              </Card>
-
-              <Card style={{ borderLeft: "4px solid var(--danger-500)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Milestone Delays</span>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-                  <span style={{ fontSize: "28px", fontWeight: "800", color: "var(--danger-700)" }}>{overallMetrics.delayedSites}</span>
-                  <Badge status={overallMetrics.delayedSites > 0 ? "warning" : "success"}>
-                    {overallMetrics.delayedSites > 0 ? "Risk Flagged" : "On Schedule"}
-                  </Badge>
-                </div>
-              </Card>
-
-              <Card style={{ borderLeft: "4px solid var(--success-500)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Financial Value</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-                  <span style={{ fontSize: "20px", fontWeight: "800", color: "var(--success-700)" }}>{formatINR(overallMetrics.totalBudget)}</span>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Total Accrued Budget</span>
-                </div>
-              </Card>
-
-              <Card style={{ borderLeft: "4px solid var(--accent-500)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Accumulated Cost</span>
-                <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-                  <span style={{ fontSize: "20px", fontWeight: "800", color: "var(--accent-700)" }}>{formatINR(overallMetrics.totalExpenses)}</span>
-                  <span style={{ fontSize: "11px", color: "var(--danger-600)", fontWeight: "600" }}>Pending payouts: {formatINR(overallMetrics.pendingPayments)}</span>
-                </div>
-              </Card>
-
-            </div>
-
-            {/* Charts & Deviation Monitor */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-              
-              <Card title="Average Corporate Execution Progress">
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px 0", gap: "16px" }}>
-                  <div style={{
-                    position: "relative",
-                    width: "140px",
-                    height: "140px",
-                    borderRadius: "50%",
-                    background: `conic-gradient(var(--primary-600) ${overallMetrics.overallProgress}%, var(--primary-100) 0)`,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center"
-                  }}>
-                    <div style={{
-                      position: "absolute",
-                      width: "110px",
-                      height: "110px",
-                      borderRadius: "50%",
-                      backgroundColor: "#ffffff",
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "center",
-                      justifyContent: "center"
-                    }}>
-                      <span style={{ fontSize: "28px", fontWeight: "900", color: "var(--primary-900)" }}>{overallMetrics.overallProgress}%</span>
-                      <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Avg Complete</span>
-                    </div>
-                  </div>
-                  <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-muted)" }}>
-                      <span>Budget Invoiced (Work completed)</span>
-                      <span style={{ fontWeight: "700" }}>{formatINR(overallMetrics.paymentsReceived)}</span>
-                    </div>
-                    <div style={{ height: "8px", width: "100%", backgroundColor: "var(--primary-100)", borderRadius: "4px", overflow: "hidden" }}>
-                      <div style={{ height: "100%", width: `${overallMetrics.overallProgress}%`, backgroundColor: "var(--primary-600)", borderRadius: "4px" }} />
-                    </div>
-                  </div>
-                </div>
-              </Card>
-
-              <Card title="Important Actions & Security Operations Ledger" subtitle="Review approvals and delayed schedule warnings.">
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", backgroundColor: overallMetrics.pendingApprovals > 0 ? "var(--warning-50)" : "var(--success-50)", borderRadius: "6px", border: `1px solid ${overallMetrics.pendingApprovals > 0 ? "var(--warning-200)" : "var(--success-200)"}` }}>
-                    {overallMetrics.pendingApprovals > 0 ? (
-                      <>
-                        <AlertTriangle size={18} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--warning-800)" }}>
-                          {overallMetrics.pendingApprovals} Requisition(s) pending approval
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-800)" }}>
-                          No pending approvals in workflow queue
-                        </span>
-                      </>
-                    )}
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", backgroundColor: overallMetrics.delayedSites > 0 ? "var(--danger-50)" : "var(--success-50)", borderRadius: "6px", border: `1px solid ${overallMetrics.delayedSites > 0 ? "var(--danger-200)" : "var(--success-200)"}` }}>
-                    {overallMetrics.delayedSites > 0 ? (
-                      <>
-                        <AlertTriangle size={18} style={{ color: "var(--danger-600)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--danger-800)" }}>
-                          {overallMetrics.delayedSites} Site(s) has delayed schedule milestones
-                        </span>
-                      </>
-                    ) : (
-                      <>
-                        <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-800)" }}>
-                          All projects timeline executing on schedule
-                        </span>
-                      </>
-                    )}
-                  </div>
-
-                  <div style={{ borderTop: "1px dashed var(--border-color)", paddingTop: "12px", marginTop: "4px" }}>
-                    <Link to="/superadmin/approvals" style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)", textDecoration: "none" }} className="no-print">
-                      Go to Approval Center queue →
-                    </Link>
-                  </div>
-                </div>
-              </Card>
-
-            </div>
-          </div>
-        )}
-
-        {/* 2. ATTENDANCE REPORT TAB PANEL */}
-        {activeTab === "attendance_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Attendance Report Summary</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Consolidated supervisor check-in logs and labour counters</p>
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={() => exportToExcel("attendance", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-                <Button onClick={() => exportToExcel("attendance", "csv")} variant="outline" icon={Download}>Export CSV</Button>
-              </div>
-            </div>
-            
-            <Card title="Labour Site Attendance Logs" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Attendance Date</th>
-                      <th>Site Name</th>
-                      <th>Labour Team</th>
-                      <th>Labour Category</th>
-                      <th style={{ textAlign: "right" }}>Worker Count</th>
-                      <th>Attendance Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const filtered = labourAttendance.filter(r => {
-                        if (filterSiteId !== "all" && r.siteId !== filterSiteId) return false;
-                        if (filterTeamId !== "all" && r.teamId !== filterTeamId) return false;
-                        if (!allowedSiteIds.has(r.siteId)) return false;
-                        if (!matchesDateFilters(r.attendanceDate)) return false;
-                        return true;
-                      });
-
-                      if (filtered.length === 0) {
-                        return (
-                          <tr>
-                            <td colSpan={6} style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)" }}>
-                              No labour attendance records found matching filters.
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      return filtered.map((r) => {
-                        const siteObj = sites.find(s => s.id === r.siteId) || { siteName: "Unknown Site" };
-                        const teamObj = teams.find(t => t.id === r.teamId) || { teamName: "Unknown Team" };
-                        return (
-                          <tr key={r.id}>
-                            <td className="font-mono">{normalizeDateStr(r.attendanceDate) || "--"}</td>
-                            <td style={{ fontWeight: "700" }}>{safeRender(siteObj.siteName)}</td>
-                            <td>{safeRender(teamObj.teamName)}</td>
-                            <td>{safeRender(r.categoryId)}</td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>{r.workerCount || 1}</td>
-                            <td>
-                              <Badge status={r.attendanceType === "Full Day" ? "success" : "warning"}>
-                                {safeRender(r.attendanceType, "Full Day")}
-                              </Badge>
-                            </td>
-                          </tr>
-                        );
-                      });
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-
-            <Card title="Site Engineer Attendance &amp; Check-In Logs" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Site Engineer Name</th>
-                      <th>Check-in / Entry Time</th>
-                      <th>Status</th>
-                      <th>Attendance Check-In Photo</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(() => {
-                      const records = [];
-                      engineers.forEach(eng => {
-                        if (filterEngineerId !== "all" && eng.id !== filterEngineerId) return;
-                        
-                        const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
-                        atts.forEach(a => {
-                          const normDate = normalizeDateStr(a.date);
-                          if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
-                          if (!allowedSiteIds.has(a.siteId)) return;
-                          if (!matchesDateFilters(normDate)) return;
-                          records.push({
-                            id: `att_${eng.id}_${normDate}`,
-                            date: normDate,
-                            name: eng.fullName,
-                            time: a.checkInTime || "--",
-                            status: "Present",
-                            photoUrl: a.checkInPhotoUrl || a.photoUrl || null
-                          });
-                        });
-
-                        const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
-                        leavesList.forEach(l => {
-                          const normDate = normalizeDateStr(l.date);
-                          if (!matchesDateFilters(normDate)) return;
-                          records.push({
-                            id: `lv_${eng.id}_${normDate}`,
-                            date: normDate,
-                            name: eng.fullName,
-                            time: "--",
-                            status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
-                            photoUrl: null
-                          });
-                        });
-                      });
-
-                      records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
-                      if (records.length === 0) {
-                        return (
-                          <tr>
-                            <td colSpan={5} style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)" }}>
-                              No supervisor attendance logs found matching filters.
-                            </td>
-                          </tr>
-                        );
-                      }
-
-                      return records.map((rec) => (
-                        <tr key={rec.id}>
-                          <td className="font-mono">{safeRender(rec.date)}</td>
-                          <td style={{ fontWeight: "700" }}>{safeRender(rec.name)}</td>
-                          <td className="font-mono">{safeRender(rec.time)}</td>
-                          <td>
-                            <Badge status={rec.status === "Present" ? "success" : "danger"}>
-                              {rec.status}
-                            </Badge>
-                          </td>
-                          <td>
-                            {rec.photoUrl ? (
-                              <img 
-                                src={rec.photoUrl} 
-                                alt="Check-in Photo" 
-                                style={{ width: "45px", height: "45px", borderRadius: "4px", objectFit: "cover", border: "1px solid var(--border-color)", cursor: "pointer" }}
-                                onClick={() => window.open(rec.photoUrl, "_blank")}
-                              />
-                            ) : (
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>No Photo</span>
-                            )}
-                          </td>
-                        </tr>
-                      ));
-                    })()}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* 3. LABOUR REPORT TAB PANEL (PRINTABLE) */}
-        {activeTab === "labour_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Labour Date Range Report</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Calculated live directly from saved production labour attendance records</p>
-              </div>
-              <div className="no-print" style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={handlePrint} variant="outline" icon={Printer}>Print</Button>
-                <Button onClick={() => { setReportTemplate("labour"); handlePrint(); }} variant="outline" icon={FileText}>Export PDF</Button>
-                <Button onClick={() => exportToExcel("labour", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-              </div>
-            </div>
-            
-            <Card title="Labour Category Wise Breakdown" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
-                      <th style={{ textAlign: "left", padding: "12px" }}>Category</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Daily Wage</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Total Workers</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Total Units</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Total Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {labourDateRangeReportData.categories.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                          No saved labour attendance records found for the selected filter parameters.
-                        </td>
-                      </tr>
-                    ) : (
-                      labourDateRangeReportData.categories.map((row, idx) => (
-                        <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                          <td style={{ fontWeight: "700", padding: "12px", color: "var(--primary-950)" }}>{row.category}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace" }}>₹{row.dailyWage.toLocaleString("en-IN")}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "600" }}>{row.totalWorkers}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "700" }}>{row.totalUnits.toFixed(2)}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "800", color: "var(--primary-700)" }}>
-                            ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                  {labourDateRangeReportData.categories.length > 0 && (
-                    <tfoot>
-                      <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800" }}>
-                        <td colSpan={4} style={{ padding: "14px", textAlign: "right", fontSize: "14px", color: "var(--primary-950)" }}>
-                          Grand Total Labour Cost:
-                        </td>
-                        <td style={{ padding: "14px", textAlign: "right", fontSize: "15px", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                          ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            </Card>
-
-            <Card style={{ backgroundColor: "#fafafa", border: "1px solid var(--border-color)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", padding: "8px 4px" }}>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Selected Period</span>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                    {filterStartDate || "Beginning"} &rarr; {filterEndDate || "Today"}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Working Days</span>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                    {labourDateRangeReportData.totalWorkingDays} Days
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Labour Cost</span>
-                  <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-700)", marginTop: "4px", fontFamily: "monospace" }}>
-                    ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* MATERIAL REPORT TAB PANEL (PRINTABLE) */}
-        {activeTab === "material_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Material Date Range Report</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Calculated live directly from saved production material logs</p>
-              </div>
-              <div className="no-print" style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={handlePrint} variant="outline" icon={Printer}>Print</Button>
-                <Button onClick={() => { setReportTemplate("material"); handlePrint(); }} variant="outline" icon={FileText}>Export PDF</Button>
-                <Button onClick={() => exportToExcel("material", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-              </div>
-            </div>
-            
-            <Card title="Material Wise Cost & Quantity Summary" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
-                      <th style={{ textAlign: "left", padding: "12px" }}>Material</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Qty</th>
-                      <th style={{ textAlign: "center", padding: "12px" }}>Unit</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Unit Price</th>
-                      <th style={{ textAlign: "right", padding: "12px" }}>Total Amount</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {materialDateRangeReportData.materials.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                          No saved material logs found for the selected filter parameters.
-                        </td>
-                      </tr>
-                    ) : (
-                      materialDateRangeReportData.materials.map((row, idx) => (
-                        <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                          <td style={{ fontWeight: "700", padding: "12px", color: "var(--primary-950)" }}>{row.materialName}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "700" }}>{row.totalQuantity}</td>
-                          <td style={{ textAlign: "center", padding: "12px" }}>{row.unit}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace" }}>₹{row.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                          <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "800", color: "var(--primary-700)" }}>
-                            ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                          </td>
-                        </tr>
-                      ))
-                    )}
-                  </tbody>
-                  {materialDateRangeReportData.materials.length > 0 && (
-                    <tfoot>
-                      <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800" }}>
-                        <td colSpan={4} style={{ padding: "14px", textAlign: "right", fontSize: "14px", color: "var(--primary-950)" }}>
-                          Grand Total Material Cost:
-                        </td>
-                        <td style={{ padding: "14px", textAlign: "right", fontSize: "15px", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                          ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  )}
-                </table>
-              </div>
-            </Card>
-
-            <Card style={{ backgroundColor: "#fafafa", border: "1px solid var(--border-color)" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", padding: "8px 4px" }}>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Selected Date Range</span>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                    {filterStartDate || "Beginning"} &rarr; {filterEndDate || "Today"}
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Grand Total Material Cost</span>
-                  <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-700)", marginTop: "4px", fontFamily: "monospace" }}>
-                    ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* 4. SALARY REPORT TAB PANEL */}
-        {activeTab === "salary_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Salary &amp; Payroll Report</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Breakdowns of Supervisor vs Labour accrued payroll payouts, and Paid / Pending ledger statuses</p>
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={() => exportToExcel("salary", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-                <Button onClick={() => exportToExcel("salary", "csv")} variant="outline" icon={Download}>Export CSV</Button>
-              </div>
-            </div>
-            
-            <Card title="Corporate Monthly Payroll Ledger" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "right" }}>Site Engineer Salaries</th>
-                      <th style={{ textAlign: "right" }}>Labour Accrued Salaries</th>
-                      <th style={{ textAlign: "right", color: "var(--success-700)" }}>Paid Payouts</th>
-                      <th style={{ textAlign: "right", color: "var(--warning-700)" }}>Pending Payouts</th>
-                      <th style={{ textAlign: "right", fontWeight: "700" }}>Total Payroll value</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(salaryReportData.engineerSalaryTotal)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(salaryReportData.labourSalaryTotal)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", color: "var(--success-700)", fontWeight: "700" }}>{formatINR(salaryReportData.paidTotal)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", color: "var(--warning-700)", fontWeight: "700" }}>{formatINR(salaryReportData.pendingTotal)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "800", fontSize: "14px" }}>{formatINR(salaryReportData.totalPayroll)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* 5. EXPENSE REPORT TAB PANEL */}
-        {activeTab === "expense_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Corporate Expense Report</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Site-wise approved expenses classified by material supply, labor payroll, general, and miscellaneous categories</p>
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={() => exportToExcel("expense", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-                <Button onClick={() => exportToExcel("expense", "csv")} variant="outline" icon={Download}>Export CSV</Button>
-              </div>
-            </div>
-            
-            <Card title="Approved Project Expenditures Breakdown" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "right" }}>Site Expenses</th>
-                      <th style={{ textAlign: "right" }}>Material Expenses</th>
-                      <th style={{ textAlign: "right" }}>Labour Expenses</th>
-                      <th style={{ textAlign: "right" }}>Other Expenses</th>
-                      <th style={{ textAlign: "right", fontWeight: "700" }}>Total Project Expense</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.siteExpense)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.materialExpense)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.labourExpense)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.otherExpense)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "800", fontSize: "14px" }}>{formatINR(expenseReportData.totalExpense)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* 6. BUDGET REPORT TAB PANEL */}
-        {activeTab === "budget_report" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-            <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Project Budget Monitoring Report</h3>
-                <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Dynamic budget utilization audit showing remaining reserves and progress indicators</p>
-              </div>
-              <div style={{ display: "flex", gap: "10px" }}>
-                <Button onClick={() => exportToExcel("budget", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-                <Button onClick={() => exportToExcel("budget", "csv")} variant="outline" icon={Download}>Export CSV</Button>
-              </div>
-            </div>
-            
-            <Card title="Corporate Budget Allocation Ledger" variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th style={{ textAlign: "right" }}>Total Budget</th>
-                      <th style={{ textAlign: "right" }}>Total Approved Expense</th>
-                      <th style={{ textAlign: "right" }}>Remaining Budget Reserves</th>
-                      <th style={{ textAlign: "right", fontWeight: "700" }}>Corporate Budget Usage %</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(budgetReportData.budget)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(budgetReportData.expense)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", color: budgetReportData.remainingBudget < 0 ? "var(--danger-700)" : "var(--success-700)", fontWeight: "700" }}>{formatINR(budgetReportData.remainingBudget)}</td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "800", fontSize: "14px", color: budgetReportData.usagePercent > 100 ? "var(--danger-700)" : (budgetReportData.usagePercent > 80 ? "var(--warning-700)" : "var(--success-700)") }}>
-                        {budgetReportData.usagePercent.toFixed(1)}%
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          </div>
-        )}
-      </div>
-
     </Layout>
   );
 }

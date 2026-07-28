@@ -229,109 +229,187 @@ export default function SiteAssignments() {
         </div>
       )}
 
-      {/* ── 1. COMPACT KPI SUMMARY CARDS (EXACT 3 CARDS) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "16px", marginBottom: "20px" }}>
-        
-        {/* KPI 1: Total Sites */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Sites</span>
-            <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#f97316", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <Building2 size={18} style={{ margin: "auto" }} />
-            </div>
-          </div>
-          <div style={{ fontSize: "26px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{sites.length}</div>
-          <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Registered project locations</span>
-        </div>
-
-        {/* KPI 2: Available Engineers */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Available Engineers</span>
-            <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <Users size={18} style={{ margin: "auto" }} />
-            </div>
-          </div>
-          <div style={{ fontSize: "26px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-            {activeEngineersList.length}
-          </div>
-          <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "8px", display: "block", fontWeight: "600" }}>Active field engineers roster</span>
-        </div>
-
-        {/* KPI 3: Active Assignments */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Assignments</span>
-            <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#e0f2fe", color: "#0369a1", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <UserCheck size={18} style={{ margin: "auto" }} />
-            </div>
-          </div>
-          <div style={{ fontSize: "26px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-            {assignments.filter(a => a.status === "active").length}
-          </div>
-          <span style={{ fontSize: "11px", color: "#0369a1", marginTop: "8px", display: "block", fontWeight: "600" }}>Deploys actively assigned</span>
-        </div>
-
-      </div>
-
-      {/* ── 2. BALANCED 3-COLUMN WORKSPACE LAYOUT (30% - 40% - 30%) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "30% 40% 30%", gap: "16px", marginBottom: "20px" }}>
-        
-        {/* LEFT PANEL (30%): PROJECT SITES */}
-        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 16px", display: "flex", flexDirection: "column", height: "580px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Building2 size={16} style={{ color: "#ea580c" }} /> Project Sites
+      {/* ── 1. ENTERPRISE QUICK ASSIGNMENT BAR ── */}
+      <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "20px 24px", marginBottom: "20px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+              <UserCheck size={18} style={{ color: "#f97316" }} /> Deploy Engineer to Site
             </h3>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>{filteredSites.length} Sites</span>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>Select a construction site and field engineer to establish site allocation</p>
+          </div>
+          <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", backgroundColor: "#f1f5f9", padding: "4px 10px", borderRadius: "20px" }}>
+            {activeEngineersList.length} Active Engineers Available
+          </span>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "16px", alignItems: "end" }}>
+          {/* Site Select */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label htmlFor="assign-site-select" style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Construction Site</label>
+            <select
+              id="assign-site-select"
+              value={selectedSiteId}
+              onChange={(e) => setSelectedSiteId(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                fontSize: "13px",
+                fontWeight: "600",
+                color: "#0f172a",
+                outline: "none"
+              }}
+            >
+              {sites.map(s => (
+                <option key={s.id} value={s.id}>
+                  {s.siteName} ({s.location || "Location N/A"})
+                </option>
+              ))}
+            </select>
           </div>
 
-          {/* Search Bar */}
+          {/* Engineer Select */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <label htmlFor="assign-eng-select" style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Site Engineer</label>
+            <select
+              id="assign-eng-select"
+              value={selectedEngineerId}
+              onChange={(e) => setSelectedEngineerId(e.target.value)}
+              style={{
+                width: "100%",
+                padding: "10px 14px",
+                borderRadius: "8px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                fontSize: "13px",
+                fontWeight: "600",
+                color: "#0f172a",
+                outline: "none"
+              }}
+            >
+              <option value="">-- Choose Engineer to Assign --</option>
+              {activeEngineersList.map(eng => {
+                const workload = getWorkload(eng.id);
+                return (
+                  <option key={eng.id} value={eng.id}>
+                    {eng.fullName} ({workload} active site{workload === 1 ? "" : "s"})
+                  </option>
+                );
+              })}
+            </select>
+          </div>
+
+          {/* Action Button */}
+          <div>
+            <Button
+              variant="primary"
+              onClick={() => handleAssign(selectedSiteId, selectedEngineerId)}
+              icon={Plus}
+              style={{ padding: "10px 20px", height: "42px", fontWeight: "700", fontSize: "13px" }}
+            >
+              Assign Engineer
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+
+
+      {/* ── 3. MAIN WORKSPACE (SITE TEAMS + ALLOCATIONS TABLE) ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "38% 60%", gap: "2%", marginBottom: "20px" }}>
+        
+        {/* LEFT COLUMN: SITE-WISE TEAM ALLOCATIONS */}
+        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px", display: "flex", flexDirection: "column", height: "560px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Building2 size={16} style={{ color: "#ea580c" }} /> Site Deployment Teams
+              </h3>
+              <span style={{ fontSize: "11px", color: "#64748b" }}>Site-wise assigned engineers list</span>
+            </div>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", backgroundColor: "#fff7ed", padding: "2px 8px", borderRadius: "100px" }}>
+              {sites.length} Sites
+            </span>
+          </div>
+
+          {/* Search */}
           <div className="input-wrapper" style={{ marginBottom: "12px" }}>
             <Search className="input-icon" size={15} />
             <input 
               type="text" 
-              placeholder="Search site or client..."
+              placeholder="Filter site..."
               value={siteSearchQuery}
               onChange={(e) => setSiteSearchQuery(e.target.value)}
               style={{ paddingLeft: "38px", fontSize: "12.5px" }}
             />
           </div>
 
-          {/* Sites Roster List */}
-          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
+          {/* Site Teams Roster */}
+          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "12px", paddingRight: "4px" }}>
             {filteredSites.length === 0 ? (
-              <div style={{ textAlign: "center", color: "#64748b", padding: "20px", fontSize: "12px" }}>No construction sites found.</div>
+              <div style={{ textAlign: "center", color: "#64748b", padding: "20px", fontSize: "12px" }}>No matching sites found.</div>
             ) : (
-              filteredSites.map((site) => {
-                const isActive = site.id === selectedSiteId;
-                const assignedCount = assignments.filter(asg => asg.siteId === site.id && asg.status === "active").length;
-                
+              filteredSites.map(site => {
+                const siteEngineers = assignments.filter(a => a.siteId === site.id && a.status === "active");
+                const isSelected = site.id === selectedSiteId;
+
                 return (
                   <div 
                     key={site.id} 
-                    onClick={() => { setSelectedSiteId(site.id); setSelectedEngineerId(""); }}
                     style={{ 
-                      cursor: "pointer", 
-                      padding: "10px 12px", 
-                      borderRadius: "8px", 
-                      border: isActive ? "1.5px solid #f97316" : "1px solid #e2e8f0", 
-                      backgroundColor: isActive ? "#fff7ed" : "#ffffff",
+                      border: isSelected ? "1.5px solid #f97316" : "1px solid #e2e8f0", 
+                      borderRadius: "10px", 
+                      backgroundColor: isSelected ? "#fff7ed" : "#f8fafc",
+                      padding: "12px 14px",
                       transition: "all 0.15s ease"
                     }}
                   >
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                      <strong style={{ fontWeight: "700", fontSize: "13px", color: isActive ? "#c2410c" : "#0f172a" }}>{site.siteName}</strong>
+                    <div 
+                      onClick={() => setSelectedSiteId(site.id)}
+                      style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>{site.siteName}</strong>
+                        <span style={{ display: "block", fontSize: "11px", color: "#64748b" }}>
+                          <MapPin size={10} style={{ display: "inline", marginRight: "2px" }} /> {site.location}
+                        </span>
+                      </div>
                       <Badge status={site.status || "active"} />
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "#64748b" }}>
-                      <span style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                        <MapPin size={11} /> {site.location}
+
+                    {/* Assigned Personnel */}
+                    {siteEngineers.length > 0 ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #cbd5e1" }}>
+                        {siteEngineers.map(asg => (
+                          <div 
+                            key={asg.id} 
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", padding: "6px 10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                                {getInitials(asg.engineerName)}
+                              </div>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{asg.engineerName}</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveAssignment(asg)}
+                              style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer", padding: "2px" }}
+                              title="Unassign Engineer"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <span style={{ display: "block", fontSize: "11px", color: "#94a3b8", fontStyle: "italic", marginTop: "4px" }}>
+                        No engineer assigned yet. Select above to assign.
                       </span>
-                      <span style={{ fontWeight: "700", color: assignedCount > 0 ? "#ea580c" : "#94a3b8" }}>
-                        {assignedCount} Staff
-                      </span>
-                    </div>
+                    )}
                   </div>
                 );
               })
@@ -339,327 +417,97 @@ export default function SiteAssignments() {
           </div>
         </Card>
 
-        {/* CENTER PANEL (40%): ASSIGNMENT WORKSPACE */}
-        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px", display: "flex", flexDirection: "column", height: "580px" }}>
-          <div style={{ marginBottom: "14px" }}>
-            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-              <UserCheck size={16} style={{ color: "#2563eb" }} /> Assignment Workspace
-            </h3>
-            <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "#64748b" }}>Deploy engineers and inspect active site teams</p>
+        {/* RIGHT COLUMN: ALLOCATIONS TABLE */}
+        <Card variant="table" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden", display: "flex", flexDirection: "column", height: "560px" }}>
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Active Site Allocations</h3>
+              <span style={{ fontSize: "11.5px", color: "#64748b" }}>
+                {filteredAssignments.length} total active assignment record(s)
+              </span>
+            </div>
+
+            <div className="input-wrapper" style={{ width: "220px" }}>
+              <Search className="input-icon" size={14} />
+              <input 
+                type="text" 
+                placeholder="Search assignments..."
+                value={assignmentSearchQuery}
+                onChange={(e) => setAssignmentSearchQuery(e.target.value)}
+                style={{ paddingLeft: "34px", fontSize: "12px" }}
+              />
+            </div>
           </div>
 
-          {selectedSite ? (
-            <div style={{ display: "flex", flexDirection: "column", gap: "16px", flex: 1, overflowY: "auto" }}>
-              
-              {/* Selected Site Summary Banner */}
-              <div style={{ padding: "12px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <strong style={{ fontSize: "14px", color: "#0f172a" }}>{selectedSite.siteName}</strong>
-                  <span style={{ fontSize: "11px", color: "#64748b" }}>Client: <strong>{selectedSite.clientName || "Internal"}</strong></span>
-                </div>
-                <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "4px", display: "flex", alignItems: "center", gap: "4px" }}>
-                  <MapPin size={12} style={{ color: "#ea580c" }} /> {selectedSite.location}
-                </div>
-              </div>
+          <div style={{ overflowX: "auto", flex: 1 }}>
+            <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Site Name</th>
+                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Engineer</th>
+                  <th style={{ padding: "10px 14px", textAlign: "center", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Status</th>
+                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Date</th>
+                  <th style={{ padding: "10px 14px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredAssignments.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} style={{ textAlign: "center", color: "#64748b", padding: "32px", fontSize: "12.5px" }}>
+                      No active site allocations found.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredAssignments.map((asg) => {
+                    const assignedDateStr = asg.assignedAt
+                      ? (asg.assignedAt.seconds
+                          ? new Date(asg.assignedAt.seconds * 1000).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" })
+                          : new Date(asg.assignedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }))
+                      : "Today";
 
-              {/* Assignment Workbench / Drop Area */}
-              <div style={{ padding: "18px", border: "2px dashed #cbd5e1", borderRadius: "10px", backgroundColor: "#fafbfc", textAlign: "center" }}>
-                {selectedEngineerId && engineers.find(eng => eng.id === selectedEngineerId) ? (
-                  (() => {
-                    const selectedEngineer = engineers.find(eng => eng.id === selectedEngineerId);
                     return (
-                      <div>
-                        <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "10px", marginBottom: "10px" }}>
-                          <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyCenter: "center", fontWeight: "800", fontSize: "12px" }}>
-                            {getInitials(selectedEngineer.fullName)}
+                      <tr key={asg.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "10px 14px" }}>
+                          <strong style={{ fontSize: "12.5px", color: "#0f172a", display: "block" }}>{asg.siteName}</strong>
+                          <span style={{ fontSize: "10.5px", color: "#64748b" }}>{asg.location || "Site Location"}</span>
+                        </td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{ width: "26px", height: "26px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                              {getInitials(asg.engineerName)}
+                            </div>
+                            <div>
+                              <strong style={{ fontSize: "12px", color: "#0f172a", display: "block" }}>{asg.engineerName}</strong>
+                              <span style={{ fontSize: "10px", color: "#64748b" }}>{asg.engineerEmail || "Engineer"}</span>
+                            </div>
                           </div>
-                          <div style={{ textAlign: "left" }}>
-                            <strong style={{ display: "block", color: "#0f172a", fontSize: "13.5px" }}>{selectedEngineer.fullName}</strong>
-                            <span style={{ fontSize: "11px", color: "#64748b" }}>{selectedEngineer.email || "Site Engineer"}</span>
-                          </div>
-                        </div>
-
-                        <p style={{ fontSize: "12px", color: "#334155", margin: "0 0 14px 0", lineHeight: "1.4" }}>
-                          Ready to deploy <strong>{selectedEngineer.fullName}</strong> to <strong>{selectedSite.siteName}</strong>. 
-                        </p>
-
-                        <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
-                          <Button 
-                            variant="primary"
-                            onClick={() => handleAssign(selectedSiteId, selectedEngineerId)}
-                            icon={Plus}
-                            size="sm"
+                        </td>
+                        <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                          <Badge status={asg.status || "active"} />
+                        </td>
+                        <td style={{ padding: "10px 14px", fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>
+                          {assignedDateStr}
+                        </td>
+                        <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                          <button 
+                            onClick={() => handleRemoveAssignment(asg)} 
+                            className="btn-icon" 
+                            title="Remove Allocation" 
+                            style={{ color: "#ef4444", border: "none", background: "none", cursor: "pointer", padding: "4px" }}
                           >
-                            Confirm Assignment
-                          </Button>
-                          <Button 
-                            variant="outline"
-                            onClick={() => setSelectedEngineerId("")}
-                            size="sm"
-                          >
-                            Cancel
-                          </Button>
-                        </div>
-                      </div>
+                            <Trash2 size={15} />
+                          </button>
+                        </td>
+                      </tr>
                     );
-                  })()
-                ) : (
-                  <div>
-                    <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#f1f5f9", color: "#64748b", display: "flex", alignItems: "center", justifyCenter: "center", margin: "0 auto 8px" }}>
-                      <UserCheck size={20} />
-                    </div>
-                    <strong style={{ fontSize: "13px", color: "#0f172a", display: "block", marginBottom: "2px" }}>Deploy Personnel</strong>
-                    <p style={{ margin: 0, fontSize: "11.5px", color: "#64748b" }}>
-                      Select an engineer from the right roster to assign them to this site.
-                    </p>
-                  </div>
+                  })
                 )}
-              </div>
-
-              {/* CURRENT SITE TEAM */}
-              <div>
-                <div style={{ fontSize: "11.5px", fontWeight: "800", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "8px" }}>
-                  Current Site Team ({selectedSiteAllocations.length})
-                </div>
-                
-                {selectedSiteAllocations.length > 0 ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {selectedSiteAllocations.map(asg => (
-                      <div 
-                        key={asg.id} 
-                        style={{ 
-                          display: "flex", 
-                          alignItems: "center", 
-                          justifyContent: "space-between",
-                          backgroundColor: "#ffffff", 
-                          border: "1px solid #e2e8f0",
-                          padding: "8px 12px",
-                          borderRadius: "8px"
-                        }}
-                      >
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#e2e8f0", color: "#334155", display: "flex", alignItems: "center", justifyCenter: "center", fontWeight: "800", fontSize: "10.5px" }}>
-                            {getInitials(asg.engineerName)}
-                          </div>
-                          <div>
-                            <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#0f172a" }}>{asg.engineerName}</span>
-                            <span style={{ display: "block", fontSize: "10.5px", color: "#64748b" }}>{asg.engineerEmail || "Site Engineer"}</span>
-                          </div>
-                        </div>
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); handleRemoveAssignment(asg); }} 
-                          className="btn-icon" 
-                          style={{ color: "#ef4444", border: "none", background: "none", cursor: "pointer", padding: "4px" }}
-                          title="Remove assignment"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={{ padding: "14px", border: "1px dashed #e2e8f0", borderRadius: "8px", textAlign: "center", color: "#64748b", fontSize: "11.5px", fontStyle: "italic" }}>
-                    No engineers allocated to this site yet.
-                  </div>
-                )}
-              </div>
-
-            </div>
-          ) : (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: "#64748b", margin: "auto" }}>
-              <Layers size={32} style={{ color: "#cbd5e1", marginBottom: "8px" }} />
-              <strong style={{ display: "block", fontSize: "14px", color: "#0f172a", marginBottom: "4px" }}>Select a Construction Project</strong>
-              <span style={{ fontSize: "12px" }}>Choose a site from the left list to start managing engineer deployments.</span>
-            </div>
-          )}
-        </Card>
-
-        {/* RIGHT PANEL (30%): AVAILABLE ENGINEERS */}
-        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 16px", display: "flex", flexDirection: "column", height: "580px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-              <Users size={16} style={{ color: "#16a34a" }} /> Available Engineers
-            </h3>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>{filteredEngineers.length} Staff</span>
-          </div>
-
-          {/* Search Bar */}
-          <div className="input-wrapper" style={{ marginBottom: "12px" }}>
-            <Search className="input-icon" size={15} />
-            <input 
-              type="text" 
-              placeholder="Search staff name..."
-              value={engineerSearchQuery}
-              onChange={(e) => setEngineerSearchQuery(e.target.value)}
-              style={{ paddingLeft: "38px", fontSize: "12.5px" }}
-            />
-          </div>
-
-          {/* Engineer Roster Cards */}
-          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "8px", paddingRight: "4px" }}>
-            {filteredEngineers.length === 0 ? (
-              <div style={{ textAlign: "center", color: "#64748b", padding: "20px", fontSize: "12px" }}>No site engineers match query.</div>
-            ) : (
-              filteredEngineers.map((eng) => {
-                const isAssigned = selectedSiteAllocations.some(asg => asg.engineerId === eng.id);
-                const isSelected = eng.id === selectedEngineerId;
-                const workloadCount = getWorkload(eng.id);
-                
-                // Status badge string calculation: Active, Available, Busy, Assigned
-                let statusLabel = "Available";
-                let statusBg = "#dcfce7";
-                let statusColor = "#16a34a";
-
-                if (isAssigned) {
-                  statusLabel = "Assigned";
-                  statusBg = "#e0f2fe";
-                  statusColor = "#0369a1";
-                } else if (workloadCount > 1) {
-                  statusLabel = "Busy";
-                  statusBg = "#fef3c7";
-                  statusColor = "#b45309";
-                } else if (eng.status === "active") {
-                  statusLabel = "Active";
-                  statusBg = "#dcfce7";
-                  statusColor = "#16a34a";
-                }
-
-                return (
-                  <div 
-                    key={eng.id} 
-                    onClick={() => {
-                      if (!isAssigned && selectedSiteId) {
-                        setSelectedEngineerId(eng.id);
-                      }
-                    }}
-                    style={{ 
-                      cursor: isAssigned ? "default" : "pointer", 
-                      padding: "10px 12px", 
-                      borderRadius: "8px", 
-                      border: isSelected ? "1.5px solid #2563eb" : "1px solid #e2e8f0",
-                      backgroundColor: isAssigned ? "#f8fafc" : (isSelected ? "#eff6ff" : "#ffffff"),
-                      opacity: isAssigned ? 0.75 : 1,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      transition: "all 0.15s ease"
-                    }}
-                  >
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0 }}>
-                      <div style={{ width: "32px", height: "32px", borderRadius: "50%", backgroundColor: "#e2e8f0", color: "#0f172a", display: "flex", alignItems: "center", justifyCenter: "center", fontWeight: "800", fontSize: "11px", flexShrink: 0 }}>
-                        {getInitials(eng.fullName)}
-                      </div>
-                      <div style={{ minWidth: 0 }}>
-                        <strong style={{ fontSize: "12.5px", color: "#0f172a", display: "block" }} className="text-ellipsis">{eng.fullName}</strong>
-                        <span style={{ fontSize: "10.5px", color: "#64748b" }}>Workload: {workloadCount} site(s)</span>
-                      </div>
-                    </div>
-
-                    <div style={{ flexShrink: 0 }}>
-                      <span style={{ fontSize: "10.5px", fontWeight: "800", backgroundColor: statusBg, color: statusColor, padding: "2px 8px", borderRadius: "100px" }}>
-                        {statusLabel}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })
-            )}
+              </tbody>
+            </table>
           </div>
         </Card>
 
       </div>
-
-      {/* ── 3. BOTTOM ALLOCATIONS TABLE ── */}
-      <Card variant="table" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden" }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Active Site Allocations</h3>
-            <span style={{ fontSize: "11.5px", color: "#64748b" }}>
-              Showing {filteredAssignments.length} allocation {filteredAssignments.length === 1 ? "record" : "records"}
-            </span>
-          </div>
-
-          <div className="input-wrapper" style={{ width: "260px" }}>
-            <Search className="input-icon" size={15} />
-            <input 
-              type="text" 
-              placeholder="Search allocations..."
-              value={assignmentSearchQuery}
-              onChange={(e) => setAssignmentSearchQuery(e.target.value)}
-              style={{ paddingLeft: "38px", fontSize: "12px" }}
-            />
-          </div>
-        </div>
-
-        <div style={{ overflowX: "auto" }}>
-          <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Site Name</th>
-                <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Engineer</th>
-                <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Allocation Status</th>
-                <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Date</th>
-                <th style={{ padding: "12px 16px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredAssignments.length === 0 ? (
-                <tr>
-                  <td colSpan={5} style={{ textAlign: "center", color: "#64748b", padding: "32px", fontSize: "13px" }}>
-                    No active allocations found matching your search.
-                  </td>
-                </tr>
-              ) : (
-                filteredAssignments.map((asg) => {
-                  const assignedDateStr = asg.assignedAt
-                    ? (asg.assignedAt.seconds
-                        ? new Date(asg.assignedAt.seconds * 1000).toLocaleDateString("en-GB")
-                        : new Date(asg.assignedAt).toLocaleDateString("en-GB"))
-                    : "Today";
-
-                  return (
-                    <tr key={asg.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "12px 16px" }}>
-                        <strong style={{ fontSize: "13px", color: "#0f172a", display: "block" }}>{asg.siteName}</strong>
-                        <span style={{ fontSize: "11px", color: "#64748b", display: "flex", alignItems: "center", gap: "3px" }}>
-                          <MapPin size={11} /> {asg.location || "Site Location"}
-                        </span>
-                      </td>
-                      <td style={{ padding: "12px 16px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                          <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyCenter: "center", fontWeight: "800", fontSize: "10.5px" }}>
-                            {getInitials(asg.engineerName)}
-                          </div>
-                          <div>
-                            <strong style={{ fontSize: "12.5px", color: "#0f172a", display: "block" }}>{asg.engineerName}</strong>
-                            <span style={{ fontSize: "10.5px", color: "#64748b" }}>{asg.engineerEmail || "Site Engineer"}</span>
-                          </div>
-                        </div>
-                      </td>
-                      <td style={{ padding: "12px 16px" }}>
-                        <Badge status={asg.status || "active"} />
-                      </td>
-                      <td style={{ padding: "12px 16px", fontSize: "11.5px", color: "#64748b", fontFamily: "monospace" }}>
-                        {assignedDateStr}
-                      </td>
-                      <td style={{ padding: "12px 16px", textAlign: "right" }}>
-                        <button 
-                          onClick={() => handleRemoveAssignment(asg)} 
-                          className="btn-icon" 
-                          title="Remove Allocation" 
-                          style={{ color: "#ef4444", border: "none", background: "none", cursor: "pointer" }}
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
 
       <Loading show={loading} text="Updating assignments..." />
     </Layout>

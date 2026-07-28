@@ -406,8 +406,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       siteName: s.siteName || 'N/A',
       date: s.date,
       time: s.createdAt?.seconds 
-        ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+        : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
       description: s.description,
       details: `Module: ${s.moduleType}`,
       timestamp: s.createdAt,

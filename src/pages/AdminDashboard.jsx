@@ -382,8 +382,8 @@ export default function AdminDashboard() {
     siteName: s.siteName || "N/A",
     date: s.date,
     time: s.createdAt?.seconds 
-      ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      : new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
+      : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
     description: s.description,
     details: `Module: ${s.moduleType}`,
     timestamp: s.createdAt,
@@ -437,10 +437,63 @@ export default function AdminDashboard() {
     return rawExpenses.filter(e => (e.status || "").toLowerCase() === "pending").length;
   }, [rawExpenses]);
 
+  // Derived values for the 6 exact KPI cards
+  const runningProjectsCount = useMemo(() => {
+    return sites.filter(s => {
+      const st = (s.status || "active").toLowerCase();
+      return st === "active" || st === "running" || st === "in progress";
+    }).length;
+  }, [sites]);
+
+  const completedProjectsCount = useMemo(() => {
+    return sites.filter(s => (s.status || "").toLowerCase() === "completed").length;
+  }, [sites]);
+
+  const onHoldProjectsCount = useMemo(() => {
+    return sites.filter(s => {
+      const st = (s.status || "").toLowerCase();
+      return st === "on hold" || st === "planning" || st === "pending";
+    }).length;
+  }, [sites]);
+
+  const delayedProjectsCount = useMemo(() => {
+    return sites.filter(s => (s.status || "").toLowerCase() === "delayed" || s.isSiteDelayed).length;
+  }, [sites]);
+
+  // Expenses breakdown by category for Expense Overview Chart
+  const expenseCategoryBreakdown = useMemo(() => {
+    const categories = { "Material": 0, "Labour": 0, "Fuel & Equipment": 0, "Other": 0 };
+    rawExpenses.forEach(exp => {
+      const amt = Number(exp.amount) || 0;
+      const cat = exp.category || exp.expenseType || "Other";
+      if (cat.toLowerCase().includes("mat")) categories["Material"] += amt;
+      else if (cat.toLowerCase().includes("lab")) categories["Labour"] += amt;
+      else if (cat.toLowerCase().includes("fuel") || cat.toLowerCase().includes("equip")) categories["Fuel & Equipment"] += amt;
+      else categories["Other"] += amt;
+    });
+    return categories;
+  }, [rawExpenses]);
+
+  const totalExpenseAllTime = useMemo(() => {
+    return Object.values(expenseCategoryBreakdown).reduce((a, b) => a + b, 0);
+  }, [expenseCategoryBreakdown]);
+
+  // Projects sorted for Upcoming Deadlines card
+  const upcomingDeadlines = useMemo(() => {
+    return sites
+      .filter(s => s.expectedEndDate || s.startDate)
+      .sort((a, b) => {
+        const dA = new Date(a.expectedEndDate || a.startDate).getTime() || Infinity;
+        const dB = new Date(b.expectedEndDate || b.startDate).getTime() || Infinity;
+        return dA - dB;
+      })
+      .slice(0, 4);
+  }, [sites]);
+
   return (
     <Layout 
-      title="ERP Executive Dashboard" 
-      description="Real-time construction site monitoring, workforce deployment, and operational control center."
+      title="Overall Admin ERP Dashboard" 
+      description="Executive Construction Control Center, Workforce Operations & Financial Analytics"
     >
       {toast.show && (
         <div id="toast-container" className="toast-container">
@@ -450,330 +503,314 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* ── 1. TOP SUMMARY KPI CARDS (EXACT 6 CARDS) ── */}
-      <div className="erp-kpi-container" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", marginBottom: "20px" }}>
+      {/* ── 1. EXACTLY SIX COMPACT KPI CARDS ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px", marginBottom: "20px" }}>
         
         {/* KPI 1: Active Sites */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Sites</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#fff7ed", color: "#f97316", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <Building2 size={20} style={{ margin: "auto" }} />
-            </div>
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-orange">
+            <Building2 size={20} />
           </div>
-          <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{sites.filter(s => (s.status || "active").toLowerCase() === "active").length}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>{totalAssignedProjects} Assigned</span>
-            <span style={{ fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 6px", borderRadius: "4px" }}>Active</span>
+          <div>
+            <div className="erp-kpi-val">{sites.filter(s => (s.status || "active").toLowerCase() === "active").length}</div>
+            <div className="erp-kpi-lbl">Active Sites</div>
           </div>
         </div>
 
-        {/* KPI 2: Active Site Engineers */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Engineers</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <HardHat size={20} style={{ margin: "auto" }} />
-            </div>
+        {/* KPI 2: Running Projects */}
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-blue">
+            <Activity size={20} />
           </div>
-          <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{engineers.filter(e => e.status === "active").length}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>Of {engineers.length} Registered</span>
-            <span style={{ fontWeight: "700", color: "#2563eb", backgroundColor: "#dbeafe", padding: "2px 6px", borderRadius: "4px" }}>Deployed</span>
+          <div>
+            <div className="erp-kpi-val">{runningProjectsCount}</div>
+            <div className="erp-kpi-lbl">Running Projects</div>
           </div>
         </div>
 
         {/* KPI 3: Today's Labour */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Today's Labour</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <Users size={20} style={{ margin: "auto" }} />
-            </div>
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-slate">
+            <Users size={20} />
           </div>
-          <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{metrics.activeWorkers}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>{metrics.attendanceToday} Check-ins Today</span>
-            <span style={{ fontWeight: "700", color: "#ea580c", backgroundColor: "#ffedd5", padding: "2px 6px", borderRadius: "4px" }}>On Site</span>
+          <div>
+            <div className="erp-kpi-val">{metrics.activeWorkers}</div>
+            <div className="erp-kpi-lbl">Today's Labour</div>
           </div>
         </div>
 
-        {/* KPI 4: Pending Approvals */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Pending Approvals</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: pendingCount > 0 ? "#fef2f2" : "#f1f5f9", color: pendingCount > 0 ? "#ef4444" : "#64748b", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <ClipboardCheck size={20} style={{ margin: "auto" }} />
+        {/* KPI 4: Today's Expense */}
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-orange">
+            <DollarSign size={20} />
+          </div>
+          <div>
+            <div className="erp-kpi-val">₹{todayExpensesSum.toLocaleString()}</div>
+            <div className="erp-kpi-lbl">Today's Expense</div>
+          </div>
+        </div>
+
+        {/* KPI 5: Total Engineers */}
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-green">
+            <HardHat size={20} />
+          </div>
+          <div>
+            <div className="erp-kpi-val">{engineers.length}</div>
+            <div className="erp-kpi-lbl">Total Engineers</div>
+          </div>
+        </div>
+
+        {/* KPI 6: Monthly Completed Projects */}
+        <div className="erp-kpi-compact">
+          <div className="erp-kpi-icon-box erp-kpi-icon-slate">
+            <TrendingUp size={20} />
+          </div>
+          <div>
+            <div className="erp-kpi-val">{completedProjectsCount}</div>
+            <div className="erp-kpi-lbl">Completed Projects</div>
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── 2. EXACTLY SIX QUICK ACTION BUTTONS ── */}
+      <div className="erp-filter-toolbar" style={{ justifyContent: "space-between", marginBottom: "20px" }}>
+        <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+          Quick Actions
+        </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <Link to="/admin/sites" className="erp-btn-primary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <Building2 size={14} /> Add Site
+          </Link>
+          <Link to="/admin/assignments" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <ClipboardCheck size={14} /> Assign Engineer
+          </Link>
+          <Link to="/admin/labour" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <Users size={14} /> Add Labour
+          </Link>
+          <Link to="/admin/materials" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <Package size={14} /> Add Material
+          </Link>
+          <Link to="/admin/reports" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <FileText size={14} /> Create DPR
+          </Link>
+          <Link to="/admin/reports" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
+            <TrendingUp size={14} /> Reports
+          </Link>
+        </div>
+      </div>
+
+      {/* ── 3. SECOND ROW: CONSTRUCTION STATUS & EXPENSE OVERVIEW CHART ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
+        
+        {/* CONSTRUCTION STATUS CARD */}
+        <div style={{ background: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
+              <Building2 size={16} style={{ color: "var(--brand-orange)" }} />
+              Construction Site Status
+            </h3>
+            <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Total Sites: {sites.length}</span>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px" }}>
+            <div style={{ backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
+              <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a" }}>{runningProjectsCount}</div>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: "#15803d", marginTop: "2px" }}>Running</div>
+            </div>
+            <div style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
+              <div style={{ fontSize: "18px", fontWeight: "800", color: "#2563eb" }}>{completedProjectsCount}</div>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: "#1d4ed8", marginTop: "2px" }}>Completed</div>
+            </div>
+            <div style={{ backgroundColor: "#fef3c7", border: "1px solid #fde68a", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
+              <div style={{ fontSize: "18px", fontWeight: "800", color: "#b45309" }}>{onHoldProjectsCount}</div>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: "#92400e", marginTop: "2px" }}>On Hold</div>
+            </div>
+            <div style={{ backgroundColor: "#fef2f2", border: "1px solid #fecaca", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
+              <div style={{ fontSize: "18px", fontWeight: "800", color: "#ef4444" }}>{delayedProjectsCount}</div>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: "#991b1b", marginTop: "2px" }}>Delayed</div>
             </div>
           </div>
-          <div style={{ fontSize: "28px", fontWeight: "800", color: pendingCount > 0 ? "#ef4444" : "#0f172a", lineHeight: "1" }}>{pendingCount}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>Awaiting Action</span>
-            {pendingCount > 0 ? (
-              <Link to="/admin/approvals" style={{ fontWeight: "700", color: "#ef4444", backgroundColor: "#fee2e2", padding: "2px 6px", borderRadius: "4px", textDecoration: "none" }}>Review →</Link>
+        </div>
+
+        {/* COMPACT EXPENSE OVERVIEW CHART */}
+        <div style={{ background: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
+              <DollarSign size={16} style={{ color: "var(--brand-orange)" }} />
+              Expense Overview
+            </h3>
+            <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Total Logged: ₹{totalExpenseAllTime.toLocaleString()}</span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {Object.entries(expenseCategoryBreakdown).map(([catName, amount]) => {
+              const pct = totalExpenseAllTime > 0 ? Math.round((amount / totalExpenseAllTime) * 100) : 0;
+              return (
+                <div key={catName}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginBottom: "3px" }}>
+                    <span style={{ fontWeight: "600", color: "var(--primary-800)" }}>{catName}</span>
+                    <span style={{ fontWeight: "700", color: "var(--primary-950)" }}>₹{amount.toLocaleString()} ({pct}%)</span>
+                  </div>
+                  <div style={{ height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                    <div style={{ 
+                      width: `${Math.max(5, pct)}%`, 
+                      height: "100%", 
+                      backgroundColor: catName === "Material" ? "#f97316" : catName === "Labour" ? "#2563eb" : catName === "Fuel & Equipment" ? "#16a34a" : "#64748b" 
+                    }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+      </div>
+
+      {/* ── 4. THIRD ROW: ACTIVE PROJECTS TABLE + UPCOMING DEADLINES ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: "20px", alignItems: "start" }}>
+        
+        {/* ACTIVE PROJECTS TABLE (COLUMNS: Site Name, Engineer, Progress, Workers, Today's Expense, Status, View) */}
+        <div className="erp-data-table-container" style={{ marginBottom: 0 }}>
+          <div style={{ padding: "14px 18px", borderBottom: "1px solid var(--border-color)", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Active Projects Overview</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Detailed site progress, supervision, and daily costs</p>
+            </div>
+            <Link to="/admin/sites" style={{ fontSize: "12px", fontWeight: "700", color: "var(--brand-orange)", textDecoration: "none" }}>
+              View All ({sites.length}) →
+            </Link>
+          </div>
+
+          <table className="erp-table">
+            <thead>
+              <tr>
+                <th>Site Name</th>
+                <th>Engineer</th>
+                <th>Progress</th>
+                <th>Workers</th>
+                <th>Today's Expense</th>
+                <th>Status</th>
+                <th style={{ textAlign: "right" }}>View</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sites.length === 0 ? (
+                <tr>
+                  <td colSpan="7">
+                    <div className="erp-empty-state">
+                      <div className="erp-empty-icon"><Building2 size={22} /></div>
+                      <span style={{ fontSize: "13px", fontWeight: "600" }}>No active construction sites registered.</span>
+                      <Link to="/admin/sites" className="erp-btn-primary" style={{ marginTop: "4px" }}>+ Add Site</Link>
+                    </div>
+                  </td>
+                </tr>
+              ) : (
+                sites.map(site => {
+                  const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
+                  
+                  // Engineer name lookup
+                  const assignedEngNames = (site.assignedEngineers || []).map(uid => {
+                    const e = engineers.find(eng => eng.id === uid);
+                    return e ? e.fullName : "Engineer";
+                  });
+
+                  // Calculate site's today expense
+                  const todayStr = new Date().toISOString().split("T")[0];
+                  const siteExpenseToday = rawExpenses
+                    .filter(e => e.siteId === site.id && (e.date === todayStr || (e.createdAt?.seconds && new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0] === todayStr)))
+                    .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+                  // Count workers at this site today
+                  const siteWorkerCount = rawAttendanceToday.filter(a => a.siteId === site.id).length;
+
+                  return (
+                    <tr key={site.id}>
+                      <td>
+                        <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>{site.siteName}</strong>
+                        <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{site.clientName || site.location || "Site Project"}</span>
+                      </td>
+                      <td>
+                        {assignedEngNames.length > 0 ? (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                            {assignedEngNames.map((name, idx) => (
+                              <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px" }}>{name}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
+                        )}
+                      </td>
+                      <td style={{ width: "120px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                            <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#2563eb") }} />
+                          </div>
+                          <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-950)", minWidth: "26px" }}>{progVal}%</span>
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600" }}>
+                        {siteWorkerCount > 0 ? `${siteWorkerCount} Active` : "--"}
+                      </td>
+                      <td style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontFamily: "monospace" }}>
+                        {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
+                      </td>
+                      <td>
+                        <Badge status={site.status || "active"} />
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <Link to="/admin/sites" className="erp-btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                          View
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* UPCOMING DEADLINES CARD */}
+        <div style={{ background: "#ffffff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "18px", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
+              <Calendar size={16} style={{ color: "var(--brand-orange)" }} />
+              Upcoming Deadlines
+            </h3>
+            <span style={{ fontSize: "11px", fontWeight: "800", backgroundColor: "#fff7ed", color: "#f97316", padding: "2px 8px", borderRadius: "100px" }}>
+              Schedule
+            </span>
+          </div>
+
+          <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+            {upcomingDeadlines.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "16px", backgroundColor: "#f8fafc", borderRadius: "8px" }}>
+                <p style={{ margin: 0, fontSize: "12px", color: "var(--primary-600)" }}>No deadlines configured.</p>
+              </div>
             ) : (
-              <span style={{ fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 6px", borderRadius: "4px" }}>Clear</span>
+              upcomingDeadlines.map(site => (
+                <div key={site.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                  <div>
+                    <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>{site.siteName}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>Client: {site.clientName || "Internal"}</span>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#c2410c", display: "block", fontFamily: "monospace" }}>
+                      {site.expectedEndDate || site.startDate || "TBD"}
+                    </span>
+                    <Badge status={site.status || "active"} style={{ fontSize: "10px", padding: "1px 5px" }} />
+                  </div>
+                </div>
+              ))
             )}
           </div>
         </div>
 
-        {/* KPI 5: Today's Expenses */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Today's Expenses</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#fef3c7", color: "#b45309", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <DollarSign size={20} style={{ margin: "auto" }} />
-            </div>
-          </div>
-          <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>₹{todayExpensesSum.toLocaleString()}</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>Field & Material Ledger</span>
-            <span style={{ fontWeight: "700", color: "#b45309", backgroundColor: "#fef3c7", padding: "2px 6px", borderRadius: "4px" }}>Daily</span>
-          </div>
-        </div>
-
-        {/* KPI 6: Monthly Progress */}
-        <div className="erp-stat-card" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "18px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>Monthly Progress</span>
-            <div style={{ width: "36px", height: "36px", borderRadius: "8px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-              <TrendingUp size={20} style={{ margin: "auto" }} />
-            </div>
-          </div>
-          <div style={{ fontSize: "28px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{avgProgress}%</div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "10px", fontSize: "11px", color: "#64748b" }}>
-            <span>Sites Completion Avg</span>
-            <span style={{ fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 6px", borderRadius: "4px" }}>Tracked</span>
-          </div>
-        </div>
-
       </div>
 
-      {/* ── 2. QUICK ACTIONS SECTION ── */}
-      <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", marginBottom: "20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-        <div style={{ fontSize: "12px", fontWeight: "700", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px", marginBottom: "12px" }}>
-          Quick Actions
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
-          <Link to="/admin/sites" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <Building2 size={15} style={{ color: "#f97316" }} /> + Add Site
-          </Link>
-          <Link to="/admin/assignments" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <ClipboardCheck size={15} style={{ color: "#2563eb" }} /> + Assign Engineer
-          </Link>
-          <Link to="/admin/engineers" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <HardHat size={15} style={{ color: "#16a34a" }} /> + Add Engineer
-          </Link>
-          <Link to="/admin/labour" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <Users size={15} style={{ color: "#ea580c" }} /> + Add Labour
-          </Link>
-          <Link to="/admin/materials" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <Package size={15} style={{ color: "#8b5cf6" }} /> + Add Material
-          </Link>
-          <Link to="/admin/reports" className="btn btn-outline" style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "8px 14px" }}>
-            <FileText size={15} style={{ color: "#06b6d4" }} /> + Create DPR
-          </Link>
-        </div>
-      </div>
-
-      {/* ── 3. MAIN CONTENT GRID (ACTIVE PROJECTS TABLE + SIDEBAR ALERTS/TASKS) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: "20px", marginBottom: "20px" }}>
-        
-        {/* ACTIVE PROJECTS TABLE */}
-        <Card variant="table" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden" }}>
-          <div style={{ padding: "16px 20px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Active Projects</h3>
-              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "#64748b" }}>Live status, progress percentages, and supervision</p>
-            </div>
-            <Link to="/admin/sites" style={{ fontSize: "12px", fontWeight: "700", color: "#ea580c", textDecoration: "none" }}>View All Sites →</Link>
-          </div>
-
-          <div className="table-container" style={{ overflowX: "auto" }}>
-            <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Site Name</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Client</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Engineer</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Progress %</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Status</th>
-                  <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Last Updated</th>
-                  <th style={{ padding: "12px 16px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sites.length === 0 ? (
-                  <tr>
-                    <td colSpan="7" style={{ textAlign: "center", padding: "32px", color: "#64748b", fontSize: "13px" }}>
-                      No construction sites registered. Click <strong>+ Add Site</strong> above to initialize your first project.
-                    </td>
-                  </tr>
-                ) : (
-                  sites.map(site => {
-                    const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
-                    const assignedEngNames = (site.assignedEngineers || []).map(uid => {
-                      const e = engineers.find(eng => eng.id === uid);
-                      return e ? e.fullName : "Engineer";
-                    });
-
-                    const lastUpdateStr = site.updatedAt?.seconds 
-                      ? new Date(site.updatedAt.seconds * 1000).toLocaleDateString("en-GB") 
-                      : (site.createdAt?.seconds 
-                          ? new Date(site.createdAt.seconds * 1000).toLocaleDateString("en-GB") 
-                          : "Today");
-
-                    return (
-                      <tr key={site.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "14px 16px" }}>
-                          <strong style={{ fontSize: "13px", color: "#0f172a", display: "block" }}>{site.siteName}</strong>
-                          <span style={{ fontSize: "11px", color: "#64748b" }}>{site.location || "Location not set"}</span>
-                        </td>
-                        <td style={{ padding: "14px 16px", fontSize: "12.5px", color: "#334155" }}>
-                          {site.clientName || "Internal Project"}
-                        </td>
-                        <td style={{ padding: "14px 16px" }}>
-                          {assignedEngNames.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                              {assignedEngNames.map((name, idx) => (
-                                <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "#334155", padding: "2px 6px", borderRadius: "4px" }}>{name}</span>
-                              ))}
-                            </div>
-                          ) : (
-                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
-                          )}
-                        </td>
-                        <td style={{ padding: "14px 16px", width: "160px" }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                              <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#2563eb") }} />
-                            </div>
-                            <span style={{ fontSize: "11.5px", fontWeight: "800", color: "#0f172a", minWidth: "32px" }}>{progVal}%</span>
-                          </div>
-                        </td>
-                        <td style={{ padding: "14px 16px" }}>
-                          <Badge status={site.status || "active"} />
-                        </td>
-                        <td style={{ padding: "14px 16px", fontSize: "11.5px", color: "#64748b", fontFamily: "monospace" }}>
-                          {lastUpdateStr}
-                        </td>
-                        <td style={{ padding: "14px 16px", textAlign: "right" }}>
-                          <Link to="/admin/sites" className="btn btn-outline" style={{ padding: "4px 10px", fontSize: "11px" }}>
-                            View
-                          </Link>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-
-        {/* SIDEBAR: OPERATIONAL ALERTS & PENDING TASKS */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          
-          {/* OPERATIONAL ALERTS */}
-          <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
-              <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-                <AlertTriangle size={16} style={{ color: "#ef4444" }} />
-                Operational Alerts
-              </span>
-              <span style={{ fontSize: "10px", fontWeight: "800", backgroundColor: alerts.length > 0 ? "#fee2e2" : "#dcfce7", color: alerts.length > 0 ? "#ef4444" : "#16a34a", padding: "2px 8px", borderRadius: "100px" }}>
-                {alerts.length} Critical
-              </span>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {alerts.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "24px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                  <CheckCircle2 size={24} style={{ color: "#16a34a", marginBottom: "6px" }} />
-                  <p style={{ margin: 0, fontSize: "12.5px", fontWeight: "700", color: "#16a34a" }}>No Critical Alerts Today</p>
-                  <span style={{ fontSize: "11px", color: "#64748b" }}>All active sites and field DPR logs on schedule</span>
-                </div>
-              ) : (
-                alerts.slice(0, 4).map(alert => (
-                  <div key={alert.id} style={{ display: "flex", gap: "10px", padding: "10px 12px", backgroundColor: alert.type === "danger" ? "#fef2f2" : "#fffbeb", borderRadius: "8px", border: `1px solid ${alert.type === "danger" ? "#fecaca" : "#fde68a"}` }}>
-                    <AlertTriangle size={15} style={{ color: alert.type === "danger" ? "#ef4444" : "#b45309", flexShrink: 0, marginTop: "2px" }} />
-                    <div style={{ minWidth: 0 }}>
-                      <strong style={{ fontSize: "11.5px", color: alert.type === "danger" ? "#991b1b" : "#92400e", display: "block" }}>{alert.title}</strong>
-                      <p style={{ margin: "2px 0 0 0", fontSize: "11px", color: "#334155", lineHeight: "1.3" }}>{alert.message}</p>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Card>
-
-          {/* PENDING TASKS */}
-          <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-            <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-              <CheckCircle2 size={16} style={{ color: "#2563eb" }} />
-              Pending Tasks
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: "12px", fontWeight: "600", color: "#334155" }}>Pending DPR Submissions</span>
-                <span style={{ fontSize: "11px", fontWeight: "800", backgroundColor: pendingDprCount > 0 ? "#fee2e2" : "#f1f5f9", color: pendingDprCount > 0 ? "#ef4444" : "#64748b", padding: "2px 8px", borderRadius: "100px" }}>{pendingDprCount} Sites</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: "12px", fontWeight: "600", color: "#334155" }}>Pending Material Approvals</span>
-                <span style={{ fontSize: "11px", fontWeight: "800", backgroundColor: pendingMaterialApprovalCount > 0 ? "#ffedd5" : "#f1f5f9", color: pendingMaterialApprovalCount > 0 ? "#c2410c" : "#64748b", padding: "2px 8px", borderRadius: "100px" }}>{pendingMaterialApprovalCount} Requests</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: "12px", fontWeight: "600", color: "#334155" }}>Pending Engineer Approvals</span>
-                <span style={{ fontSize: "11px", fontWeight: "800", backgroundColor: pendingEngineerApprovalCount > 0 ? "#e0f2fe" : "#f1f5f9", color: pendingEngineerApprovalCount > 0 ? "#0369a1" : "#64748b", padding: "2px 8px", borderRadius: "100px" }}>{pendingEngineerApprovalCount} Requests</span>
-              </div>
-
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                <span style={{ fontSize: "12px", fontWeight: "600", color: "#334155" }}>Pending Expenses</span>
-                <span style={{ fontSize: "11px", fontWeight: "800", backgroundColor: pendingExpenseCount > 0 ? "#fef3c7" : "#f1f5f9", color: pendingExpenseCount > 0 ? "#b45309" : "#64748b", padding: "2px 8px", borderRadius: "100px" }}>{pendingExpenseCount} Logs</span>
-              </div>
-
-            </div>
-          </Card>
-
-        </div>
-
-      </div>
-
-      {/* ── 4. RECENT ACTIVITY TIMELINE ── */}
-      <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>Recent Operational Activity</h3>
-            <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "#64748b" }}>Live log stream of site actions, field attendance, materials, and expenses</p>
-          </div>
-          <Activity size={18} style={{ color: "#ea580c" }} />
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          {combinedTimeline.length === 0 ? (
-            <p style={{ textAlign: "center", color: "#64748b", padding: "20px", fontSize: "12.5px" }}>No recent activity logged in the system.</p>
-          ) : (
-            combinedTimeline.slice(0, 6).map((log, index) => (
-              <div key={log.id || index} style={{ display: "flex", gap: "12px", alignItems: "flex-start", paddingBottom: index === 5 ? "0" : "12px", borderBottom: index === 5 ? "none" : "1px solid #f1f5f9" }}>
-                <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#ea580c", marginTop: "5px", flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>{log.description}</strong>
-                    <span style={{ fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>{log.time}</span>
-                  </div>
-                  <span style={{ fontSize: "11px", color: "#64748b" }}>Site: {log.siteName} • By: {log.engineerName} ({log.details})</span>
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-      </Card>
-
-      <Loading show={loading} text="Loading Construction ERP dashboard..." />
+      <Loading show={loading} text="Loading Construction ERP..." />
     </Layout>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import Layout from "../components/layout/Layout";
 import { 
   getSites, 
@@ -16,6 +16,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import SiteFilterBar from "../components/common/SiteFilterBar";
 import { useAuth } from "../context/AuthContext";
 import { firebaseConfig } from "../firebase/config";
 import { 
@@ -291,8 +292,25 @@ export default function Sites() {
   const [engineers, setEngineers] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [engineerFilter, setEngineerFilter] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [progressFilter, setProgressFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+  const [confirmModal, setConfirmModal] = useState({
+    show: false,
+    title: "Confirm Action",
+    message: "Are you sure you want to perform this action?",
+    confirmText: "Confirm",
+    variant: "primary",
+    onConfirm: null
+  });
+
+  const closeConfirmModal = () => {
+    setConfirmModal(prev => ({ ...prev, show: false, onConfirm: null }));
+  };
 
   // Modal States
   const [showFormModal, setShowFormModal] = useState(false);
@@ -474,11 +492,51 @@ export default function Sites() {
     loadData();
   }, []);
 
-  const filteredSites = sites.filter(site => 
-    site.siteName?.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-    site.clientName?.toLowerCase().includes(searchQuery.toLowerCase().trim()) ||
-    site.location?.toLowerCase().includes(searchQuery.toLowerCase().trim())
-  );
+  const filteredSites = useMemo(() => {
+    return sites.filter(site => {
+      // Search
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase().trim();
+        const matchName = (site.siteName || "").toLowerCase().includes(q);
+        const matchClient = (site.clientName || "").toLowerCase().includes(q);
+        const matchLoc = (site.location || "").toLowerCase().includes(q);
+        if (!matchName && !matchClient && !matchLoc) return false;
+      }
+
+      // Status Filter
+      if (statusFilter !== "all" && site.status !== statusFilter) return false;
+
+      // Engineer Filter
+      if (engineerFilter) {
+        const matchEng = site.proposedLocationCapturedBy === engineerFilter || (site.assignedEngineers && site.assignedEngineers.includes(engineerFilter));
+        if (!matchEng) return false;
+      }
+
+      // Date Range Filter
+      if (fromDate && site.startDate && site.startDate < fromDate) return false;
+      if (toDate && site.expectedEndDate && site.expectedEndDate > toDate) return false;
+
+      // Progress Filter
+      if (progressFilter !== "all") {
+        const p = Number(site.progress || 0);
+        if (progressFilter === "0-25" && (p < 0 || p > 25)) return false;
+        if (progressFilter === "25-50" && (p <= 25 || p > 50)) return false;
+        if (progressFilter === "50-75" && (p <= 50 || p > 75)) return false;
+        if (progressFilter === "75-100" && (p <= 75 || p > 100)) return false;
+      }
+
+      return true;
+    });
+  }, [sites, searchQuery, statusFilter, engineerFilter, fromDate, toDate, progressFilter]);
+
+  const handleResetFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("all");
+    setEngineerFilter("");
+    setFromDate("");
+    setToDate("");
+    setProgressFilter("all");
+  };
 
   const handleOpenAddModal = () => {
     setFormMode("add");
@@ -514,57 +572,12 @@ export default function Sites() {
     setShowFormModal(true);
   };
 
-  const handleFormSubmit = async (e) => {
-    e.preventDefault();
-
-    // Validation checks
-    if (!formName.trim()) {
-      showToast("Site Name is required.", "error");
-      return;
-    }
-    if (!formClientName.trim()) {
-      showToast("Client Name is required.", "error");
-      return;
-    }
-    if (!formStartDate) {
-      showToast("Start Date is required.", "error");
-      return;
-    }
-    if (!formExpectedEndDate) {
-      showToast("Expected End Date is required.", "error");
-      return;
-    }
-    if (new Date(formExpectedEndDate) < new Date(formStartDate)) {
-      showToast("Expected End Date cannot be before Start Date.", "error");
-      return;
-    }
-
-    const budgetNum = Number(formBudget);
-    if (!formBudget.toString().trim()) {
-      showToast("Site Budget is required.", "error");
-      return;
-    }
-    if (isNaN(budgetNum) || budgetNum <= 0) {
-      showToast("Site Budget must be a positive numeric value.", "error");
-      return;
-    }
-
-    if (!formLatitude || !formLongitude) {
-      showToast("Please search for or click to pin the exact site location on Google Maps.", "error");
-      return;
-    }
-
-    let rad = 50;
-    if (formMode === "edit") {
-      const existingSite = sites.find(s => s.id === formId);
-      rad = existingSite ? Number(existingSite.radius || 50) : 50;
-    }
-
+  const executeSaveSite = async (budgetNum, rad) => {
     setLoading(true);
     try {
       if (formMode === "add") {
         const adminId = userProfile?.uid || userProfile?.id || null;
-        const newSiteId = await createSite(
+        await createSite(
           formName.trim(), 
           formClientName.trim(), 
           formLocation.trim(), 
@@ -616,58 +629,145 @@ export default function Sites() {
     }
   };
 
-  const handleApproveLocation = async (siteId, siteData) => {
-    if (confirm(`Approve location setup for "${siteData.siteName}"?`)) {
-      setLoading(true);
-      try {
-        await approveSiteLocation(siteId, siteData);
-        showToast("Site Location Approved successfully", "success");
-        await loadData();
-      } catch (err) {
-        console.error("Error approving site location:", err);
-        showToast(`Failed to approve location: ${err.message}`, "error");
-      } finally {
-        setLoading(false);
-      }
-    }
-  };
+  const handleFormSubmit = async (e) => {
+    e.preventDefault();
 
-  const handleRejectLocation = async (siteId) => {
-    if (confirm("Reject this site location setup? Site engineer will need to capture it again.")) {
-      setLoading(true);
-      try {
-        await rejectSiteLocation(siteId);
-        showToast("Site Location Rejected", "info");
-        await loadData();
-      } catch (err) {
-        console.error("Error rejecting site location:", err);
-        showToast(`Failed to reject location: ${err.message}`, "error");
-      } finally {
-        setLoading(false);
-      }
+    // Validation checks
+    if (!formName.trim()) {
+      showToast("Site Name is required.", "error");
+      return;
     }
-  };
+    if (!formClientName.trim()) {
+      showToast("Client Name is required.", "error");
+      return;
+    }
+    if (!formStartDate) {
+      showToast("Start Date is required.", "error");
+      return;
+    }
+    if (!formExpectedEndDate) {
+      showToast("Expected End Date is required.", "error");
+      return;
+    }
+    if (new Date(formExpectedEndDate) < new Date(formStartDate)) {
+      showToast("Expected End Date cannot be before Start Date.", "error");
+      return;
+    }
 
-  const handleDeleteSite = async (site) => {
-    if (confirm(`Are you sure you want to delete the site "${site.siteName}"?`)) {
-      setLoading(true);
-      try {
-        await deleteSite(site.id);
-        showToast("Site deleted successfully.", "success");
-        await loadData();
-      } catch (err) {
-        console.error("Deletion failed:", err);
-        if (err.code === "permission-denied") {
-          showToast("Access Denied: You do not have permission to delete sites.", "error");
-        } else if (err.code === "unavailable" || err.message?.includes("offline") || !navigator.onLine) {
-          showToast("Database Offline: Please check your network connection.", "error");
-        } else {
-          showToast(`Failed to delete site: ${err.message}`, "error");
+    const budgetNum = Number(formBudget);
+    if (!formBudget.toString().trim()) {
+      showToast("Site Budget is required.", "error");
+      return;
+    }
+    if (isNaN(budgetNum) || budgetNum <= 0) {
+      showToast("Site Budget must be a positive numeric value.", "error");
+      return;
+    }
+
+    if (!formLatitude || !formLongitude) {
+      showToast("Please search for or click to pin the exact site location on Google Maps.", "error");
+      return;
+    }
+
+    let rad = 50;
+    if (formMode === "edit") {
+      const existingSite = sites.find(s => s.id === formId);
+      rad = existingSite ? Number(existingSite.radius || 50) : 50;
+
+      // Popup confirmation before updating site
+      setConfirmModal({
+        show: true,
+        title: "Save Site Modifications",
+        message: `Are you sure you want to update and save modifications to construction site "${formName.trim()}"?`,
+        confirmText: "Save Changes",
+        variant: "primary",
+        onConfirm: () => {
+          closeConfirmModal();
+          executeSaveSite(budgetNum, rad);
         }
-      } finally {
-        setLoading(false);
-      }
+      });
+      return;
     }
+
+    await executeSaveSite(budgetNum, rad);
+  };
+
+  const handleApproveLocation = (siteId, siteData) => {
+    setConfirmModal({
+      show: true,
+      title: "Approve Site Location",
+      message: `Are you sure you want to approve boundary location setup for "${siteData.siteName}"?`,
+      confirmText: "Approve Location",
+      variant: "primary",
+      onConfirm: async () => {
+        closeConfirmModal();
+        setLoading(true);
+        try {
+          await approveSiteLocation(siteId, siteData);
+          showToast("Site Location Approved successfully", "success");
+          await loadData();
+        } catch (err) {
+          console.error("Error approving site location:", err);
+          showToast(`Failed to approve location: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
+  };
+
+  const handleRejectLocation = (siteId) => {
+    setConfirmModal({
+      show: true,
+      title: "Reject Site Location",
+      message: "Are you sure you want to reject this site location setup? The site engineer will need to capture it again.",
+      confirmText: "Reject Location",
+      variant: "danger",
+      onConfirm: async () => {
+        closeConfirmModal();
+        setLoading(true);
+        try {
+          await rejectSiteLocation(siteId);
+          showToast("Site Location Rejected", "info");
+          await loadData();
+        } catch (err) {
+          console.error("Error rejecting site location:", err);
+          showToast(`Failed to reject location: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
+  };
+
+  const handleDeleteSite = (site) => {
+    setConfirmModal({
+      show: true,
+      title: "Delete Construction Site",
+      message: `Are you sure you want to permanently delete site "${site.siteName}"? All associated logs and site records will be removed.`,
+      confirmText: "Delete Site",
+      variant: "danger",
+      onConfirm: async () => {
+        closeConfirmModal();
+        setLoading(true);
+        try {
+          await deleteSite(site.id);
+          showToast("Site deleted successfully.", "success");
+          await loadData();
+        } catch (err) {
+          console.error("Deletion failed:", err);
+          if (err.code === "permission-denied") {
+            showToast("Access Denied: You do not have permission to delete sites.", "error");
+          } else if (err.code === "unavailable" || err.message?.includes("offline") || !navigator.onLine) {
+            showToast("Database Offline: Please check your network connection.", "error");
+          } else {
+            showToast(`Failed to delete site: ${err.message}`, "error");
+          }
+        } finally {
+          setLoading(false);
+        }
+      }
+    });
   };
 
   if (selectedSiteId) {
@@ -1012,8 +1112,34 @@ export default function Sites() {
         </form>
       </Modal>
 
-      {/* MODAL: VIEW SITE LOCATION MAP */}
-
+      {/* ACTION CONFIRMATION POPUP MODAL */}
+      <Modal
+        isOpen={confirmModal.show}
+        onClose={closeConfirmModal}
+        title={confirmModal.title}
+        size="sm"
+      >
+        <div style={{ padding: "8px 0" }}>
+          <p style={{ margin: "0 0 20px 0", fontSize: "13.5px", color: "#334155", lineHeight: "1.5" }}>
+            {confirmModal.message}
+          </p>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+            <Button variant="outline" onClick={closeConfirmModal}>
+              Cancel
+            </Button>
+            <Button 
+              variant={confirmModal.variant || "primary"}
+              onClick={() => {
+                if (typeof confirmModal.onConfirm === "function") {
+                  confirmModal.onConfirm();
+                }
+              }}
+            >
+              {confirmModal.confirmText || "Confirm"}
+            </Button>
+          </div>
+        </div>
+      </Modal>
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

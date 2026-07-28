@@ -3075,19 +3075,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <span className="mobile-action-title">Upload Photo</span>
             </button>
 
-            {/* Create Material Request */}
-            <button 
-              type="button"
-              className="mobile-action-card materials" 
-              onClick={() => navigate("/engineer/material")}
-              style={{ border: "none", cursor: "pointer" }}
-            >
-              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--warning-50)", color: "var(--warning-700)" }}>
-                <Package size={20} />
-              </div>
-              <span className="mobile-action-title">Request Material</span>
-            </button>
-
             {/* View Tasks */}
             <button 
               type="button"
