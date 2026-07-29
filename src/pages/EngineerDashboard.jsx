@@ -262,6 +262,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Workforce submit and lock states
   const [lockedDates, setLockedDates] = useState(new Set());
   const [labourSubmitting, setLabourSubmitting] = useState(false);
+  const [isLabourLocked, setIsLabourLocked] = useState(false);
+  const [labourLockInfo, setLabourLockInfo] = useState(null);
+
+  const fetchLabourLockStatus = async () => {
+    if (!activeSiteId || !labourDate) {
+      setIsLabourLocked(false);
+      setLabourLockInfo(null);
+      return;
+    }
+    try {
+      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+      setIsLabourLocked(lockStatus.submitted);
+      setLabourLockInfo(lockStatus);
+    } catch (err) {
+      console.error("Error checking labour submission status:", err);
+    }
+  };
 
   const loadLockedDates = async () => {
     if (!activeSiteId) {
@@ -273,7 +290,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const locked = new Set(
         records
           .filter(r => r.status === "submitted" && (r.type === "labour_attendance_lock" || r.id?.startsWith("labour_lock_")))
-          .map(r => r.date)
+          .map(r => r.date || r.attendanceDate)
+          .filter(Boolean)
       );
       setLockedDates(locked);
     } catch (err) {
@@ -366,7 +384,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [labourHistoryRecords, setLabourHistoryRecords] = useState([]);
   const [activeWorkforceSubTab, setActiveWorkforceSubTab] = useState("new-entry"); // "new-entry" or "history"
   const [expandedDates, setExpandedDates] = useState([]);
-  const isLabourSubmitted = lockedDates.has(labourDate);
+  const isLabourSubmitted = isLabourLocked;
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingValue, setEditingValue] = useState(1.0);
@@ -772,6 +790,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     };
     fetchMaterialLockStatus();
   }, [activeSiteId, bulkMaterialDate]);
+
+  // Check Labour Attendance submission status for selected site and date
+  useEffect(() => {
+    fetchLabourLockStatus();
+  }, [activeSiteId, labourDate]);
 
   // Sync labour entries & historical summary whenever active site or select date changes
   useEffect(() => {
@@ -1446,7 +1469,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Count-based worker attendance handlers with custom work units & daily wage
   const handleCountChange = async (categoryId, customUnitsVal, increment) => {
-    if (lockedDates.has(labourDate) || isLabourSubmitted) {
+    if (isLabourSubmitted) {
       showToast("Cannot modify count: Attendance for this date is submitted and locked.", "error");
       return;
     }
@@ -1507,7 +1530,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleWorkUnitsChange = async (categoryId, newUnitsStr) => {
-    if (lockedDates.has(labourDate) || isLabourSubmitted) {
+    if (isLabourSubmitted) {
       showToast("Cannot modify work units: Attendance for this date is submitted and locked.", "error");
       return;
     }
@@ -1715,6 +1738,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       try {
         await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId);
         showToast("Workforce attendance submitted and locked successfully.", "success");
+        setIsLabourLocked(true);
+        await fetchLabourLockStatus();
         await loadLockedDates(); // Reload locked dates to trigger local locks
       } catch (err) {
         console.error("Failed to submit workforce attendance:", err);
@@ -1773,6 +1798,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setMaterialFlow("list");
       setBulkQuantitiesMap({});
       setIsBulkMaterialLocked(true);
+      const lockStatus = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
+      setIsBulkMaterialLocked(lockStatus.submitted);
+      setBulkMaterialLockInfo(lockStatus);
       await loadDashboardData();
     } catch (err) {
       console.error("Bulk material submit error:", err);

@@ -4518,7 +4518,7 @@ export async function checkLabourSubmissionStatus(siteId, dateStr) {
   const docSnap = await getDoc(docRef);
   if (docSnap.exists()) {
     const data = docSnap.data();
-    if (data.status === "submitted" && (data.type === "labour_attendance_lock" || data.siteId === siteId)) {
+    if (data.status === "submitted") {
       return {
         submitted: true,
         submittedAt: data.submittedAt || null,
