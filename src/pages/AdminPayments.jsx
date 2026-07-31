@@ -336,7 +336,7 @@ export default function AdminPayments() {
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Site Expense Management</h2>
               {activeSite && (
-                <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #bfdbfe" }}>
+                <span style={{ backgroundColor: "#fff7ed", color: "#c2410c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
                   {activeSite.siteName}
                 </span>
               )}
@@ -481,19 +481,19 @@ export default function AdminPayments() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Labour Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Users size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(labourExpenseVal)}</div>
-          <span style={{ fontSize: "11px", color: "#2563eb", marginTop: "4px", display: "block", fontWeight: "600" }}>Daily wages &amp; attendance</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Daily wages &amp; attendance</span>
         </div>
 
         {/* Card 3: Material Expense */}
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Material Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#faf5ff", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Package size={16} />
             </div>
           </div>
@@ -647,8 +647,8 @@ export default function AdminPayments() {
                       // Badge color mapping
                       let catBadgeBg = "#f1f5f9";
                       let catBadgeFg = "#475569";
-                      if (exp.normCategory === "Labour") { catBadgeBg = "#eff6ff"; catBadgeFg = "#1d4ed8"; }
-                      else if (exp.normCategory === "Material") { catBadgeBg = "#faf5ff"; catBadgeFg = "#7e22ce"; }
+                      if (exp.normCategory === "Labour") { catBadgeBg = "#fff7ed"; catBadgeFg = "#c2410c"; }
+                      else if (exp.normCategory === "Material") { catBadgeBg = "#fff7ed"; catBadgeFg = "#ea580c"; }
                       else if (exp.normCategory === "Transport") { catBadgeBg = "#fff7ed"; catBadgeFg = "#c2410c"; }
 
                       return (
@@ -702,7 +702,7 @@ export default function AdminPayments() {
                                 padding: "5px 10px",
                                 fontSize: "12px",
                                 fontWeight: "600",
-                                color: "#3b82f6",
+                                color: "#334155",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",

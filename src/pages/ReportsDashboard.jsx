@@ -733,9 +733,9 @@ export default function ReportsDashboard() {
     });
 
     const donutData = [
-      { name: "Material Cost", value: materialCost, color: "#3b82f6" },
-      { name: "Labour Cost", value: labourCost, color: "#22c55e" },
-      { name: "Other Expenses", value: otherCost, color: "#8b5cf6" }
+      { name: "Material Cost", value: materialCost, color: "#f97316" },
+      { name: "Labour Cost", value: labourCost, color: "#16a34a" },
+      { name: "Other Expenses", value: otherCost, color: "#f59e0b" }
     ];
 
     // Sorted monthly trend
@@ -1365,7 +1365,7 @@ export default function ReportsDashboard() {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Site Reports Dashboard</h2>
-              <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #bfdbfe" }}>
+              <span style={{ backgroundColor: "#fff7ed", color: "#c2410c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
                 {activeTab.replace("_report", "").toUpperCase()} REPORT
               </span>
             </div>
@@ -1508,26 +1508,26 @@ export default function ReportsDashboard() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Accrued Expenses</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <DollarSign size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(overallMetrics.totalExpenses)}</div>
-          <span style={{ fontSize: "11px", color: "#2563eb", marginTop: "4px", display: "block", fontWeight: "600" }}>Total site cost accrued</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Total site cost accrued</span>
         </div>
 
         {/* KPI 3: Labour Workforce Units */}
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Labour Headcount</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#faf5ff", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#ffedd5", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Users size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>
             {labourDateRangeReportData?.categories ? labourDateRangeReportData.categories.reduce((acc, c) => acc + (c.totalWorkers || 0), 0) : 0}
           </div>
-          <span style={{ fontSize: "11px", color: "#9333ea", marginTop: "4px", display: "block", fontWeight: "600" }}>Attendance units logged</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Attendance units logged</span>
         </div>
 
         {/* KPI 4: Avg Progress */}

@@ -558,7 +558,7 @@ export default function PayrollSummary() {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Worker Payouts</h2>
-              <span style={{ backgroundColor: "#eff6ff", color: "#1d4ed8", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #bfdbfe" }}>
+              <span style={{ backgroundColor: "#fff7ed", color: "#c2410c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
                 {filterPeriod === "Month" ? filterMonth : filterPeriod}
               </span>
             </div>
@@ -807,24 +807,24 @@ export default function PayrollSummary() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Workers</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Users size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{totalWorkers}</div>
-          <span style={{ fontSize: "11px", color: "#2563eb", marginTop: "4px", display: "block", fontWeight: "600" }}>Labour teams &amp; engineers</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Labour teams &amp; engineers</span>
         </div>
 
         {/* KPI 4: Current Period Amount */}
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Current Period Amount</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#faf5ff", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <DollarSign size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(currentPeriodAmount)}</div>
-          <span style={{ fontSize: "11px", color: "#9333ea", marginTop: "4px", display: "block", fontWeight: "600" }}>Gross accrued payroll</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Gross accrued payroll</span>
         </div>
 
       </div>
@@ -939,8 +939,8 @@ export default function PayrollSummary() {
                         {/* Worker Type Badge */}
                         <td style={{ padding: "12px 16px" }}>
                           <span style={{ 
-                            backgroundColor: row.type === "Labour" ? "#eff6ff" : "#faf5ff", 
-                            color: row.type === "Labour" ? "#1d4ed8" : "#7e22ce", 
+                            backgroundColor: row.type === "Labour" ? "#fff7ed" : "#fff7ed", 
+                            color: row.type === "Labour" ? "#c2410c" : "#ea580c", 
                             fontSize: "11px", 
                             fontWeight: "700", 
                             padding: "3px 8px", 
@@ -996,7 +996,7 @@ export default function PayrollSummary() {
                                 padding: "5px 9px",
                                 fontSize: "12px",
                                 fontWeight: "600",
-                                color: "#2563eb",
+                                color: "#ea580c",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",

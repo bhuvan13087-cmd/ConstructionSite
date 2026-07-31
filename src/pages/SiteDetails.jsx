@@ -489,7 +489,7 @@ export default function SiteDetails({ siteId, onBack }) {
           
           {/* Financial Summary KPI Cards */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "16px" }}>
-            <Card style={{ borderLeft: "4px solid #3b82f6" }}>
+            <Card style={{ borderLeft: "4px solid #0f172a" }}>
               <span style={{ fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase" }}>Gross Labour Amount</span>
               <div style={{ fontSize: "22px", fontWeight: "900", color: "#0f172a", marginTop: "6px", fontFamily: "monospace" }}>
                 ₹{siteLabourFinancials.grossAmount.toLocaleString("en-IN")}
@@ -505,9 +505,9 @@ export default function SiteDetails({ siteId, onBack }) {
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>Sum of advances issued for this site</span>
             </Card>
 
-            <Card style={{ borderLeft: "4px solid #22c55e" }}>
-              <span style={{ fontSize: "11px", fontWeight: "750", color: "#15803d", textTransform: "uppercase" }}>Net Payable Amount</span>
-              <div style={{ fontSize: "22px", fontWeight: "900", color: "#16a34a", marginTop: "6px", fontFamily: "monospace" }}>
+            <Card style={{ borderLeft: "4px solid var(--success-500)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "var(--success-600)", textTransform: "uppercase" }}>Net Payable Amount</span>
+              <div style={{ fontSize: "22px", fontWeight: "900", color: "var(--success-600)", marginTop: "6px", fontFamily: "monospace" }}>
                 ₹{siteLabourFinancials.netPayable.toLocaleString("en-IN")}
               </div>
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>Gross Amount minus Advance Paid</span>
@@ -518,8 +518,8 @@ export default function SiteDetails({ siteId, onBack }) {
           <div style={{
             padding: "14px 18px",
             borderRadius: "10px",
-            backgroundColor: "#f0f9ff",
-            border: "1px solid #bae6fd",
+            backgroundColor: "var(--primary-50)",
+            border: "1px solid var(--border-color)",
             display: "flex",
             alignItems: "center",
             justify: "space-between",
@@ -527,13 +527,13 @@ export default function SiteDetails({ siteId, onBack }) {
             gap: "10px"
           }}>
             <div>
-              <span style={{ fontSize: "12px", fontWeight: "800", color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+              <span style={{ fontSize: "12px", fontWeight: "800", color: "#c2410c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 Automatically Resolved Labour Team
               </span>
               <div style={{ fontSize: "15px", fontWeight: "900", color: "#0284c7", marginTop: "2px" }}>
                 {autoTeam.teamName}
               </div>
-              <span style={{ fontSize: "11.5px", color: "#0369a1" }}>
+              <span style={{ fontSize: "11.5px", color: "#c2410c" }}>
                 Resolved automatically from site attendance records in Firestore. No manual team selection required.
               </span>
             </div>
@@ -752,7 +752,7 @@ export default function SiteDetails({ siteId, onBack }) {
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
                   <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Overall Progress</span>
-                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#e0f2fe", color: "#0369a1", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
                     <Activity size={18} style={{ margin: "auto" }} />
                   </div>
                 </div>
@@ -900,7 +900,7 @@ export default function SiteDetails({ siteId, onBack }) {
                     {/* 3. Pending Labour Update */}
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                       <span style={{ color: "#334155", fontWeight: "500" }}>Pending Labour Update</span>
-                      <span style={{ fontWeight: "700", color: siteLabourFinancials.netPayable > 0 ? "#2563eb" : "#16a34a", fontSize: "11px" }}>
+                      <span style={{ fontWeight: "700", color: siteLabourFinancials.netPayable > 0 ? "#ea580c" : "#16a34a", fontSize: "11px" }}>
                         ₹{siteLabourFinancials.netPayable.toLocaleString("en-IN")} Net Payable
                       </span>
                     </div>

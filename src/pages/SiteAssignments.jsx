@@ -426,7 +426,7 @@ export default function SiteAssignments() {
                             style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", padding: "6px 10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}
                           >
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
                                 {getInitials(asg.engineerName)}
                               </div>
                               <span style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{asg.engineerName}</span>
@@ -510,7 +510,7 @@ export default function SiteAssignments() {
                         </td>
                         <td style={{ padding: "10px 14px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ width: "26px", height: "26px", borderRadius: "50%", backgroundColor: "#dbeafe", color: "#1e40af", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                            <div style={{ width: "26px", height: "26px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
                               {getInitials(asg.engineerName)}
                             </div>
                             <div>

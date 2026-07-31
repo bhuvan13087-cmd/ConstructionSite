@@ -417,11 +417,11 @@ export default function DocumentsDashboard() {
       typeName = "PDF";
     } else if (fName.endsWith(".xlsx") || fName.endsWith(".xls") || fName.endsWith(".csv")) {
       fileColor = "#dcfce7";
-      iconColor = "#22c55e";
+      iconColor = "#16a34a";
       typeName = "EXCEL";
     } else if (fName.endsWith(".doc") || fName.endsWith(".docx")) {
-      fileColor = "#dbeafe";
-      iconColor = "#3b82f6";
+      fileColor = "#ffedd5";
+      iconColor = "#334155";
       typeName = "WORD";
     }
 

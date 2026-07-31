@@ -481,7 +481,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         <div className="dash-kpi-bar">
 
           <div className="dash-kpi-item">
-            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(59,130,246,0.08)", color: "#3b82f6" }}>
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(30,41,59,0.08)", color: "var(--primary-900)" }}>
               <Building2 size={20} />
             </div>
             <div className="dash-kpi-info">
@@ -542,7 +542,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
 
           <div className="dash-kpi-item">
-            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(139,92,246,0.08)", color: "#8b5cf6" }}>
+            <div className="dash-kpi-icon" style={{ backgroundColor: "rgba(249,115,22,0.08)", color: "var(--accent-600)" }}>
               <Layers size={20} />
             </div>
             <div className="dash-kpi-info">

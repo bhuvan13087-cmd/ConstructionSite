@@ -619,9 +619,9 @@ export default function AdminDashboard() {
               <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a" }}>{runningProjectsCount}</div>
               <div style={{ fontSize: "11px", fontWeight: "700", color: "#15803d", marginTop: "2px" }}>Running</div>
             </div>
-            <div style={{ backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
-              <div style={{ fontSize: "18px", fontWeight: "800", color: "#2563eb" }}>{completedProjectsCount}</div>
-              <div style={{ fontSize: "11px", fontWeight: "700", color: "#1d4ed8", marginTop: "2px" }}>Completed</div>
+            <div style={{ backgroundColor: "#fff7ed", border: "1px solid #ffedd5", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
+              <div style={{ fontSize: "18px", fontWeight: "800", color: "#ea580c" }}>{completedProjectsCount}</div>
+              <div style={{ fontSize: "11px", fontWeight: "700", color: "#c2410c", marginTop: "2px" }}>Completed</div>
             </div>
             <div style={{ backgroundColor: "#fef3c7", border: "1px solid #fde68a", padding: "12px 10px", borderRadius: "8px", textAlign: "center" }}>
               <div style={{ fontSize: "18px", fontWeight: "800", color: "#b45309" }}>{onHoldProjectsCount}</div>
@@ -657,7 +657,7 @@ export default function AdminDashboard() {
                     <div style={{ 
                       width: `${Math.max(5, pct)}%`, 
                       height: "100%", 
-                      backgroundColor: catName === "Material" ? "#f97316" : catName === "Labour" ? "#2563eb" : catName === "Fuel & Equipment" ? "#16a34a" : "#64748b" 
+                      backgroundColor: catName === "Material" ? "#f97316" : catName === "Labour" ? "#ea580c" : catName === "Fuel & Equipment" ? "#16a34a" : "#64748b" 
                     }} />
                   </div>
                 </div>
@@ -745,7 +745,7 @@ export default function AdminDashboard() {
                       <td style={{ width: "120px" }}>
                         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                           <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                            <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#2563eb") }} />
+                            <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#ea580c") }} />
                           </div>
                           <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-950)", minWidth: "26px" }}>{progVal}%</span>
                         </div>

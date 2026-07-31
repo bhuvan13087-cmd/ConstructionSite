@@ -376,12 +376,12 @@ export default function ApprovalsDashboard() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Queue</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Layers size={16} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{totalCount}</div>
-          <span style={{ fontSize: "11px", color: "#2563eb", marginTop: "4px", display: "block", fontWeight: "600" }}>Total processed history</span>
+          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Total processed history</span>
         </div>
 
       </div>
@@ -614,8 +614,8 @@ export default function ApprovalsDashboard() {
                               width: "28px",
                               height: "28px",
                               borderRadius: "50%",
-                              backgroundColor: "#eff6ff",
-                              color: "#2563eb",
+                              backgroundColor: "#fff7ed",
+                              color: "#ea580c",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",

@@ -930,7 +930,7 @@ export default function AdminLabour() {
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Labour Teams</h2>
-              <span style={{ backgroundColor: "#eff6ff", color: "#2563eb", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #bfdbfe" }}>
+              <span style={{ backgroundColor: "#fff7ed", color: "#ea580c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
                 {teams.length} Registered Teams
               </span>
             </div>
@@ -1006,7 +1006,7 @@ export default function AdminLabour() {
 
                     {/* Stats summary badge outside */}
                     <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #f1f5f9" }}>
-                      <Users size={18} style={{ color: "#2563eb" }} />
+                      <Users size={18} style={{ color: "#ea580c" }} />
                       <div>
                         <span style={{ fontSize: "10.5px", textTransform: "uppercase", fontWeight: "700", color: "#64748b", display: "block" }}>Total Labour</span>
                         <strong style={{ fontSize: "14px", color: "#0f172a" }}>{categoriesCount} {categoriesCount === 1 ? "Category" : "Categories"}</strong>
@@ -1088,8 +1088,8 @@ export default function AdminLabour() {
                         {cats.map(cat => {
                           const membersList = cat.members ? Object.values(cat.members) : [];
                           return (
-                            <div key={cat.id || cat.name} style={{ marginLeft: "8px", borderLeft: "2px solid #3b82f6", paddingLeft: "14px" }}>
-                              <h5 style={{ margin: "0 0 8px 0", color: "#1e40af", fontWeight: "700", fontSize: "13.5px" }}>
+                            <div key={cat.id || cat.name} style={{ marginLeft: "8px", borderLeft: "2px solid #ea580c", paddingLeft: "14px" }}>
+                              <h5 style={{ margin: "0 0 8px 0", color: "#c2410c", fontWeight: "700", fontSize: "13.5px" }}>
                                 {cat.name} <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>(Base Wage: ₹{cat.baseWage} / Cycle: {cat.paymentType})</span>
                               </h5>
                               {membersList.length === 0 ? (
@@ -1355,8 +1355,8 @@ export default function AdminLabour() {
             <div style={{ fontSize: "22px", fontWeight: "800", color: "#b45309", marginTop: "2px" }}>{totalHalfDay}</div>
           </div>
           <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#2563eb", textTransform: "uppercase" }}>Calculated Cost</span>
-            <div style={{ fontSize: "22px", fontWeight: "800", color: "#2563eb", marginTop: "2px", fontFamily: "monospace" }}>₹{totalLabourCost.toLocaleString("en-IN")}</div>
+            <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", textTransform: "uppercase" }}>Calculated Cost</span>
+            <div style={{ fontSize: "22px", fontWeight: "800", color: "#ea580c", marginTop: "2px", fontFamily: "monospace" }}>₹{totalLabourCost.toLocaleString("en-IN")}</div>
           </div>
         </div>
 
@@ -1473,7 +1473,7 @@ export default function AdminLabour() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Teams</span>
-            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#eff6ff", color: "#2563eb", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
               <Users size={16} style={{ margin: "auto" }} />
             </div>
           </div>
@@ -1529,14 +1529,14 @@ export default function AdminLabour() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Attendance Today</span>
-            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#f3e8ff", color: "#8b5cf6", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
               <Calendar size={16} style={{ margin: "auto" }} />
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
             {allLabourAttendance.filter(r => r.attendanceDate === new Date().toISOString().split("T")[0]).length}
           </div>
-          <span style={{ fontSize: "10.5px", color: "#8b5cf6", marginTop: "6px", display: "block", fontWeight: "600" }}>Check-ins logged</span>
+          <span style={{ fontSize: "10.5px", color: "#ea580c", marginTop: "6px", display: "block", fontWeight: "600" }}>Check-ins logged</span>
         </div>
 
       </div>
@@ -1747,7 +1747,7 @@ export default function AdminLabour() {
                 />
               </div>
 
-              <div style={{ backgroundColor: "#eff6ff", color: "#2563eb", padding: "8px 14px", borderRadius: "8px", border: "1px solid #bfdbfe", textAlign: "center" }}>
+              <div style={{ backgroundColor: "#fff7ed", color: "#ea580c", padding: "8px 14px", borderRadius: "8px", border: "1px solid #ffedd5", textAlign: "center" }}>
                 <span style={{ fontSize: "10.5px", textTransform: "uppercase", fontWeight: "700", display: "block" }}>Existing Entries</span>
                 <strong style={{ fontSize: "16px" }}>{editCategories.filter(c => c.name && c.name.trim()).length} Entries</strong>
               </div>

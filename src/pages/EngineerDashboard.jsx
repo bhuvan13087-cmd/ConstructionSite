@@ -3294,8 +3294,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <div 
                   key={notif.id} 
                   style={{
-                    backgroundColor: notif.isRead ? "#f8fafc" : "#eff6ff",
-                    border: `1.5px solid ${notif.isRead ? "var(--border-color)" : "#bfdbfe"}`,
+                    backgroundColor: notif.isRead ? "#f8fafc" : "#fff7ed",
+                    border: `1.5px solid ${notif.isRead ? "var(--border-color)" : "#ffedd5"}`,
                     padding: "12px",
                     borderRadius: "8px",
                     display: "flex",
@@ -4314,7 +4314,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         padding: "12px",
                         borderRadius: "8px",
                         border: qtyNum > 0 ? "1.5px solid var(--accent-500)" : "1px solid #e2e8f0",
-                        backgroundColor: qtyNum > 0 ? "#f0f9ff" : "#ffffff",
+                        backgroundColor: qtyNum > 0 ? "#fff7ed" : "#ffffff",
                         transition: "all 0.15s ease"
                       }}
                     >
@@ -4365,7 +4365,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "3px" }}>
                             Calculated Amount
                           </span>
-                          <strong style={{ fontSize: "15px", color: itemAmount > 0 ? "#0369a1" : "var(--text-muted)" }}>
+                          <strong style={{ fontSize: "15px", color: itemAmount > 0 ? "#ea580c" : "var(--text-muted)" }}>
                             ₹{itemAmount.toLocaleString("en-IN")}
                           </strong>
                         </div>
@@ -4393,13 +4393,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
               return (
                 <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "2px solid #e2e8f0", paddingTop: "12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", backgroundColor: "#eff6ff", borderRadius: "8px", border: "1px solid #bfdbfe" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", backgroundColor: "#fff7ed", borderRadius: "8px", border: "1px solid #ffedd5" }}>
                     <div>
-                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#1e40af", display: "block" }}>Selected Materials</span>
+                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>Selected Materials</span>
                       <strong style={{ fontSize: "14px", color: "#1e3a8a" }}>{totalItemsCount} Material Items</strong>
                     </div>
                     <div style={{ textAlign: "right" }}>
-                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#1e40af", display: "block" }}>Running Grand Total</span>
+                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>Running Grand Total</span>
                       <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>₹{grandTotalCost.toLocaleString("en-IN")}</strong>
                     </div>
                   </div>
@@ -4961,7 +4961,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <span style={{ fontSize: "12px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                             Work Units
                           </span>
-                          <span style={{ fontSize: "14px", fontWeight: "800", color: rowAmount > 0 ? "#0369a1" : "#64748b" }}>
+                          <span style={{ fontSize: "14px", fontWeight: "800", color: rowAmount > 0 ? "#ea580c" : "#64748b" }}>
                             Calculated Amount: ₹{rowAmount.toLocaleString("en-IN")}
                           </span>
                         </div>
@@ -5059,8 +5059,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#14532d", marginTop: "2px" }}>{presentCategoriesCount}</div>
                         </div>
 
-                        <div style={{ backgroundColor: "#f0f9ff", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #e0f2fe" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase" }}>Avg Work Units</span>
+                        <div style={{ backgroundColor: "#fff7ed", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #ffedd5" }}>
+                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase" }}>Avg Work Units</span>
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#075985", marginTop: "2px" }}>{avgUnits}</div>
                         </div>
 
@@ -5276,15 +5276,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
 
           <div style={{
-            backgroundColor: "#f0f9ff",
+            backgroundColor: "#fff7ed",
             borderRadius: "16px",
             padding: "14px 16px",
-            border: "1px solid #e0f2fe",
+            border: "1px solid #ffedd5",
             display: "flex",
             flexDirection: "column",
             gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#0369a1", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
             <span style={{ fontSize: "22px", fontWeight: "900", color: "#075985" }}>{grandTotalWorkUnits.toFixed(2)}</span>
           </div>
 
@@ -5571,7 +5571,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           </div>
 
                           <div style={{ textAlign: "right" }}>
-                            <span style={{ fontSize: "16px", fontWeight: "900", color: "#0369a1" }}>
+                            <span style={{ fontSize: "16px", fontWeight: "900", color: "#ea580c" }}>
                               Calculated Amount: ₹{cost.toLocaleString("en-IN")}
                             </span>
                           </div>
