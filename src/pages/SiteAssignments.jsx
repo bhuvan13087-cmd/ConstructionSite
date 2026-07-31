@@ -12,6 +12,7 @@ import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { 
   Plus, 
   Trash2, 
@@ -256,6 +257,11 @@ export default function SiteAssignments() {
     asg => asg.siteId === selectedSiteId && asg.status === "active"
   );
 
+  // KPI metrics
+  const totalAssignments = assignments.length;
+  const uniqueSitesAssigned = [...new Set(assignments.map(a => a.siteId))].length;
+  const uniqueEngineersDeployed = [...new Set(assignments.map(a => a.engineerId))].length;
+
   return (
     <Layout title="Site Assignments" description="Configure construction site allocations and manage field engineer deployments.">
       {toast.show && (
@@ -266,24 +272,72 @@ export default function SiteAssignments() {
         </div>
       )}
 
-      {/* ── 1. ENTERPRISE QUICK ASSIGNMENT BAR ── */}
-      <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "20px 24px", marginBottom: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
-              <UserCheck size={18} style={{ color: "#f97316" }} /> Deploy Engineer to Site
-            </h3>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b" }}>Select a construction site and field engineer to establish site allocation</p>
+      {/* ── KPI Summary Bar ── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+        gap: "14px",
+        marginBottom: "24px"
+      }}>
+        {[
+          { label: "Total Assignments", value: totalAssignments, sub: "Active records", icon: "🔗", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
+          { label: "Sites Deployed", value: uniqueSitesAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
+          { label: "Engineers Active", value: activeEngineersList.length, sub: "Ready to deploy", icon: "👷", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
+          { label: "Engineers Deployed", value: uniqueEngineersDeployed, sub: "On active sites", icon: "✅", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
+          { label: "Total Sites", value: sites.length, sub: "Registered projects", icon: "📍", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" }
+        ].map((kpi, i) => (
+          <div key={i} style={{
+            background: kpi.bg,
+            border: `1px solid ${kpi.border}`,
+            borderRadius: "14px",
+            padding: "16px 18px",
+            boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "4px"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</span>
+              <span style={{ fontSize: "18px" }}>{kpi.icon}</span>
+            </div>
+            <div style={{ fontSize: "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.1" }}>{kpi.value}</div>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>{kpi.sub}</div>
           </div>
-          <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", backgroundColor: "#f1f5f9", padding: "4px 10px", borderRadius: "20px" }}>
-            {activeEngineersList.length} Active Engineers Available
+        ))}
+      </div>
+
+      {/* ── Quick Assignment Panel ── */}
+      <div style={{
+        background: "#ffffff",
+        border: "1px solid var(--border-color)",
+        borderRadius: "16px",
+        boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+        padding: "20px 24px",
+        marginBottom: "22px"
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px", flexWrap: "wrap", gap: "12px" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "8px" }}>
+              <UserCheck size={18} style={{ color: "#ea580c" }} /> Deploy Engineer to Site
+            </h3>
+            <p style={{ margin: "3px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Select a construction site and field engineer to establish site allocation</p>
+          </div>
+          <span style={{
+            fontSize: "11.5px",
+            fontWeight: "700",
+            color: "#c2410c",
+            backgroundColor: "#fff7ed",
+            border: "1px solid #ffedd5",
+            padding: "4px 12px",
+            borderRadius: "20px"
+          }}>
+            {activeEngineersList.length} Active Engineers
           </span>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: "16px", alignItems: "end" }}>
-          {/* Site Select */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label htmlFor="assign-site-select" style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Construction Site</label>
+            <label htmlFor="assign-site-select" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-700)", letterSpacing: "0.3px" }}>Construction Site</label>
             <select
               id="assign-site-select"
               value={selectedSiteId}
@@ -291,13 +345,14 @@ export default function SiteAssignments() {
               style={{
                 width: "100%",
                 padding: "10px 14px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "#ffffff",
+                borderRadius: "10px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: "var(--primary-50)",
                 fontSize: "13px",
                 fontWeight: "600",
-                color: "#0f172a",
-                outline: "none"
+                color: "var(--primary-950)",
+                outline: "none",
+                cursor: "pointer"
               }}
             >
               {sites.map(s => (
@@ -308,9 +363,8 @@ export default function SiteAssignments() {
             </select>
           </div>
 
-          {/* Engineer Select */}
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-            <label htmlFor="assign-eng-select" style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>Site Engineer</label>
+            <label htmlFor="assign-eng-select" style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-700)", letterSpacing: "0.3px" }}>Site Engineer</label>
             <select
               id="assign-eng-select"
               value={selectedEngineerId}
@@ -318,13 +372,14 @@ export default function SiteAssignments() {
               style={{
                 width: "100%",
                 padding: "10px 14px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "#ffffff",
+                borderRadius: "10px",
+                border: "1px solid var(--border-color)",
+                backgroundColor: "var(--primary-50)",
                 fontSize: "13px",
                 fontWeight: "600",
-                color: "#0f172a",
-                outline: "none"
+                color: "var(--primary-950)",
+                outline: "none",
+                cursor: "pointer"
               }}
             >
               <option value="">-- Choose Engineer to Assign --</option>
@@ -339,7 +394,6 @@ export default function SiteAssignments() {
             </select>
           </div>
 
-          {/* Action Button */}
           <div>
             <Button
               variant="primary"
@@ -347,94 +401,105 @@ export default function SiteAssignments() {
               icon={Plus}
               style={{ padding: "10px 20px", height: "42px", fontWeight: "700", fontSize: "13px" }}
             >
-              Assign Engineer
+              Assign
             </Button>
           </div>
         </div>
-      </Card>
+      </div>
 
-
-
-      {/* ── 3. MAIN WORKSPACE (SITE TEAMS + ALLOCATIONS TABLE) ── */}
+      {/* ── Main Workspace: Site Teams + Allocations Table ── */}
       <div style={{ display: "grid", gridTemplateColumns: "38% 60%", gap: "2%", marginBottom: "20px" }}>
-        
-        {/* LEFT COLUMN: SITE-WISE TEAM ALLOCATIONS */}
-        <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px", display: "flex", flexDirection: "column", height: "560px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+
+        {/* LEFT: Site-wise Teams Panel */}
+        <div style={{
+          background: "#ffffff",
+          border: "1px solid var(--border-color)",
+          borderRadius: "16px",
+          boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+          padding: "18px",
+          display: "flex",
+          flexDirection: "column",
+          height: "560px"
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
                 <Building2 size={16} style={{ color: "#ea580c" }} /> Site Deployment Teams
               </h3>
-              <span style={{ fontSize: "11px", color: "#64748b" }}>Site-wise assigned engineers list</span>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Site-wise assigned engineers</span>
             </div>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", backgroundColor: "#fff7ed", padding: "2px 8px", borderRadius: "100px" }}>
+            <span style={{
+              fontSize: "11px",
+              fontWeight: "700",
+              color: "#c2410c",
+              backgroundColor: "#fff7ed",
+              border: "1px solid #ffedd5",
+              padding: "2px 10px",
+              borderRadius: "100px"
+            }}>
               {sites.length} Sites
             </span>
           </div>
 
-          {/* Search */}
           <div className="input-wrapper" style={{ marginBottom: "12px" }}>
-            <Search className="input-icon" size={15} />
-            <input 
-              type="text" 
-              placeholder="Filter site..."
+            <Search className="input-icon" size={14} />
+            <input
+              type="text"
+              placeholder="Filter sites..."
               value={siteSearchQuery}
               onChange={(e) => setSiteSearchQuery(e.target.value)}
               style={{ paddingLeft: "38px", fontSize: "12.5px" }}
             />
           </div>
 
-          {/* Site Teams Roster */}
-          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "12px", paddingRight: "4px" }}>
+          <div style={{ overflowY: "auto", flex: 1, display: "flex", flexDirection: "column", gap: "10px", paddingRight: "4px" }}>
             {filteredSites.length === 0 ? (
-              <div style={{ textAlign: "center", color: "#64748b", padding: "20px", fontSize: "12px" }}>No matching sites found.</div>
+              <div style={{ textAlign: "center", color: "var(--text-muted)", padding: "24px", fontSize: "12px" }}>No matching sites found.</div>
             ) : (
               filteredSites.map(site => {
                 const siteEngineers = assignments.filter(a => a.siteId === site.id && a.status === "active");
                 const isSelected = site.id === selectedSiteId;
 
                 return (
-                  <div 
-                    key={site.id} 
-                    style={{ 
-                      border: isSelected ? "1.5px solid #f97316" : "1px solid #e2e8f0", 
-                      borderRadius: "10px", 
-                      backgroundColor: isSelected ? "#fff7ed" : "#f8fafc",
+                  <div
+                    key={site.id}
+                    style={{
+                      border: isSelected ? "1.5px solid #f97316" : "1px solid var(--border-color)",
+                      borderRadius: "12px",
+                      backgroundColor: isSelected ? "#fff7ed" : "var(--primary-50)",
                       padding: "12px 14px",
-                      transition: "all 0.15s ease"
+                      transition: "all 0.15s ease",
+                      cursor: "pointer"
                     }}
+                    onClick={() => setSelectedSiteId(site.id)}
                   >
-                    <div 
-                      onClick={() => setSelectedSiteId(site.id)}
-                      style={{ cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}
-                    >
-                      <div>
-                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>{site.siteName}</strong>
-                        <span style={{ display: "block", fontSize: "11px", color: "#64748b" }}>
-                          <MapPin size={10} style={{ display: "inline", marginRight: "2px" }} /> {site.location}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: siteEngineers.length > 0 ? "10px" : 0 }}>
+                      <div style={{ minWidth: 0 }}>
+                        <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{site.siteName}</strong>
+                        <span style={{ display: "flex", alignItems: "center", gap: "3px", fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                          <MapPin size={10} /> {site.location}
                         </span>
                       </div>
                       <Badge status={site.status || "active"} />
                     </div>
 
-                    {/* Assigned Personnel */}
                     {siteEngineers.length > 0 ? (
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", marginTop: "8px", paddingTop: "8px", borderTop: "1px solid #cbd5e1" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "6px", paddingTop: "8px", borderTop: "1px solid var(--border-color)" }}>
                         {siteEngineers.map(asg => (
-                          <div 
-                            key={asg.id} 
-                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", padding: "6px 10px", borderRadius: "6px", border: "1px solid #e2e8f0" }}
+                          <div
+                            key={asg.id}
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#ffffff", padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border-color)" }}
                           >
                             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px", flexShrink: 0 }}>
                                 {getInitials(asg.engineerName)}
                               </div>
-                              <span style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>{asg.engineerName}</span>
+                              <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)" }}>{asg.engineerName}</span>
                             </div>
                             <button
                               type="button"
-                              onClick={() => handleRemoveAssignment(asg)}
-                              style={{ color: "#ef4444", background: "none", border: "none", cursor: "pointer", padding: "2px" }}
+                              onClick={(e) => { e.stopPropagation(); handleRemoveAssignment(asg); }}
+                              style={{ color: "var(--danger-500)", background: "none", border: "none", cursor: "pointer", padding: "2px", display: "flex", alignItems: "center" }}
                               title="Unassign Engineer"
                             >
                               <Trash2 size={13} />
@@ -443,8 +508,8 @@ export default function SiteAssignments() {
                         ))}
                       </div>
                     ) : (
-                      <span style={{ display: "block", fontSize: "11px", color: "#94a3b8", fontStyle: "italic", marginTop: "4px" }}>
-                        No engineer assigned yet. Select above to assign.
+                      <span style={{ display: "block", fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic", marginTop: "4px" }}>
+                        No engineers assigned yet.
                       </span>
                     )}
                   </div>
@@ -452,22 +517,39 @@ export default function SiteAssignments() {
               })
             )}
           </div>
-        </Card>
+        </div>
 
-        {/* RIGHT COLUMN: ALLOCATIONS TABLE */}
-        <Card variant="table" style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", overflow: "hidden", display: "flex", flexDirection: "column", height: "560px" }}>
-          <div style={{ padding: "14px 18px", borderBottom: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc" }}>
+        {/* RIGHT: Allocations Table */}
+        <div style={{
+          background: "#ffffff",
+          border: "1px solid var(--border-color)",
+          borderRadius: "16px",
+          boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+          overflow: "hidden",
+          display: "flex",
+          flexDirection: "column",
+          height: "560px"
+        }}>
+          <div style={{
+            padding: "14px 18px",
+            borderBottom: "1px solid var(--border-color)",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            backgroundColor: "var(--primary-50)",
+            flexWrap: "wrap",
+            gap: "10px"
+          }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Active Site Allocations</h3>
-              <span style={{ fontSize: "11.5px", color: "#64748b" }}>
-                {filteredAssignments.length} total active assignment record(s)
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Active Site Allocations</h3>
+              <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
+                {filteredAssignments.length} active assignment record(s)
               </span>
             </div>
-
             <div className="input-wrapper" style={{ width: "220px" }}>
               <Search className="input-icon" size={14} />
-              <input 
-                type="text" 
+              <input
+                type="text"
                 placeholder="Search assignments..."
                 value={assignmentSearchQuery}
                 onChange={(e) => setAssignmentSearchQuery(e.target.value)}
@@ -477,20 +559,28 @@ export default function SiteAssignments() {
           </div>
 
           <div style={{ overflowX: "auto", flex: 1 }}>
-            <table className="modern-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
               <thead>
-                <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Site Name</th>
-                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Engineer</th>
-                  <th style={{ padding: "10px 14px", textAlign: "center", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Status</th>
-                  <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Assigned Date</th>
-                  <th style={{ padding: "10px 14px", textAlign: "right", fontSize: "11px", fontWeight: "800", color: "#475569", textTransform: "uppercase" }}>Action</th>
+                <tr style={{ background: "var(--primary-50)", borderBottom: "1px solid var(--border-color)" }}>
+                  {["Site Name", "Assigned Engineer", "Status", "Assigned Date", "Action"].map((h, i) => (
+                    <th key={i} style={{
+                      padding: "10px 14px",
+                      textAlign: i === 2 ? "center" : i === 4 ? "right" : "left",
+                      fontSize: "11px",
+                      fontWeight: "800",
+                      color: "var(--primary-600)",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      whiteSpace: "nowrap"
+                    }}>{h}</th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
                 {filteredAssignments.length === 0 ? (
                   <tr>
-                    <td colSpan={5} style={{ textAlign: "center", color: "#64748b", padding: "32px", fontSize: "12.5px" }}>
+                    <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "40px", fontSize: "12.5px" }}>
+                      <div style={{ fontSize: "28px", marginBottom: "8px" }}>📋</div>
                       No active site allocations found.
                     </td>
                   </tr>
@@ -503,36 +593,53 @@ export default function SiteAssignments() {
                       : "Today";
 
                     return (
-                      <tr key={asg.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <tr key={asg.id} style={{ borderBottom: "1px solid var(--border-color)", transition: "background 0.1s ease" }}
+                        onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
+                        onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                      >
                         <td style={{ padding: "10px 14px" }}>
-                          <strong style={{ fontSize: "12.5px", color: "#0f172a", display: "block" }}>{asg.siteName}</strong>
-                          <span style={{ fontSize: "10.5px", color: "#64748b" }}>{asg.location || "Site Location"}</span>
+                          <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>{asg.siteName}</strong>
+                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>{asg.location || "Site Location"}</span>
                         </td>
                         <td style={{ padding: "10px 14px" }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ width: "26px", height: "26px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px" }}>
+                            <div style={{ width: "28px", height: "28px", borderRadius: "50%", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: "800", fontSize: "10px", flexShrink: 0 }}>
                               {getInitials(asg.engineerName)}
                             </div>
                             <div>
-                              <strong style={{ fontSize: "12px", color: "#0f172a", display: "block" }}>{asg.engineerName}</strong>
-                              <span style={{ fontSize: "10px", color: "#64748b" }}>{asg.engineerEmail || "Engineer"}</span>
+                              <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block" }}>{asg.engineerName}</strong>
+                              <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>{asg.engineerEmail || "Engineer"}</span>
                             </div>
                           </div>
                         </td>
                         <td style={{ padding: "10px 14px", textAlign: "center" }}>
                           <Badge status={asg.status || "active"} />
                         </td>
-                        <td style={{ padding: "10px 14px", fontSize: "11px", color: "#64748b", fontFamily: "monospace" }}>
+                        <td style={{ padding: "10px 14px", fontSize: "11px", color: "var(--text-muted)", fontFamily: "monospace", whiteSpace: "nowrap" }}>
                           {assignedDateStr}
                         </td>
                         <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                          <button 
-                            onClick={() => handleRemoveAssignment(asg)} 
-                            className="btn-icon" 
-                            title="Remove Allocation" 
-                            style={{ color: "#ef4444", border: "none", background: "none", cursor: "pointer", padding: "4px" }}
+                          <button
+                            onClick={() => handleRemoveAssignment(asg)}
+                            style={{
+                              padding: "5px 10px",
+                              borderRadius: "7px",
+                              border: "1px solid var(--danger-100)",
+                              backgroundColor: "var(--danger-50)",
+                              color: "var(--danger-600)",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "11px",
+                              fontWeight: "700",
+                              transition: "background 0.15s ease"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--danger-100)"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = "var(--danger-50)"}
+                            title="Remove Allocation"
                           >
-                            <Trash2 size={15} />
+                            <Trash2 size={12} /> Remove
                           </button>
                         </td>
                       </tr>
@@ -542,7 +649,7 @@ export default function SiteAssignments() {
               </tbody>
             </table>
           </div>
-        </Card>
+        </div>
 
       </div>
 
@@ -550,5 +657,7 @@ export default function SiteAssignments() {
 
       <Loading show={loading} text="Updating assignments..." />
     </Layout>
+
   );
 }
+
