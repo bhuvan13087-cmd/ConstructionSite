@@ -831,81 +831,244 @@ export default function Sites() {
         </Button>
       </div>
 
-      {/* Main Table */}
-      <Card variant="table">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Site Name</th>
-              <th>Client Name</th>
-              <th>Location</th>
-              <th>Start Date</th>
-              <th>Expected End Date</th>
-              <th style={{ textAlign: "right" }}>Total Budget</th>
-              <th>Status</th>
-              <th className="text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSites.length === 0 ? (
-              <tr>
-                <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                  No construction sites found. Click "Add Site" to register one.
-                </td>
-              </tr>
-            ) : (
-              filteredSites.map((site) => {
-                return (
-                  <tr key={site.id}>
-                    <td 
-                      style={{ fontWeight: 700, color: "var(--primary-600)", cursor: "pointer" }} 
+      {/* KPI Summary Bar */}
+      {sites.length > 0 && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: "14px",
+          marginBottom: "24px"
+        }}>
+          {[
+            { label: "Total Sites", value: sites.length, sub: "Registered projects", icon: "🏗️", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
+            { label: "Active Sites", value: sites.filter(s => s.status === "Active").length, sub: "Currently ongoing", icon: "✅", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
+            { label: "Planning", value: sites.filter(s => s.status === "Planning").length, sub: "Not yet started", icon: "📋", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" },
+            { label: "Completed", value: sites.filter(s => s.status === "Completed").length, sub: "Finished projects", icon: "🏆", bg: "#f0fdf4", border: "#dcfce7", color: "var(--success-600)" },
+            { label: "Total Budget", value: `₹${(sites.reduce((s, x) => s + (Number(x.budget) || 0), 0) / 100000).toFixed(1)}L`, sub: "Across all sites", icon: "💰", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" }
+          ].map((kpi, i) => (
+            <div key={i} style={{
+              background: kpi.bg,
+              border: `1px solid ${kpi.border}`,
+              borderRadius: "14px",
+              padding: "16px 18px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</span>
+                <span style={{ fontSize: "18px" }}>{kpi.icon}</span>
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.1" }}>{kpi.value}</div>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>{kpi.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Site Cards Grid */}
+      {filteredSites.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: "64px 24px",
+          background: "#fff",
+          borderRadius: "16px",
+          border: "1.5px dashed var(--border-color)",
+          color: "var(--text-muted)"
+        }}>
+          <div style={{ fontSize: "40px", marginBottom: "12px" }}>🏗️</div>
+          <div style={{ fontWeight: "700", fontSize: "15px", color: "var(--primary-800)" }}>No construction sites found</div>
+          <div style={{ fontSize: "13px", marginTop: "6px" }}>Click "Add Site" to register your first project.</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "18px" }}>
+          {filteredSites.map((site) => {
+            const statusColors = {
+              Active: { bg: "var(--success-50)", border: "var(--success-100)", dot: "var(--success-500)" },
+              Planning: { bg: "var(--primary-50)", border: "var(--border-color)", dot: "var(--primary-500)" },
+              Completed: { bg: "#f0fdf4", border: "#dcfce7", dot: "var(--success-600)" }
+            };
+            const sc = statusColors[site.status] || statusColors["Planning"];
+            const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase() : "CS";
+            const budget = site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--";
+            
+            return (
+              <div key={site.id} style={{
+                background: "#ffffff",
+                borderRadius: "16px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+                padding: "20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px",
+                transition: "box-shadow 0.2s ease, transform 0.2s ease",
+                cursor: "default"
+              }}
+                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.10)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(15,23,42,0.05)"; e.currentTarget.style.transform = "translateY(0)"; }}
+              >
+                {/* Card Header */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                  <div style={{
+                    width: "44px",
+                    height: "44px",
+                    borderRadius: "12px",
+                    backgroundColor: "#fff7ed",
+                    border: "1.5px solid #ffedd5",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: "800",
+                    fontSize: "14px",
+                    color: "#c2410c",
+                    flexShrink: 0
+                  }}>{initials}</div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
                       onClick={() => setSelectedSiteId(site.id)}
                       title="Click to view site dashboard"
-                      onMouseEnter={(e) => e.currentTarget.style.textDecoration = "underline"}
-                      onMouseLeave={(e) => e.currentTarget.style.textDecoration = "none"}
-                    >
-                      {site.siteName}
-                    </td>
-                    <td>{site.clientName || "--"}</td>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <MapPin size={14} style={{ color: "var(--text-muted)" }} />
-                        <span>{site.location}</span>
-                      </div>
-                    </td>
-                    <td className="font-mono">{site.startDate || "--"}</td>
-                    <td className="font-mono">{site.expectedEndDate || "--"}</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                      {site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--"}
-                    </td>
-                    <td>
-                      <Badge status={site.status || "Planning"} />
-                    </td>
-                    <td>
-                      <div className="table-actions">
-                        <button 
-                          onClick={() => setSelectedSiteId(site.id)} 
-                          className="btn-icon" 
-                          title="View Site Dashboard" 
-                          style={{ color: "var(--primary-600)" }}
-                        >
-                          <Building2 size={16} />
-                        </button>
-                        <button onClick={() => handleOpenEditModal(site)} className="btn-icon btn-edit-action" title="Edit Site">
-                          <Edit3 size={16} />
-                        </button>
-                        <button onClick={() => handleDeleteSite(site)} className="btn-icon" title="Delete Site" style={{ color: "var(--danger-500)" }}>
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </Card>
+                      style={{
+                        fontWeight: "800",
+                        fontSize: "15px",
+                        color: "var(--primary-950)",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        transition: "color 0.15s ease"
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                      onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                    >{site.siteName}</div>
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>Client: <strong style={{ color: "var(--primary-700)" }}>{site.clientName || "--"}</strong></div>
+                  </div>
+                  {/* Status pill */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "4px 10px",
+                    borderRadius: "20px",
+                    backgroundColor: sc.bg,
+                    border: `1px solid ${sc.border}`,
+                    flexShrink: 0
+                  }}>
+                    <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: sc.dot }} />
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: sc.dot }}>{site.status || "Planning"}</span>
+                  </div>
+                </div>
+
+                {/* Location */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 12px",
+                  backgroundColor: "var(--primary-50)",
+                  borderRadius: "8px",
+                  border: "1px solid var(--border-color)"
+                }}>
+                  <MapPin size={13} style={{ color: "#ea580c", flexShrink: 0 }} />
+                  <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: "500", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{site.location || "--"}</span>
+                </div>
+
+                {/* Dates & Budget Row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
+                  {[
+                    { label: "Start", value: site.startDate || "--" },
+                    { label: "End", value: site.expectedEndDate || "--" },
+                    { label: "Budget", value: budget }
+                  ].map((item, i) => (
+                    <div key={i} style={{ textAlign: "center", padding: "8px 6px", backgroundColor: "var(--primary-50)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                      <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>{item.label}</div>
+                      <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginTop: "2px", fontFamily: i === 2 ? "monospace" : "inherit" }}>{item.value}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Actions */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  paddingTop: "10px",
+                  borderTop: "1px solid var(--border-color)"
+                }}>
+                  <button
+                    onClick={() => setSelectedSiteId(site.id)}
+                    title="View Site Dashboard"
+                    style={{
+                      flex: 1,
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #ffedd5",
+                      backgroundColor: "#fff7ed",
+                      color: "#c2410c",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "5px",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ffedd5"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#fff7ed"}
+                  >
+                    <Building2 size={13} /> View
+                  </button>
+                  <button
+                    onClick={() => handleOpenEditModal(site)}
+                    title="Edit Site"
+                    style={{
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)",
+                      backgroundColor: "#ffffff",
+                      color: "var(--primary-700)",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "5px",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#ffffff"}
+                  >
+                    <Edit3 size={13} /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteSite(site)}
+                    title="Delete Site"
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--danger-100)",
+                      backgroundColor: "var(--danger-50)",
+                      color: "var(--danger-600)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--danger-100)"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "var(--danger-50)"}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* MODAL: ADD/EDIT SITE */}
       <Modal 

@@ -337,89 +337,225 @@ export default function SiteEngineers() {
         </Button>
       </div>
 
-      {/* Main Table */}
-      <Card variant="table">
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Phone Number</th>
-              <th>Status</th>
-              <th>Assigned Sites</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredEngineers.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                  No site engineers found. Click "Add Engineer" to register one.
-                </td>
-              </tr>
-            ) : (
-              filteredEngineers.map((eng) => {
-                const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
+      {/* KPI Summary Bar */}
+      {engineers.length > 0 && (
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gap: "14px",
+          marginBottom: "24px"
+        }}>
+          {[
+            { label: "Total Engineers", value: engineers.length, sub: "Registered accounts", icon: "👷", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
+            { label: "Active", value: engineers.filter(e => e.status === "active").length, sub: "Currently enabled", icon: "✅", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
+            { label: "Inactive", value: engineers.filter(e => e.status !== "active").length, sub: "Disabled accounts", icon: "⏸️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" },
+            { label: "Sites Covered", value: [...new Set(engineers.flatMap(e => e.assignedSites || []))].length, sub: "Unique site assignments", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" }
+          ].map((kpi, i) => (
+            <div key={i} style={{
+              background: kpi.bg,
+              border: `1px solid ${kpi.border}`,
+              borderRadius: "14px",
+              padding: "16px 18px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "4px"
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</span>
+                <span style={{ fontSize: "18px" }}>{kpi.icon}</span>
+              </div>
+              <div style={{ fontSize: "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.1" }}>{kpi.value}</div>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>{kpi.sub}</div>
+            </div>
+          ))}
+        </div>
+      )}
 
-                return (
-                  <tr key={eng.id}>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                        <div 
-                          onClick={() => setSelectedEngineerId(eng.id)} 
-                          className="avatar-initials info" 
-                          style={{ cursor: "pointer", width: "36px", height: "36px" }}
-                          title="Click to view details"
-                        >
-                          {eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE"}
-                        </div>
-                        <div>
-                          <span 
-                            onClick={() => setSelectedEngineerId(eng.id)} 
-                            style={{ cursor: "pointer", fontWeight: 700, color: "var(--primary-900)", transition: "color 0.15s ease" }}
-                            onMouseEnter={(e) => e.currentTarget.style.color = "var(--accent-600)"}
-                            onMouseLeave={(e) => e.currentTarget.style.color = "var(--primary-900)"}
-                            title="Click to view details"
-                          >
-                            {eng.fullName}
-                          </span>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="font-mono">{eng.email}</td>
-                    <td>{eng.phoneNumber || "--"}</td>
-                    <td>
-                      <Badge status={eng.status || "inactive"} />
-                    </td>
-                    <td>
-                      <Badge status="pending">{sitesCount} Sites</Badge>
-                    </td>
-                    <td>
-                      <div className="table-actions">
-                        <button 
-                          onClick={() => handleOpenEditModal(eng)} 
-                          className="btn-icon btn-edit-action" 
-                          title="Edit Profile"
-                        >
-                          <Edit3 size={15} />
-                        </button>
-                        <button 
-                          onClick={() => handleDeleteEngineer(eng)} 
-                          className="btn-icon" 
-                          title="Delete Engineer"
-                          style={{ color: "var(--danger-500)" }}
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </Card>
+      {/* Engineer Cards Grid */}
+      {filteredEngineers.length === 0 ? (
+        <div style={{
+          textAlign: "center",
+          padding: "64px 24px",
+          background: "#fff",
+          borderRadius: "16px",
+          border: "1.5px dashed var(--border-color)",
+          color: "var(--text-muted)"
+        }}>
+          <div style={{ fontSize: "40px", marginBottom: "12px" }}>👷</div>
+          <div style={{ fontWeight: "700", fontSize: "15px", color: "var(--primary-800)" }}>No site engineers found</div>
+          <div style={{ fontSize: "13px", marginTop: "6px" }}>Click "Add Engineer" to register one.</div>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "18px" }}>
+          {filteredEngineers.map((eng) => {
+            const isActive = eng.status === "active";
+            const initials = eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE";
+            const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
+
+            return (
+              <div key={eng.id} style={{
+                background: "#ffffff",
+                borderRadius: "16px",
+                border: `1px solid ${isActive ? "var(--border-color)" : "var(--danger-100)"}`,
+                boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
+                padding: "20px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "14px",
+                transition: "box-shadow 0.2s ease, transform 0.2s ease"
+              }}
+                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.10)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
+                onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(15,23,42,0.05)"; e.currentTarget.style.transform = "translateY(0)"; }}
+              >
+                {/* Header */}
+                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                  <div
+                    onClick={() => setSelectedEngineerId(eng.id)}
+                    title="Click to view activity"
+                    style={{
+                      width: "46px",
+                      height: "46px",
+                      borderRadius: "50%",
+                      backgroundColor: isActive ? "#fff7ed" : "var(--primary-100)",
+                      border: `2px solid ${isActive ? "#ffedd5" : "var(--border-color)"}`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: "800",
+                      fontSize: "14px",
+                      color: isActive ? "#c2410c" : "var(--primary-500)",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      transition: "transform 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.transform = "scale(1.08)"}
+                    onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+                  >{initials}</div>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      onClick={() => setSelectedEngineerId(eng.id)}
+                      style={{
+                        fontWeight: "800",
+                        fontSize: "14px",
+                        color: "var(--primary-950)",
+                        cursor: "pointer",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        transition: "color 0.15s ease"
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                      onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                    >{eng.fullName}</div>
+                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eng.email}</div>
+                  </div>
+
+                  {/* Status pill */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "4px 10px",
+                    borderRadius: "20px",
+                    backgroundColor: isActive ? "var(--success-50)" : "var(--danger-50)",
+                    border: `1px solid ${isActive ? "var(--success-100)" : "var(--danger-100)"}`,
+                    flexShrink: 0
+                  }}>
+                    <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: isActive ? "var(--success-500)" : "var(--danger-500)" }} />
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: isActive ? "var(--success-600)" : "var(--danger-600)" }}>
+                      {isActive ? "Active" : "Inactive"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Info Row */}
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
+                  <div style={{ padding: "8px 10px", backgroundColor: "var(--primary-50)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+                    <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Phone</div>
+                    <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--primary-900)", marginTop: "2px" }}>{eng.phoneNumber || "--"}</div>
+                  </div>
+                  <div style={{ padding: "8px 10px", backgroundColor: "#fff7ed", borderRadius: "8px", border: "1px solid #ffedd5" }}>
+                    <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Sites Assigned</div>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#c2410c", marginTop: "2px" }}>{sitesCount} Site{sitesCount !== 1 ? "s" : ""}</div>
+                  </div>
+                </div>
+
+                {/* Actions */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  paddingTop: "10px",
+                  borderTop: "1px solid var(--border-color)"
+                }}>
+                  <button
+                    onClick={() => setSelectedEngineerId(eng.id)}
+                    title="View Activity"
+                    style={{
+                      flex: 1,
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #ffedd5",
+                      backgroundColor: "#fff7ed",
+                      color: "#c2410c",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ffedd5"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#fff7ed"}
+                  >View Activity</button>
+                  <button
+                    onClick={() => handleOpenEditModal(eng)}
+                    title="Edit Profile"
+                    style={{
+                      padding: "7px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border-color)",
+                      backgroundColor: "#ffffff",
+                      color: "var(--primary-700)",
+                      fontWeight: "700",
+                      fontSize: "12px",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#ffffff"}
+                  >
+                    <Edit3 size={12} /> Edit
+                  </button>
+                  <button
+                    onClick={() => handleDeleteEngineer(eng)}
+                    title="Delete Engineer"
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--danger-100)",
+                      backgroundColor: "var(--danger-50)",
+                      color: "var(--danger-600)",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      transition: "background 0.15s ease"
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--danger-100)"}
+                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "var(--danger-50)"}
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       {/* MODAL: ADD/EDIT SITE ENGINEER */}
       <Modal 
