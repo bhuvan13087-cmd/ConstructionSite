@@ -205,6 +205,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [sitePhotos, setSitePhotos] = useState([]);
   const [dailyUpdates, setDailyUpdates] = useState([]);
   const [materials, setMaterials] = useState([]);
+  const [labourMaster, setLabourMaster] = useState({ categories: {}, history: [] });
   const [activeSiteId, setActiveSiteId] = useState("");
   const [savedSiteLocation, setSavedSiteLocation] = useState(null);
   const [allSitesAttendance, setAllSitesAttendance] = useState([]);
@@ -595,14 +596,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         // Derive adminId from the assigned site's createdByAdmin for payment scoping
         try {
           const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
-          const [ge, lp, lh] = await Promise.all([
+          const [ge, lp, lh, lm] = await Promise.all([
             getGeneralExpenses(currentActiveId),
             getLabourPayments(adminId, currentActiveId),
-            getLabourDailyCountsSummary(currentActiveId)
+            getLabourDailyCountsSummary(currentActiveId),
+            getLabourMaster(adminId)
           ]);
           setGeneralExpenses(ge);
           setLabourPayments(lp);
           setLabourHistory(lh);
+          if (lm) setLabourMaster(lm);
         } catch (e) {
           console.error("Failed to load financials:", e);
         }
