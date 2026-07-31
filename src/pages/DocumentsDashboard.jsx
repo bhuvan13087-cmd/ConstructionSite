@@ -38,8 +38,9 @@ import {
 } from "lucide-react";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
-import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
+import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 
 export default function DocumentsDashboard() {
@@ -60,6 +61,37 @@ export default function DocumentsDashboard() {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "success" });
+
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   // Filters State
   const [searchQuery, setSearchQuery] = useState("");
@@ -252,19 +284,28 @@ export default function DocumentsDashboard() {
 
   // Delete Document process
   const handleDeleteDoc = async (docId) => {
-    if (!window.confirm("Are you sure you want to permanently delete this document and all its records? This cannot be undone.")) return;
-    try {
-      setLoading(true);
-      await deleteDocument(docId, userId, userName);
-      showToast("Document deleted successfully");
-      setSelectedDoc(null);
-      await refreshDocumentsList();
-    } catch (err) {
-      console.error("Error deleting document:", err);
-      showToast("Failed to delete document", "error");
-    } finally {
-      setLoading(false);
-    }
+    showConfirmModal({
+      title: "Delete Document?",
+      message: "Are you sure you want to permanently delete this document and all its records?",
+      details: "This action cannot be undone.",
+      confirmText: "Delete Document",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          setLoading(true);
+          await deleteDocument(docId, userId, userName);
+          showToast("Document deleted successfully");
+          setSelectedDoc(null);
+          await refreshDocumentsList();
+        } catch (err) {
+          console.error("Error deleting document:", err);
+          showToast("Failed to delete document", "error");
+        } finally {
+          setLoading(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   // Manage Categories Operations
@@ -935,6 +976,8 @@ export default function DocumentsDashboard() {
           </Modal>
         )}
       </div>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
     </Layout>
   );
 }

@@ -67,6 +67,7 @@ import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import SelectWithOthers from "../components/common/SelectWithOthers";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { 
   MapPin, 
   FileText, 
@@ -215,6 +216,37 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [selectedRecord, setSelectedRecord] = useState(null);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
+  
   const getLastAttendanceForSite = (siteId) => {
     if (!allSitesAttendance || allSitesAttendance.length === 0) {
       return "No attendance recorded";
@@ -269,14 +301,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (!activeSiteId || !labourDate) {
       setIsLabourLocked(false);
       setLabourLockInfo(null);
-      return;
+      return { submitted: false };
     }
     try {
       const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate);
-      setIsLabourLocked(lockStatus.submitted);
-      setLabourLockInfo(lockStatus);
+      const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
+      setIsLabourLocked(isSubmitted);
+      setLabourLockInfo(isSubmitted ? lockStatus : null);
+      return lockStatus;
     } catch (err) {
       console.error("Error checking labour submission status:", err);
+      setIsLabourLocked(false);
+      setLabourLockInfo(null);
+      return { submitted: false };
     }
   };
 
@@ -604,8 +641,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const loadedRows = records.map(r => ({
           id: r.id,
           categoryId: r.categoryId,
+          categoryName: r.categoryName || "",
           workerCount: r.workerCount !== undefined ? Number(r.workerCount) : 1,
-          attendanceType: r.attendanceType || (Number(r.attendanceValue) === 0.5 ? "Half Day" : "Full Day"),
+          customWorkUnits: r.customWorkUnits !== undefined ? Number(r.customWorkUnits) : (r.units !== undefined ? Number(r.units) : 1.0),
+          units: r.units !== undefined ? Number(r.units) : (r.customWorkUnits !== undefined ? Number(r.customWorkUnits) : 1.0),
+          dailyWage: Number(r.dailyWage || r.wage || 0),
+          calculatedAmount: Number(r.calculatedAmount || r.totalAmount || 0),
+          attendanceType: r.attendanceType || `${r.customWorkUnits || r.units || 1.0} Units`,
           dbId: r.id,
           isSaving: false,
           isSaved: true
@@ -793,7 +835,30 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Check Labour Attendance submission status for selected site and date
   useEffect(() => {
-    fetchLabourLockStatus();
+    let isCurrent = true;
+    // Always reset state synchronously on date or site change
+    setIsLabourLocked(false);
+    setLabourLockInfo(null);
+
+    if (activeSiteId && labourDate) {
+      checkLabourSubmissionStatus(activeSiteId, labourDate).then(lockStatus => {
+        if (isCurrent) {
+          const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
+          setIsLabourLocked(isSubmitted);
+          setLabourLockInfo(isSubmitted ? lockStatus : null);
+        }
+      }).catch(err => {
+        if (isCurrent) {
+          console.error("Error checking labour submission status:", err);
+          setIsLabourLocked(false);
+          setLabourLockInfo(null);
+        }
+      });
+    }
+
+    return () => {
+      isCurrent = false;
+    };
   }, [activeSiteId, labourDate]);
 
   // Sync labour entries & historical summary whenever active site or select date changes
@@ -1317,16 +1382,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Cancel / Delete Leave Handler
   const handleDeleteLeave = async (leaveId) => {
-    if (window.confirm("Delete this entry?")) {
-      try {
-        await deleteEngineerLeave(leaveId);
-        showToast("Deleted successfully", "success");
-        await loadDashboardData();
-      } catch (err) {
-        console.error("Failed to cancel leave:", err);
-        showToast("Failed to cancel leave: " + err.message, "error");
+    showConfirmModal({
+      title: "Cancel Leave Request?",
+      message: "Are you sure you want to cancel this leave record?",
+      confirmText: "Cancel Leave",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteEngineerLeave(leaveId);
+          showToast("Deleted successfully", "success");
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to cancel leave:", err);
+          showToast("Failed to cancel leave: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Change Password Handler for Site Engineer
@@ -1393,16 +1466,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Security error: You can only delete your own records.", "error");
       return;
     }
-    if (window.confirm("Delete this entry?")) {
-      try {
-        await deleteMaterial(materialId);
-        showToast("Deleted successfully", "success");
-        await loadDashboardData();
-      } catch (err) {
-        console.error("Failed to delete material:", err);
-        showToast("Failed to delete: " + err.message, "error");
+    showConfirmModal({
+      title: "Delete Material Entry?",
+      message: "Are you sure you want to delete this material log?",
+      confirmText: "Delete Log",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteMaterial(materialId);
+          showToast("Deleted successfully", "success");
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to delete material:", err);
+          showToast("Failed to delete: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Delete Labour Counts Log Handler
@@ -1413,18 +1494,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Security error: You can only delete your own records.", "error");
       return;
     }
-    if (window.confirm("Delete this entry?")) {
-      try {
-        await deleteLabourDailyCounts(activeSiteId, dateStr);
-        showToast("Deleted successfully", "success");
-        const hist = await getLabourDailyCountsHistory(activeSiteId);
-        setLabourHistory(hist);
-        await loadDashboardData();
-      } catch (err) {
-        console.error("Failed to delete labour counts:", err);
-        showToast("Failed to delete: " + err.message, "error");
+    showConfirmModal({
+      title: "Delete Labour Record?",
+      message: `Are you sure you want to delete labour count logs for ${dateStr}?`,
+      confirmText: "Delete Entries",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteLabourDailyCounts(activeSiteId, dateStr);
+          showToast("Deleted successfully", "success");
+          const hist = await getLabourDailyCountsHistory(activeSiteId);
+          setLabourHistory(hist);
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to delete labour counts:", err);
+          showToast("Failed to delete: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Delete Progress DPR Log Handler
@@ -1435,16 +1524,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Security error: You can only delete your own records.", "error");
       return;
     }
-    if (window.confirm("Delete this entry?")) {
-      try {
-        await deleteDailyProgressReport(reportId);
-        showToast("Deleted successfully", "success");
-        await loadDashboardData();
-      } catch (err) {
-        console.error("Failed to delete progress report:", err);
-        showToast("Failed to delete: " + err.message, "error");
+    showConfirmModal({
+      title: "Delete Daily Progress Report?",
+      message: "Are you sure you want to delete this progress report?",
+      confirmText: "Delete Report",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteDailyProgressReport(reportId);
+          showToast("Deleted successfully", "success");
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to delete progress report:", err);
+          showToast("Failed to delete: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Delete Site Inspection Photo Handler
@@ -1455,16 +1552,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Security error: You can only delete your own records.", "error");
       return;
     }
-    if (window.confirm("Delete this entry?")) {
-      try {
-        await deleteSitePhoto(photoId);
-        showToast("Deleted successfully", "success");
-        await loadDashboardData();
-      } catch (err) {
-        console.error("Failed to delete photo:", err);
-        showToast("Failed to delete: " + err.message, "error");
+    showConfirmModal({
+      title: "Delete Site Photo?",
+      message: "Are you sure you want to delete this site photo?",
+      confirmText: "Delete Photo",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteSitePhoto(photoId);
+          showToast("Deleted successfully", "success");
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to delete photo:", err);
+          showToast("Failed to delete: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Count-based worker attendance handlers with custom work units & daily wage
@@ -1476,7 +1581,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     const units = Math.max(0.01, Number(customUnitsVal) || 1.0);
     const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
-    const cat = categories.find(c => c.id === categoryId) || selectedTeamObj?.categories?.find(c => c.id === categoryId);
+    const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
     const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
 
     const record = attendanceRows.find(r => r.categoryId === categoryId);
@@ -1540,7 +1645,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const record = attendanceRows.find(r => r.categoryId === categoryId);
     if (record && record.workerCount > 0) {
       const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
-      const cat = categories.find(c => c.id === categoryId) || selectedTeamObj?.categories?.find(c => c.id === categoryId);
+      const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
       const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
       const calculatedAmount = record.workerCount * units * dailyWage;
 
@@ -1660,15 +1765,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
       return;
     }
-    if (window.confirm("Are you sure you want to delete this worker record?")) {
-      try {
-        await deleteLabourAttendanceRecord(recordId);
-        showToast("Record deleted successfully.", "success");
-      } catch (err) {
-        console.error("Failed to delete record:", err);
-        showToast("Failed to delete: " + err.message, "error");
+    showConfirmModal({
+      title: "Delete Worker Record?",
+      message: "Are you sure you want to delete this worker record?",
+      confirmText: "Delete Record",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteLabourAttendanceRecord(recordId);
+          showToast("Record deleted successfully.", "success");
+        } catch (err) {
+          console.error("Failed to delete record:", err);
+          showToast("Failed to delete: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   const handleDeleteCategoryHistoryRecords = async (dateStr, teamId, categoryId) => {
@@ -1676,23 +1789,34 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
       return;
     }
-    if (window.confirm(`Are you sure you want to delete all attendance records for this category on ${dateStr}?`)) {
-      const recordsToDelete = labourHistoryRecords.filter(r => 
-        r.attendanceDate === dateStr && 
-        r.teamId === teamId && 
-        r.categoryId === categoryId
-      );
+    showConfirmModal({
+      title: "Delete Category Attendance?",
+      message: `Are you sure you want to delete all attendance records for this category on ${dateStr}?`,
+      confirmText: "Delete Category Entries",
+      variant: "danger",
+      onConfirm: async () => {
+        const recordsToDelete = labourHistoryRecords.filter(r => 
+          r.attendanceDate === dateStr && 
+          r.teamId === teamId && 
+          r.categoryId === categoryId
+        );
 
-      if (recordsToDelete.length === 0) return;
+        if (recordsToDelete.length === 0) {
+          closeConfirmModal();
+          return;
+        }
 
-      try {
-        await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
-        showToast("Category attendance deleted successfully.", "success");
-      } catch (err) {
-        console.error("Failed to delete category records:", err);
-        showToast("Failed to delete category records: " + err.message, "error");
+        try {
+          await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
+          showToast("Category attendance deleted successfully.", "success");
+        } catch (err) {
+          console.error("Failed to delete category records:", err);
+          showToast("Failed to delete category records: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   const handleDeleteTeamHistoryRecords = async (dateStr, teamId) => {
@@ -1700,22 +1824,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
       return;
     }
-    if (window.confirm(`Are you sure you want to delete the entire team's attendance for ${dateStr}?`)) {
-      const recordsToDelete = labourHistoryRecords.filter(r => 
-        r.attendanceDate === dateStr && 
-        r.teamId === teamId
-      );
+    showConfirmModal({
+      title: "Delete Team Attendance?",
+      message: `Are you sure you want to delete the entire team's attendance for ${dateStr}?`,
+      confirmText: "Delete Team Records",
+      variant: "danger",
+      onConfirm: async () => {
+        const recordsToDelete = labourHistoryRecords.filter(r => 
+          r.attendanceDate === dateStr && 
+          r.teamId === teamId
+        );
 
-      if (recordsToDelete.length === 0) return;
+        if (recordsToDelete.length === 0) {
+          closeConfirmModal();
+          return;
+        }
 
-      try {
-        await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
-        showToast("Team attendance deleted successfully.", "success");
-      } catch (err) {
-        console.error("Failed to delete team records:", err);
-        showToast("Failed to delete team records: " + err.message, "error");
+        try {
+          await Promise.all(recordsToDelete.map(r => deleteLabourAttendanceRecord(r.id)));
+          showToast("Team attendance deleted successfully.", "success");
+        } catch (err) {
+          console.error("Failed to delete team records:", err);
+          showToast("Failed to delete team records: " + err.message, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Submit workforce attendance
@@ -1733,21 +1868,49 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
     
-    if (window.confirm("Are you sure you want to submit? This will lock the workforce attendance record for this date and site.")) {
-      setLabourSubmitting(true);
-      try {
-        await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId);
-        showToast("Workforce attendance submitted and locked successfully.", "success");
-        setIsLabourLocked(true);
-        await fetchLabourLockStatus();
-        await loadLockedDates(); // Reload locked dates to trigger local locks
-      } catch (err) {
-        console.error("Failed to submit workforce attendance:", err);
-        showToast("Submission failed: " + err.message, "error");
-      } finally {
-        setLabourSubmitting(false);
-      }
+    // Duplicate Prevention Check directly against database
+    const freshCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+    if (freshCheck && freshCheck.submitted) {
+      setIsLabourLocked(true);
+      setLabourLockInfo(freshCheck);
+      showToast("Attendance for this site and date has already been submitted and locked.", "warning");
+      return;
     }
+
+    showConfirmModal({
+      title: "Confirm Labour Submission?",
+      message: "You are about to submit today's labour attendance record.",
+      details: "After submission, editing and modifications will be locked for this date and site.",
+      confirmText: "Submit & Lock",
+      cancelText: "Cancel",
+      variant: "lock",
+      onConfirm: async () => {
+        setLabourSubmitting(true);
+        try {
+          // Double check database inside modal confirm to prevent race condition duplicates
+          const reCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+          if (reCheck && reCheck.submitted) {
+            setIsLabourLocked(true);
+            setLabourLockInfo(reCheck);
+            showToast("Attendance for this site and date was already submitted and locked.", "warning");
+            closeConfirmModal();
+            return;
+          }
+
+          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId);
+          showToast("Workforce attendance submitted and locked successfully.", "success");
+          setIsLabourLocked(true);
+          await fetchLabourLockStatus();
+          await loadLockedDates(); // Reload locked dates to trigger local locks
+        } catch (err) {
+          console.error("Failed to submit workforce attendance:", err);
+          showToast("Submission failed: " + err.message, "error");
+        } finally {
+          setLabourSubmitting(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   // 4. Save Material Receipt
@@ -4644,9 +4807,32 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     border: "1px solid #bbf7d0",
                     fontSize: "14px",
                     fontWeight: "700",
-                    textAlign: "center"
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
                   }}>
-                    ✓ Attendance submitted successfully. This record is locked and can no longer be modified.
+                    <div>🔒 Attendance submitted successfully. This record is locked and can no longer be modified.</div>
+                    {labourLockInfo && (
+                      <div style={{ fontSize: "12.5px", fontWeight: "600", color: "#15803d" }}>
+                        {labourLockInfo.submittedAt && (
+                          <span>
+                            Submitted: {
+                              labourLockInfo.submittedAt?.seconds
+                                ? new Date(labourLockInfo.submittedAt.seconds * 1000).toLocaleString("en-IN")
+                                : (typeof labourLockInfo.submittedAt === "string" || labourLockInfo.submittedAt instanceof Date
+                                  ? new Date(labourLockInfo.submittedAt).toLocaleString("en-IN")
+                                  : labourDate)
+                            }
+                          </span>
+                        )}
+                        {labourLockInfo.submittedBy && (
+                          <span style={{ marginLeft: labourLockInfo.submittedAt ? "12px" : "0px" }}>
+                            By: {userProfile?.fullName && labourLockInfo.submittedBy === userProfile?.uid ? userProfile.fullName : labourLockInfo.submittedBy}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
                 {teamCategories.map(cat => {
@@ -6411,6 +6597,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         </Modal>
       </div>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
       <Loading show={loading} text="Synchronizing Worksite Database..." />
     </div>

@@ -4513,21 +4513,48 @@ export function subscribeGeneralExpenses(onUpdate) {
 // Check daily labor attendance submission status
 export async function checkLabourSubmissionStatus(siteId, dateStr) {
   if (!siteId || !dateStr) return { submitted: false };
-  const db = getDb();
-  const docRef = doc(db, "attendance", `labour_lock_${siteId}_${dateStr}`);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    const data = docSnap.data();
-    if (data.status === "submitted") {
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+
+  try {
+    const db = getDb();
+    // 1. Direct doc lookup by document ID format: labour_lock_${siteId}_${dateStr}
+    const docRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      const data = docSnap.data();
+      if (data.status === "submitted" && (!data.siteId || String(data.siteId).trim() === cleanSiteId) && (!data.date || String(data.date).trim() === cleanDateStr)) {
+        return {
+          submitted: true,
+          submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
+          submittedBy: data.submittedBy || data.engineerId || data.userId || null
+        };
+      }
+    }
+
+    // 2. Query search in attendance collection for any lock record matching siteId, dateStr, and status === "submitted"
+    const q = query(
+      collection(db, "attendance"),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr),
+      where("status", "==", "submitted"),
+      where("type", "==", "labour_attendance_lock")
+    );
+    const querySnap = await getDocs(q);
+    if (!querySnap.empty) {
+      const data = querySnap.docs[0].data();
       return {
         submitted: true,
-        submittedAt: data.submittedAt || null,
-        submittedBy: data.submittedBy || null
+        submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
+        submittedBy: data.submittedBy || data.engineerId || data.userId || null
       };
     }
+  } catch (err) {
+    console.error("Error checking labour submission status:", err);
   }
   return { submitted: false };
 }
+
 
 // Submit workforce attendance for site and date
 export async function submitLabourAttendance(siteId, dateStr, engineerId) {

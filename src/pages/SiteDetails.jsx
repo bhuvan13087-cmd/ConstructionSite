@@ -5,6 +5,7 @@ import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { 
   getSites, 
   getSiteEngineers, 
@@ -211,17 +212,57 @@ export default function SiteDetails({ siteId, onBack }) {
     }
   };
 
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
+
   const handleDeleteMaterialLog = async (materialId) => {
-    if (confirm("Are you sure you want to delete this material log record? This action cannot be undone.")) {
-      try {
-        await deleteMaterial(materialId);
-        showToast("Material record deleted successfully.", "success");
-        await loadData();
-      } catch (err) {
-        console.error(err);
-        showToast(`Failed to delete record: ${err.message}`, "error");
+    showConfirmModal({
+      title: "Delete Material Record?",
+      message: "Are you sure you want to delete this material log record?",
+      details: "This action cannot be undone.",
+      confirmText: "Delete Log",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteMaterial(materialId);
+          showToast("Material record deleted successfully.", "success");
+          await loadData();
+        } catch (err) {
+          console.error(err);
+          showToast(`Failed to delete record: ${err.message}`, "error");
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   const loadData = async () => {
@@ -1867,6 +1908,8 @@ export default function SiteDetails({ siteId, onBack }) {
         )}
 
       </div>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
     </Layout>
   );
 }

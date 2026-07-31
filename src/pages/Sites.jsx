@@ -14,8 +14,8 @@ import Loading from "../components/common/Loading";
 import SiteDetails from "./SiteDetails";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
-import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import SiteFilterBar from "../components/common/SiteFilterBar";
 import { useAuth } from "../context/AuthContext";
 import { firebaseConfig } from "../firebase/config";
@@ -1113,33 +1113,15 @@ export default function Sites() {
       </Modal>
 
       {/* ACTION CONFIRMATION POPUP MODAL */}
-      <Modal
+      <ConfirmationModal
         isOpen={confirmModal.show}
         onClose={closeConfirmModal}
         title={confirmModal.title}
-        size="sm"
-      >
-        <div style={{ padding: "8px 0" }}>
-          <p style={{ margin: "0 0 20px 0", fontSize: "13.5px", color: "#334155", lineHeight: "1.5" }}>
-            {confirmModal.message}
-          </p>
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px" }}>
-            <Button variant="outline" onClick={closeConfirmModal}>
-              Cancel
-            </Button>
-            <Button 
-              variant={confirmModal.variant || "primary"}
-              onClick={() => {
-                if (typeof confirmModal.onConfirm === "function") {
-                  confirmModal.onConfirm();
-                }
-              }}
-            >
-              {confirmModal.confirmText || "Confirm"}
-            </Button>
-          </div>
-        </div>
-      </Modal>
+        message={confirmModal.message}
+        confirmText={confirmModal.confirmText || "Confirm"}
+        variant={confirmModal.variant || "danger"}
+        onConfirm={confirmModal.onConfirm}
+      />
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

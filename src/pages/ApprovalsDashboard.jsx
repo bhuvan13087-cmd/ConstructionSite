@@ -17,6 +17,7 @@ import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { 
   Check, 
   X, 
@@ -242,31 +243,49 @@ export default function ApprovalsDashboard() {
 
   // Approval Handlers
   const handleApprove = async (req) => {
-    if (!window.confirm(`Approve this ${req.type} request?`)) return;
-    setLoading(true);
-    try {
-      await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
-      showToast(`${req.type} request approved successfully.`, "success");
-    } catch (err) {
-      console.error("Approve failed:", err);
-      showToast(`Approval failed: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
-    }
+    showConfirmModal({
+      title: `Approve ${req.type} Request?`,
+      message: `Are you sure you want to approve this ${req.type} request from ${req.requestedBy || 'engineer'}?`,
+      details: req.details ? `Details: ${req.details}` : null,
+      confirmText: "Approve Request",
+      variant: "success",
+      onConfirm: async () => {
+        setLoading(true);
+        try {
+          await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
+          showToast(`${req.type} request approved successfully.`, "success");
+        } catch (err) {
+          console.error("Approve failed:", err);
+          showToast(`Approval failed: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   const handleReject = async (req) => {
-    if (!window.confirm(`Reject this ${req.type} request?`)) return;
-    setLoading(true);
-    try {
-      await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
-      showToast(`${req.type} request rejected.`, "info");
-    } catch (err) {
-      console.error("Reject failed:", err);
-      showToast(`Rejection failed: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
-    }
+    showConfirmModal({
+      title: `Reject ${req.type} Request?`,
+      message: `Are you sure you want to reject this ${req.type} request from ${req.requestedBy || 'engineer'}?`,
+      details: req.details ? `Details: ${req.details}` : null,
+      confirmText: "Reject Request",
+      variant: "danger",
+      onConfirm: async () => {
+        setLoading(true);
+        try {
+          await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
+          showToast(`${req.type} request rejected.`, "info");
+        } catch (err) {
+          console.error("Reject failed:", err);
+          showToast(`Rejection failed: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   const hasActiveFilters = searchQuery || filterType !== "all" || filterStatus !== "pending" || fromDate || toDate || filterEngineer || filterSiteId;
@@ -755,6 +774,8 @@ export default function ApprovalsDashboard() {
         )}
 
       </Card>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
       <Loading show={loading} text="Updating approval state..." />
     </Layout>

@@ -42,12 +42,43 @@ import {
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
-import Button from "../components/common/Button";
 import { Modal } from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 
 export default function AdminLabour() {
   const { userProfile } = useAuth();
+  
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
   
   // App states
   const [activeTab, setActiveTab] = useState("master"); // master, assignments, salary
@@ -491,43 +522,43 @@ export default function AdminLabour() {
 
   const handleDeleteCategoryInViewModal = async (catId, catName) => {
     if (!activeViewingTeam) return;
-    if (!confirm(`Delete labour entry "${catName}" from ${activeViewingTeam.teamName}?`)) return;
+    showConfirmModal({
+      title: "Delete Category Entry?",
+      message: `Delete labour category "${catName}" from ${activeViewingTeam.teamName}?`,
+      confirmText: "Delete Category",
+      variant: "danger",
+      onConfirm: async () => {
+        const targetTeamId = activeViewingTeam.id;
+        setSubmitting(true);
+        try {
+          await deleteLabourCategoryFromTeam(targetTeamId, catId);
+          showToast(`Category "${catName}" deleted.`, "success");
+          setTeams(prevTeams => prevTeams.map(t => {
+            if (t.id === targetTeamId) {
+              const updated = { ...(t.categories || {}) };
+              delete updated[catId];
+              return { ...t, categories: updated };
+            }
+            return t;
+          }));
 
-    const targetTeamId = activeViewingTeam.id;
-
-    setSubmitting(true);
-    try {
-      await deleteLabourCategoryFromTeam(targetTeamId, catId);
-
-      // Optimistic state cleanup
-      setTeams(prevTeams => prevTeams.map(t => {
-        if (t.id === targetTeamId) {
-          const updated = { ...(t.categories || {}) };
-          delete updated[catId];
-          return { ...t, categories: updated };
+          setViewingTeam(prev => {
+            if (prev && prev.id === targetTeamId) {
+              const updated = { ...(prev.categories || {}) };
+              delete updated[catId];
+              return { ...prev, categories: updated };
+            }
+            return prev;
+          });
+          await loadData();
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          setSubmitting(false);
+          closeConfirmModal();
         }
-        return t;
-      }));
-
-      setViewingTeam(prev => {
-        if (prev && prev.id === targetTeamId) {
-          const updated = { ...(prev.categories || {}) };
-          delete updated[catId];
-          return { ...prev, categories: updated };
-        }
-        return prev;
-      });
-
-      showToast(`Labour entry "${catName}" deleted.`, "info");
-
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      const fetchedTeams = await getLabourTeams(adminId);
-      setTeams(fetchedTeams);
-    } catch (err) {
-      showToast(`Failed to delete entry: ${err.message}`, "error");
-    } finally {
-      setSubmitting(false);
-    }
+      }
+    });
   };
 
   // EDIT TEAM MODAL HANDLERS
@@ -654,21 +685,30 @@ export default function AdminLabour() {
   };
 
   const handleDeleteTeam = async (teamId, name) => {
-    if (!confirm(`Are you sure you want to permanently delete Team "${name}"? This will delete all its categories and members.`)) return;
-    setSubmitting(true);
-    try {
-      await deleteLabourTeam(teamId);
-      showToast(`Team "${name}" deleted.`, "success");
-      if (selectedTeamId === teamId) {
-        setSelectedTeamId("");
-        setSelectedCategoryId("");
+    showConfirmModal({
+      title: "Delete Labour Team?",
+      message: `Are you sure you want to permanently delete Team "${name}"?`,
+      details: "This will remove all categories and members assigned to this team.",
+      confirmText: "Delete Team",
+      variant: "danger",
+      onConfirm: async () => {
+        setSubmitting(true);
+        try {
+          await deleteLabourTeam(teamId);
+          showToast(`Team "${name}" deleted.`, "success");
+          if (selectedTeamId === teamId) {
+            setSelectedTeamId("");
+            setSelectedCategoryId("");
+          }
+          await loadData();
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          setSubmitting(false);
+          closeConfirmModal();
+        }
       }
-      await loadData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setSubmitting(false);
-    }
+    });
   };
 
   // -------------------------------------------------------------
@@ -735,20 +775,29 @@ export default function AdminLabour() {
   };
 
   const handleDeleteCategoryFromTeam = async (catId, catName) => {
-    if (!confirm(`Are you sure you want to permanently delete Category "${catName}"? This will delete all its members immediately.`)) return;
-    setSubmitting(true);
-    try {
-      await deleteLabourCategoryFromTeam(selectedTeamId, catId);
-      showToast(`Category "${catName}" deleted.`, "success");
-      if (selectedCategoryId === catId) {
-        setSelectedCategoryId("");
+    showConfirmModal({
+      title: "Delete Labour Category?",
+      message: `Are you sure you want to permanently delete Category "${catName}"?`,
+      details: "This will remove all members assigned to this category immediately.",
+      confirmText: "Delete Category",
+      variant: "danger",
+      onConfirm: async () => {
+        setSubmitting(true);
+        try {
+          await deleteLabourCategoryFromTeam(selectedTeamId, catId);
+          showToast(`Category "${catName}" deleted.`, "success");
+          if (selectedCategoryId === catId) {
+            setSelectedCategoryId("");
+          }
+          await loadData();
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          setSubmitting(false);
+          closeConfirmModal();
+        }
       }
-      await loadData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setSubmitting(false);
-    }
+    });
   };
 
   // -------------------------------------------------------------
@@ -825,17 +874,25 @@ export default function AdminLabour() {
   };
 
   const handleDeleteMember = async (memberId, name) => {
-    if (!confirm(`Are you sure you want to delete member "${name}"?`)) return;
-    setSubmitting(true);
-    try {
-      await deleteLabourMemberFromCategory(selectedTeamId, selectedCategoryId, memberId);
-      showToast(`Member "${name}" removed.`, "success");
-      await loadData();
-    } catch (err) {
-      showToast(err.message, "error");
-    } finally {
-      setSubmitting(false);
-    }
+    showConfirmModal({
+      title: "Remove Member?",
+      message: `Are you sure you want to delete member "${name}"?`,
+      confirmText: "Remove Member",
+      variant: "danger",
+      onConfirm: async () => {
+        setSubmitting(true);
+        try {
+          await deleteLabourMemberFromCategory(selectedTeamId, selectedCategoryId, memberId);
+          showToast(`Member "${name}" removed.`, "success");
+          await loadData();
+        } catch (err) {
+          showToast(err.message, "error");
+        } finally {
+          setSubmitting(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   // -------------------------------------------------------------
@@ -1924,6 +1981,8 @@ export default function AdminLabour() {
 
         </form>
       </Modal>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
     </Layout>
   );

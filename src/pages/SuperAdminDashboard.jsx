@@ -6,6 +6,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import {
   getSites,
@@ -64,6 +65,37 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
   
   // Datasets
   const [sites, setSites] = useState([]);
@@ -285,33 +317,51 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     .sort((a, b) => b.requestDate.localeCompare(a.requestDate));
 
   const handleApproveRequest = async (req) => {
-    if (!window.confirm(`Approve this ${req.type} request?`)) return;
-    setDataLoading(true);
-    try {
-      await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
-      showToast(`${req.type} request approved successfully.`, "success");
-      await loadStaticData();
-    } catch (err) {
-      console.error("Approve failed:", err);
-      showToast(`Approval failed: ${err.message}`, "error");
-    } finally {
-      setDataLoading(false);
-    }
+    showConfirmModal({
+      title: `Approve ${req.type} Request?`,
+      message: `Are you sure you want to approve this ${req.type} request from ${req.requestedBy || 'engineer'}?`,
+      details: req.details ? `Details: ${req.details}` : null,
+      confirmText: "Approve Request",
+      variant: "success",
+      onConfirm: async () => {
+        setDataLoading(true);
+        try {
+          await resolveApprovalRequest(req.id, "Approved", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
+          showToast(`${req.type} request approved successfully.`, "success");
+          await loadStaticData();
+        } catch (err) {
+          console.error("Approve failed:", err);
+          showToast(`Approval failed: ${err.message}`, "error");
+        } finally {
+          setDataLoading(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   const handleRejectRequest = async (req) => {
-    if (!window.confirm(`Reject this ${req.type} request?`)) return;
-    setDataLoading(true);
-    try {
-      await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
-      showToast(`${req.type} request rejected.`, "info");
-      await loadStaticData();
-    } catch (err) {
-      console.error("Reject failed:", err);
-      showToast(`Rejection failed: ${err.message}`, "error");
-    } finally {
-      setDataLoading(false);
-    }
+    showConfirmModal({
+      title: `Reject ${req.type} Request?`,
+      message: `Are you sure you want to reject this ${req.type} request from ${req.requestedBy || 'engineer'}?`,
+      details: req.details ? `Details: ${req.details}` : null,
+      confirmText: "Reject Request",
+      variant: "danger",
+      onConfirm: async () => {
+        setDataLoading(true);
+        try {
+          await resolveApprovalRequest(req.id, "Rejected", userProfile?.id || "admin", userProfile?.fullName || "Admin User");
+          showToast(`${req.type} request rejected.`, "info");
+          await loadStaticData();
+        } catch (err) {
+          console.error("Reject failed:", err);
+          showToast(`Rejection failed: ${err.message}`, "error");
+        } finally {
+          setDataLoading(false);
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   // Render sub-view handlers
@@ -1136,6 +1186,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       {tab === "finance" && renderFinancialMonitoring()}
       {tab === "progress" && renderProgressMonitoring()}
       {tab === "approvals" && renderApprovalCenter()}
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
       <Loading show={dataLoading} text="Updating database record..." />
     </Layout>

@@ -5,6 +5,7 @@ import { hasPermission } from "../../services/businessLogic";
 import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History } from "lucide-react";
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
+import ConfirmationModal from "../common/ConfirmationModal";
 
 const NavGroupTitle = ({ children }) => (
   <div className="sidebar-nav-group-title">
@@ -14,15 +15,56 @@ const NavGroupTitle = ({ children }) => (
 
 export default function Sidebar({ isOpen, onClose }) {
   const { userProfile, logout } = useAuth();
+  
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = React.useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "warning",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "warning",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   const handleLogout = async () => {
-    if (confirm("Are you sure you want to sign out?")) {
-      try {
-        await logout();
-      } catch (err) {
-        console.error("Sign out error:", err);
+    showConfirmModal({
+      title: "Sign Out of Workspace?",
+      message: "Are you sure you want to sign out of your account?",
+      confirmText: "Sign Out",
+      cancelText: "Stay Signed In",
+      variant: "warning",
+      icon: LogOut,
+      onConfirm: async () => {
+        try {
+          await logout();
+        } catch (err) {
+          console.error("Sign out error:", err);
+        } finally {
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   const initials = userProfile?.fullName
@@ -488,6 +530,8 @@ export default function Sidebar({ isOpen, onClose }) {
           Sign Out
         </Button>
       </div>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
     </aside>
   );
 }

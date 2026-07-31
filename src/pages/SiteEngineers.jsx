@@ -21,6 +21,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import { 
   Plus, 
@@ -49,6 +50,37 @@ export default function SiteEngineers() {
   const [searchQuery, setSearchQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   // Modal States
   const [showFormModal, setShowFormModal] = useState(false);
@@ -129,19 +161,27 @@ export default function SiteEngineers() {
 
   // Delete Site Engineer completely from Database
   const handleDeleteEngineer = async (eng) => {
-    if (window.confirm("Delete user permanently?")) {
-      setLoading(true);
-      try {
-        await deleteSiteEngineer(eng.id, eng.email, eng.password);
-        showToast("User deleted successfully", "success");
-        await loadData();
-      } catch (err) {
-        console.error("Error deleting engineer:", err);
-        showToast(`Failed to delete: ${err.message}`, "error");
-      } finally {
-        setLoading(false);
+    showConfirmModal({
+      title: "Delete Site Engineer?",
+      message: `Are you sure you want to permanently delete engineer "${eng.fullName || eng.name || eng.email}"?`,
+      details: "This will remove user authentication, site assignments, and engineer profile data.",
+      confirmText: "Delete Engineer",
+      variant: "danger",
+      onConfirm: async () => {
+        setLoading(true);
+        try {
+          await deleteSiteEngineer(eng.id, eng.email, eng.password);
+          showToast("User deleted successfully", "success");
+          await loadData();
+        } catch (err) {
+          console.error("Error deleting engineer:", err);
+          showToast(`Failed to delete: ${err.message}`, "error");
+        } finally {
+          setLoading(false);
+          closeConfirmModal();
+        }
       }
-    }
+    });
   };
 
   // Open Details Modal
@@ -755,14 +795,22 @@ export default function SiteEngineers() {
                 </Button>
                 
                 <Button 
-                  onClick={async () => {
-                    if (window.confirm(`Are you sure you want to change status to ${selectedEngineer.status === "active" ? "inactive" : "active"}?`)) {
-                      await handleToggleStatus(selectedEngineer.id, selectedEngineer.status);
-                      setSelectedEngineer(prev => ({
-                        ...prev,
-                        status: prev.status === "active" ? "inactive" : "active"
-                      }));
-                    }
+                  onClick={() => {
+                    const newStatus = selectedEngineer.status === "active" ? "inactive" : "active";
+                    showConfirmModal({
+                      title: newStatus === "active" ? "Activate Engineer Account?" : "Deactivate Engineer Account?",
+                      message: `Are you sure you want to change status to ${newStatus}?`,
+                      confirmText: newStatus === "active" ? "Activate" : "Deactivate",
+                      variant: newStatus === "active" ? "success" : "warning",
+                      onConfirm: async () => {
+                        await handleToggleStatus(selectedEngineer.id, selectedEngineer.status);
+                        setSelectedEngineer(prev => ({
+                          ...prev,
+                          status: newStatus
+                        }));
+                        closeConfirmModal();
+                      }
+                    });
                   }}
                   variant="outline"
                   size="sm"
@@ -787,7 +835,7 @@ export default function SiteEngineers() {
         )}
       </Modal>
 
-
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

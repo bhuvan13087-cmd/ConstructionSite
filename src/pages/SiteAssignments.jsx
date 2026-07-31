@@ -27,6 +27,37 @@ import {
 export default function SiteAssignments() {
   const { user, userProfile } = useAuth();
   
+  // Custom Confirmation Modal state
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger",
+    onConfirm: null,
+    isLoading: false
+  });
+
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
+  
   // State variables
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
@@ -146,24 +177,30 @@ export default function SiteAssignments() {
 
   // Handle assignment removal
   const handleRemoveAssignment = async (asg) => {
-    const confirmMessage = `Are you sure you want to remove "${asg.engineerName}" from "${asg.siteName}"?`;
-    if (confirm(confirmMessage)) {
-      setLoading(true);
-      try {
-        await removeEngineerFromSite(asg.id);
-        showToast("Assignment removed successfully.", "success");
-        await loadData();
-      } catch (err) {
-        console.error("Assignment deletion failed:", err);
-        if (err.code === "permission-denied") {
-          showToast("Permission Denied: Only admins can manage site allocations.", "error");
-        } else {
-          showToast(err.message || "Failed to delete assignment.", "error");
+    showConfirmModal({
+      title: "Remove Site Assignment?",
+      message: `Are you sure you want to remove "${asg.engineerName}" from "${asg.siteName}"?`,
+      confirmText: "Remove Assignment",
+      variant: "danger",
+      onConfirm: async () => {
+        setLoading(true);
+        try {
+          await removeEngineerFromSite(asg.id);
+          showToast("Assignment removed successfully.", "success");
+          await loadData();
+        } catch (err) {
+          console.error("Assignment deletion failed:", err);
+          if (err.code === "permission-denied") {
+            showToast("Permission Denied: Only admins can manage site allocations.", "error");
+          } else {
+            showToast(err.message || "Failed to delete assignment.", "error");
+          }
+        } finally {
+          setLoading(false);
+          closeConfirmModal();
         }
-      } finally {
-        setLoading(false);
       }
-    }
+    });
   };
 
   // Helper function to extract name initials
@@ -508,6 +545,8 @@ export default function SiteAssignments() {
         </Card>
 
       </div>
+
+      <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
 
       <Loading show={loading} text="Updating assignments..." />
     </Layout>
