@@ -652,12 +652,8 @@ export default function SiteAssignments() {
         </div>
 
       </div>
-
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
-
       <Loading show={loading} text="Updating assignments..." />
     </Layout>
-
   );
 }
-

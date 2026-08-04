@@ -39,6 +39,7 @@ import {
   Search,
   Eye
 } from "lucide-react";
+import Button from "../components/common/Button";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
