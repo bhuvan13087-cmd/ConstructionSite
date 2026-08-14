@@ -16,10 +16,15 @@ import ReportsDashboard from "../pages/ReportsDashboard";
 import PayrollSummary from "../pages/PayrollSummary";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import ErrorBoundary from "../components/common/ErrorBoundary";
+import Loading from "../components/common/Loading";
 import { useAuth } from "../context/AuthContext";
 
 export default function AppRoutes() {
-  const { user, userProfile } = useAuth();
+  const { user, userProfile, loading } = useAuth();
+
+  if (loading) {
+    return <Loading show={true} text="Verifying Session..." />;
+  }
 
   return (
     <Routes>

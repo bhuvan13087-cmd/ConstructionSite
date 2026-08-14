@@ -6,20 +6,21 @@ import {
   sendPasswordResetEmail,
   updatePassword,
   setPersistence,
-  browserSessionPersistence
+  browserLocalPersistence
 } from "firebase/auth";
 import { getFirebaseAuth, getSecondaryAuth } from "./config";
 
 // Sign in with email and password (main App)
 export async function signIn(email, password) {
   const auth = getFirebaseAuth();
-  await setPersistence(auth, browserSessionPersistence);
+  await setPersistence(auth, browserLocalPersistence);
   return signInWithEmailAndPassword(auth, email, password);
 }
 
 // Create user with email and password (main App, e.g. Admin creation)
 export async function signUp(email, password) {
   const auth = getFirebaseAuth();
+  await setPersistence(auth, browserLocalPersistence);
   return createUserWithEmailAndPassword(auth, email, password);
 }
 
