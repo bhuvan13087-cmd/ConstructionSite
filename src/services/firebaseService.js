@@ -751,7 +751,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
     const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&cb=${Date.now()}`, {
       headers: {
         'Accept-Language': 'en',
-        'User-Agent': 'ApexBuild-ConstructionSite-Verification/1.0 (contact@apexbuild.com)'
+        'User-Agent': 'VisvasBuilders-ConstructionSite-Verification/1.0 (contact@visvasbuilders.com)'
       }
     });
     if (res.ok) {

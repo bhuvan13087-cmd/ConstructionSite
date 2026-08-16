@@ -68,6 +68,7 @@ import Badge from "../components/common/Badge";
 import SelectWithOthers from "../components/common/SelectWithOthers";
 import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
+import CivilEngineerLogo from "../components/common/CivilEngineerLogo";
 import { 
   MapPin, 
   FileText, 
@@ -2165,8 +2166,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         <div className="mobile-app-frame">
           <header className="mobile-app-header">
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <HardHat size={22} style={{ color: "var(--accent-600)" }} />
-              <h3>Apex Build</h3>
+              <CivilEngineerLogo size={24} />
+              <h3>Visvas Builders</h3>
             </div>
           </header>
           <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "16px", justifyContent: "center" }}>
@@ -2247,8 +2248,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         <div className="mobile-app-frame">
           <header className="mobile-app-header" style={{ justifyContent: "space-between", height: "64px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <HardHat size={22} style={{ color: "var(--construction-orange)" }} />
-              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>Apex Build</h3>
+              <CivilEngineerLogo size={24} />
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>Visvas Builders</h3>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <div style={{
@@ -2299,7 +2300,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   {userProfile?.fullName || "Site Engineer"}
                 </h4>
                 <p style={{ margin: 0, fontSize: "11px", color: "var(--text-muted)" }}>
-                  {userProfile?.email || "engineer@apex.com"}
+                  {userProfile?.email || "engineer@visvasbuilders.com"}
                 </p>
               </div>
             </div>
@@ -6288,14 +6289,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         {/* Top Header */}
         <header className="mobile-app-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", height: "auto", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <HardHat size={20} style={{ color: "var(--accent-600)" }} />
+            <CivilEngineerLogo size={22} />
             <h3 style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>
               {tab === "attendance" ? "Attendance" : 
                tab === "attendance-history" ? "My Attendance History" :
                tab === "material" ? "Materials" : 
                tab === "labour" ? "Workforce" : 
                tab === "expenses" ? "Financials & Expenses" : 
-               ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Apex Build"}
+               ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Visvas Builders"}
             </h3>
           </div>
 

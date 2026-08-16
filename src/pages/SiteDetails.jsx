@@ -1894,7 +1894,7 @@ export default function SiteDetails({ siteId, onBack }) {
                 <div>
                   <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>Audited By (Admin Signature)</span>
                   <div style={{ height: "40px" }} />
-                  <span style={{ fontSize: "12px", borderTop: "1px solid #64748b", display: "inline-block", minWidth: "180px", paddingTop: "4px" }}>Apex Administration</span>
+                  <span style={{ fontSize: "12px", borderTop: "1px solid #64748b", display: "inline-block", minWidth: "180px", paddingTop: "4px" }}>Visvas Administration</span>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>Site Supervisor Sign-Off</span>

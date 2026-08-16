@@ -2200,13 +2200,9 @@ export default function ReportsDashboard() {
         {/* Company header details */}
         <div className="report-header-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <svg width="40" height="40" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M50 15L15 45H25V85H75V45H85L50 15Z" fill="#1e293b" />
-              <path d="M50 15L85 45H75V85H25V45H15L50 15Z" stroke="#e65100" strokeWidth="6" strokeLinejoin="round" />
-              <rect x="42" y="55" width="16" height="30" fill="#ffffff" />
-            </svg>
+            <img src="/app-icon.png" alt="Visvas Builders" width="40" height="40" style={{ borderRadius: "8px", objectFit: "contain", display: "inline-block" }} />
             <div>
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit" }}>Apex Construction Group</h2>
+              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit" }}>Visvas Builders</h2>
               <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Corporate Field Operations &amp; Auditing Ledger</span>
             </div>
           </div>
@@ -2606,7 +2602,7 @@ export default function ReportsDashboard() {
 
         {/* Signature Verification Block */}
         <div style={{ borderTop: "1.5px solid #94a3b8", marginTop: "40px", paddingTop: "20px", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#64748b" }}>
-          <p>Document Security Verification: APEX-BI-{new Date().getFullYear()}-{Math.floor(Math.random() * 90000) + 10000}</p>
+          <p>Document Security Verification: VISVAS-BI-{new Date().getFullYear()}-{Math.floor(Math.random() * 90000) + 10000}</p>
           <div style={{ textAlign: "right" }}>
             <p style={{ borderTop: "1.5px solid #0f172a", width: "160px", display: "inline-block", marginTop: "24px" }}></p>
             <p style={{ margin: "2px 0 0 0" }}>Authorized Signature</p>
