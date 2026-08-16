@@ -867,208 +867,281 @@ export default function Sites() {
         </div>
       )}
 
-      {/* Site Cards Grid */}
-      {filteredSites.length === 0 ? (
-        <div style={{
-          textAlign: "center",
-          padding: "64px 24px",
-          background: "#fff",
-          borderRadius: "16px",
-          border: "1.5px dashed var(--border-color)",
-          color: "var(--text-muted)"
-        }}>
-          <div style={{ fontSize: "40px", marginBottom: "12px" }}>🏗️</div>
-          <div style={{ fontWeight: "700", fontSize: "15px", color: "var(--primary-800)" }}>No construction sites found</div>
-          <div style={{ fontSize: "13px", marginTop: "6px" }}>Click "Add Site" to register your first project.</div>
-        </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "18px" }}>
-          {filteredSites.map((site) => {
-            const statusColors = {
-              Active: { bg: "var(--success-50)", border: "var(--success-100)", dot: "var(--success-500)" },
-              Planning: { bg: "var(--primary-50)", border: "var(--border-color)", dot: "var(--primary-500)" },
-              Completed: { bg: "#f0fdf4", border: "#dcfce7", dot: "var(--success-600)" }
-            };
-            const sc = statusColors[site.status] || statusColors["Planning"];
-            const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0,2).toUpperCase() : "CS";
-            const budget = site.budget !== undefined && site.budget !== null ? `₹${Number(site.budget).toLocaleString("en-IN")}` : "--";
-            
-            return (
-              <div key={site.id} style={{
-                background: "#ffffff",
-                borderRadius: "16px",
-                border: "1px solid var(--border-color)",
-                boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
-                padding: "20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "14px",
-                transition: "box-shadow 0.2s ease, transform 0.2s ease",
-                cursor: "default"
-              }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.10)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(15,23,42,0.05)"; e.currentTarget.style.transform = "translateY(0)"; }}
-              >
-                {/* Card Header */}
-                <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
-                  <div style={{
-                    width: "44px",
-                    height: "44px",
-                    borderRadius: "12px",
-                    backgroundColor: "#fff7ed",
-                    border: "1.5px solid #ffedd5",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: "800",
-                    fontSize: "14px",
-                    color: "#c2410c",
-                    flexShrink: 0
-                  }}>{initials}</div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      onClick={() => setSelectedSiteId(site.id)}
-                      title="Click to view site dashboard"
-                      style={{
-                        fontWeight: "800",
-                        fontSize: "15px",
-                        color: "var(--primary-950)",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        transition: "color 0.15s ease"
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
-                      onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
-                    >{site.siteName}</div>
-                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>Client: <strong style={{ color: "var(--primary-700)" }}>{site.clientName || "--"}</strong></div>
-                  </div>
-                  {/* Status pill */}
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "4px 10px",
-                    borderRadius: "20px",
-                    backgroundColor: sc.bg,
-                    border: `1px solid ${sc.border}`,
-                    flexShrink: 0
-                  }}>
-                    <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: sc.dot }} />
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: sc.dot }}>{site.status || "Planning"}</span>
-                  </div>
-                </div>
+      {/* ── All Sites Table (Full-Width Compact List) ── */}
+      <div style={{
+        background: "#ffffff",
+        border: "1px solid var(--border-color)",
+        borderRadius: "14px",
+        overflow: "hidden",
+        boxShadow: "var(--shadow-sm)"
+      }}>
+        {filteredSites.length === 0 ? (
+          <div style={{
+            textAlign: "center",
+            padding: "56px 24px",
+            color: "var(--text-muted)"
+          }}>
+            <div style={{ fontSize: "36px", marginBottom: "10px" }}>🏗️</div>
+            <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-800)", marginBottom: "4px" }}>
+              {searchQuery ? "No construction sites match your search" : "No construction sites found"}
+            </div>
+            <div style={{ fontSize: "12px" }}>
+              {searchQuery ? "Try searching with a different name, client, or location." : `Click "Add Site" to register your first project.`}
+            </div>
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: "820px" }}>
+              <thead>
+                <tr style={{ background: "var(--primary-50)", borderBottom: "1px solid var(--border-color)" }}>
+                  <th style={{ width: "22%", paddingLeft: "20px" }}>Site Name</th>
+                  <th style={{ width: "15%" }}>Client</th>
+                  <th style={{ width: "18%" }}>Location</th>
+                  <th style={{ width: "11%" }}>Start Date</th>
+                  <th style={{ width: "11%" }}>End Date</th>
+                  <th style={{ width: "11%" }}>Budget</th>
+                  <th style={{ width: "10%", textAlign: "center" }}>Status</th>
+                  <th style={{ width: "12%", textAlign: "right", paddingRight: "20px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredSites.map((site) => {
+                  const statusColors = {
+                    Active: { bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)", dot: "var(--success-500)" },
+                    Planning: { bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)", dot: "var(--primary-500)" },
+                    Completed: { bg: "#f0fdf4", border: "#dcfce7", color: "var(--success-700)", dot: "var(--success-600)" }
+                  };
+                  const sc = statusColors[site.status] || statusColors["Planning"];
+                  const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+                  const budgetFormatted = site.budget !== undefined && site.budget !== null && site.budget !== ""
+                    ? `₹${Number(site.budget).toLocaleString("en-IN")}`
+                    : "—";
 
-                {/* Location */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "8px 12px",
-                  backgroundColor: "var(--primary-50)",
-                  borderRadius: "8px",
-                  border: "1px solid var(--border-color)"
-                }}>
-                  <MapPin size={13} style={{ color: "#ea580c", flexShrink: 0 }} />
-                  <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: "500", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{site.location || "--"}</span>
-                </div>
+                  return (
+                    <tr
+                      key={site.id}
+                      style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                      onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                      onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                    >
+                      {/* Site Name column */}
+                      <td style={{ paddingLeft: "20px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div
+                            onClick={() => setSelectedSiteId(site.id)}
+                            title="View Site Dashboard"
+                            style={{
+                              width: "34px",
+                              height: "34px",
+                              borderRadius: "9px",
+                              backgroundColor: "#fff7ed",
+                              border: "1.5px solid #ffedd5",
+                              color: "#c2410c",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: "800",
+                              fontSize: "11px",
+                              flexShrink: 0,
+                              cursor: "pointer",
+                              transition: "transform 0.15s ease",
+                              userSelect: "none"
+                            }}
+                            onMouseEnter={e => e.currentTarget.style.transform = "scale(1.08)"}
+                            onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
+                          >
+                            {initials}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              onClick={() => setSelectedSiteId(site.id)}
+                              title="View Site Dashboard"
+                              style={{
+                                fontWeight: "700",
+                                fontSize: "13px",
+                                color: "var(--primary-950)",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                maxWidth: "200px",
+                                transition: "color 0.12s ease"
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                              onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                            >
+                              {site.siteName}
+                            </div>
+                            {site.siteLocationName && (
+                              <div style={{ fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "200px" }}>
+                                {site.siteLocationName}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      </td>
 
-                {/* Dates & Budget Row */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
-                  {[
-                    { label: "Start", value: site.startDate || "--" },
-                    { label: "End", value: site.expectedEndDate || "--" },
-                    { label: "Budget", value: budget }
-                  ].map((item, i) => (
-                    <div key={i} style={{ textAlign: "center", padding: "8px 6px", backgroundColor: "var(--primary-50)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                      <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>{item.label}</div>
-                      <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", marginTop: "2px", fontFamily: i === 2 ? "monospace" : "inherit" }}>{item.value}</div>
-                    </div>
-                  ))}
-                </div>
+                      {/* Client column */}
+                      <td>
+                        <span style={{ fontSize: "12.5px", fontWeight: "600", color: "var(--primary-800)", whiteSpace: "nowrap" }}>
+                          {site.clientName || "—"}
+                        </span>
+                      </td>
 
-                {/* Actions */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  paddingTop: "10px",
-                  borderTop: "1px solid var(--border-color)"
-                }}>
-                  <button
-                    onClick={() => setSelectedSiteId(site.id)}
-                    title="View Site Dashboard"
-                    style={{
-                      flex: 1,
-                      padding: "7px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid #ffedd5",
-                      backgroundColor: "#fff7ed",
-                      color: "#c2410c",
-                      fontWeight: "700",
-                      fontSize: "12px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "5px",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ffedd5"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#fff7ed"}
-                  >
-                    <Building2 size={13} /> View
-                  </button>
-                  <button
-                    onClick={() => handleOpenEditModal(site)}
-                    title="Edit Site"
-                    style={{
-                      padding: "7px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border-color)",
-                      backgroundColor: "#ffffff",
-                      color: "var(--primary-700)",
-                      fontWeight: "700",
-                      fontSize: "12px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      gap: "5px",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#ffffff"}
-                  >
-                    <Edit3 size={13} /> Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteSite(site)}
-                    title="Delete Site"
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--danger-100)",
-                      backgroundColor: "var(--danger-50)",
-                      color: "var(--danger-600)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--danger-100)"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "var(--danger-50)"}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                      {/* Location column */}
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--primary-700)", fontWeight: 500, maxWidth: "220px" }}>
+                          <MapPin size={12} style={{ color: "#ea580c", flexShrink: 0 }} />
+                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} title={site.location || ""}>
+                            {site.location || "—"}
+                          </span>
+                        </div>
+                      </td>
+
+                      {/* Start Date column */}
+                      <td>
+                        <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: 500, whiteSpace: "nowrap" }}>
+                          {site.startDate || "—"}
+                        </span>
+                      </td>
+
+                      {/* End Date column */}
+                      <td>
+                        <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: 500, whiteSpace: "nowrap" }}>
+                          {site.expectedEndDate || "—"}
+                        </span>
+                      </td>
+
+                      {/* Budget column */}
+                      <td>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-900)", fontFamily: "monospace", whiteSpace: "nowrap" }}>
+                          {budgetFormatted}
+                        </span>
+                      </td>
+
+                      {/* Status column */}
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          padding: "3px 9px",
+                          borderRadius: "20px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          backgroundColor: sc.bg,
+                          color: sc.color,
+                          border: `1px solid ${sc.border}`,
+                          whiteSpace: "nowrap"
+                        }}>
+                          <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc.dot, flexShrink: 0 }} />
+                          {site.status || "Planning"}
+                        </span>
+                      </td>
+
+                      {/* Actions column */}
+                      <td style={{ paddingRight: "20px" }}>
+                        <div className="table-actions" style={{ justifyContent: "flex-end" }}>
+                          {/* View */}
+                          <button
+                            className="btn-icon"
+                            onClick={() => setSelectedSiteId(site.id)}
+                            title="View Site Dashboard"
+                            style={{
+                              width: "30px",
+                              height: "30px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: "7px",
+                              border: "1px solid var(--border-color)",
+                              background: "#fff",
+                              color: "var(--primary-600)",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                              flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#fff7ed"; e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.borderColor = "#ffedd5"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Building2 size={13} />
+                          </button>
+
+                          {/* Edit */}
+                          <button
+                            className="btn-icon btn-edit-action"
+                            onClick={() => handleOpenEditModal(site)}
+                            title="Edit Site"
+                            style={{
+                              width: "30px",
+                              height: "30px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: "7px",
+                              border: "1px solid var(--border-color)",
+                              background: "#fff",
+                              color: "var(--primary-600)",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                              flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "var(--brand-orange-light)"; e.currentTarget.style.color = "var(--brand-orange)"; e.currentTarget.style.borderColor = "var(--brand-orange-border)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Edit3 size={13} />
+                          </button>
+
+                          {/* Delete */}
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleDeleteSite(site)}
+                            title="Delete Site"
+                            style={{
+                              width: "30px",
+                              height: "30px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              borderRadius: "7px",
+                              border: "1px solid var(--border-color)",
+                              background: "#fff",
+                              color: "var(--primary-600)",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease",
+                              flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "var(--danger-50)"; e.currentTarget.style.color = "var(--danger-600)"; e.currentTarget.style.borderColor = "var(--danger-100)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Table footer */}
+        {filteredSites.length > 0 && (
+          <div style={{
+            borderTop: "1px solid var(--border-color)",
+            padding: "10px 20px",
+            background: "#f8fafc",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center"
+          }}>
+            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", fontWeight: 600 }}>
+              Showing {filteredSites.length} of {sites.length} site{sites.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* MODAL: ADD/EDIT SITE */}
       <Modal 
