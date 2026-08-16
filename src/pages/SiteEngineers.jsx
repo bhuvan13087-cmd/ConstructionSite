@@ -284,7 +284,9 @@ export default function SiteEngineers() {
           formSelectedSites,
           true,
           formOldSites,
-          formHolidayAllowance
+          formHolidayAllowance,
+          "",
+          userProfile?.uid || userProfile?.id || null
         );
 
         showToast("Site Engineer updated successfully.", "success");
@@ -309,6 +311,12 @@ export default function SiteEngineers() {
     );
   }
 
+  // Derived counts for KPI strip
+  const totalEngineers = engineers.length;
+  const activeCount = engineers.filter(e => e.status === "active").length;
+  const inactiveCount = totalEngineers - activeCount;
+  const sitesCovered = [...new Set(engineers.flatMap(e => e.assignedSites || []))].length;
+
   return (
     <Layout title="Site Engineers" description="Manage Site Engineer security credentials and construction site assignments.">
       {toast.show && (
@@ -319,243 +327,352 @@ export default function SiteEngineers() {
         </div>
       )}
 
-      {/* Toolbar header */}
-      <div className="subview-actions-header">
-        <div className="search-filter-bar">
-          <div className="input-wrapper search-wrapper">
-            <Search className="input-icon" size={16} />
-            <input 
-              type="text" 
-              placeholder="Search engineers by name or email..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
+      {/* ── Page Header ── */}
+      <div style={{
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        marginBottom: "20px",
+        flexWrap: "wrap",
+        gap: "12px"
+      }}>
+        <div>
+          <h1 style={{
+            fontFamily: "var(--font-family-title)",
+            fontSize: "20px",
+            fontWeight: "800",
+            color: "var(--primary-950)",
+            margin: 0,
+            lineHeight: "1.2"
+          }}>
+            Site Engineers
+          </h1>
+          <p style={{ fontSize: "13px", color: "var(--text-muted)", margin: "3px 0 0 0", fontWeight: 500 }}>
+            Manage engineer profiles, credentials, and site deployments.
+          </p>
         </div>
         <Button onClick={handleOpenAddModal} id="btn-add-engineer" icon={Plus} className="btn-add">
           Add Engineer
         </Button>
       </div>
 
-      {/* KPI Summary Bar */}
-      {engineers.length > 0 && (
+      {/* ── Compact KPI Strip ── */}
+      {totalEngineers > 0 && (
         <div style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: "14px",
-          marginBottom: "24px"
+          display: "flex",
+          gap: "1px",
+          background: "var(--border-color)",
+          border: "1px solid var(--border-color)",
+          borderRadius: "12px",
+          overflow: "hidden",
+          marginBottom: "16px",
+          boxShadow: "var(--shadow-sm)"
         }}>
           {[
-            { label: "Total Engineers", value: engineers.length, sub: "Registered accounts", icon: "👷", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
-            { label: "Active", value: engineers.filter(e => e.status === "active").length, sub: "Currently enabled", icon: "✅", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
-            { label: "Inactive", value: engineers.filter(e => e.status !== "active").length, sub: "Disabled accounts", icon: "⏸️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" },
-            { label: "Sites Covered", value: [...new Set(engineers.flatMap(e => e.assignedSites || []))].length, sub: "Unique site assignments", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" }
+            { label: "Total Engineers", value: totalEngineers, color: "var(--primary-950)", bg: "#fff" },
+            { label: "Active", value: activeCount, color: "var(--success-600)", bg: "#fff" },
+            { label: "Inactive", value: inactiveCount, color: "var(--text-muted)", bg: "#fff" },
+            { label: "Sites Covered", value: sitesCovered, color: "#c2410c", bg: "#fff7ed" }
           ].map((kpi, i) => (
             <div key={i} style={{
+              flex: 1,
               background: kpi.bg,
-              border: `1px solid ${kpi.border}`,
-              borderRadius: "14px",
-              padding: "16px 18px",
-              boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+              padding: "10px 16px",
               display: "flex",
               flexDirection: "column",
-              gap: "4px"
+              gap: "1px",
+              minWidth: 0
             }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</span>
-                <span style={{ fontSize: "18px" }}>{kpi.icon}</span>
-              </div>
-              <div style={{ fontSize: "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.1" }}>{kpi.value}</div>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>{kpi.sub}</div>
+              <span style={{
+                fontSize: "10px",
+                fontWeight: "700",
+                color: "var(--text-muted)",
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+                whiteSpace: "nowrap"
+              }}>{kpi.label}</span>
+              <span style={{
+                fontSize: "20px",
+                fontWeight: "900",
+                color: kpi.color,
+                lineHeight: "1.1",
+                fontFamily: "var(--font-family-title)"
+              }}>{kpi.value}</span>
             </div>
           ))}
         </div>
       )}
 
-      {/* Engineer Cards Grid */}
-      {filteredEngineers.length === 0 ? (
-        <div style={{
-          textAlign: "center",
-          padding: "64px 24px",
-          background: "#fff",
-          borderRadius: "16px",
-          border: "1.5px dashed var(--border-color)",
-          color: "var(--text-muted)"
-        }}>
-          <div style={{ fontSize: "40px", marginBottom: "12px" }}>👷</div>
-          <div style={{ fontWeight: "700", fontSize: "15px", color: "var(--primary-800)" }}>No site engineers found</div>
-          <div style={{ fontSize: "13px", marginTop: "6px" }}>Click "Add Engineer" to register one.</div>
+      {/* ── Toolbar: Search ── */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        gap: "10px",
+        marginBottom: "12px",
+        flexWrap: "wrap"
+      }}>
+        <div className="input-wrapper search-wrapper" style={{ flex: 1, minWidth: "200px", maxWidth: "360px" }}>
+          <Search className="input-icon" size={15} />
+          <input
+            type="text"
+            placeholder="Search by name or email…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            style={{ fontSize: "13px" }}
+          />
         </div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "18px" }}>
-          {filteredEngineers.map((eng) => {
-            const isActive = eng.status === "active";
-            const initials = eng.fullName ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase() : "SE";
-            const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
+        {searchQuery && (
+          <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600 }}>
+            {filteredEngineers.length} result{filteredEngineers.length !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
 
-            return (
-              <div key={eng.id} style={{
-                background: "#ffffff",
-                borderRadius: "16px",
-                border: `1px solid ${isActive ? "var(--border-color)" : "var(--danger-100)"}`,
-                boxShadow: "0 2px 8px rgba(15,23,42,0.05)",
-                padding: "20px",
-                display: "flex",
-                flexDirection: "column",
-                gap: "14px",
-                transition: "box-shadow 0.2s ease, transform 0.2s ease"
-              }}
-                onMouseEnter={e => { e.currentTarget.style.boxShadow = "0 8px 24px rgba(15,23,42,0.10)"; e.currentTarget.style.transform = "translateY(-2px)"; }}
-                onMouseLeave={e => { e.currentTarget.style.boxShadow = "0 2px 8px rgba(15,23,42,0.05)"; e.currentTarget.style.transform = "translateY(0)"; }}
-              >
-                {/* Header */}
-                <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                  <div
-                    onClick={() => setSelectedEngineerId(eng.id)}
-                    title="Click to view activity"
-                    style={{
-                      width: "46px",
-                      height: "46px",
-                      borderRadius: "50%",
-                      backgroundColor: isActive ? "#fff7ed" : "var(--primary-100)",
-                      border: `2px solid ${isActive ? "#ffedd5" : "var(--border-color)"}`,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "800",
-                      fontSize: "14px",
-                      color: isActive ? "#c2410c" : "var(--primary-500)",
-                      cursor: "pointer",
-                      flexShrink: 0,
-                      transition: "transform 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.transform = "scale(1.08)"}
-                    onMouseLeave={e => e.currentTarget.style.transform = "scale(1)"}
-                  >{initials}</div>
+      {/* ── Engineer Table ── */}
+      <div style={{
+        background: "#fff",
+        border: "1px solid var(--border-color)",
+        borderRadius: "14px",
+        overflow: "hidden",
+        boxShadow: "var(--shadow-sm)"
+      }}>
+        {filteredEngineers.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "56px 24px", color: "var(--text-muted)" }}>
+            <div style={{ fontSize: "36px", marginBottom: "10px" }}>👷</div>
+            <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-800)", marginBottom: "4px" }}>
+              {searchQuery ? "No engineers match your search" : "No site engineers yet"}
+            </div>
+            <div style={{ fontSize: "12px" }}>
+              {searchQuery ? "Try a different name or email." : `Click "Add Engineer" to register one.`}
+            </div>
+          </div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table className="data-table" style={{ minWidth: "640px" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: "30%", paddingLeft: "20px" }}>Engineer</th>
+                  <th style={{ width: "18%" }}>Contact</th>
+                  <th style={{ width: "12%", textAlign: "center" }}>Status</th>
+                  <th style={{ width: "14%", textAlign: "center" }}>Sites Assigned</th>
+                  <th style={{ width: "16%", textAlign: "right", paddingRight: "20px" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredEngineers.map((eng) => {
+                  const isActive = eng.status === "active";
+                  const initials = eng.fullName
+                    ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()
+                    : "SE";
+                  const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div
-                      onClick={() => setSelectedEngineerId(eng.id)}
-                      style={{
-                        fontWeight: "800",
-                        fontSize: "14px",
-                        color: "var(--primary-950)",
-                        cursor: "pointer",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        transition: "color 0.15s ease"
-                      }}
-                      onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
-                      onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
-                    >{eng.fullName}</div>
-                    <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{eng.email}</div>
-                  </div>
+                  return (
+                    <tr
+                      key={eng.id}
+                      style={{ transition: "background 0.12s ease" }}
+                      onMouseEnter={e => e.currentTarget.style.background = "#f8fafc"}
+                      onMouseLeave={e => e.currentTarget.style.background = "transparent"}
+                    >
+                      {/* Engineer column */}
+                      <td style={{ paddingLeft: "20px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "11px" }}>
+                          <div
+                            onClick={() => setSelectedEngineerId(eng.id)}
+                            title="View Activity Dashboard"
+                            style={{
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "10px",
+                              background: isActive
+                                ? "linear-gradient(135deg, #fff7ed, #ffedd5)"
+                                : "linear-gradient(135deg, var(--primary-100), var(--primary-200))",
+                              border: `1.5px solid ${isActive ? "#ffedd5" : "var(--border-color)"}`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: "800",
+                              fontSize: "12px",
+                              color: isActive ? "#c2410c" : "var(--primary-600)",
+                              cursor: "pointer",
+                              flexShrink: 0,
+                              transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                              userSelect: "none"
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.08)"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(249,115,22,0.18)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.boxShadow = "none"; }}
+                          >
+                            {initials}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div
+                              onClick={() => setSelectedEngineerId(eng.id)}
+                              title="View Activity Dashboard"
+                              style={{
+                                fontWeight: "700",
+                                fontSize: "13px",
+                                color: "var(--primary-950)",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                maxWidth: "200px",
+                                transition: "color 0.12s ease"
+                              }}
+                              onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                              onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                            >
+                              {eng.fullName}
+                            </div>
+                            <div style={{
+                              fontSize: "11.5px",
+                              color: "var(--text-muted)",
+                              fontWeight: 500,
+                              whiteSpace: "nowrap",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              maxWidth: "200px",
+                              marginTop: "1px"
+                            }}>
+                              {eng.email}
+                            </div>
+                          </div>
+                        </div>
+                      </td>
 
-                  {/* Status pill */}
-                  <div style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "4px 10px",
-                    borderRadius: "20px",
-                    backgroundColor: isActive ? "var(--success-50)" : "var(--danger-50)",
-                    border: `1px solid ${isActive ? "var(--success-100)" : "var(--danger-100)"}`,
-                    flexShrink: 0
-                  }}>
-                    <div style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: isActive ? "var(--success-500)" : "var(--danger-500)" }} />
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: isActive ? "var(--success-600)" : "var(--danger-600)" }}>
-                      {isActive ? "Active" : "Inactive"}
-                    </span>
-                  </div>
-                </div>
+                      {/* Contact column */}
+                      <td>
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          fontSize: "12.5px",
+                          color: "var(--primary-700)",
+                          fontWeight: 600
+                        }}>
+                          <Phone size={12} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                          <span style={{ whiteSpace: "nowrap" }}>{eng.phoneNumber || "—"}</span>
+                        </div>
+                      </td>
 
-                {/* Info Row */}
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-                  <div style={{ padding: "8px 10px", backgroundColor: "var(--primary-50)", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-                    <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Phone</div>
-                    <div style={{ fontSize: "12px", fontWeight: "600", color: "var(--primary-900)", marginTop: "2px" }}>{eng.phoneNumber || "--"}</div>
-                  </div>
-                  <div style={{ padding: "8px 10px", backgroundColor: "#fff7ed", borderRadius: "8px", border: "1px solid #ffedd5" }}>
-                    <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>Sites Assigned</div>
-                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#c2410c", marginTop: "2px" }}>{sitesCount} Site{sitesCount !== 1 ? "s" : ""}</div>
-                  </div>
-                </div>
+                      {/* Status column */}
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          padding: "3px 9px",
+                          borderRadius: "20px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          backgroundColor: isActive ? "var(--success-50)" : "var(--danger-50)",
+                          color: isActive ? "var(--success-600)" : "var(--danger-600)",
+                          border: `1px solid ${isActive ? "var(--success-100)" : "var(--danger-100)"}`,
+                          whiteSpace: "nowrap"
+                        }}>
+                          <span style={{
+                            width: "5px",
+                            height: "5px",
+                            borderRadius: "50%",
+                            backgroundColor: isActive ? "var(--success-500)" : "var(--danger-500)",
+                            flexShrink: 0
+                          }} />
+                          {isActive ? "Active" : "Inactive"}
+                        </span>
+                      </td>
 
-                {/* Actions */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px",
-                  paddingTop: "10px",
-                  borderTop: "1px solid var(--border-color)"
-                }}>
-                  <button
-                    onClick={() => setSelectedEngineerId(eng.id)}
-                    title="View Activity"
-                    style={{
-                      flex: 1,
-                      padding: "7px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid #ffedd5",
-                      backgroundColor: "#fff7ed",
-                      color: "#c2410c",
-                      fontWeight: "700",
-                      fontSize: "12px",
-                      cursor: "pointer",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "#ffedd5"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#fff7ed"}
-                  >View Activity</button>
-                  <button
-                    onClick={() => handleOpenEditModal(eng)}
-                    title="Edit Profile"
-                    style={{
-                      padding: "7px 12px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--border-color)",
-                      backgroundColor: "#ffffff",
-                      color: "var(--primary-700)",
-                      fontWeight: "700",
-                      fontSize: "12px",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--primary-50)"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "#ffffff"}
-                  >
-                    <Edit3 size={12} /> Edit
-                  </button>
-                  <button
-                    onClick={() => handleDeleteEngineer(eng)}
-                    title="Delete Engineer"
-                    style={{
-                      padding: "7px 10px",
-                      borderRadius: "8px",
-                      border: "1px solid var(--danger-100)",
-                      backgroundColor: "var(--danger-50)",
-                      color: "var(--danger-600)",
-                      cursor: "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      transition: "background 0.15s ease"
-                    }}
-                    onMouseEnter={e => e.currentTarget.style.backgroundColor = "var(--danger-100)"}
-                    onMouseLeave={e => e.currentTarget.style.backgroundColor = "var(--danger-50)"}
-                  >
-                    <Trash2 size={13} />
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
+                      {/* Sites Assigned column */}
+                      <td style={{ textAlign: "center" }}>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "5px",
+                          padding: "3px 10px",
+                          borderRadius: "8px",
+                          fontSize: "12px",
+                          fontWeight: "700",
+                          backgroundColor: sitesCount > 0 ? "#fff7ed" : "var(--primary-50)",
+                          color: sitesCount > 0 ? "#c2410c" : "var(--primary-600)",
+                          border: `1px solid ${sitesCount > 0 ? "#ffedd5" : "var(--border-color)"}`,
+                          whiteSpace: "nowrap"
+                        }}>
+                          <Building2 size={11} />
+                          {sitesCount} Site{sitesCount !== 1 ? "s" : ""}
+                        </span>
+                      </td>
+
+                      {/* Actions column */}
+                      <td style={{ paddingRight: "20px" }}>
+                        <div className="table-actions" style={{ justifyContent: "flex-end" }}>
+                          <button
+                            className="btn-icon"
+                            onClick={() => setSelectedEngineerId(eng.id)}
+                            title="View Activity Dashboard"
+                            style={{
+                              width: "30px", height: "30px",
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              borderRadius: "7px", border: "1px solid var(--border-color)",
+                              background: "#fff", color: "var(--primary-600)",
+                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#fff7ed"; e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.borderColor = "#ffedd5"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Eye size={13} />
+                          </button>
+                          <button
+                            className="btn-icon btn-edit-action"
+                            onClick={() => handleOpenEditModal(eng)}
+                            title="Edit Profile"
+                            style={{
+                              width: "30px", height: "30px",
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              borderRadius: "7px", border: "1px solid var(--border-color)",
+                              background: "#fff", color: "var(--primary-600)",
+                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "var(--brand-orange-light)"; e.currentTarget.style.color = "var(--brand-orange)"; e.currentTarget.style.borderColor = "var(--brand-orange-border)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Edit3 size={13} />
+                          </button>
+                          <button
+                            className="btn-icon"
+                            onClick={() => handleDeleteEngineer(eng)}
+                            title="Delete Engineer"
+                            style={{
+                              width: "30px", height: "30px",
+                              display: "inline-flex", alignItems: "center", justifyContent: "center",
+                              borderRadius: "7px", border: "1px solid var(--border-color)",
+                              background: "#fff", color: "var(--primary-600)",
+                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "var(--danger-50)"; e.currentTarget.style.color = "var(--danger-600)"; e.currentTarget.style.borderColor = "var(--danger-100)"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {/* Table footer */}
+        {filteredEngineers.length > 0 && (
+          <div style={{
+            borderTop: "1px solid var(--border-color)",
+            padding: "9px 20px",
+            background: "#f8fafc"
+          }}>
+            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", fontWeight: 600 }}>
+              Showing {filteredEngineers.length} of {totalEngineers} engineer{totalEngineers !== 1 ? "s" : ""}
+            </span>
+          </div>
+        )}
+      </div>
 
       {/* MODAL: ADD/EDIT SITE ENGINEER */}
       <Modal 
