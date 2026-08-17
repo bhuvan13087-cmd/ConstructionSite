@@ -860,23 +860,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     setMaterialUsageRows(prev => {
       if (prev.length === 0) {
         const activeMats = (team.materials || []).filter(m => m.status !== "Inactive");
-        return activeMats.map(m => ({
-          rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          materialId: m.id,
-          materialName: m.name,
-          unit: m.unit || "Unit",
-          rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
-          quantity: ""
-        }));
+        return activeMats.map(m => {
+          const isCustom = m.type === "custom";
+          const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+          return {
+            rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            materialId: m.id,
+            materialName: m.name,
+            type: isCustom ? "custom" : "standard",
+            unit: isCustom ? "" : (m.unit || "Bag"),
+            rate: amt,
+            amount: amt,
+            quantity: isCustom ? 1 : ""
+          };
+        });
       }
       return prev.map(row => {
         const mat = (team.materials || []).find(m => m.id === row.materialId);
         if (mat) {
+          const isCustom = mat.type === "custom";
+          const amt = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice)) || 0;
           return {
             ...row,
             materialName: mat.name,
-            unit: mat.unit || "Unit",
-            rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0
+            type: isCustom ? "custom" : "standard",
+            unit: isCustom ? "" : (mat.unit || "Bag"),
+            rate: amt,
+            amount: amt
           };
         }
         return row;
@@ -1975,14 +1985,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const activeMats = (team?.materials || []).filter(m => m.status !== "Inactive");
 
     if (activeMats.length > 0) {
-      setMaterialUsageRows(activeMats.map(m => ({
-        rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-        materialId: m.id,
-        materialName: m.name,
-        unit: m.unit || "Unit",
-        rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
-        quantity: ""
-      })));
+      setMaterialUsageRows(activeMats.map(m => {
+        const isCustom = m.type === "custom";
+        const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+        return {
+          rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          materialId: m.id,
+          materialName: m.name,
+          type: isCustom ? "custom" : "standard",
+          unit: isCustom ? "" : (m.unit || "Bag"),
+          rate: amt,
+          amount: amt,
+          quantity: isCustom ? 1 : ""
+        };
+      }));
     } else {
       setMaterialUsageRows([]);
     }
@@ -2005,6 +2021,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     const nextMat = availableMats[0];
+    const isCustom = nextMat.type === "custom";
+    const amt = Number(nextMat.amount !== undefined ? nextMat.amount : (nextMat.rate !== undefined ? nextMat.rate : nextMat.unitPrice)) || 0;
 
     setMaterialUsageRows(prev => [
       ...prev,
@@ -2012,9 +2030,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         rowId: `row_${nextMat.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         materialId: nextMat.id,
         materialName: nextMat.name,
-        unit: nextMat.unit || "Unit",
-        rate: Number(nextMat.rate !== undefined ? nextMat.rate : nextMat.unitPrice) || 0,
-        quantity: ""
+        type: isCustom ? "custom" : "standard",
+        unit: isCustom ? "" : (nextMat.unit || "Bag"),
+        rate: amt,
+        amount: amt,
+        quantity: isCustom ? 1 : ""
       }
     ]);
   };
@@ -2027,9 +2047,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     // Strict duplicate check across other rows in current unsaved list
     const isDuplicate = materialUsageRows.some(row => row.rowId !== rowId && row.materialId === newMatId);
     if (isDuplicate) {
-      showToast(`"${mat.name}" is already in your usage list. Please edit its quantity instead.`, "warning");
+      showToast(`"${mat.name}" is already in your usage list.`, "warning");
       return;
     }
+
+    const isCustom = mat.type === "custom";
+    const amt = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice)) || 0;
 
     setMaterialUsageRows(prev => prev.map(row => {
       if (row.rowId === rowId) {
@@ -2037,8 +2060,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           ...row,
           materialId: mat.id,
           materialName: mat.name,
-          unit: mat.unit || "Unit",
-          rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0
+          type: isCustom ? "custom" : "standard",
+          unit: isCustom ? "" : (mat.unit || "Bag"),
+          rate: amt,
+          amount: amt,
+          quantity: isCustom ? 1 : ""
         };
       }
       return row;
@@ -2103,26 +2129,47 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     const itemsToSave = [];
     materialUsageRows.forEach(row => {
-      const qtyStr = row.quantity;
-      const qtyNum = Number(qtyStr);
-      if (qtyStr !== undefined && qtyStr !== null && qtyStr !== "" && !isNaN(qtyNum) && qtyNum > 0) {
-        const itemRate = Number(row.rate) || 0;
+      const isCustom = row.type === "custom";
+      if (isCustom) {
+        const itemAmt = Number(row.amount !== undefined ? row.amount : row.rate) || 0;
         itemsToSave.push({
           teamId: currentTeam.id,
           teamName: currentTeam.name,
           materialName: row.materialName,
+          type: "custom",
+          materialType: "custom",
           category: currentTeam.name,
-          unit: row.unit || "Unit",
-          unitPrice: itemRate,
-          rate: itemRate,
-          quantity: qtyNum,
-          totalAmount: qtyNum * itemRate
+          unit: "",
+          unitPrice: itemAmt,
+          rate: itemAmt,
+          amount: itemAmt,
+          quantity: 1,
+          totalAmount: itemAmt
         });
+      } else {
+        const qtyStr = row.quantity;
+        const qtyNum = Number(qtyStr);
+        if (qtyStr !== undefined && qtyStr !== null && qtyStr !== "" && !isNaN(qtyNum) && qtyNum > 0) {
+          const itemRate = Number(row.rate) || 0;
+          itemsToSave.push({
+            teamId: currentTeam.id,
+            teamName: currentTeam.name,
+            materialName: row.materialName,
+            type: "standard",
+            materialType: "standard",
+            category: currentTeam.name,
+            unit: row.unit || "Unit",
+            unitPrice: itemRate,
+            rate: itemRate,
+            quantity: qtyNum,
+            totalAmount: qtyNum * itemRate
+          });
+        }
       }
     });
 
     if (itemsToSave.length === 0) {
-      showToast(`Please enter a quantity greater than 0 for at least one material under "${currentTeam.name}".`, "error");
+      showToast(`Please enter a quantity greater than 0 for standard materials or include custom materials under "${currentTeam.name}".`, "error");
       return;
     }
 
@@ -2154,8 +2201,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setIsBulkMaterialLocked(lockStatus.submitted);
       setBulkMaterialLockInfo(lockStatus);
 
-      // Clear quantities on current rows
-      setMaterialUsageRows(prev => prev.map(r => ({ ...r, quantity: "" })));
+      // Clear quantities on current standard rows
+      setMaterialUsageRows(prev => prev.map(r => r.type === "custom" ? r : ({ ...r, quantity: "" })));
 
       await loadDashboardData();
     } catch (err) {
@@ -4307,12 +4354,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               }
 
               const grandTotalAmount = materialUsageRows.reduce((acc, row) => {
+                if (row.type === "custom") {
+                  return acc + (Number(row.amount !== undefined ? row.amount : row.rate) || 0);
+                }
                 const q = Number(row.quantity) || 0;
                 const r = Number(row.rate) || 0;
                 return acc + (q * r);
               }, 0);
 
-              const itemsWithQtyCount = materialUsageRows.filter(r => (Number(r.quantity) || 0) > 0).length;
+              const itemsWithQtyCount = materialUsageRows.filter(r => r.type === "custom" || (Number(r.quantity) || 0) > 0).length;
 
               return (
                 <div style={{
@@ -4353,7 +4403,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
                             <th style={{ padding: "10px 12px", textAlign: "left" }}>Material</th>
                             <th style={{ padding: "10px 10px", textAlign: "left", width: "75px" }}>Unit</th>
-                            <th style={{ padding: "10px 10px", textAlign: "right", width: "90px" }}>Rate</th>
+                            <th style={{ padding: "10px 10px", textAlign: "right", width: "110px" }}>Rate / Bill Amt</th>
                             <th style={{ padding: "10px 10px", textAlign: "left", width: "95px" }}>Quantity</th>
                             <th style={{ padding: "10px 12px", textAlign: "right", width: "105px" }}>Amount</th>
                             <th style={{ padding: "10px 8px", textAlign: "center", width: "80px" }}>Actions</th>
@@ -4361,11 +4411,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </thead>
                         <tbody>
                           {materialUsageRows.map((row) => {
+                            const isCustom = row.type === "custom";
                             const qtyNum = Number(row.quantity) || 0;
-                            const itemAmount = qtyNum * (Number(row.rate) || 0);
+                            const itemAmount = isCustom 
+                              ? (Number(row.amount !== undefined ? row.amount : row.rate) || 0)
+                              : (qtyNum * (Number(row.rate) || 0));
 
                             return (
-                              <tr key={row.rowId} style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: qtyNum > 0 ? "#fffaf5" : "transparent" }}>
+                              <tr key={row.rowId} style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "transparent" }}>
                                 {/* Material Select */}
                                 <td style={{ padding: "8px 10px" }}>
                                   <select
@@ -4386,9 +4439,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                   >
                                     {teamMaterials.map(m => {
                                       const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
+                                      const isMatCustom = m.type === "custom";
                                       return (
                                         <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
-                                          {m.name} {isAlreadyInOtherRow ? "(Already Added)" : ""}
+                                          {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Already Added" : ""}
                                         </option>
                                       );
                                     })}
@@ -4397,39 +4451,47 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                                 {/* Unit */}
                                 <td style={{ padding: "8px 10px" }}>
-                                  <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", color: "#475569" }}>
-                                    {row.unit}
-                                  </span>
+                                  {isCustom ? (
+                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px", paddingLeft: "4px" }}>—</span>
+                                  ) : (
+                                    <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", color: "#475569" }}>
+                                      {row.unit}
+                                    </span>
+                                  )}
                                 </td>
 
-                                {/* Rate */}
-                                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", color: "#16a34a", fontWeight: "800" }}>
-                                  ₹{Number(row.rate || 0).toLocaleString("en-IN")}
+                                {/* Rate / Bill Amount */}
+                                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", color: isCustom ? "#4338ca" : "#16a34a", fontWeight: "800" }}>
+                                  ₹{Number((isCustom && row.amount !== undefined) ? row.amount : (row.rate || 0)).toLocaleString("en-IN")}
                                 </td>
 
                                 {/* Quantity Input */}
                                 <td style={{ padding: "8px 10px" }}>
-                                  <input
-                                    id={`qty-input-${row.rowId}`}
-                                    type="number"
-                                    min="0"
-                                    step="any"
-                                    placeholder="0"
-                                    value={row.quantity}
-                                    onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
-                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                    style={{
-                                      width: "100%",
-                                      padding: "6px 8px",
-                                      borderRadius: "6px",
-                                      border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
-                                      fontSize: "13px",
-                                      fontWeight: "700",
-                                      textAlign: "right",
-                                      backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
-                                      outline: "none"
-                                    }}
-                                  />
+                                  {isCustom ? (
+                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px", paddingLeft: "4px" }}>—</span>
+                                  ) : (
+                                    <input
+                                      id={`qty-input-${row.rowId}`}
+                                      type="number"
+                                      min="0"
+                                      step="any"
+                                      placeholder="0"
+                                      value={row.quantity}
+                                      onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
+                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                      style={{
+                                        width: "100%",
+                                        padding: "6px 8px",
+                                        borderRadius: "6px",
+                                        border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
+                                        fontSize: "13px",
+                                        fontWeight: "700",
+                                        textAlign: "right",
+                                        backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
+                                        outline: "none"
+                                      }}
+                                    />
+                                  )}
                                 </td>
 
                                 {/* Calculated Amount */}
@@ -4440,26 +4502,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 {/* Row Actions: Edit ✏️ and Delete 🗑️ */}
                                 <td style={{ padding: "8px 8px", textAlign: "center" }}>
                                   <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-                                    <button
-                                      type="button"
-                                      onClick={() => handleEditMaterialRow(row.rowId)}
-                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                      style={{
-                                        background: "#f8fafc",
-                                        border: "1px solid #cbd5e1",
-                                        borderRadius: "6px",
-                                        padding: "4px 6px",
-                                        cursor: "pointer",
-                                        color: "var(--primary-700)",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        transition: "all 0.15s ease"
-                                      }}
-                                      title="Edit Quantity"
-                                    >
-                                      <Edit2 size={13} />
-                                    </button>
+                                    {!isCustom && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleEditMaterialRow(row.rowId)}
+                                        disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                        style={{
+                                          background: "#f8fafc",
+                                          border: "1px solid #cbd5e1",
+                                          borderRadius: "6px",
+                                          padding: "4px 6px",
+                                          cursor: "pointer",
+                                          color: "var(--primary-700)",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          transition: "all 0.15s ease"
+                                        }}
+                                        title="Edit Quantity"
+                                      >
+                                        <Edit2 size={13} />
+                                      </button>
+                                    )}
                                     <button
                                       type="button"
                                       onClick={() => handleRemoveMaterialRow(row.rowId)}
@@ -4546,7 +4610,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       </div>
                       <div style={{ textAlign: "right" }}>
                         <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
-                          Total Amount (Qty × Rate)
+                          Total Amount
                         </span>
                         <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>
                           ₹{grandTotalAmount.toLocaleString("en-IN")}

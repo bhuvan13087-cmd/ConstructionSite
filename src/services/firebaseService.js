@@ -3071,15 +3071,19 @@ export async function saveMaterialTeams(teamsList) {
   const flatList = [];
   (teamsList || []).forEach(team => {
     (team.materials || []).forEach(mat => {
+      const isCustom = mat.type === "custom";
+      const amt = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice)) || 0;
       flatList.push({
         id: mat.id,
         name: mat.name,
+        type: isCustom ? "custom" : "standard",
         category: team.name,
         teamId: team.id,
         teamName: team.name,
-        unit: mat.unit,
-        unitPrice: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0,
-        rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0,
+        unit: isCustom ? "" : (mat.unit || "Bag"),
+        unitPrice: amt,
+        rate: amt,
+        amount: amt,
         status: mat.status || "Active"
       });
     });
@@ -3121,12 +3125,16 @@ export function subscribeMaterialTeams(onUpdate) {
               materials: []
             };
           }
+          const isCustom = m.type === "custom";
+          const amt = Number(m.amount !== undefined ? m.amount : (m.unitPrice !== undefined ? m.unitPrice : m.rate)) || 0;
           grouped[teamName].materials.push({
             id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
             name: m.name || "",
-            unit: m.unit || "Unit",
-            rate: Number(m.unitPrice || m.rate) || 0,
-            unitPrice: Number(m.unitPrice || m.rate) || 0,
+            type: isCustom ? "custom" : "standard",
+            unit: isCustom ? "" : (m.unit || "Bag"),
+            rate: amt,
+            amount: amt,
+            unitPrice: amt,
             status: m.status || "Active"
           });
         });
@@ -3156,14 +3164,20 @@ export async function createMaterialTeam(teamName, initialMaterials = []) {
 
   const formattedMaterials = (initialMaterials || [])
     .filter(m => m && (m.name || "").trim())
-    .map(m => ({
-      id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-      name: (m.name || "").trim(),
-      unit: (m.unit || "Bag").trim(),
-      rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
-      unitPrice: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
-      status: m.status || "Active"
-    }));
+    .map(m => {
+      const isCustom = m.type === "custom";
+      const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+      return {
+        id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+        name: (m.name || "").trim(),
+        type: isCustom ? "custom" : "standard",
+        unit: isCustom ? "" : ((m.unit || "Bag").trim()),
+        rate: amt,
+        amount: amt,
+        unitPrice: amt,
+        status: m.status || "Active"
+      };
+    });
 
   const newTeam = {
     id: `mat_team_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
@@ -3202,11 +3216,12 @@ export async function deleteMaterialTeam(teamId) {
 
 export async function addMaterialToTeam(teamId, materialData) {
   const nameClean = (materialData.name || "").trim();
-  const unitClean = (materialData.unit || "Unit").trim();
-  const rateVal = Number(materialData.rate !== undefined ? materialData.rate : materialData.unitPrice) || 0;
+  const isCustom = materialData.type === "custom";
+  const unitClean = isCustom ? "" : (materialData.unit || "Bag").trim();
+  const amountVal = Number(materialData.amount !== undefined ? materialData.amount : (materialData.rate !== undefined ? materialData.rate : materialData.unitPrice)) || 0;
 
   if (!nameClean) throw new Error("Material Name cannot be empty.");
-  if (!unitClean) throw new Error("Unit of measure cannot be empty.");
+  if (!isCustom && !unitClean) throw new Error("Unit of measure cannot be empty.");
 
   const currentTeams = await getMaterialTeams();
   const teamIndex = currentTeams.findIndex(t => t.id === teamId);
@@ -3219,9 +3234,11 @@ export async function addMaterialToTeam(teamId, materialData) {
   const newMat = {
     id: `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     name: nameClean,
+    type: isCustom ? "custom" : "standard",
     unit: unitClean,
-    rate: rateVal,
-    unitPrice: rateVal,
+    rate: amountVal,
+    amount: amountVal,
+    unitPrice: amountVal,
     status: materialData.status || "Active"
   };
 
@@ -3242,16 +3259,27 @@ export async function updateMaterialInTeam(teamId, materialId, updatedData) {
   if (teamIndex === -1) throw new Error("Material Team not found.");
 
   const team = currentTeams[teamIndex];
-  const rateVal = updatedData.rate !== undefined ? Number(updatedData.rate) : (updatedData.unitPrice !== undefined ? Number(updatedData.unitPrice) : undefined);
-
   const updatedMaterials = (team.materials || []).map(m => {
     if (m.id === materialId) {
+      const isCustom = updatedData.type !== undefined ? (updatedData.type === "custom") : (m.type === "custom");
+      const amtVal = updatedData.amount !== undefined 
+        ? Number(updatedData.amount)
+        : (updatedData.rate !== undefined 
+            ? Number(updatedData.rate) 
+            : (updatedData.unitPrice !== undefined 
+                ? Number(updatedData.unitPrice) 
+                : (m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice))));
+      
+      const newUnit = isCustom ? "" : (updatedData.unit !== undefined ? updatedData.unit.trim() : (m.unit || "Bag"));
+
       return {
         ...m,
         name: updatedData.name ? updatedData.name.trim() : m.name,
-        unit: updatedData.unit ? updatedData.unit.trim() : m.unit,
-        rate: rateVal !== undefined ? rateVal : (m.rate !== undefined ? m.rate : m.unitPrice),
-        unitPrice: rateVal !== undefined ? rateVal : (m.unitPrice !== undefined ? m.unitPrice : m.rate),
+        type: isCustom ? "custom" : "standard",
+        unit: newUnit,
+        rate: amtVal,
+        amount: amtVal,
+        unitPrice: amtVal,
         status: updatedData.status || m.status || "Active"
       };
     }
@@ -4971,18 +4999,21 @@ export async function saveBulkMaterialEntry(bulkData) {
     throw new Error("Material entry for this site and date is already submitted and locked.");
   }
 
-  const validItems = (items || []).filter(item => Number(item.quantity) > 0);
+  const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
-    throw new Error("Please enter a quantity greater than 0 for at least one material.");
+    throw new Error("Please enter at least one material for submission.");
   }
 
   const db = getDb();
 
   // Save each material item to materials collection using deterministic document ID
   for (const item of validItems) {
-    const qty = Number(item.quantity);
-    const uPrice = Number(item.unitPrice) || 0;
-    const totAmount = qty * uPrice;
+    const isCustom = item.type === "custom";
+    const qty = isCustom ? 1 : Number(item.quantity);
+    const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
+    const totAmount = isCustom 
+      ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
+      : (qty * uPrice);
     const matName = (item.materialName || item.name || "").trim();
     const matSlug = matName.toLowerCase().replace(/[^a-z0-9]/g, "_");
     const docId = `bulk_log_${siteId}_${matSlug}_${dateStr}`;
@@ -4994,15 +5025,18 @@ export async function saveBulkMaterialEntry(bulkData) {
       teamId: item.teamId || bulkData.teamId || null,
       teamName: item.teamName || bulkData.teamName || item.category || "General",
       materialName: matName,
+      materialType: isCustom ? "custom" : "standard",
       category: item.category || item.teamName || bulkData.teamName || "General",
       quantity: qty,
       requiredQuantity: qty,
-      unit: item.unit || "Unit",
+      unit: isCustom ? "" : (item.unit || "Unit"),
       unitPrice: uPrice,
+      rate: uPrice,
+      amount: totAmount,
       totalAmount: totAmount,
       supplierName: item.supplierName?.trim() || item.teamName || bulkData.teamName || "Material Supplier",
       purchaseDate: dateStr,
-      notes: item.notes?.trim() || `Material Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
+      notes: item.notes?.trim() || `${isCustom ? "Custom Material" : "Material"} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
       status: "Approved", // Automatically approved bulk log
       type: "material_log",

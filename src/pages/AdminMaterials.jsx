@@ -124,11 +124,11 @@ export default function AdminMaterials() {
   // Material within Team Modals state
   const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
   const [targetTeamForMat, setTargetTeamForMat] = useState(null);
-  const [newMaterialForm, setNewMaterialForm] = useState({ name: "", unit: "Bag", rate: "" });
+  const [newMaterialForm, setNewMaterialForm] = useState({ type: "standard", name: "", unit: "Bag", rate: "", amount: "" });
 
   const [showEditMaterialModal, setShowEditMaterialModal] = useState(false);
   const [targetTeamForEditMat, setTargetTeamForEditMat] = useState(null);
-  const [editingMaterial, setEditingMaterial] = useState({ id: "", name: "", unit: "Bag", rate: "", status: "Active" });
+  const [editingMaterial, setEditingMaterial] = useState({ id: "", name: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
 
   // Requisition Approval Modal state
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -195,7 +195,7 @@ export default function AdminMaterials() {
   const handleOpenAddTeamModal = () => {
     setNewTeamName("");
     setNewTeamMaterials([
-      { id: 1, name: "", rate: "", unit: "Bag" }
+      { id: 1, type: "standard", name: "", rate: "", amount: "", unit: "Bag" }
     ]);
     setShowAddTeamModal(true);
   };
@@ -203,14 +203,14 @@ export default function AdminMaterials() {
   const handleAddMaterialRowInCreate = () => {
     setNewTeamMaterials(prev => [
       ...prev,
-      { id: Date.now() + Math.random(), name: "", rate: "", unit: "Bag" }
+      { id: Date.now() + Math.random(), type: "standard", name: "", rate: "", amount: "", unit: "Bag" }
     ]);
   };
 
   const handleRemoveMaterialRowInCreate = (rowId) => {
     setNewTeamMaterials(prev => {
       const filtered = prev.filter(r => r.id !== rowId);
-      return filtered.length === 0 ? [{ id: Date.now(), name: "", rate: "", unit: "Bag" }] : filtered;
+      return filtered.length === 0 ? [{ id: Date.now(), type: "standard", name: "", rate: "", amount: "", unit: "Bag" }] : filtered;
     });
   };
 
@@ -228,7 +228,23 @@ export default function AdminMaterials() {
       return;
     }
 
-    const validMaterials = newTeamMaterials.filter(m => m.name && m.name.trim().length > 0);
+    const validMaterials = newTeamMaterials
+      .filter(m => m.name && m.name.trim().length > 0)
+      .map(m => {
+        const isCustom = m.type === "custom";
+        const amt = Number(isCustom ? m.amount : m.rate) || 0;
+        return {
+          id: m.id,
+          name: m.name.trim(),
+          type: isCustom ? "custom" : "standard",
+          unit: isCustom ? "" : (m.unit || "Bag"),
+          rate: amt,
+          amount: amt,
+          unitPrice: amt,
+          status: "Active"
+        };
+      });
+
     if (validMaterials.length === 0) {
       showToast("Please add at least one material to the team.", "error");
       return;
@@ -237,7 +253,7 @@ export default function AdminMaterials() {
     try {
       await createMaterialTeam(teamNameClean, validMaterials);
       setNewTeamName("");
-      setNewTeamMaterials([{ id: 1, name: "", rate: "", unit: "Bag" }]);
+      setNewTeamMaterials([{ id: 1, type: "standard", name: "", rate: "", amount: "", unit: "Bag" }]);
       setShowAddTeamModal(false);
       showToast(`Material Team "${teamNameClean}" created successfully with ${validMaterials.length} materials!`, "success");
     } catch (err) {
@@ -288,13 +304,17 @@ export default function AdminMaterials() {
     e.preventDefault();
     if (!targetTeamForMat || !newMaterialForm.name.trim()) return;
     try {
+      const isCustom = newMaterialForm.type === "custom";
+      const amt = Number(isCustom ? newMaterialForm.amount : newMaterialForm.rate) || 0;
       await addMaterialToTeam(targetTeamForMat.id, {
         name: newMaterialForm.name.trim(),
-        unit: newMaterialForm.unit,
-        rate: Number(newMaterialForm.rate) || 0,
+        type: isCustom ? "custom" : "standard",
+        unit: isCustom ? "" : (newMaterialForm.unit || "Bag"),
+        rate: amt,
+        amount: amt,
         status: "Active"
       });
-      setNewMaterialForm({ name: "", unit: "Bag", rate: "" });
+      setNewMaterialForm({ type: "standard", name: "", unit: "Bag", rate: "", amount: "" });
       setShowAddMaterialModal(false);
       setTargetTeamForMat(null);
       showToast(`Material added to team "${targetTeamForMat.name}" successfully!`, "success");
@@ -307,16 +327,20 @@ export default function AdminMaterials() {
     e.preventDefault();
     if (!targetTeamForEditMat || !editingMaterial.name.trim()) return;
     try {
+      const isCustom = editingMaterial.type === "custom";
+      const amt = Number(isCustom ? editingMaterial.amount : editingMaterial.rate) || 0;
       await updateMaterialInTeam(targetTeamForEditMat.id, editingMaterial.id, {
         name: editingMaterial.name.trim(),
-        unit: editingMaterial.unit,
-        rate: Number(editingMaterial.rate) || 0,
+        type: isCustom ? "custom" : "standard",
+        unit: isCustom ? "" : (editingMaterial.unit || "Bag"),
+        rate: amt,
+        amount: amt,
         status: editingMaterial.status
       });
       setShowEditMaterialModal(false);
       setTargetTeamForEditMat(null);
-      setEditingMaterial({ id: "", name: "", unit: "Bag", rate: "", status: "Active" });
-      showToast("Material and rate updated successfully!", "success");
+      setEditingMaterial({ id: "", name: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
+      showToast("Material updated successfully!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
@@ -1097,66 +1121,91 @@ export default function AdminMaterials() {
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
                 <thead>
                   <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
-                    <th style={{ padding: "8px 12px", textAlign: "left" }}>Material Name *</th>
-                    <th style={{ padding: "8px 12px", textAlign: "right", width: "120px" }}>Rate (₹)</th>
-                    <th style={{ padding: "8px 12px", textAlign: "left", width: "130px" }}>Unit</th>
-                    <th style={{ padding: "8px 12px", textAlign: "center", width: "40px" }}></th>
+                    <th style={{ padding: "8px 10px", textAlign: "left", width: "110px" }}>Type</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left" }}>Material Name *</th>
+                    <th style={{ padding: "8px 10px", textAlign: "right", width: "120px" }}>Rate / Amount (₹)</th>
+                    <th style={{ padding: "8px 10px", textAlign: "left", width: "105px" }}>Unit</th>
+                    <th style={{ padding: "8px 10px", textAlign: "center", width: "35px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {newTeamMaterials.map((row, idx) => (
-                    <tr key={row.id || idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                      <td style={{ padding: "6px 10px" }}>
-                        <input
-                          type="text"
-                          placeholder="e.g. Sand, Jelly, Cement"
-                          value={row.name}
-                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "name", e.target.value)}
-                          required={idx === 0}
-                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
-                        />
-                      </td>
-                      <td style={{ padding: "6px 10px" }}>
-                        <input
-                          type="number"
-                          min="0"
-                          step="any"
-                          placeholder="800"
-                          value={row.rate}
-                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "rate", e.target.value)}
-                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", textAlign: "right" }}
-                        />
-                      </td>
-                      <td style={{ padding: "6px 10px" }}>
-                        <select
-                          value={row.unit}
-                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "unit", e.target.value)}
-                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", backgroundColor: "#ffffff" }}
-                        >
-                          <option value="Bag">Bag</option>
-                          <option value="Ton">Ton</option>
-                          <option value="Load">Load</option>
-                          <option value="CFT">CFT</option>
-                          <option value="Sqft">Sqft</option>
-                          <option value="Piece">Piece</option>
-                          <option value="Meter">Meter</option>
-                          <option value="Unit">Unit</option>
-                        </select>
-                      </td>
-                      <td style={{ padding: "6px 8px", textAlign: "center" }}>
-                        {newTeamMaterials.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveMaterialRowInCreate(row.id)}
-                            style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px" }}
-                            title="Remove row"
+                  {newTeamMaterials.map((row, idx) => {
+                    const isCustom = row.type === "custom";
+                    return (
+                      <tr key={row.id || idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "6px 8px" }}>
+                          <select
+                            value={row.type || "standard"}
+                            onChange={(e) => handleMaterialRowChangeInCreate(row.id, "type", e.target.value)}
+                            style={{ width: "100%", padding: "6px 8px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", backgroundColor: "#ffffff", fontWeight: "600" }}
                           >
-                            <Trash2 size={14} />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
+                            <option value="standard">Standard</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                        </td>
+                        <td style={{ padding: "6px 8px" }}>
+                          <input
+                            type="text"
+                            placeholder={isCustom ? "e.g. Steel, Plumbing Pipe" : "e.g. Sand, Jelly, Cement"}
+                            value={row.name}
+                            onChange={(e) => handleMaterialRowChangeInCreate(row.id, "name", e.target.value)}
+                            required={idx === 0}
+                            style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                          />
+                        </td>
+                        <td style={{ padding: "6px 8px" }}>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            placeholder={isCustom ? "25000" : "800"}
+                            value={isCustom ? (row.amount !== undefined ? row.amount : row.rate) : row.rate}
+                            onChange={(e) => {
+                              if (isCustom) {
+                                handleMaterialRowChangeInCreate(row.id, "amount", e.target.value);
+                                handleMaterialRowChangeInCreate(row.id, "rate", e.target.value);
+                              } else {
+                                handleMaterialRowChangeInCreate(row.id, "rate", e.target.value);
+                              }
+                            }}
+                            style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", textAlign: "right" }}
+                          />
+                        </td>
+                        <td style={{ padding: "6px 8px" }}>
+                          {isCustom ? (
+                            <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "600", paddingLeft: "8px" }}>—</span>
+                          ) : (
+                            <select
+                              value={row.unit || "Bag"}
+                              onChange={(e) => handleMaterialRowChangeInCreate(row.id, "unit", e.target.value)}
+                              style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", backgroundColor: "#ffffff" }}
+                            >
+                              <option value="Bag">Bag</option>
+                              <option value="Ton">Ton</option>
+                              <option value="Load">Load</option>
+                              <option value="CFT">CFT</option>
+                              <option value="Sqft">Sqft</option>
+                              <option value="Piece">Piece</option>
+                              <option value="Meter">Meter</option>
+                              <option value="Unit">Unit</option>
+                            </select>
+                          )}
+                        </td>
+                        <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                          {newTeamMaterials.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveMaterialRowInCreate(row.id)}
+                              style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px" }}
+                              title="Remove row"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1196,7 +1245,7 @@ export default function AdminMaterials() {
                 size="sm"
                 onClick={() => {
                   setTargetTeamForMat(activeViewingTeam);
-                  setNewMaterialForm({ name: "", unit: "Bag", rate: "" });
+                  setNewMaterialForm({ type: "standard", name: "", unit: "Bag", rate: "", amount: "" });
                   setShowAddMaterialModal(true);
                 }}
                 style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "7px 14px" }}
@@ -1217,81 +1266,100 @@ export default function AdminMaterials() {
                   <thead>
                     <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
                       <th style={{ padding: "10px 14px", textAlign: "left" }}>Material</th>
-                      <th style={{ padding: "10px 14px", textAlign: "right", width: "130px" }}>Rate (₹)</th>
-                      <th style={{ padding: "10px 14px", textAlign: "left", width: "110px" }}>Unit</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", width: "140px" }}>Rate / Amount (₹)</th>
+                      <th style={{ padding: "10px 14px", textAlign: "left", width: "95px" }}>Unit</th>
                       <th style={{ padding: "10px 14px", textAlign: "center", width: "100px" }}>Status</th>
                       <th style={{ padding: "10px 14px", textAlign: "right", width: "130px" }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {activeViewingTeam.materials.map(mat => (
-                      <tr key={mat.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                        <td style={{ padding: "10px 14px", fontWeight: "700", color: "#0f172a" }}>{mat.name}</td>
-                        <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", color: "var(--success-700)", fontWeight: "800", fontSize: "13px" }}>
-                          ₹{Number(mat.rate !== undefined ? mat.rate : mat.unitPrice || 0).toLocaleString("en-IN")}
-                        </td>
-                        <td style={{ padding: "10px 14px" }}>
-                          <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: "600", color: "#475569" }}>
-                            {mat.unit}
-                          </span>
-                        </td>
-                        <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                          <Badge status={mat.status === "Active" ? "success" : "danger"}>
-                            {mat.status || "Active"}
-                          </Badge>
-                        </td>
-                        <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setTargetTeamForEditMat(activeViewingTeam);
-                                setEditingMaterial({
-                                  id: mat.id,
-                                  name: mat.name,
-                                  unit: mat.unit,
-                                  rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
-                                  status: mat.status || "Active"
-                                });
-                                setShowEditMaterialModal(true);
-                              }}
-                              style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
-                              title="Edit Material"
-                              aria-label="Edit Material"
-                            >
-                              <Edit2 size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRequestToggleMaterialStatus(activeViewingTeam.id, activeViewingTeam.name, mat)}
-                              style={{
-                                background: mat.status === "Active" ? "#fff7ed" : "#f0fdf4",
-                                border: mat.status === "Active" ? "1px solid #fed7aa" : "1px solid #bbf7d0",
-                                borderRadius: "6px",
-                                padding: "5px 7px",
-                                cursor: "pointer",
-                                color: mat.status === "Active" ? "#c2410c" : "#15803d",
-                                fontSize: "11px",
-                                fontWeight: "700"
-                              }}
-                              title={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
-                              aria-label={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
-                            >
-                              {mat.status === "Active" ? "Deactivate" : "Activate"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleRequestDeleteMaterial(activeViewingTeam.id, activeViewingTeam.name, mat)}
-                              style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "#dc2626", display: "flex", alignItems: "center" }}
-                              title="Delete Material"
-                              aria-label="Delete Material"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
+                    {activeViewingTeam.materials.map(mat => {
+                      const isCustom = mat.type === "custom";
+                      const displayAmount = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice || 0));
+                      return (
+                        <tr key={mat.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "10px 14px", fontWeight: "700", color: "#0f172a" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <span>{mat.name}</span>
+                              {isCustom && (
+                                <span style={{ fontSize: "10px", fontWeight: "800", color: "#4338ca", backgroundColor: "#e0e7ff", padding: "1px 6px", borderRadius: "4px" }}>
+                                  Custom
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", color: "var(--success-700)", fontWeight: "800", fontSize: "13px" }}>
+                            ₹{displayAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "10px 14px" }}>
+                            {isCustom ? (
+                              <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px" }}>—</span>
+                            ) : (
+                              <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: "600", color: "#475569" }}>
+                                {mat.unit || "Unit"}
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                            <Badge status={mat.status === "Active" ? "success" : "danger"}>
+                              {mat.status || "Active"}
+                            </Badge>
+                          </td>
+                          <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setTargetTeamForEditMat(activeViewingTeam);
+                                  setEditingMaterial({
+                                    id: mat.id,
+                                    name: mat.name,
+                                    type: isCustom ? "custom" : "standard",
+                                    unit: mat.unit || "Bag",
+                                    rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
+                                    amount: mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0)),
+                                    status: mat.status || "Active"
+                                  });
+                                  setShowEditMaterialModal(true);
+                                }}
+                                style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
+                                title="Edit Material"
+                                aria-label="Edit Material"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRequestToggleMaterialStatus(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                                style={{
+                                  background: mat.status === "Active" ? "#fff7ed" : "#f0fdf4",
+                                  border: mat.status === "Active" ? "1px solid #fed7aa" : "1px solid #bbf7d0",
+                                  borderRadius: "6px",
+                                  padding: "5px 7px",
+                                  cursor: "pointer",
+                                  color: mat.status === "Active" ? "#c2410c" : "#15803d",
+                                  fontSize: "11px",
+                                  fontWeight: "700"
+                                }}
+                                title={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                                aria-label={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                              >
+                                {mat.status === "Active" ? "Deactivate" : "Activate"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRequestDeleteMaterial(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                                style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "#dc2626", display: "flex", alignItems: "center" }}
+                                title="Delete Material"
+                                aria-label="Delete Material"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               )}
@@ -1373,55 +1441,155 @@ export default function AdminMaterials() {
       >
         <form id="add-mat-team-form" onSubmit={handleAddMaterialToTeamSubmit}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Material Type Selection */}
             <div className="form-group">
-              <label htmlFor="team-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
-              <input
-                id="team-mat-name"
-                type="text"
-                placeholder="e.g. Sand, Jelly, Cement, 10mm TMT Steel"
-                value={newMaterialForm.name}
-                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, name: e.target.value }))}
-                required
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-              />
+              <label style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>
+                Material Type <span style={{ color: "var(--danger-600)" }}>*</span>
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "standard" }))}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: newMaterialForm.type !== "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: newMaterialForm.type !== "custom" ? "#fff7ed" : "#ffffff",
+                    color: newMaterialForm.type !== "custom" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px"
+                  }}
+                >
+                  <Package size={15} />
+                  <span>Standard Material</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "custom" }))}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: newMaterialForm.type === "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: newMaterialForm.type === "custom" ? "#fff7ed" : "#ffffff",
+                    color: newMaterialForm.type === "custom" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px"
+                  }}
+                >
+                  <FileText size={15} />
+                  <span>Custom</span>
+                </button>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="team-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit of Measure</label>
-              <select
-                id="team-mat-unit"
-                value={newMaterialForm.unit}
-                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, unit: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
-              >
-                <option value="Bag">Bag</option>
-                <option value="Ton">Ton</option>
-                <option value="Load">Load</option>
-                <option value="CFT">CFT</option>
-                <option value="Sqft">Sqft</option>
-                <option value="Piece">Piece</option>
-                <option value="Meter">Meter</option>
-                <option value="Unit">Unit</option>
-              </select>
-            </div>
+            {newMaterialForm.type === "custom" ? (
+              /* Custom Material Fields: Custom Material Name & Bill Amount / Amount ONLY */
+              <>
+                <div className="form-group">
+                  <label htmlFor="team-mat-custom-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Custom Material Name <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="team-mat-custom-name"
+                    type="text"
+                    placeholder="e.g. Steel, Plumbing Pipe"
+                    value={newMaterialForm.name}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="team-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
-              <input
-                id="team-mat-rate"
-                type="number"
-                min="0"
-                step="any"
-                placeholder="e.g. 800"
-                value={newMaterialForm.rate}
-                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, rate: e.target.value }))}
-                required
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-              />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                This rate will auto-populate and calculate amount when Site Engineers select this team.
-              </span>
-            </div>
+                <div className="form-group">
+                  <label htmlFor="team-mat-custom-amount" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Bill Amount / Amount (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="team-mat-custom-amount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="e.g. 25000"
+                    value={newMaterialForm.amount !== undefined && newMaterialForm.amount !== "" ? newMaterialForm.amount : newMaterialForm.rate}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, amount: e.target.value, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    The entered amount represents the complete bill amount for this custom material.
+                  </span>
+                </div>
+              </>
+            ) : (
+              /* Standard Material Fields: Material Name, Unit of Measure, Rate */
+              <>
+                <div className="form-group">
+                  <label htmlFor="team-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Material Name <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="team-mat-name"
+                    type="text"
+                    placeholder="e.g. Sand, Jelly, Cement, 10mm TMT Steel"
+                    value={newMaterialForm.name}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="team-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Unit of Measure <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <select
+                    id="team-mat-unit"
+                    value={newMaterialForm.unit || "Bag"}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, unit: e.target.value }))}
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+                  >
+                    <option value="Bag">Bag</option>
+                    <option value="Ton">Ton</option>
+                    <option value="Load">Load</option>
+                    <option value="CFT">CFT</option>
+                    <option value="Sqft">Sqft</option>
+                    <option value="Piece">Piece</option>
+                    <option value="Meter">Meter</option>
+                    <option value="Unit">Unit</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="team-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="team-mat-rate"
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="e.g. 800"
+                    value={newMaterialForm.rate}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    This rate will auto-populate and calculate amount (Qty × Rate) when Site Engineers select this team.
+                  </span>
+                </div>
+              </>
+            )}
           </div>
         </form>
       </Modal>
@@ -1451,53 +1619,151 @@ export default function AdminMaterials() {
       >
         <form id="edit-mat-team-form" onSubmit={handleEditMaterialInTeamSubmit}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Material Type Selection */}
             <div className="form-group">
-              <label htmlFor="edit-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
-              <input
-                id="edit-mat-name"
-                type="text"
-                value={editingMaterial.name}
-                onChange={(e) => setEditingMaterial(prev => ({ ...prev, name: e.target.value }))}
-                required
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-              />
+              <label style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>
+                Material Type <span style={{ color: "var(--danger-600)" }}>*</span>
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                <button
+                  type="button"
+                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "standard" }))}
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: editingMaterial.type !== "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: editingMaterial.type !== "custom" ? "#fff7ed" : "#ffffff",
+                    color: editingMaterial.type !== "custom" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px"
+                  }}
+                >
+                  <Package size={15} />
+                  <span>Standard Material</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "custom" }))}
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: editingMaterial.type === "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: editingMaterial.type === "custom" ? "#fff7ed" : "#ffffff",
+                    color: editingMaterial.type === "custom" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "13px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px"
+                  }}
+                >
+                  <FileText size={15} />
+                  <span>Custom</span>
+                </button>
+              </div>
             </div>
 
-            <div className="form-group">
-              <label htmlFor="edit-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit of Measure</label>
-              <select
-                id="edit-mat-unit"
-                value={editingMaterial.unit}
-                onChange={(e) => setEditingMaterial(prev => ({ ...prev, unit: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
-              >
-                <option value="Bag">Bag</option>
-                <option value="Ton">Ton</option>
-                <option value="Load">Load</option>
-                <option value="CFT">CFT</option>
-                <option value="Sqft">Sqft</option>
-                <option value="Piece">Piece</option>
-                <option value="Meter">Meter</option>
-                <option value="Unit">Unit</option>
-              </select>
-            </div>
+            {editingMaterial.type === "custom" ? (
+              /* Custom Material: Custom Material Name & Bill Amount / Amount ONLY */
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-mat-custom-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Custom Material Name <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="edit-mat-custom-name"
+                    type="text"
+                    value={editingMaterial.name}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
 
-            <div className="form-group">
-              <label htmlFor="edit-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
-              <input
-                id="edit-mat-rate"
-                type="number"
-                min="0"
-                step="any"
-                value={editingMaterial.rate}
-                onChange={(e) => setEditingMaterial(prev => ({ ...prev, rate: e.target.value }))}
-                required
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-              />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                Updating rate applies immediately to all future Site Engineer material usage entries.
-              </span>
-            </div>
+                <div className="form-group">
+                  <label htmlFor="edit-mat-custom-amount" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Bill Amount / Amount (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="edit-mat-custom-amount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={editingMaterial.amount !== undefined && editingMaterial.amount !== "" ? editingMaterial.amount : editingMaterial.rate}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, amount: e.target.value, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    The entered amount represents the complete bill amount for this custom material.
+                  </span>
+                </div>
+              </>
+            ) : (
+              /* Standard Material: Name, Unit, Rate */
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Material Name <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="edit-mat-name"
+                    type="text"
+                    value={editingMaterial.name}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, name: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Unit of Measure <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <select
+                    id="edit-mat-unit"
+                    value={editingMaterial.unit || "Bag"}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, unit: e.target.value }))}
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
+                  >
+                    <option value="Bag">Bag</option>
+                    <option value="Ton">Ton</option>
+                    <option value="Load">Load</option>
+                    <option value="CFT">CFT</option>
+                    <option value="Sqft">Sqft</option>
+                    <option value="Piece">Piece</option>
+                    <option value="Meter">Meter</option>
+                    <option value="Unit">Unit</option>
+                  </select>
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="edit-mat-rate"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={editingMaterial.rate}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    Updating rate applies immediately to all future Site Engineer material usage entries.
+                  </span>
+                </div>
+              </>
+            )}
 
             <div className="form-group">
               <label htmlFor="edit-mat-status" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Status</label>
