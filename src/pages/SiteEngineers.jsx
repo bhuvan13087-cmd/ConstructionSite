@@ -38,7 +38,10 @@ import {
   ShieldCheck,
   Phone,
   Trash2,
-  Building2
+  Building2,
+  Users,
+  UserCheck,
+  UserX
 } from "lucide-react";
 
 
@@ -330,9 +333,9 @@ export default function SiteEngineers() {
       {/* ── Page Header ── */}
       <div style={{
         display: "flex",
-        alignItems: "flex-start",
+        alignItems: "center",
         justifyContent: "space-between",
-        marginBottom: "20px",
+        marginBottom: "18px",
         flexWrap: "wrap",
         gap: "12px"
       }}>
@@ -351,57 +354,132 @@ export default function SiteEngineers() {
             Manage engineer profiles, credentials, and site deployments.
           </p>
         </div>
-        <Button onClick={handleOpenAddModal} id="btn-add-engineer" icon={Plus} className="btn-add">
+        <Button 
+          onClick={handleOpenAddModal} 
+          id="btn-add-engineer" 
+          icon={Plus} 
+          style={{
+            width: "auto",
+            padding: "8px 16px",
+            fontSize: "13px",
+            fontWeight: "600",
+            borderRadius: "8px",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "6px",
+            boxShadow: "0 2px 6px rgba(249, 115, 22, 0.22)"
+          }}
+        >
           Add Engineer
         </Button>
       </div>
 
-      {/* ── Compact KPI Strip ── */}
-      {totalEngineers > 0 && (
-        <div style={{
-          display: "flex",
-          gap: "1px",
-          background: "var(--border-color)",
-          border: "1px solid var(--border-color)",
-          borderRadius: "12px",
-          overflow: "hidden",
-          marginBottom: "16px",
-          boxShadow: "var(--shadow-sm)"
-        }}>
-          {[
-            { label: "Total Engineers", value: totalEngineers, color: "var(--primary-950)", bg: "#fff" },
-            { label: "Active", value: activeCount, color: "var(--success-600)", bg: "#fff" },
-            { label: "Inactive", value: inactiveCount, color: "var(--text-muted)", bg: "#fff" },
-            { label: "Sites Covered", value: sitesCovered, color: "#c2410c", bg: "#fff7ed" }
-          ].map((kpi, i) => (
-            <div key={i} style={{
-              flex: 1,
-              background: kpi.bg,
-              padding: "10px 16px",
-              display: "flex",
-              flexDirection: "column",
-              gap: "1px",
-              minWidth: 0
-            }}>
-              <span style={{
-                fontSize: "10px",
-                fontWeight: "700",
+      {/* ── Summary Metric Cards ── */}
+      <div style={{
+        display: "grid",
+        gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+        gap: "12px",
+        marginBottom: "20px"
+      }}>
+        {[
+          {
+            label: "Total Engineers",
+            value: totalEngineers,
+            sub: "Registered accounts",
+            icon: Users,
+            iconBg: "var(--accent-50)",
+            iconColor: "var(--brand-orange)",
+            valColor: "var(--primary-950)"
+          },
+          {
+            label: "Active",
+            value: activeCount,
+            sub: "Currently active",
+            icon: UserCheck,
+            iconBg: "#f0fdf4",
+            iconColor: "var(--success-600)",
+            valColor: "var(--success-600)"
+          },
+          {
+            label: "Inactive",
+            value: inactiveCount,
+            sub: "Disabled / inactive",
+            icon: UserX,
+            iconBg: "#f8fafc",
+            iconColor: "var(--text-muted)",
+            valColor: "var(--text-muted)"
+          },
+          {
+            label: "Sites Covered",
+            value: sitesCovered,
+            sub: "Assigned locations",
+            icon: Building2,
+            iconBg: "#fff7ed",
+            iconColor: "#c2410c",
+            valColor: "#c2410c"
+          }
+        ].map((card, idx) => {
+          const IconComponent = card.icon;
+          return (
+            <div
+              key={idx}
+              style={{
+                background: "#ffffff",
+                border: "1px solid var(--border-color)",
+                borderRadius: "10px",
+                padding: "14px 16px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                boxShadow: "var(--shadow-sm)"
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                <div style={{
+                  width: "26px",
+                  height: "26px",
+                  borderRadius: "6px",
+                  background: card.iconBg,
+                  color: card.iconColor,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0
+                }}>
+                  <IconComponent size={14} />
+                </div>
+                <span style={{
+                  fontSize: "11px",
+                  fontWeight: "700",
+                  color: "var(--text-muted)",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.05em",
+                  whiteSpace: "nowrap"
+                }}>
+                  {card.label}
+                </span>
+              </div>
+              <div style={{
+                fontSize: "24px",
+                fontWeight: "800",
+                color: card.valColor,
+                fontFamily: "var(--font-family-title)",
+                lineHeight: "1.1"
+              }}>
+                {card.value}
+              </div>
+              <div style={{
+                fontSize: "11.5px",
                 color: "var(--text-muted)",
-                textTransform: "uppercase",
-                letterSpacing: "0.06em",
-                whiteSpace: "nowrap"
-              }}>{kpi.label}</span>
-              <span style={{
-                fontSize: "20px",
-                fontWeight: "900",
-                color: kpi.color,
-                lineHeight: "1.1",
-                fontFamily: "var(--font-family-title)"
-              }}>{kpi.value}</span>
+                fontWeight: "500",
+                marginTop: "1px"
+              }}>
+                {card.sub}
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
 
       {/* ── Toolbar: Search ── */}
       <div style={{

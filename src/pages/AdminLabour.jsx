@@ -113,6 +113,13 @@ export default function AdminLabour() {
   const [newLabourWage, setNewLabourWage] = useState("750");
   const [newLabourCycle, setNewLabourCycle] = useState("Daily");
 
+  // Edit Single Labour Entry Modal State (inside View Team modal)
+  const [showEditLabourModal, setShowEditLabourModal] = useState(false);
+  const [editingLabourCat, setEditingLabourCat] = useState(null);
+  const [editLabourName, setEditLabourName] = useState("");
+  const [editLabourWage, setEditLabourWage] = useState("750");
+  const [editLabourCycle, setEditLabourCycle] = useState("Daily");
+
   // Dynamic live viewingTeam derivation synced with teams state
   const activeViewingTeam = viewingTeam ? (teams.find(t => t.id === viewingTeam.id) || viewingTeam) : null;
 
@@ -516,6 +523,85 @@ export default function AdminLabour() {
       setTeams(fetchedTeams);
     } catch (err) {
       showToast(`Failed to add labour: ${err.message}`, "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleOpenEditLabourModal = (teamId, catId, catVal) => {
+    const nameVal = catVal.name || catId;
+    const wageVal = String(catVal.baseWage || 750);
+    const cycleVal = ["Daily", "Weekly", "Monthly"].includes(catVal.paymentType) ? catVal.paymentType : "Daily";
+
+    setEditingLabourCat({
+      teamId,
+      catId,
+      name: nameVal,
+      baseWage: wageVal,
+      paymentType: cycleVal
+    });
+    setEditLabourName(nameVal);
+    setEditLabourWage(wageVal);
+    setEditLabourCycle(cycleVal);
+    setShowEditLabourModal(true);
+  };
+
+  const handleSaveEditLabourSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingLabourCat) return;
+
+    const nameClean = editLabourName.trim();
+    if (!nameClean) {
+      showToast("Please enter a Labour Type / Category.", "error");
+      return;
+    }
+
+    const wageNum = Number(editLabourWage);
+    if (isNaN(wageNum) || wageNum <= 0) {
+      showToast("Please enter a valid wage amount greater than 0.", "error");
+      return;
+    }
+
+    const cycle = ["Daily", "Weekly", "Monthly"].includes(editLabourCycle) ? editLabourCycle : "Daily";
+
+    setSubmitting(true);
+    try {
+      const { teamId, catId } = editingLabourCat;
+
+      // 1. Update in Firestore
+      await updateLabourCategoryInTeam(teamId, catId, {
+        name: nameClean,
+        baseWage: wageNum,
+        paymentType: cycle
+      });
+
+      // 2. Optimistic local state update
+      setTeams(prevTeams => prevTeams.map(t => {
+        if (t.id === teamId) {
+          const currentCat = t.categories?.[catId] || {};
+          const updatedCat = { ...currentCat, name: nameClean, baseWage: wageNum, paymentType: cycle };
+          return { ...t, categories: { ...(t.categories || {}), [catId]: updatedCat } };
+        }
+        return t;
+      }));
+
+      setViewingTeam(prev => {
+        if (prev && prev.id === teamId) {
+          const currentCat = prev.categories?.[catId] || {};
+          const updatedCat = { ...currentCat, name: nameClean, baseWage: wageNum, paymentType: cycle };
+          return { ...prev, categories: { ...(prev.categories || {}), [catId]: updatedCat } };
+        }
+        return prev;
+      });
+
+      showToast(`Labour "${nameClean}" updated successfully!`, "success");
+      setShowEditLabourModal(false);
+      setEditingLabourCat(null);
+
+      // 3. Authoritative re-fetch
+      await loadData();
+    } catch (err) {
+      showToast(`Failed to update labour: ${err.message}`, "error");
     } finally {
       setSubmitting(false);
     }
@@ -1628,7 +1714,7 @@ export default function AdminLabour() {
                       <th style={{ padding: "10px 14px", textAlign: "left" }}>Labour Type / Category</th>
                       <th style={{ padding: "10px 14px", textAlign: "right", width: "140px" }}>Wage Amount (₹)</th>
                       <th style={{ padding: "10px 14px", textAlign: "left", width: "140px" }}>Payment Cycle</th>
-                      <th style={{ padding: "10px 14px", textAlign: "center", width: "60px" }}>Action</th>
+                      <th style={{ padding: "10px 14px", textAlign: "center", width: "90px" }}>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1638,14 +1724,24 @@ export default function AdminLabour() {
                         <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", color: "#16a34a", fontWeight: "800" }}>₹{catVal.baseWage || 750}</td>
                         <td style={{ padding: "10px 14px", color: "#475569", fontWeight: "600" }}>{catVal.paymentType || "Daily"}</td>
                         <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteCategoryInViewModal(catId, catVal.name || catId)}
-                            style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px" }}
-                            title="Delete category entry"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenEditLabourModal(activeViewingTeam.id, catId, catVal)}
+                              style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "4px 6px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
+                              title="Edit category entry"
+                            >
+                              <Edit2 size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteCategoryInViewModal(catId, catVal.name || catId)}
+                              style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "4px 6px", color: "#dc2626", cursor: "pointer", display: "flex", alignItems: "center" }}
+                              title="Delete category entry"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1719,6 +1815,72 @@ export default function AdminLabour() {
           </div>
 
         </form>
+      </Modal>
+
+      {/* ── EDIT SINGLE LABOUR SUB-MODAL (INSIDE VIEW) ── */}
+      <Modal
+        isOpen={showEditLabourModal && !!editingLabourCat}
+        onClose={() => {
+          setShowEditLabourModal(false);
+          setEditingLabourCat(null);
+        }}
+        title={editingLabourCat ? `Edit Labour Entry: ${editingLabourCat.name}` : "Edit Labour Entry"}
+        maxWidth="500px"
+      >
+        {editingLabourCat && (
+          <form onSubmit={handleSaveEditLabourSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "10px 0" }}>
+            <div>
+              <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569", display: "block", marginBottom: "4px" }}>Labour Type / Category *</label>
+              <input
+                type="text"
+                placeholder="e.g. Mason, Welder, Helper, Painter"
+                value={editLabourName}
+                onChange={(e) => setEditLabourName(e.target.value)}
+                required
+                style={{ width: "100%", padding: "9px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", outline: "none" }}
+              />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569", display: "block", marginBottom: "4px" }}>Wage Amount (₹) *</label>
+                <input
+                  type="number"
+                  placeholder="750"
+                  value={editLabourWage}
+                  onChange={(e) => setEditLabourWage(e.target.value)}
+                  required
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", outline: "none" }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569", display: "block", marginBottom: "4px" }}>Payment Cycle *</label>
+                <select
+                  value={editLabourCycle}
+                  onChange={(e) => setEditLabourCycle(e.target.value)}
+                  style={{ width: "100%", padding: "9px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "13px", outline: "none", backgroundColor: "#ffffff" }}
+                >
+                  <option value="Daily">Daily</option>
+                  <option value="Weekly">Weekly</option>
+                  <option value="Monthly">Monthly</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "12px", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+              <Button type="button" variant="outline" onClick={() => {
+                setShowEditLabourModal(false);
+                setEditingLabourCat(null);
+              }}>
+                Cancel
+              </Button>
+              <Button type="submit" variant="primary" disabled={submitting}>
+                {submitting ? "Saving..." : "Save Changes"}
+              </Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* ── EDIT LABOUR TEAM MODAL (MODIFY EXISTING ENTRIES ONLY) ── */}

@@ -1740,14 +1740,16 @@ export async function addMaterial(materialData) {
   await setDoc(newMaterialRef, {
     siteId: materialData.siteId,
     engineerId: materialData.engineerId,
+    teamId: materialData.teamId || null,
+    teamName: materialData.teamName || materialData.category || "General",
     materialName: matName,
-    category: materialData.category,
+    category: materialData.category || materialData.teamName || "General",
     quantity: Number(materialData.quantity),
     requiredQuantity: Number(materialData.requiredQuantity || materialData.quantity),
     unit: materialData.unit,
-    unitPrice: Number(materialData.unitPrice) || 0,
-    totalAmount: Number(materialData.totalAmount) || (Number(materialData.quantity) * (Number(materialData.unitPrice) || 0)),
-    supplierName: materialData.supplierName,
+    unitPrice: Number(materialData.unitPrice || materialData.rate) || 0,
+    totalAmount: Number(materialData.totalAmount) || (Number(materialData.quantity) * (Number(materialData.unitPrice || materialData.rate) || 0)),
+    supplierName: materialData.supplierName || materialData.teamName || "Material Supplier",
     purchaseDate: purchaseDate,
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
@@ -3015,181 +3017,358 @@ export async function saveLabourPayment(paymentData, adminId = null) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// MATERIAL MASTER – Single Source of Truth
+// MATERIAL MASTER & TEAMS – Single Source of Truth
 //
-// Storage path:  labourCategories/__material_master__  (field: materialsList)
+// Storage path:  labourCategories/material-master-config  (fields: materialTeams, materialsList)
 //
-// Why this path?  The existing Firestore rule for /labourCategories/{categoryId}
-// already has:
-//   allow read: if isActiveUser();   ← admins AND site engineers
-//   allow write: if isAdmin();       ← only admins can write
-//
-// The old path (users/material_master) was blocked for site engineers because
-// the /users/{userId} read rule only allowed uid == userId | isAdmin() |
-// specific special document IDs.  Storing here requires NO rule change and
-// ensures every role can subscribe and receive real-time updates.
+// Storing here ensures every active role (Admin and Site Engineers) can subscribe
+// and receive real-time updates without Firestore security rule changes.
 // ─────────────────────────────────────────────────────────────────────────────
 const MATERIAL_MASTER_DOC = ["labourCategories", "material-master-config"];
 
-export async function getMaterialMaster() {
+export async function getMaterialTeams() {
   const db = getDb();
-  // Primary path – readable by all active users
   const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
   const primarySnap = await getDoc(primaryRef);
   if (primarySnap.exists()) {
-    return primarySnap.data().materialsList || [];
-  }
-
-  // One-time migration: pull from legacy path (admin-only) and write to primary
-  try {
-    const legacyRef = doc(db, "users", "material_master");
-    const legacySnap = await getDoc(legacyRef);
-    if (legacySnap.exists()) {
-      const list = legacySnap.data().materialsList || [];
-      if (list.length > 0) {
-        await setDoc(primaryRef, { materialsList: list, updatedAt: serverTimestamp() });
-      }
-      return list;
+    const data = primarySnap.data();
+    if (data.materialTeams && Array.isArray(data.materialTeams)) {
+      return data.materialTeams;
     }
-  } catch (e) {
-    // Legacy path not readable (e.g. called by site engineer) – safe to ignore
+    // Fallback: If legacy materialsList exists, migrate to teams representation
+    if (data.materialsList && Array.isArray(data.materialsList) && data.materialsList.length > 0) {
+      const grouped = {};
+      data.materialsList.forEach(m => {
+        const teamName = m.category || "General";
+        if (!grouped[teamName]) {
+          grouped[teamName] = {
+            id: `mat_team_${teamName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`,
+            name: teamName,
+            createdAt: new Date().toISOString(),
+            materials: []
+          };
+        }
+        grouped[teamName].materials.push({
+          id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+          name: m.name || "",
+          unit: m.unit || "Unit",
+          rate: Number(m.unitPrice || m.rate) || 0,
+          unitPrice: Number(m.unitPrice || m.rate) || 0,
+          status: m.status || "Active"
+        });
+      });
+      return Object.values(grouped);
+    }
   }
   return [];
 }
 
-export async function saveMaterialMaster(materialsList) {
+export async function saveMaterialTeams(teamsList) {
   const db = getDb();
-  // Write to primary path (all active users can read this)
   const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
-  await setDoc(primaryRef, {
-    materialsList,
-    updatedAt: serverTimestamp()
+  
+  // Flatten to legacy materialsList as well for backward-compatibility with any legacy views
+  const flatList = [];
+  (teamsList || []).forEach(team => {
+    (team.materials || []).forEach(mat => {
+      flatList.push({
+        id: mat.id,
+        name: mat.name,
+        category: team.name,
+        teamId: team.id,
+        teamName: team.name,
+        unit: mat.unit,
+        unitPrice: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0,
+        rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0,
+        status: mat.status || "Active"
+      });
+    });
   });
-  // Best-effort mirror to legacy path so any old clients still work
+
+  await setDoc(primaryRef, {
+    materialTeams: teamsList,
+    materialsList: flatList,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
   try {
     const legacyRef = doc(db, "users", "material_master");
-    await setDoc(legacyRef, { materialsList, updatedAt: serverTimestamp() });
-  } catch (e) {
-    // Admin always has write access, but swallow any unexpected errors
-  }
+    await setDoc(legacyRef, { materialTeams: teamsList, materialsList: flatList, updatedAt: serverTimestamp() }, { merge: true });
+  } catch (e) {}
 }
 
-// Real-time synchronization subscription for Material Master (Single Source of Truth)
-export function subscribeMaterialMaster(onUpdate) {
+// Real-time synchronization subscription for Material Teams (Single Source of Truth)
+export function subscribeMaterialTeams(onUpdate) {
   const db = getDb();
   const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
 
   return onSnapshot(primaryRef, async (docSnap) => {
     if (docSnap.exists()) {
-      onUpdate(docSnap.data().materialsList || []);
-    } else {
-      try {
-        const list = await getMaterialMaster();
-        onUpdate(list || []);
-      } catch (e) {
-        onUpdate([]);
+      const data = docSnap.data();
+      if (data.materialTeams && Array.isArray(data.materialTeams)) {
+        onUpdate(data.materialTeams);
+        return;
+      }
+      if (data.materialsList && Array.isArray(data.materialsList) && data.materialsList.length > 0) {
+        const grouped = {};
+        data.materialsList.forEach(m => {
+          const teamName = m.category || "General";
+          if (!grouped[teamName]) {
+            grouped[teamName] = {
+              id: `mat_team_${teamName.toLowerCase().replace(/[^a-z0-9]/g, "_")}`,
+              name: teamName,
+              createdAt: new Date().toISOString(),
+              materials: []
+            };
+          }
+          grouped[teamName].materials.push({
+            id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+            name: m.name || "",
+            unit: m.unit || "Unit",
+            rate: Number(m.unitPrice || m.rate) || 0,
+            unitPrice: Number(m.unitPrice || m.rate) || 0,
+            status: m.status || "Active"
+          });
+        });
+        onUpdate(Object.values(grouped));
+        return;
       }
     }
+    try {
+      const teams = await getMaterialTeams();
+      onUpdate(teams || []);
+    } catch (e) {
+      onUpdate([]);
+    }
   }, (error) => {
-    console.error("subscribeMaterialMaster failed:", error);
+    console.error("subscribeMaterialTeams failed:", error);
     onUpdate([]);
   });
 }
 
-export async function createMaterialGroup(groupName) {
-  const cleanName = (groupName || "").trim();
-  if (!cleanName) throw new Error("Material Group name cannot be empty.");
-  
-  const currentList = await getMaterialMaster();
-  const groupExists = currentList.some(item => (item.category || "").toLowerCase() === cleanName.toLowerCase());
-  if (groupExists) throw new Error("Material Group already exists.");
+export async function createMaterialTeam(teamName, initialMaterials = []) {
+  const cleanName = (teamName || "").trim();
+  if (!cleanName) throw new Error("Material Team name cannot be empty.");
 
-  const newGroupItem = {
-    id: `mat_grp_${Date.now()}`,
-    name: `${cleanName} Standard`,
-    category: cleanName,
-    unit: "Unit",
-    status: "Active"
+  const currentTeams = await getMaterialTeams();
+  const exists = currentTeams.some(t => (t.name || "").toLowerCase() === cleanName.toLowerCase());
+  if (exists) throw new Error(`Material Team "${cleanName}" already exists.`);
+
+  const formattedMaterials = (initialMaterials || [])
+    .filter(m => m && (m.name || "").trim())
+    .map(m => ({
+      id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+      name: (m.name || "").trim(),
+      unit: (m.unit || "Bag").trim(),
+      rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
+      unitPrice: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
+      status: m.status || "Active"
+    }));
+
+  const newTeam = {
+    id: `mat_team_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    name: cleanName,
+    createdAt: new Date().toISOString(),
+    materials: formattedMaterials
   };
-  const updatedList = [...currentList, newGroupItem];
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+
+  const updatedTeams = [...currentTeams, newTeam];
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+export async function updateMaterialTeam(teamId, { name }) {
+  const cleanName = (name || "").trim();
+  if (!cleanName) throw new Error("Team name cannot be empty.");
+
+  const currentTeams = await getMaterialTeams();
+  const updatedTeams = currentTeams.map(t => {
+    if (t.id === teamId) {
+      return { ...t, name: cleanName };
+    }
+    return t;
+  });
+
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+export async function deleteMaterialTeam(teamId) {
+  const currentTeams = await getMaterialTeams();
+  const updatedTeams = currentTeams.filter(t => t.id !== teamId);
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+export async function addMaterialToTeam(teamId, materialData) {
+  const nameClean = (materialData.name || "").trim();
+  const unitClean = (materialData.unit || "Unit").trim();
+  const rateVal = Number(materialData.rate !== undefined ? materialData.rate : materialData.unitPrice) || 0;
+
+  if (!nameClean) throw new Error("Material Name cannot be empty.");
+  if (!unitClean) throw new Error("Unit of measure cannot be empty.");
+
+  const currentTeams = await getMaterialTeams();
+  const teamIndex = currentTeams.findIndex(t => t.id === teamId);
+  if (teamIndex === -1) throw new Error("Material Team not found.");
+
+  const team = currentTeams[teamIndex];
+  const matExists = (team.materials || []).some(m => (m.name || "").toLowerCase() === nameClean.toLowerCase());
+  if (matExists) throw new Error(`Material "${nameClean}" already exists under team "${team.name}".`);
+
+  const newMat = {
+    id: `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
+    name: nameClean,
+    unit: unitClean,
+    rate: rateVal,
+    unitPrice: rateVal,
+    status: materialData.status || "Active"
+  };
+
+  const updatedTeam = {
+    ...team,
+    materials: [...(team.materials || []), newMat]
+  };
+
+  const updatedTeams = [...currentTeams];
+  updatedTeams[teamIndex] = updatedTeam;
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+export async function updateMaterialInTeam(teamId, materialId, updatedData) {
+  const currentTeams = await getMaterialTeams();
+  const teamIndex = currentTeams.findIndex(t => t.id === teamId);
+  if (teamIndex === -1) throw new Error("Material Team not found.");
+
+  const team = currentTeams[teamIndex];
+  const rateVal = updatedData.rate !== undefined ? Number(updatedData.rate) : (updatedData.unitPrice !== undefined ? Number(updatedData.unitPrice) : undefined);
+
+  const updatedMaterials = (team.materials || []).map(m => {
+    if (m.id === materialId) {
+      return {
+        ...m,
+        name: updatedData.name ? updatedData.name.trim() : m.name,
+        unit: updatedData.unit ? updatedData.unit.trim() : m.unit,
+        rate: rateVal !== undefined ? rateVal : (m.rate !== undefined ? m.rate : m.unitPrice),
+        unitPrice: rateVal !== undefined ? rateVal : (m.unitPrice !== undefined ? m.unitPrice : m.rate),
+        status: updatedData.status || m.status || "Active"
+      };
+    }
+    return m;
+  });
+
+  const updatedTeam = { ...team, materials: updatedMaterials };
+  const updatedTeams = [...currentTeams];
+  updatedTeams[teamIndex] = updatedTeam;
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+export async function deleteMaterialFromTeam(teamId, materialId) {
+  const currentTeams = await getMaterialTeams();
+  const teamIndex = currentTeams.findIndex(t => t.id === teamId);
+  if (teamIndex === -1) throw new Error("Material Team not found.");
+
+  const team = currentTeams[teamIndex];
+  const updatedMaterials = (team.materials || []).filter(m => m.id !== materialId);
+  const updatedTeam = { ...team, materials: updatedMaterials };
+  const updatedTeams = [...currentTeams];
+  updatedTeams[teamIndex] = updatedTeam;
+  await saveMaterialTeams(updatedTeams);
+  return updatedTeams;
+}
+
+// Backward-compatible wrappers for legacy callers
+export async function getMaterialMaster() {
+  const teams = await getMaterialTeams();
+  const flat = [];
+  teams.forEach(t => {
+    (t.materials || []).forEach(m => {
+      flat.push({ ...m, category: t.name, teamId: t.id, teamName: t.name });
+    });
+  });
+  return flat;
+}
+
+export async function saveMaterialMaster(materialsList) {
+  const db = getDb();
+  const primaryRef = doc(db, MATERIAL_MASTER_DOC[0], MATERIAL_MASTER_DOC[1]);
+  await setDoc(primaryRef, {
+    materialsList,
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+}
+
+export function subscribeMaterialMaster(onUpdate) {
+  return subscribeMaterialTeams((teams) => {
+    const flat = [];
+    (teams || []).forEach(t => {
+      (t.materials || []).forEach(m => {
+        flat.push({ ...m, category: t.name, teamId: t.id, teamName: t.name });
+      });
+    });
+    onUpdate(flat);
+  });
+}
+
+export async function createMaterialGroup(groupName) {
+  return createMaterialTeam(groupName);
 }
 
 export async function renameMaterialGroup(oldGroupName, newGroupName) {
-  const oldClean = (oldGroupName || "").trim();
-  const newClean = (newGroupName || "").trim();
-  if (!newClean) throw new Error("New Material Group name cannot be empty.");
-
-  const currentList = await getMaterialMaster();
-  const updatedList = currentList.map(item => {
-    if ((item.category || "").toLowerCase() === oldClean.toLowerCase()) {
-      return { ...item, category: newClean };
-    }
-    return item;
-  });
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+  const teams = await getMaterialTeams();
+  const team = teams.find(t => (t.name || "").toLowerCase() === (oldGroupName || "").toLowerCase());
+  if (team) {
+    return updateMaterialTeam(team.id, { name: newGroupName });
+  }
+  return teams;
 }
 
 export async function deleteMaterialGroup(groupName) {
-  const cleanName = (groupName || "").trim();
-  const currentList = await getMaterialMaster();
-  const updatedList = currentList.filter(item => (item.category || "").toLowerCase() !== cleanName.toLowerCase());
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+  const teams = await getMaterialTeams();
+  const team = teams.find(t => (t.name || "").toLowerCase() === (groupName || "").toLowerCase());
+  if (team) {
+    return deleteMaterialTeam(team.id);
+  }
+  return teams;
 }
 
 export async function createMaterialItem(materialData) {
-  const nameClean = (materialData.name || "").trim();
-  const categoryClean = (materialData.category || "").trim();
-  const unitClean = (materialData.unit || "Bag").trim();
-  
-  if (!nameClean) throw new Error("Material Name cannot be empty.");
-  if (!categoryClean) throw new Error("Material Group/Category cannot be empty.");
-
-  const currentList = await getMaterialMaster();
-  const newItem = {
-    id: `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-    name: nameClean,
-    category: categoryClean,
-    unit: unitClean,
-    unitPrice: Number(materialData.unitPrice) || 0,
-    status: materialData.status || "Active"
-  };
-  const updatedList = [...currentList, newItem];
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+  const teams = await getMaterialTeams();
+  const cat = materialData.category || "General";
+  let team = teams.find(t => (t.name || "").toLowerCase() === cat.toLowerCase());
+  if (!team) {
+    await createMaterialTeam(cat);
+    const updated = await getMaterialTeams();
+    team = updated.find(t => (t.name || "").toLowerCase() === cat.toLowerCase());
+  }
+  if (team) {
+    return addMaterialToTeam(team.id, materialData);
+  }
+  return teams;
 }
 
 export async function updateMaterialItem(itemId, updatedData) {
-  const currentList = await getMaterialMaster();
-  const updatedList = currentList.map((item, index) => {
-    if (item.id === itemId || index === itemId) {
-      return {
-        ...item,
-        name: (updatedData.name || item.name).trim(),
-        category: (updatedData.category || item.category).trim(),
-        unit: (updatedData.unit || item.unit).trim(),
-        unitPrice: updatedData.unitPrice !== undefined ? Number(updatedData.unitPrice) : (item.unitPrice || 0),
-        status: updatedData.status || item.status || "Active"
-      };
+  const teams = await getMaterialTeams();
+  for (const t of teams) {
+    const m = (t.materials || []).find(mat => mat.id === itemId);
+    if (m) {
+      return updateMaterialInTeam(t.id, itemId, updatedData);
     }
-    return item;
-  });
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+  }
+  return teams;
 }
 
-export async function deleteMaterialItem(itemId, itemIndex = null) {
-  const currentList = await getMaterialMaster();
-  const updatedList = currentList.filter((item, index) => {
-    if (itemId && item.id) return item.id !== itemId;
-    if (itemIndex !== null && itemIndex !== undefined) return index !== itemIndex;
-    return true;
-  });
-  await saveMaterialMaster(updatedList);
-  return updatedList;
+export async function deleteMaterialItem(itemId) {
+  const teams = await getMaterialTeams();
+  for (const t of teams) {
+    const m = (t.materials || []).find(mat => mat.id === itemId);
+    if (m) {
+      return deleteMaterialFromTeam(t.id, itemId);
+    }
+  }
+  return teams;
 }
 
 
@@ -4300,7 +4479,9 @@ export async function updateLabourCategoryInTeam(teamId, categoryId, categoryDat
     if (!category) {
       throw new Error("Category does not exist.");
     }
-
+    if (categoryData.name && categoryData.name.trim()) {
+      category.name = categoryData.name.trim();
+    }
     category.paymentType = categoryData.paymentType;
     category.baseWage = baseWage;
     
@@ -4810,16 +4991,18 @@ export async function saveBulkMaterialEntry(bulkData) {
     await setDoc(docRef, {
       siteId,
       engineerId,
+      teamId: item.teamId || bulkData.teamId || null,
+      teamName: item.teamName || bulkData.teamName || item.category || "General",
       materialName: matName,
-      category: item.category || "General",
+      category: item.category || item.teamName || bulkData.teamName || "General",
       quantity: qty,
       requiredQuantity: qty,
       unit: item.unit || "Unit",
       unitPrice: uPrice,
       totalAmount: totAmount,
-      supplierName: item.supplierName?.trim() || "Bulk Material Supplier",
+      supplierName: item.supplierName?.trim() || item.teamName || bulkData.teamName || "Material Supplier",
       purchaseDate: dateStr,
-      notes: item.notes?.trim() || `Bulk Entry on ${dateStr}`,
+      notes: item.notes?.trim() || `Material Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
       status: "Approved", // Automatically approved bulk log
       type: "material_log",

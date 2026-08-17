@@ -5,23 +5,24 @@ import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 import Modal from "../components/common/Modal";
+import ConfirmationModal from "../components/common/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import {
   getSites,
   getMaterialsDetailed,
   updateMaterial,
-  getMaterialMaster,
-  saveMaterialMaster,
-  subscribeMaterialMaster,
   subscribeMaterialsDetailed,
   logMaterialUsage,
   logMaterialPayment,
-  createMaterialGroup,
-  renameMaterialGroup,
-  deleteMaterialGroup,
-  createMaterialItem,
-  updateMaterialItem,
-  deleteMaterialItem
+  getMaterialTeams,
+  saveMaterialTeams,
+  subscribeMaterialTeams,
+  createMaterialTeam,
+  updateMaterialTeam,
+  deleteMaterialTeam,
+  addMaterialToTeam,
+  updateMaterialInTeam,
+  deleteMaterialFromTeam
 } from "../services/firebaseService";
 import {
   processMaterialPaymentAndDelivery
@@ -44,7 +45,13 @@ import {
   MapPin,
   Clock,
   Printer,
-  Trash2
+  Trash2,
+  Users,
+  Search,
+  ChevronDown,
+  ChevronUp,
+  Eye,
+  ShieldAlert
 } from "lucide-react";
 
 export default function AdminMaterials() {
@@ -54,29 +61,89 @@ export default function AdminMaterials() {
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState("all");
   const [allMaterials, setAllMaterials] = useState([]);
-  const [materialMaster, setMaterialMaster] = useState([]);
+  const [materialTeams, setMaterialTeams] = useState([]);
+  const [teamSearch, setTeamSearch] = useState("");
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   
-  // Modals state
-  const [showAddMasterModal, setShowAddMasterModal] = useState(false);
-  const [newMasterItem, setNewMasterItem] = useState({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "" });
-  const [showAddGroupModal, setShowAddGroupModal] = useState(false);
-  const [newGroupName, setNewGroupName] = useState("");
-  const [showRenameGroupModal, setShowRenameGroupModal] = useState(false);
-  const [oldGroupName, setOldGroupName] = useState("");
-  const [renamingGroupName, setRenamingGroupName] = useState("");
+  // Custom Confirmation Modal state for UI safety confirmations (Deactivate / Delete)
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: "",
+    message: "",
+    details: null,
+    confirmText: "Confirm",
+    cancelText: "Cancel",
+    variant: "danger", // "danger", "warning"
+    onConfirm: null,
+    isLoading: false
+  });
 
+  const showConfirmModal = (config) => {
+    setConfirmModalState({
+      isOpen: true,
+      title: config.title || "Confirm Action",
+      message: config.message || "Are you sure you want to proceed?",
+      details: config.details || null,
+      confirmText: config.confirmText || "Confirm",
+      cancelText: config.cancelText || "Cancel",
+      variant: config.variant || "danger",
+      onConfirm: config.onConfirm || null,
+      isLoading: false
+    });
+  };
+
+  const closeConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
+
+  // View Team Details Popup Modal state
+  const [showViewTeamModal, setShowViewTeamModal] = useState(false);
+  const [viewingTeamId, setViewingTeamId] = useState(null);
+
+  // Dynamic live viewing team synced with materialTeams state
+  const activeViewingTeam = viewingTeamId
+    ? (materialTeams.find(t => t.id === viewingTeamId) || null)
+    : null;
+
+  const handleOpenViewTeamModal = (team) => {
+    setViewingTeamId(team.id);
+    setShowViewTeamModal(true);
+  };
+
+  // Team Modals state
+  const [showAddTeamModal, setShowAddTeamModal] = useState(false);
+  const [newTeamName, setNewTeamName] = useState("");
+  const [newTeamMaterials, setNewTeamMaterials] = useState([
+    { id: 1, name: "", rate: "", unit: "Bag" }
+  ]);
+
+  const [showRenameTeamModal, setShowRenameTeamModal] = useState(false);
+  const [targetTeam, setTargetTeam] = useState(null);
+  const [renamingTeamName, setRenamingTeamName] = useState("");
+
+  // Material within Team Modals state
+  const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
+  const [targetTeamForMat, setTargetTeamForMat] = useState(null);
+  const [newMaterialForm, setNewMaterialForm] = useState({ name: "", unit: "Bag", rate: "" });
+
+  const [showEditMaterialModal, setShowEditMaterialModal] = useState(false);
+  const [targetTeamForEditMat, setTargetTeamForEditMat] = useState(null);
+  const [editingMaterial, setEditingMaterial] = useState({ id: "", name: "", unit: "Bag", rate: "", status: "Active" });
+
+  // Requisition Approval Modal state
   const [showApprovalModal, setShowApprovalModal] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [approvalQty, setApprovalQty] = useState("");
   const [approvalCost, setApprovalCost] = useState("");
   
+  // Usage Modal state
   const [showUsageModal, setShowUsageModal] = useState(false);
   const [selectedInventoryItem, setSelectedInventoryItem] = useState(null);
   const [usageQty, setUsageQty] = useState("");
   const [usageDate, setUsageDate] = useState(new Date().toISOString().split("T")[0]);
   const [usageNotes, setUsageNotes] = useState("");
   
+  // Payment Modal state
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPaymentItem, setSelectedPaymentItem] = useState(null);
   const [payAmount, setPayAmount] = useState("");
@@ -91,15 +158,8 @@ export default function AdminMaterials() {
     }, 4000);
   };
 
-  const [showEditMasterModal, setShowEditMasterModal] = useState(false);
-  const [editingMasterIndex, setEditingMasterIndex] = useState(null);
-  const [editingMasterItem, setEditingMasterItem] = useState({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "", status: "Active" });
-
-  const [showDeleteMasterModal, setShowDeleteMasterModal] = useState(false);
-  const [deletingMasterIndex, setDeletingMasterIndex] = useState(null);
-
   useEffect(() => {
-    let unsubMaster;
+    let unsubTeams;
     let unsubMaterials;
     
     const initSubscriptions = async () => {
@@ -109,8 +169,8 @@ export default function AdminMaterials() {
         const fetchedSites = await getSites(adminId);
         setSites(fetchedSites);
         
-        unsubMaster = subscribeMaterialMaster((mmList) => {
-          setMaterialMaster(mmList);
+        unsubTeams = subscribeMaterialTeams((teamsList) => {
+          setMaterialTeams(teamsList || []);
         });
         
         unsubMaterials = subscribeMaterialsDetailed(null, (mats) => {
@@ -127,109 +187,187 @@ export default function AdminMaterials() {
     initSubscriptions();
 
     return () => {
-      if (unsubMaster) unsubMaster();
+      if (unsubTeams) unsubTeams();
       if (unsubMaterials) unsubMaterials();
     };
   }, [userProfile]);
 
-  const handleAddGroup = async (e) => {
+  const handleOpenAddTeamModal = () => {
+    setNewTeamName("");
+    setNewTeamMaterials([
+      { id: 1, name: "", rate: "", unit: "Bag" }
+    ]);
+    setShowAddTeamModal(true);
+  };
+
+  const handleAddMaterialRowInCreate = () => {
+    setNewTeamMaterials(prev => [
+      ...prev,
+      { id: Date.now() + Math.random(), name: "", rate: "", unit: "Bag" }
+    ]);
+  };
+
+  const handleRemoveMaterialRowInCreate = (rowId) => {
+    setNewTeamMaterials(prev => {
+      const filtered = prev.filter(r => r.id !== rowId);
+      return filtered.length === 0 ? [{ id: Date.now(), name: "", rate: "", unit: "Bag" }] : filtered;
+    });
+  };
+
+  const handleMaterialRowChangeInCreate = (rowId, field, value) => {
+    setNewTeamMaterials(prev =>
+      prev.map(r => r.id === rowId ? { ...r, [field]: value } : r)
+    );
+  };
+
+  const handleAddTeam = async (e) => {
     e.preventDefault();
-    if (!newGroupName.trim()) return;
+    const teamNameClean = newTeamName.trim();
+    if (!teamNameClean) {
+      showToast("Please enter a Material Team name.", "error");
+      return;
+    }
+
+    const validMaterials = newTeamMaterials.filter(m => m.name && m.name.trim().length > 0);
+    if (validMaterials.length === 0) {
+      showToast("Please add at least one material to the team.", "error");
+      return;
+    }
+
     try {
-      await createMaterialGroup(newGroupName.trim());
-      setNewGroupName("");
-      setShowAddGroupModal(false);
-      showToast(`Material Group "${newGroupName.trim()}" created successfully!`, "success");
+      await createMaterialTeam(teamNameClean, validMaterials);
+      setNewTeamName("");
+      setNewTeamMaterials([{ id: 1, name: "", rate: "", unit: "Bag" }]);
+      setShowAddTeamModal(false);
+      showToast(`Material Team "${teamNameClean}" created successfully with ${validMaterials.length} materials!`, "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
 
-  const handleRenameGroup = async (e) => {
+  const handleRenameTeam = async (e) => {
     e.preventDefault();
-    if (!renamingGroupName.trim() || !oldGroupName) return;
+    if (!renamingTeamName.trim() || !targetTeam) return;
     try {
-      await renameMaterialGroup(oldGroupName, renamingGroupName.trim());
-      setShowRenameGroupModal(false);
-      setOldGroupName("");
-      setRenamingGroupName("");
-      showToast("Material Group renamed successfully!", "success");
+      await updateMaterialTeam(targetTeam.id, { name: renamingTeamName.trim() });
+      setShowRenameTeamModal(false);
+      setTargetTeam(null);
+      setRenamingTeamName("");
+      showToast("Material Team renamed successfully!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
 
-  const handleAddMaster = async (e) => {
+  const handleRequestDeleteTeam = (team) => {
+    showConfirmModal({
+      title: "Delete Material Team?",
+      message: `Are you sure you want to permanently delete "${team.name}"?`,
+      details: `This action will remove all ${(team.materials || []).length} configured materials under this team.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteMaterialTeam(team.id);
+          showToast(`Material Team "${team.name}" deleted successfully!`, "success");
+          if (viewingTeamId === team.id) {
+            setShowViewTeamModal(false);
+            setViewingTeamId(null);
+          }
+        } catch (err) {
+          showToast(`Failed: ${err.message}`, "error");
+        } finally {
+          closeConfirmModal();
+        }
+      }
+    });
+  };
+
+  const handleAddMaterialToTeamSubmit = async (e) => {
     e.preventDefault();
-    if (!newMasterItem.name.trim()) return;
+    if (!targetTeamForMat || !newMaterialForm.name.trim()) return;
     try {
-      const catName = newMasterItem.category === "Other" && newMasterItem.customCategory?.trim() ? newMasterItem.customCategory.trim() : newMasterItem.category;
-      await createMaterialItem({
-        name: newMasterItem.name.trim(),
-        category: catName,
-        unit: newMasterItem.unit,
-        unitPrice: Number(newMasterItem.unitPrice) || 0,
+      await addMaterialToTeam(targetTeamForMat.id, {
+        name: newMaterialForm.name.trim(),
+        unit: newMaterialForm.unit,
+        rate: Number(newMaterialForm.rate) || 0,
         status: "Active"
       });
-      setNewMasterItem({ name: "", category: "Cement", customCategory: "", unit: "Bag", unitPrice: "" });
-      setShowAddMasterModal(false);
-      showToast("Lookup material added successfully!", "success");
+      setNewMaterialForm({ name: "", unit: "Bag", rate: "" });
+      setShowAddMaterialModal(false);
+      setTargetTeamForMat(null);
+      showToast(`Material added to team "${targetTeamForMat.name}" successfully!`, "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
 
-  const handleEditMaster = async (e) => {
+  const handleEditMaterialInTeamSubmit = async (e) => {
     e.preventDefault();
-    if (editingMasterIndex === null || !editingMasterItem.name.trim()) return;
+    if (!targetTeamForEditMat || !editingMaterial.name.trim()) return;
     try {
-      const catName = editingMasterItem.category === "Other" && editingMasterItem.customCategory?.trim() ? editingMasterItem.customCategory.trim() : editingMasterItem.category;
-      const updatedList = [...materialMaster];
-      updatedList[editingMasterIndex] = {
-        ...updatedList[editingMasterIndex],
-        name: editingMasterItem.name.trim(),
-        category: catName,
-        unit: editingMasterItem.unit,
-        unitPrice: Number(editingMasterItem.unitPrice) || 0,
-        status: editingMasterItem.status
-      };
-      await saveMaterialMaster(updatedList);
-      setShowEditMasterModal(false);
-      setEditingMasterIndex(null);
-      showToast("Lookup material updated successfully!", "success");
+      await updateMaterialInTeam(targetTeamForEditMat.id, editingMaterial.id, {
+        name: editingMaterial.name.trim(),
+        unit: editingMaterial.unit,
+        rate: Number(editingMaterial.rate) || 0,
+        status: editingMaterial.status
+      });
+      setShowEditMaterialModal(false);
+      setTargetTeamForEditMat(null);
+      setEditingMaterial({ id: "", name: "", unit: "Bag", rate: "", status: "Active" });
+      showToast("Material and rate updated successfully!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
 
-  const handleDeleteMasterItem = (index) => {
-    setDeletingMasterIndex(index);
-    setShowDeleteMasterModal(true);
-  };
-
-  const handleConfirmDeleteMaster = async () => {
-    if (deletingMasterIndex === null) return;
-    const itemToDelete = materialMaster[deletingMasterIndex];
-    try {
-      const updatedList = materialMaster.filter((_, idx) => idx !== deletingMasterIndex);
-      await saveMaterialMaster(updatedList);
-      setShowDeleteMasterModal(false);
-      setDeletingMasterIndex(null);
-      showToast(`Material "${itemToDelete?.name || ''}" removed successfully!`, "success");
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, "error");
+  const handleRequestToggleMaterialStatus = (teamId, teamName, mat) => {
+    if (mat.status === "Active") {
+      showConfirmModal({
+        title: "Deactivate Material?",
+        message: `Are you sure you want to deactivate "${mat.name}" from "${teamName}"?`,
+        details: "This material will no longer be available for new selections.",
+        confirmText: "Deactivate",
+        cancelText: "Cancel",
+        variant: "warning",
+        onConfirm: async () => {
+          try {
+            await updateMaterialInTeam(teamId, mat.id, { status: "Inactive" });
+            showToast(`Material "${mat.name}" deactivated.`, "info");
+          } catch (err) {
+            showToast(`Failed: ${err.message}`, "error");
+          } finally {
+            closeConfirmModal();
+          }
+        }
+      });
+    } else {
+      updateMaterialInTeam(teamId, mat.id, { status: "Active" })
+        .then(() => showToast(`Material "${mat.name}" activated!`, "success"))
+        .catch((err) => showToast(`Failed: ${err.message}`, "error"));
     }
   };
 
-  const handleToggleMasterStatus = async (index) => {
-    try {
-      const updatedList = [...materialMaster];
-      updatedList[index].status = updatedList[index].status === "Active" ? "Inactive" : "Active";
-      await saveMaterialMaster(updatedList);
-      showToast("Lookup status modified!", "success");
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, "error");
-    }
+  const handleRequestDeleteMaterial = (teamId, teamName, mat) => {
+    showConfirmModal({
+      title: "Delete Material?",
+      message: `Are you sure you want to permanently delete "${mat.name}" from "${teamName}"?`,
+      details: "This material will be permanently removed from this team catalog.",
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      variant: "danger",
+      onConfirm: async () => {
+        try {
+          await deleteMaterialFromTeam(teamId, mat.id);
+          showToast(`Material "${mat.name}" deleted successfully!`, "success");
+        } catch (err) {
+          showToast(`Failed: ${err.message}`, "error");
+        } finally {
+          closeConfirmModal();
+        }
+      }
+    });
   };
 
   const handleOpenApproval = (req) => {
@@ -450,110 +588,183 @@ export default function AdminMaterials() {
           </Card>
         )}
 
-        {/* Tab content 1: Material Master */}
+        {/* Tab content 1: Material Teams & Rates Configuration */}
         {activeTab === "master" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            <Card 
-              title="Material Master Lookup & Groups Configuration" 
-              subtitle="Single source of truth for site engineer material requisitions."
-              headerActions={
-                <div style={{ display: "flex", gap: "10px" }}>
-                  <Button onClick={() => setShowAddGroupModal(true)} variant="secondary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Plus size={16} />
-                    <span>Create Group</span>
-                  </Button>
-                  <Button onClick={() => setShowAddMasterModal(true)} variant="primary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Plus size={16} />
-                    <span>Add Material</span>
-                  </Button>
+            {/* Header / Summary Bar */}
+            <div style={{
+              background: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "12px",
+              padding: "20px 24px",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "16px"
+            }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Material Teams</h2>
+                  <span style={{ backgroundColor: "#fff7ed", color: "#ea580c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
+                    {materialTeams.length} Registered Teams
+                  </span>
                 </div>
-              }
-            >
-              {materialMaster.length === 0 ? (
-                <div style={{ padding: "48px 24px", textAlign: "center" }}>
-                  <Package size={48} style={{ color: "var(--text-muted)", marginBottom: "12px", opacity: 0.6 }} />
-                  <h4 style={{ margin: "0 0 6px 0", color: "var(--primary-900)", fontWeight: "700" }}>No Material Master Records Found</h4>
-                  <p style={{ margin: 0, color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic" }}>
-                    No Material Groups or Materials have been configured in Firestore. Click "Create Group" or "Add Material" above to populate the production master database.
-                  </p>
+                <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748b" }}>
+                  Manage material teams, unit rates, and item catalogs. Click any team card to view or manage materials.
+                </p>
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                <div style={{ position: "relative", minWidth: "220px" }}>
+                  <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+                  <input
+                    type="text"
+                    placeholder="Search teams or materials..."
+                    value={teamSearch}
+                    onChange={(e) => setTeamSearch(e.target.value)}
+                    style={{ width: "100%", padding: "8px 10px 8px 32px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "12.5px", outline: "none" }}
+                  />
                 </div>
-              ) : (
-                <div style={{ overflowX: "auto" }}>
-                  <table className="data-table" style={{ margin: 0 }}>
-                    <thead>
-                      <tr>
-                        <th>Material Group</th>
-                         <th>Material Name</th>
-                         <th>Unit of Measure</th>
-                         <th style={{ textAlign: "right" }}>Unit Price (₹)</th>
-                         <th>Lookup Status</th>
-                         <th style={{ textAlign: "right" }}>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {materialMaster.map((item, idx) => (
-                        <tr key={item.id || idx}>
-                          <td>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <Badge status="pending">{item.category}</Badge>
-                              <button 
-                                type="button"
-                                onClick={() => {
-                                  setOldGroupName(item.category);
-                                  setRenamingGroupName(item.category);
-                                  setShowRenameGroupModal(true);
-                                }}
-                                title="Rename Material Group"
-                                style={{ border: "none", background: "none", cursor: "pointer", color: "var(--text-muted)", padding: "2px" }}
-                              >
-                                <Edit2 size={12} />
-                              </button>
+                <Button
+                  onClick={handleOpenAddTeamModal}
+                  variant="primary"
+                  style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px" }}
+                >
+                  <Plus size={16} />
+                  <span>Create Team</span>
+                </Button>
+              </div>
+            </div>
+
+            {/* TEAM DISPLAY GRID (COMPACT ENTERPRISE CARDS) */}
+            {materialTeams.length === 0 ? (
+              <Card style={{ padding: "48px 24px", textAlign: "center", color: "#64748b" }}>
+                <Package size={36} style={{ color: "#94a3b8", marginBottom: "10px" }} />
+                <h4 style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#0f172a" }}>No Material Teams Found</h4>
+                <p style={{ margin: "0 0 16px 0", fontSize: "13px" }}>Click "+ Create Team" to setup trade material supply teams.</p>
+                <Button onClick={handleOpenAddTeamModal} variant="primary" style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <Plus size={16} />
+                  <span>Create First Material Team</span>
+                </Button>
+              </Card>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "18px" }}>
+                {materialTeams
+                  .filter(t => {
+                    if (!teamSearch.trim()) return true;
+                    const q = teamSearch.toLowerCase().trim();
+                    const matchesTeam = (t.name || "").toLowerCase().includes(q);
+                    const matchesMat = (t.materials || []).some(m => (m.name || "").toLowerCase().includes(q));
+                    return matchesTeam || matchesMat;
+                  })
+                  .map(team => {
+                    const mats = team.materials || [];
+
+                    return (
+                      <div
+                        key={team.id}
+                        style={{
+                          background: "#ffffff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "12px",
+                          padding: "18px 20px",
+                          boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                          display: "flex",
+                          flexDirection: "column",
+                          justifyContent: "space-between",
+                          gap: "14px",
+                          transition: "all 0.2s ease"
+                        }}
+                      >
+                        <div>
+                          {/* Header: Team name & Status */}
+                          <div 
+                            style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "12px", cursor: "pointer" }}
+                            onClick={() => handleOpenViewTeamModal(team)}
+                          >
+                            <div>
+                              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>{team.name}</h3>
+                              <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", marginTop: "2px", display: "block" }}>
+                                Material Supply Team
+                              </span>
                             </div>
-                          </td>
-                          <td style={{ fontWeight: "700" }}>{item.name}</td>
-                          <td className="font-mono">{item.unit}</td>
-                          <td style={{ textAlign: "right", fontWeight: "700", color: "var(--success-700)" }}>
-                            {item.unitPrice > 0 ? `₹${Number(item.unitPrice).toLocaleString("en-IN")}` : <span style={{ color: "var(--danger-600)", fontStyle: "italic", fontWeight: 400 }}>Not Set</span>}
-                          </td>
-                          <td>
-                            <Badge status={item.status === "Active" ? "success" : "danger"}>{item.status}</Badge>
-                          </td>
-                          <td style={{ textAlign: "right" }}>
-                            <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end" }}>
-                              <Button 
-                                variant="secondary" 
-                                size="sm" 
-                                onClick={() => handleToggleMasterStatus(idx)}
-                              >
-                                Change Status
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                onClick={() => {
-                                  setEditingMasterIndex(idx);
-                                  setEditingMasterItem({ ...item, customCategory: "" });
-                                  setShowEditMasterModal(true);
-                                }}
-                              >
-                                Edit
-                              </Button>
-                              <Button 
-                                variant="danger" 
-                                size="sm" 
-                                onClick={() => handleDeleteMasterItem(idx)}
-                              >
-                                Delete
-                              </Button>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px", color: "#16a34a", fontSize: "12px", fontWeight: "700" }}>
+                              <span style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", backgroundColor: "#16a34a" }}></span>
+                              <span>Active</span>
                             </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Card>
+                          </div>
+
+                          {/* Stats summary badge outside (Labour Team presentation style) */}
+                          <div 
+                            style={{ 
+                              display: "flex", 
+                              alignItems: "center", 
+                              gap: "10px",
+                              padding: "12px 14px", 
+                              backgroundColor: "#f8fafc", 
+                              borderRadius: "8px", 
+                              border: "1px solid #f1f5f9",
+                              cursor: "pointer"
+                            }}
+                            onClick={() => handleOpenViewTeamModal(team)}
+                          >
+                            <div style={{ width: "32px", height: "32px", borderRadius: "8px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                              <Package size={18} />
+                            </div>
+                            <div>
+                              <span style={{ fontSize: "10.5px", textTransform: "uppercase", fontWeight: "700", color: "#64748b", display: "block" }}>Total Materials</span>
+                              <strong style={{ fontSize: "14px", color: "#0f172a" }}>
+                                {mats.length} {mats.length === 1 ? "Material" : "Materials"}
+                              </strong>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Actions Bar */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #f1f5f9" }}>
+                          <div style={{ display: "flex", gap: "6px" }}>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleOpenViewTeamModal(team)}
+                              style={{ fontSize: "12px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <Eye size={13} />
+                              <span>View</span>
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setTargetTeam(team);
+                                setRenamingTeamName(team.name);
+                                setShowRenameTeamModal(true);
+                              }}
+                              style={{ fontSize: "12px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <Edit2 size={13} />
+                              <span>Edit</span>
+                            </Button>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRequestDeleteTeam(team)}
+                            style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px", display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", fontWeight: "600" }}
+                            title="Delete Team"
+                          >
+                            <Trash2 size={14} />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+
+                      </div>
+                    );
+                  })}
+              </div>
+            )}
           </div>
         )}
 
@@ -821,33 +1032,314 @@ export default function AdminMaterials() {
 
       </div>
 
-      {/* Modal: Create Material Group */}
+      {/* Modal: Create Material Team (with inline dynamic material entry) */}
       <Modal
-        isOpen={showAddGroupModal}
-        onClose={() => setShowAddGroupModal(false)}
-        title="Create Material Group"
-        maxWidth="450px"
+        isOpen={showAddTeamModal}
+        onClose={() => setShowAddTeamModal(false)}
+        title="Create Material Team"
+        maxWidth="640px"
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
-            <Button type="button" variant="secondary" onClick={() => setShowAddGroupModal(false)}>
+            <Button type="button" variant="secondary" onClick={() => setShowAddTeamModal(false)}>
               Cancel
             </Button>
-            <Button type="submit" form="add-group-form" variant="primary">
-              Create Group
+            <Button type="submit" form="add-team-form" variant="primary">
+              Create Team
             </Button>
           </div>
         }
       >
-        <form id="add-group-form" onSubmit={handleAddGroup}>
+        <form id="add-team-form" onSubmit={handleAddTeam} style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "6px 0" }}>
+          <div className="form-group">
+            <label htmlFor="team-name" style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)" }}>
+              Team Name <span style={{ color: "var(--danger-600)" }}>*</span>
+            </label>
+            <input
+              id="team-name"
+              type="text"
+              placeholder="e.g. Bhuvan Team, Arjun Mason, Karthik Team"
+              value={newTeamName}
+              onChange={(e) => setNewTeamName(e.target.value)}
+              required
+              style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+            />
+          </div>
+
+          {/* Dynamic Inline Materials Table */}
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <label style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)" }}>
+                Configured Materials <span style={{ color: "var(--danger-600)" }}>*</span>
+              </label>
+              <button
+                type="button"
+                onClick={handleAddMaterialRowInCreate}
+                style={{
+                  background: "#fff7ed",
+                  border: "1px solid #ffedd5",
+                  color: "#ea580c",
+                  fontWeight: "700",
+                  fontSize: "12px",
+                  padding: "5px 10px",
+                  borderRadius: "6px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+              >
+                <Plus size={14} />
+                <span>Add Material Row</span>
+              </button>
+            </div>
+
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", maxHeight: "280px", overflowY: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                <thead>
+                  <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
+                    <th style={{ padding: "8px 12px", textAlign: "left" }}>Material Name *</th>
+                    <th style={{ padding: "8px 12px", textAlign: "right", width: "120px" }}>Rate (₹)</th>
+                    <th style={{ padding: "8px 12px", textAlign: "left", width: "130px" }}>Unit</th>
+                    <th style={{ padding: "8px 12px", textAlign: "center", width: "40px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {newTeamMaterials.map((row, idx) => (
+                    <tr key={row.id || idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                      <td style={{ padding: "6px 10px" }}>
+                        <input
+                          type="text"
+                          placeholder="e.g. Sand, Jelly, Cement"
+                          value={row.name}
+                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "name", e.target.value)}
+                          required={idx === 0}
+                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
+                        />
+                      </td>
+                      <td style={{ padding: "6px 10px" }}>
+                        <input
+                          type="number"
+                          min="0"
+                          step="any"
+                          placeholder="800"
+                          value={row.rate}
+                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "rate", e.target.value)}
+                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", textAlign: "right" }}
+                        />
+                      </td>
+                      <td style={{ padding: "6px 10px" }}>
+                        <select
+                          value={row.unit}
+                          onChange={(e) => handleMaterialRowChangeInCreate(row.id, "unit", e.target.value)}
+                          style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", backgroundColor: "#ffffff" }}
+                        >
+                          <option value="Bag">Bag</option>
+                          <option value="Ton">Ton</option>
+                          <option value="Load">Load</option>
+                          <option value="CFT">CFT</option>
+                          <option value="Sqft">Sqft</option>
+                          <option value="Piece">Piece</option>
+                          <option value="Meter">Meter</option>
+                          <option value="Unit">Unit</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                        {newTeamMaterials.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveMaterialRowInCreate(row.id)}
+                            style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px" }}
+                            title="Remove row"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Modal: View Team Details Popup */}
+      <Modal
+        isOpen={showViewTeamModal && !!activeViewingTeam}
+        onClose={() => {
+          setShowViewTeamModal(false);
+          setViewingTeamId(null);
+        }}
+        title={activeViewingTeam ? `${activeViewingTeam.name} — Material Details` : "Material Team Details"}
+        maxWidth="680px"
+      >
+        {activeViewingTeam && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "6px 0" }}>
+            {/* Header Info & Add Material Action */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>{activeViewingTeam.name}</h4>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "100px" }}>
+                    ● Active
+                  </span>
+                </div>
+                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600", marginTop: "2px", display: "block" }}>
+                  {(activeViewingTeam.materials || []).length} Configured Materials
+                </span>
+              </div>
+
+              <Button
+                type="button"
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  setTargetTeamForMat(activeViewingTeam);
+                  setNewMaterialForm({ name: "", unit: "Bag", rate: "" });
+                  setShowAddMaterialModal(true);
+                }}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12.5px", padding: "7px 14px" }}
+              >
+                <Plus size={15} />
+                <span>+ Add Material</span>
+              </Button>
+            </div>
+
+            {/* Materials Table */}
+            <div style={{ border: "1px solid #e2e8f0", borderRadius: "8px", overflow: "hidden", maxHeight: "380px", overflowY: "auto" }}>
+              {(!activeViewingTeam.materials || activeViewingTeam.materials.length === 0) ? (
+                <div style={{ padding: "32px", textAlign: "center", color: "#94a3b8", fontSize: "13px" }}>
+                  No materials configured for this team yet. Click <strong>"+ Add Material"</strong> above to add items and rates.
+                </div>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                  <thead>
+                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
+                      <th style={{ padding: "10px 14px", textAlign: "left" }}>Material</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", width: "130px" }}>Rate (₹)</th>
+                      <th style={{ padding: "10px 14px", textAlign: "left", width: "110px" }}>Unit</th>
+                      <th style={{ padding: "10px 14px", textAlign: "center", width: "100px" }}>Status</th>
+                      <th style={{ padding: "10px 14px", textAlign: "right", width: "130px" }}>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeViewingTeam.materials.map(mat => (
+                      <tr key={mat.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        <td style={{ padding: "10px 14px", fontWeight: "700", color: "#0f172a" }}>{mat.name}</td>
+                        <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", color: "var(--success-700)", fontWeight: "800", fontSize: "13px" }}>
+                          ₹{Number(mat.rate !== undefined ? mat.rate : mat.unitPrice || 0).toLocaleString("en-IN")}
+                        </td>
+                        <td style={{ padding: "10px 14px" }}>
+                          <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: "600", color: "#475569" }}>
+                            {mat.unit}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                          <Badge status={mat.status === "Active" ? "success" : "danger"}>
+                            {mat.status || "Active"}
+                          </Badge>
+                        </td>
+                        <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setTargetTeamForEditMat(activeViewingTeam);
+                                setEditingMaterial({
+                                  id: mat.id,
+                                  name: mat.name,
+                                  unit: mat.unit,
+                                  rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
+                                  status: mat.status || "Active"
+                                });
+                                setShowEditMaterialModal(true);
+                              }}
+                              style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
+                              title="Edit Material"
+                              aria-label="Edit Material"
+                            >
+                              <Edit2 size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRequestToggleMaterialStatus(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                              style={{
+                                background: mat.status === "Active" ? "#fff7ed" : "#f0fdf4",
+                                border: mat.status === "Active" ? "1px solid #fed7aa" : "1px solid #bbf7d0",
+                                borderRadius: "6px",
+                                padding: "5px 7px",
+                                cursor: "pointer",
+                                color: mat.status === "Active" ? "#c2410c" : "#15803d",
+                                fontSize: "11px",
+                                fontWeight: "700"
+                              }}
+                              title={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                              aria-label={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                            >
+                              {mat.status === "Active" ? "Deactivate" : "Activate"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRequestDeleteMaterial(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                              style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "#dc2626", display: "flex", alignItems: "center" }}
+                              title="Delete Material"
+                              aria-label="Delete Material"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Footer / Close Button */}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+              <Button type="button" variant="outline" onClick={() => { setShowViewTeamModal(false); setViewingTeamId(null); }}>
+                Close
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal: Rename Material Team */}
+      <Modal
+        isOpen={showRenameTeamModal && !!targetTeam}
+        onClose={() => {
+          setShowRenameTeamModal(false);
+          setTargetTeam(null);
+        }}
+        title={`Rename Material Team (${targetTeam?.name || ""})`}
+        maxWidth="450px"
+        footer={
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
+            <Button type="button" variant="secondary" onClick={() => {
+              setShowRenameTeamModal(false);
+              setTargetTeam(null);
+            }}>
+              Cancel
+            </Button>
+            <Button type="submit" form="rename-team-form" variant="primary">
+              Save Name
+            </Button>
+          </div>
+        }
+      >
+        <form id="rename-team-form" onSubmit={handleRenameTeam}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div className="form-group">
-              <label htmlFor="group-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Group Name</label>
+              <label htmlFor="rename-team-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>New Team Name</label>
               <input
-                id="group-name"
+                id="rename-team-name"
                 type="text"
-                placeholder="e.g. Electricals, Plumbing, Aggregates, Structural Steel"
-                value={newGroupName}
-                onChange={(e) => setNewGroupName(e.target.value)}
+                placeholder="e.g. Arjun Mason Contractors"
+                value={renamingTeamName}
+                onChange={(e) => setRenamingTeamName(e.target.value)}
                 required
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
               />
@@ -856,115 +1348,57 @@ export default function AdminMaterials() {
         </form>
       </Modal>
 
-      {/* Modal: Rename Material Group */}
+      {/* Modal: Add Material to Team */}
       <Modal
-        isOpen={showRenameGroupModal}
-        onClose={() => setShowRenameGroupModal(false)}
-        title={`Rename Material Group (${oldGroupName})`}
-        maxWidth="450px"
-        footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
-            <Button type="button" variant="secondary" onClick={() => setShowRenameGroupModal(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" form="rename-group-form" variant="primary">
-              Save Group Name
-            </Button>
-          </div>
-        }
-      >
-        <form id="rename-group-form" onSubmit={handleRenameGroup}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            <div className="form-group">
-              <label htmlFor="rename-group-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>New Material Group Name</label>
-              <input
-                id="rename-group-name"
-                type="text"
-                placeholder="e.g. Sanitary & Plumbing"
-                value={renamingGroupName}
-                onChange={(e) => setRenamingGroupName(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-              />
-            </div>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Modal: Create Master Material Type */}
-      <Modal
-        isOpen={showAddMasterModal}
-        onClose={() => setShowAddMasterModal(false)}
-        title="Create Master Material Type"
+        isOpen={showAddMaterialModal && !!targetTeamForMat}
+        onClose={() => {
+          setShowAddMaterialModal(false);
+          setTargetTeamForMat(null);
+        }}
+        title={`Add Material to Team "${targetTeamForMat?.name || ""}"`}
         maxWidth="480px"
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
-            <Button type="button" variant="secondary" onClick={() => setShowAddMasterModal(false)}>
+            <Button type="button" variant="secondary" onClick={() => {
+              setShowAddMaterialModal(false);
+              setTargetTeamForMat(null);
+            }}>
               Cancel
             </Button>
-            <Button type="submit" form="add-master-form" variant="primary">
-              Create Type
+            <Button type="submit" form="add-mat-team-form" variant="primary">
+              Add Material
             </Button>
           </div>
         }
       >
-        <form id="add-master-form" onSubmit={handleAddMaster}>
+        <form id="add-mat-team-form" onSubmit={handleAddMaterialToTeamSubmit}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div className="form-group">
-              <label htmlFor="master-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
+              <label htmlFor="team-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
               <input
-                id="master-name"
+                id="team-mat-name"
                 type="text"
-                placeholder="e.g. 53 Grade Cement, 10mm TMT Steel"
-                value={newMasterItem.name}
-                onChange={(e) => setNewMasterItem(prev => ({ ...prev, name: e.target.value }))}
+                placeholder="e.g. Sand, Jelly, Cement, 10mm TMT Steel"
+                value={newMaterialForm.name}
+                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, name: e.target.value }))}
                 required
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
               />
             </div>
-            
-            <div className="form-group">
-              <label htmlFor="master-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Category Type (Material Group)</label>
-              <select
-                id="master-cat"
-                value={newMasterItem.category}
-                onChange={(e) => setNewMasterItem(prev => ({ ...prev, category: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
-              >
-                <option value="Cement">Cement</option>
-                <option value="Steel">Steel</option>
-                <option value="Sand">Sand</option>
-                <option value="Bricks">Bricks</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            {newMasterItem.category === "Other" && (
-              <div className="form-group">
-                <label htmlFor="master-custom-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Specify Custom Category</label>
-                <input
-                  id="master-custom-cat"
-                  type="text"
-                  placeholder="e.g. Tiles, Glass, Paints"
-                  value={newMasterItem.customCategory || ""}
-                  onChange={(e) => setNewMasterItem(prev => ({ ...prev, customCategory: e.target.value }))}
-                  required
-                  style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-                />
-              </div>
-            )}
 
             <div className="form-group">
-              <label htmlFor="master-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Type</label>
+              <label htmlFor="team-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit of Measure</label>
               <select
-                id="master-unit"
-                value={newMasterItem.unit}
-                onChange={(e) => setNewMasterItem(prev => ({ ...prev, unit: e.target.value }))}
+                id="team-mat-unit"
+                value={newMaterialForm.unit}
+                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, unit: e.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
               >
                 <option value="Bag">Bag</option>
                 <option value="Ton">Ton</option>
                 <option value="Load">Load</option>
+                <option value="CFT">CFT</option>
+                <option value="Sqft">Sqft</option>
                 <option value="Piece">Piece</option>
                 <option value="Meter">Meter</option>
                 <option value="Unit">Unit</option>
@@ -972,104 +1406,76 @@ export default function AdminMaterials() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="master-unit-price" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Price (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
+              <label htmlFor="team-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
               <input
-                id="master-unit-price"
+                id="team-mat-rate"
                 type="number"
                 min="0"
-                step="0.01"
-                placeholder="e.g. 420"
-                value={newMasterItem.unitPrice}
-                onChange={(e) => setNewMasterItem(prev => ({ ...prev, unitPrice: e.target.value }))}
+                step="any"
+                placeholder="e.g. 800"
+                value={newMaterialForm.rate}
+                onChange={(e) => setNewMaterialForm(prev => ({ ...prev, rate: e.target.value }))}
                 required
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
               />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>This price will auto-populate on the Site Engineer material entry form.</span>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                This rate will auto-populate and calculate amount when Site Engineers select this team.
+              </span>
             </div>
           </div>
         </form>
       </Modal>
 
-      {/* Modal: Edit Master Material Type */}
+      {/* Modal: Edit Material in Team */}
       <Modal
-        isOpen={showEditMasterModal}
+        isOpen={showEditMaterialModal && !!targetTeamForEditMat}
         onClose={() => {
-          setShowEditMasterModal(false);
-          setEditingMasterIndex(null);
+          setShowEditMaterialModal(false);
+          setTargetTeamForEditMat(null);
         }}
-        title="Edit Master Material Type"
+        title={`Edit Material — ${targetTeamForEditMat?.name || ""}`}
         maxWidth="480px"
         footer={
           <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
             <Button type="button" variant="secondary" onClick={() => {
-              setShowEditMasterModal(false);
-              setEditingMasterIndex(null);
+              setShowEditMaterialModal(false);
+              setTargetTeamForEditMat(null);
             }}>
               Cancel
             </Button>
-            <Button type="submit" form="edit-master-form" variant="primary">
+            <Button type="submit" form="edit-mat-team-form" variant="primary">
               Save Changes
             </Button>
           </div>
         }
       >
-        <form id="edit-master-form" onSubmit={handleEditMaster}>
+        <form id="edit-mat-team-form" onSubmit={handleEditMaterialInTeamSubmit}>
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             <div className="form-group">
-              <label htmlFor="edit-master-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
+              <label htmlFor="edit-mat-name" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Material Name</label>
               <input
-                id="edit-master-name"
+                id="edit-mat-name"
                 type="text"
-                placeholder="e.g. 53 Grade Cement, 10mm TMT Steel"
-                value={editingMasterItem.name}
-                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, name: e.target.value }))}
+                value={editingMaterial.name}
+                onChange={(e) => setEditingMaterial(prev => ({ ...prev, name: e.target.value }))}
                 required
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
               />
             </div>
-            
-            <div className="form-group">
-              <label htmlFor="edit-master-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Category Type (Material Group)</label>
-              <select
-                id="edit-master-cat"
-                value={editingMasterItem.category}
-                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, category: e.target.value }))}
-                style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
-              >
-                <option value="Cement">Cement</option>
-                <option value="Steel">Steel</option>
-                <option value="Sand">Sand</option>
-                <option value="Bricks">Bricks</option>
-                <option value="Other">Other</option>
-              </select>
-            </div>
-
-            {editingMasterItem.category === "Other" && (
-              <div className="form-group">
-                <label htmlFor="edit-master-custom-cat" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Specify Custom Category</label>
-                <input
-                  id="edit-master-custom-cat"
-                  type="text"
-                  placeholder="e.g. Tiles, Glass, Paints"
-                  value={editingMasterItem.customCategory || ""}
-                  onChange={(e) => setEditingMasterItem(prev => ({ ...prev, customCategory: e.target.value }))}
-                  required
-                  style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
-                />
-              </div>
-            )}
 
             <div className="form-group">
-              <label htmlFor="edit-master-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Type</label>
+              <label htmlFor="edit-mat-unit" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit of Measure</label>
               <select
-                id="edit-master-unit"
-                value={editingMasterItem.unit}
-                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unit: e.target.value }))}
+                id="edit-mat-unit"
+                value={editingMaterial.unit}
+                onChange={(e) => setEditingMaterial(prev => ({ ...prev, unit: e.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
               >
                 <option value="Bag">Bag</option>
                 <option value="Ton">Ton</option>
                 <option value="Load">Load</option>
+                <option value="CFT">CFT</option>
+                <option value="Sqft">Sqft</option>
                 <option value="Piece">Piece</option>
                 <option value="Meter">Meter</option>
                 <option value="Unit">Unit</option>
@@ -1077,27 +1483,28 @@ export default function AdminMaterials() {
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-master-unit-price" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Unit Price (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
+              <label htmlFor="edit-mat-rate" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Configured Rate (₹) <span style={{ color: "var(--danger-600)" }}>*</span></label>
               <input
-                id="edit-master-unit-price"
+                id="edit-mat-rate"
                 type="number"
                 min="0"
-                step="0.01"
-                placeholder="e.g. 420"
-                value={editingMasterItem.unitPrice ?? ""}
-                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, unitPrice: e.target.value }))}
+                step="any"
+                value={editingMaterial.rate}
+                onChange={(e) => setEditingMaterial(prev => ({ ...prev, rate: e.target.value }))}
                 required
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
               />
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>This price will auto-populate on the Site Engineer material entry form.</span>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
+                Updating rate applies immediately to all future Site Engineer material usage entries.
+              </span>
             </div>
 
             <div className="form-group">
-              <label htmlFor="edit-master-status" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Status</label>
+              <label htmlFor="edit-mat-status" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>Status</label>
               <select
-                id="edit-master-status"
-                value={editingMasterItem.status}
-                onChange={(e) => setEditingMasterItem(prev => ({ ...prev, status: e.target.value }))}
+                id="edit-mat-status"
+                value={editingMaterial.status}
+                onChange={(e) => setEditingMaterial(prev => ({ ...prev, status: e.target.value }))}
                 style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "14px" }}
               >
                 <option value="Active">Active</option>
@@ -1108,38 +1515,6 @@ export default function AdminMaterials() {
         </form>
       </Modal>
 
-      {/* Modal: Delete master Lookup item confirmation */}
-      <Modal
-        isOpen={showDeleteMasterModal && deletingMasterIndex !== null}
-        onClose={() => {
-          setShowDeleteMasterModal(false);
-          setDeletingMasterIndex(null);
-        }}
-        title="Delete Material Master Item"
-        maxWidth="440px"
-        footer={
-          <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", width: "100%" }}>
-            <Button type="button" variant="secondary" onClick={() => {
-              setShowDeleteMasterModal(false);
-              setDeletingMasterIndex(null);
-            }}>
-              Cancel
-            </Button>
-            <Button type="button" variant="danger" onClick={handleConfirmDeleteMaster}>
-              Delete Item
-            </Button>
-          </div>
-        }
-      >
-        <div style={{ padding: "8px 0" }}>
-          <p style={{ margin: 0, fontSize: "14px", color: "var(--primary-900)", lineHeight: "1.5" }}>
-            Are you sure you want to delete <strong>{materialMaster[deletingMasterIndex]?.name}</strong> ({materialMaster[deletingMasterIndex]?.category}) from the Material Master lookup configuration?
-          </p>
-          <p style={{ margin: "12px 0 0 0", fontSize: "12px", color: "var(--text-muted)", fontStyle: "italic" }}>
-            This change will immediately sync and remove the item across all site engineer dashboards.
-          </p>
-        </div>
-      </Modal>
 
       {/* Modal: Process Requisition */}
       {showApprovalModal && selectedRequest && (
@@ -1326,6 +1701,20 @@ export default function AdminMaterials() {
           </div>
         </div>
       )}
+
+      {/* Confirmation Modal for UI Safety (Deactivate / Delete) */}
+      <ConfirmationModal
+        isOpen={confirmModalState.isOpen}
+        onClose={closeConfirmModal}
+        onConfirm={confirmModalState.onConfirm}
+        title={confirmModalState.title}
+        message={confirmModalState.message}
+        details={confirmModalState.details}
+        confirmText={confirmModalState.confirmText}
+        cancelText={confirmModalState.cancelText}
+        variant={confirmModalState.variant}
+        isLoading={confirmModalState.isLoading}
+      />
 
     </Layout>
   );

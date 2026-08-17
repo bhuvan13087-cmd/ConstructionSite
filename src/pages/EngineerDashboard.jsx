@@ -27,6 +27,8 @@ import {
   subscribeLabourCategories,
   subscribeMaterialMaster,
   subscribeMaterialsDetailed,
+  getMaterialTeams,
+  subscribeMaterialTeams,
   getEngineerAttendanceAndLeaveStats,
   logEngineerLeave,
   getEngineerLeaves,
@@ -108,7 +110,9 @@ import {
   DollarSign,
   History,
   Truck,
-  Layers
+  Layers,
+  Edit2,
+  Edit
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -462,7 +466,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Material search & filter state
   const [materialSearch, setMaterialSearch] = useState("");
   const [materialDateFilter, setMaterialDateFilter] = useState("");
-  const [materialTabMode, setMaterialTabMode] = useState("master"); // "master" or "logs"
+  const [materialTabMode, setMaterialTabMode] = useState("entry"); // "entry" or "logs"
 
   // 4. Site Progress Photo fields
   const [sitePhotoFile, setSitePhotoFile] = useState(null);
@@ -483,8 +487,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [nextActivity, setNextActivity] = useState("");
   const [progressSubmitting, setProgressSubmitting] = useState(false);
 
-  // 6. Material Master & Consumption state variables
+  // 6. Material Master, Teams & Consumption state variables
   const [materialMaster, setMaterialMaster] = useState([]);
+  const [materialTeams, setMaterialTeams] = useState([]);
+  const [selectedMaterialTeamId, setSelectedMaterialTeamId] = useState("");
+  const [materialUsageRows, setMaterialUsageRows] = useState([]);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [selectedMatDelivery, setSelectedMatDelivery] = useState(null);
   const [deliveryRecQty, setDeliveryRecQty] = useState("");
@@ -500,7 +507,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Bulk Material Entry states
   const [bulkMaterialDate, setBulkMaterialDate] = useState(new Date().toISOString().split("T")[0]);
-  const [bulkQuantitiesMap, setBulkQuantitiesMap] = useState({});
   const [isBulkMaterialLocked, setIsBulkMaterialLocked] = useState(false);
   const [bulkMaterialLockInfo, setBulkMaterialLockInfo] = useState(null);
   const [bulkMaterialSubmitting, setBulkMaterialSubmitting] = useState(false);
@@ -799,13 +805,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       setCategories(activeCats);
     });
 
-    const unsubscribeMatMaster = subscribeMaterialMaster((mmList) => {
-      setMaterialMaster(mmList);
+    const unsubscribeMatTeams = subscribeMaterialTeams((teamsList) => {
+      setMaterialTeams(teamsList || []);
+      // Keep materialMaster in sync for any legacy components
+      const flat = [];
+      (teamsList || []).forEach(t => {
+        (t.materials || []).forEach(m => {
+          flat.push({ ...m, category: t.name, teamId: t.id, teamName: t.name });
+        });
+      });
+      setMaterialMaster(flat);
     });
 
     return () => {
       unsubscribeLabour();
-      unsubscribeMatMaster();
+      unsubscribeMatTeams();
     };
   }, []);
 
@@ -836,6 +850,39 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     };
     fetchMaterialLockStatus();
   }, [activeSiteId, bulkMaterialDate]);
+
+  // Synchronize material usage rows with latest team master rates in real-time
+  useEffect(() => {
+    if (!selectedMaterialTeamId || materialTeams.length === 0) return;
+    const team = materialTeams.find(t => t.id === selectedMaterialTeamId);
+    if (!team) return;
+
+    setMaterialUsageRows(prev => {
+      if (prev.length === 0) {
+        const activeMats = (team.materials || []).filter(m => m.status !== "Inactive");
+        return activeMats.map(m => ({
+          rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          materialId: m.id,
+          materialName: m.name,
+          unit: m.unit || "Unit",
+          rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
+          quantity: ""
+        }));
+      }
+      return prev.map(row => {
+        const mat = (team.materials || []).find(m => m.id === row.materialId);
+        if (mat) {
+          return {
+            ...row,
+            materialName: mat.name,
+            unit: mat.unit || "Unit",
+            rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0
+          };
+        }
+        return row;
+      });
+    });
+  }, [materialTeams, selectedMaterialTeamId]);
 
   // Check Labour Attendance submission status for selected site and date
   useEffect(() => {
@@ -1917,57 +1964,199 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     });
   };
 
-  // 4. Save Material Receipt
+  // 4. Material Usage Row & Selection Handlers
+  const handleSelectMaterialTeam = (teamId) => {
+    setSelectedMaterialTeamId(teamId);
+    if (!teamId) {
+      setMaterialUsageRows([]);
+      return;
+    }
+    const team = materialTeams.find(t => t.id === teamId);
+    const activeMats = (team?.materials || []).filter(m => m.status !== "Inactive");
+
+    if (activeMats.length > 0) {
+      setMaterialUsageRows(activeMats.map(m => ({
+        rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        materialId: m.id,
+        materialName: m.name,
+        unit: m.unit || "Unit",
+        rate: Number(m.rate !== undefined ? m.rate : m.unitPrice) || 0,
+        quantity: ""
+      })));
+    } else {
+      setMaterialUsageRows([]);
+    }
+  };
+
+  const handleAddMaterialRow = () => {
+    const team = materialTeams.find(t => t.id === selectedMaterialTeamId);
+    const activeMats = (team?.materials || []).filter(m => m.status !== "Inactive");
+    if (!activeMats || activeMats.length === 0) {
+      showToast("No active materials configured for this team.", "error");
+      return;
+    }
+
+    const existingMatIds = new Set(materialUsageRows.map(r => r.materialId));
+    const availableMats = activeMats.filter(m => !existingMatIds.has(m.id));
+
+    if (availableMats.length === 0) {
+      showToast("All materials for this team are already in the list. You can edit quantities or remove unneeded rows.", "info");
+      return;
+    }
+
+    const nextMat = availableMats[0];
+
+    setMaterialUsageRows(prev => [
+      ...prev,
+      {
+        rowId: `row_${nextMat.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        materialId: nextMat.id,
+        materialName: nextMat.name,
+        unit: nextMat.unit || "Unit",
+        rate: Number(nextMat.rate !== undefined ? nextMat.rate : nextMat.unitPrice) || 0,
+        quantity: ""
+      }
+    ]);
+  };
+
+  const handleMaterialRowChange = (rowId, newMatId) => {
+    const team = materialTeams.find(t => t.id === selectedMaterialTeamId);
+    const mat = (team?.materials || []).find(m => m.id === newMatId);
+    if (!mat) return;
+
+    // Strict duplicate check across other rows in current unsaved list
+    const isDuplicate = materialUsageRows.some(row => row.rowId !== rowId && row.materialId === newMatId);
+    if (isDuplicate) {
+      showToast(`"${mat.name}" is already in your usage list. Please edit its quantity instead.`, "warning");
+      return;
+    }
+
+    setMaterialUsageRows(prev => prev.map(row => {
+      if (row.rowId === rowId) {
+        return {
+          ...row,
+          materialId: mat.id,
+          materialName: mat.name,
+          unit: mat.unit || "Unit",
+          rate: Number(mat.rate !== undefined ? mat.rate : mat.unitPrice) || 0
+        };
+      }
+      return row;
+    }));
+  };
+
+  const handleEditMaterialRow = (rowId) => {
+    const inputEl = document.getElementById(`qty-input-${rowId}`);
+    if (inputEl) {
+      inputEl.focus();
+      if (inputEl.select) inputEl.select();
+    }
+  };
+
+  const handleQuantityRowChange = (rowId, qtyVal) => {
+    setMaterialUsageRows(prev => prev.map(row => {
+      if (row.rowId === rowId) {
+        return { ...row, quantity: qtyVal };
+      }
+      return row;
+    }));
+  };
+
+  const handleRemoveMaterialRow = (rowId) => {
+    const rowToRemove = materialUsageRows.find(r => r.rowId === rowId);
+    setMaterialUsageRows(prev => prev.filter(row => row.rowId !== rowId));
+    if (rowToRemove) {
+      showToast(`Removed "${rowToRemove.materialName}" from list.`, "info");
+    }
+  };
+
+  // Save Material Usage
   const handleBulkMaterialSubmit = async (e) => {
-    e.preventDefault();
     if (e && e.preventDefault) e.preventDefault();
     if (bulkMaterialSubmitting) return;
+
+    if (!bulkMaterialDate || !bulkMaterialDate.trim()) {
+      showToast("Please select a date before submitting.", "error");
+      return;
+    }
+
     if (!activeSiteId) {
       showToast("Please select construction site.", "error");
       return;
     }
+
     if (isBulkMaterialLocked) {
       showToast("Material entry for this site and date is already submitted and locked.", "error");
       return;
     }
 
+    if (!selectedMaterialTeamId) {
+      showToast("Please select a Material Team.", "error");
+      return;
+    }
+
+    const currentTeam = materialTeams.find(t => t.id === selectedMaterialTeamId);
+    if (!currentTeam) {
+      showToast("No configured Material Team found. Please contact Admin.", "error");
+      return;
+    }
+
     const itemsToSave = [];
-    (materialMaster || []).forEach(m => {
-      const qtyStr = bulkQuantitiesMap[m.id];
+    materialUsageRows.forEach(row => {
+      const qtyStr = row.quantity;
       const qtyNum = Number(qtyStr);
       if (qtyStr !== undefined && qtyStr !== null && qtyStr !== "" && !isNaN(qtyNum) && qtyNum > 0) {
+        const itemRate = Number(row.rate) || 0;
         itemsToSave.push({
-          materialName: m.name,
-          category: m.category,
-          unit: m.unit || "Unit",
-          unitPrice: Number(m.unitPrice) || 0,
-          quantity: qtyNum
+          teamId: currentTeam.id,
+          teamName: currentTeam.name,
+          materialName: row.materialName,
+          category: currentTeam.name,
+          unit: row.unit || "Unit",
+          unitPrice: itemRate,
+          rate: itemRate,
+          quantity: qtyNum,
+          totalAmount: qtyNum * itemRate
         });
       }
     });
 
     if (itemsToSave.length === 0) {
-      showToast("Please enter a quantity greater than 0 for at least one material item.", "error");
+      showToast(`Please enter a quantity greater than 0 for at least one material under "${currentTeam.name}".`, "error");
       return;
     }
 
     setBulkMaterialSubmitting(true);
     try {
+      // Double check lock status from database to prevent race conditions & duplicate submissions
+      const reCheck = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
+      if (reCheck && reCheck.submitted) {
+        setIsBulkMaterialLocked(true);
+        setBulkMaterialLockInfo(reCheck);
+        showToast("Material entry for this site and date was already submitted and locked.", "warning");
+        return;
+      }
+
       const engineerId = currentEngineerId || userProfile?.uid || userProfile?.id || "";
       await saveBulkMaterialEntry({
         siteId: activeSiteId,
         dateStr: bulkMaterialDate,
         engineerId,
+        teamId: currentTeam.id,
+        teamName: currentTeam.name,
         items: itemsToSave
       });
 
-      showToast(`Bulk material entry submitted and locked (${itemsToSave.length} material items)!`, "success");
+      showToast(`Material entry recorded for "${currentTeam.name}" (${itemsToSave.length} items)!`, "success");
       setMaterialFlow("list");
-      setBulkQuantitiesMap({});
       setIsBulkMaterialLocked(true);
       const lockStatus = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
       setIsBulkMaterialLocked(lockStatus.submitted);
       setBulkMaterialLockInfo(lockStatus);
+
+      // Clear quantities on current rows
+      setMaterialUsageRows(prev => prev.map(r => ({ ...r, quantity: "" })));
+
       await loadDashboardData();
     } catch (err) {
       console.error("Bulk material submit error:", err);
@@ -3882,224 +4071,648 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       }
     };
 
-    const activeMasterItems = materialMaster
-      .filter(m => m.status === "Active")
-      .filter(m => {
-        const query = materialSearch.toLowerCase().trim();
-        if (!query) return true;
-        return (
-          (m.name || "").toLowerCase().includes(query) ||
-          (m.category || "").toLowerCase().includes(query)
-        );
+    const activeTeamMaterialsCount = materialTeams.reduce(
+      (acc, t) => acc + (t.materials || []).filter(m => m.status !== "Inactive").length,
+      0
+    );
+
+    const filteredTeams = materialTeams
+      .map(t => ({
+        ...t,
+        materials: (t.materials || []).filter(m => m.status !== "Inactive").filter(m => {
+          const query = materialSearch.toLowerCase().trim();
+          if (!query) return true;
+          return (m.name || "").toLowerCase().includes(query) || (t.name || "").toLowerCase().includes(query);
+        })
+      }))
+      .filter(t => {
+        if (!materialSearch.trim()) return true;
+        return t.materials.length > 0 || (t.name || "").toLowerCase().includes(materialSearch.toLowerCase().trim());
       });
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        {/* Navigation Sub-Tabs */}
-        <div style={{ display: "flex", borderBottom: "2px solid #e2e8f0", gap: "8px" }}>
+      <div style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "20px",
+        fontFamily: "'Outfit', 'Inter', sans-serif",
+        color: "#1c1b1f",
+        maxWidth: "640px",
+        margin: "0 auto",
+        padding: "8px 4px 80px 4px"
+      }}>
+        {/* Segmented Control */}
+        <div style={{
+          display: "flex",
+          backgroundColor: "#f1f5f9",
+          borderRadius: "24px",
+          padding: "4px",
+          gap: "4px",
+          border: "1px solid #cbd5e1",
+          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)"
+        }}>
           <button
             type="button"
-            onClick={() => setMaterialTabMode("master")}
+            onClick={() => setMaterialTabMode("entry")}
             style={{
               flex: 1,
               padding: "10px 12px",
+              borderRadius: "20px",
+              fontSize: "14px",
+              fontWeight: "750",
               border: "none",
-              backgroundColor: "transparent",
-              borderBottom: materialTabMode === "master" ? "3px solid var(--accent-600)" : "3px solid transparent",
-              color: materialTabMode === "master" ? "var(--accent-750)" : "var(--text-muted)",
-              fontWeight: materialTabMode === "master" ? "800" : "600",
-              fontSize: "13px",
               cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "6px"
+              backgroundColor: materialTabMode === "entry" ? "#ffffff" : "transparent",
+              color: materialTabMode === "entry" ? "#ea580c" : "#64748b",
+              boxShadow: materialTabMode === "entry" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+              transition: "all 0.2s ease"
             }}
           >
-            <Package size={16} />
-            <span>Master Catalog ({materialMaster.filter(m => m.status === "Active").length})</span>
+            Record Material Usage
           </button>
-
           <button
             type="button"
             onClick={() => setMaterialTabMode("logs")}
             style={{
               flex: 1,
               padding: "10px 12px",
+              borderRadius: "20px",
+              fontSize: "14px",
+              fontWeight: "750",
               border: "none",
-              backgroundColor: "transparent",
-              borderBottom: materialTabMode === "logs" ? "3px solid var(--accent-600)" : "3px solid transparent",
-              color: materialTabMode === "logs" ? "var(--accent-750)" : "var(--text-muted)",
-              fontWeight: materialTabMode === "logs" ? "800" : "600",
-              fontSize: "13px",
               cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "6px"
+              backgroundColor: materialTabMode === "logs" ? "#ffffff" : "transparent",
+              color: materialTabMode === "logs" ? "#ea580c" : "#64748b",
+              boxShadow: materialTabMode === "logs" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+              transition: "all 0.2s ease"
             }}
           >
-            <Truck size={16} />
-            <span>Site Logs ({activeMaterials.length})</span>
+            Site Logs & History ({activeMaterials.length})
           </button>
         </div>
 
-        {/* Search bar & filter */}
-        <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
-            <Search size={16} style={{ color: "var(--text-muted)" }} />
-            <input 
-              type="text" 
-              placeholder={materialTabMode === "master" ? "Search Admin material master catalog..." : "Search site material logs, suppliers..."}
-              value={materialSearch}
-              onChange={(e) => setMaterialSearch(e.target.value)}
-              style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
-            />
-          </div>
-          {materialTabMode === "logs" && (
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <div style={{ flex: 1 }}>
+        {/* ── SUB-TAB 1: RECORD MATERIAL USAGE ENTRY ── */}
+        {materialTabMode === "entry" && (
+          <form onSubmit={handleBulkMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            
+            {/* 1. Date Selector Card */}
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              padding: "16px 20px",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              <label htmlFor="material-entry-date" style={{
+                fontSize: "12px",
+                fontWeight: "750",
+                color: "#ea580c",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px"
+              }}>
+                Usage Date
+              </label>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
                 <input 
+                  id="material-entry-date"
                   type="date" 
-                  value={materialDateFilter} 
-                  onChange={(e) => setMaterialDateFilter(e.target.value)} 
-                  style={{ width: "100%", padding: "8px 12px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
+                  value={bulkMaterialDate} 
+                  onChange={(e) => setBulkMaterialDate(e.target.value)} 
+                  style={{
+                    width: "100%",
+                    height: "48px",
+                    padding: "12px 14px 12px 44px",
+                    borderRadius: "12px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    fontSize: "15px",
+                    outline: "none",
+                    color: "#0f172a",
+                    fontWeight: "600"
+                  }}
                 />
               </div>
-              {materialDateFilter && (
-                <button 
-                  type="button" 
-                  onClick={() => setMaterialDateFilter("")}
+            </div>
+
+            {/* 2. Selected Team Dropdown Card */}
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "16px",
+              padding: "16px 20px",
+              border: "1px solid #cbd5e1",
+              boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px"
+            }}>
+              <label htmlFor="select-material-team-dropdown" style={{
+                fontSize: "12px",
+                fontWeight: "750",
+                color: "#ea580c",
+                textTransform: "uppercase",
+                letterSpacing: "0.5px"
+              }}>
+                Selected Team
+              </label>
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <Users size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
+                <select
+                  id="select-material-team-dropdown"
+                  value={selectedMaterialTeamId}
+                  onChange={(e) => handleSelectMaterialTeam(e.target.value)}
                   style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--danger-600)",
-                    fontSize: "12px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                    textDecoration: "underline"
+                    width: "100%",
+                    height: "48px",
+                    padding: "12px 14px 12px 44px",
+                    borderRadius: "12px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    fontSize: "15px",
+                    outline: "none",
+                    color: "#0f172a",
+                    fontWeight: "600"
                   }}
                 >
-                  Clear Date
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* Material Master Catalog View */}
-        {materialTabMode === "master" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            {activeMasterItems.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px dashed var(--border-color)" }}>
-                <Package size={36} style={{ color: "var(--text-muted)", marginBottom: "8px", opacity: 0.6 }} />
-                <p style={{ margin: 0, fontWeight: "700", color: "var(--primary-900)", fontSize: "14px" }}>No Active Material Master Items</p>
-                <p style={{ margin: "4px 0 0 0", color: "var(--text-muted)", fontSize: "12px", fontStyle: "italic" }}>
-                  No Material Master items match your filter. The Admin creates and manages material master items in the Admin Dashboard.
-                </p>
+                  <option value="">-- Select Material Team --</option>
+                  {materialTeams.map(t => (
+                    <option key={t.id} value={t.id}>
+                      {t.name} ({(t.materials || []).filter(m => m.status !== "Inactive").length} materials)
+                    </option>
+                  ))}
+                </select>
               </div>
-            ) : (
-              activeMasterItems.map(item => (
-                <div key={item.id} className="mobile-material-card" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)", boxShadow: "0 1px 3px rgba(0,0,0,0.05)" }}>
-                  <div>
-                    <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{item.category}</span>
-                    <h4 style={{ margin: "2px 0 4px 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{item.name}</h4>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px", fontSize: "12px" }}>
-                      <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "700" }}>{item.unit}</span>
-                      <span style={{ fontWeight: "700", color: "var(--success-700)" }}>
-                        {item.unitPrice > 0 ? `₹${Number(item.unitPrice).toLocaleString("en-IN")} / ${item.unit}` : "Price Pending Admin Setup"}
-                      </span>
-                    </div>
+            </div>
+
+            {/* 3. Submission Lock Warning */}
+            {isBulkMaterialLocked && (
+              <div style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                padding: "14px 16px",
+                backgroundColor: "#fef2f2",
+                border: "1px solid #fecaca",
+                borderRadius: "14px",
+                color: "var(--danger-700)",
+                fontSize: "13px",
+                fontWeight: "700"
+              }}>
+                <Lock size={18} />
+                <div>
+                  <span>Material entry for this Site and Date is <strong>SUBMITTED & LOCKED</strong>.</span>
+                  <div style={{ fontSize: "11.5px", fontWeight: "normal", color: "#991b1b", marginTop: "2px" }}>
+                    Duplicate submission disabled for this date.
                   </div>
                 </div>
-              ))
+              </div>
             )}
-          </div>
+
+            {/* 4. Materials Table Section (Only after selecting team) */}
+            {!selectedMaterialTeamId ? (
+              <div style={{
+                textAlign: "center",
+                padding: "48px 24px",
+                backgroundColor: "#ffffff",
+                borderRadius: "16px",
+                border: "1px dashed #cbd5e1",
+                color: "#64748b",
+                fontSize: "14px",
+                fontWeight: "600"
+              }}>
+                Please select a Material Team above to record material usage.
+              </div>
+            ) : (() => {
+              const selectedTeam = materialTeams.find(t => t.id === selectedMaterialTeamId);
+              const teamMaterials = (selectedTeam?.materials || []).filter(m => m.status !== "Inactive");
+
+              if (teamMaterials.length === 0) {
+                return (
+                  <div style={{
+                    textAlign: "center",
+                    padding: "48px 24px",
+                    backgroundColor: "#ffffff",
+                    borderRadius: "16px",
+                    border: "1px dashed #ef4444",
+                    color: "#b91c1c",
+                    fontSize: "14px",
+                    fontWeight: "600"
+                  }}>
+                    No active materials configured for "{selectedTeam?.name}" by Admin.
+                  </div>
+                );
+              }
+
+              const grandTotalAmount = materialUsageRows.reduce((acc, row) => {
+                const q = Number(row.quantity) || 0;
+                const r = Number(row.rate) || 0;
+                return acc + (q * r);
+              }, 0);
+
+              const itemsWithQtyCount = materialUsageRows.filter(r => (Number(r.quantity) || 0) > 0).length;
+
+              return (
+                <div style={{
+                  backgroundColor: "#ffffff",
+                  borderRadius: "16px",
+                  padding: "16px 20px",
+                  border: "1px solid #cbd5e1",
+                  boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <div>
+                      <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                        {selectedTeam?.name} Materials
+                      </h4>
+                      <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "600" }}>
+                        Configured master rates
+                      </span>
+                    </div>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", backgroundColor: "#fff7ed", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
+                      {teamMaterials.length} Available Items
+                    </span>
+                  </div>
+
+                  {/* Clean Compact Table / Rows */}
+                  {materialUsageRows.length === 0 ? (
+                    <div style={{ textAlign: "center", padding: "28px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
+                      <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                        No materials in current list. Click "+ Add Material" below to select and add materials.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", overflowX: "auto" }}>
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
+                        <thead>
+                          <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
+                            <th style={{ padding: "10px 12px", textAlign: "left" }}>Material</th>
+                            <th style={{ padding: "10px 10px", textAlign: "left", width: "75px" }}>Unit</th>
+                            <th style={{ padding: "10px 10px", textAlign: "right", width: "90px" }}>Rate</th>
+                            <th style={{ padding: "10px 10px", textAlign: "left", width: "95px" }}>Quantity</th>
+                            <th style={{ padding: "10px 12px", textAlign: "right", width: "105px" }}>Amount</th>
+                            <th style={{ padding: "10px 8px", textAlign: "center", width: "80px" }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {materialUsageRows.map((row) => {
+                            const qtyNum = Number(row.quantity) || 0;
+                            const itemAmount = qtyNum * (Number(row.rate) || 0);
+
+                            return (
+                              <tr key={row.rowId} style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: qtyNum > 0 ? "#fffaf5" : "transparent" }}>
+                                {/* Material Select */}
+                                <td style={{ padding: "8px 10px" }}>
+                                  <select
+                                    value={row.materialId}
+                                    onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
+                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                    style={{
+                                      width: "100%",
+                                      padding: "6px 8px",
+                                      borderRadius: "6px",
+                                      border: "1px solid #cbd5e1",
+                                      fontSize: "12.5px",
+                                      fontWeight: "700",
+                                      color: "#0f172a",
+                                      backgroundColor: "#ffffff",
+                                      outline: "none"
+                                    }}
+                                  >
+                                    {teamMaterials.map(m => {
+                                      const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
+                                      return (
+                                        <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
+                                          {m.name} {isAlreadyInOtherRow ? "(Already Added)" : ""}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </td>
+
+                                {/* Unit */}
+                                <td style={{ padding: "8px 10px" }}>
+                                  <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", color: "#475569" }}>
+                                    {row.unit}
+                                  </span>
+                                </td>
+
+                                {/* Rate */}
+                                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", color: "#16a34a", fontWeight: "800" }}>
+                                  ₹{Number(row.rate || 0).toLocaleString("en-IN")}
+                                </td>
+
+                                {/* Quantity Input */}
+                                <td style={{ padding: "8px 10px" }}>
+                                  <input
+                                    id={`qty-input-${row.rowId}`}
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    placeholder="0"
+                                    value={row.quantity}
+                                    onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
+                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                    style={{
+                                      width: "100%",
+                                      padding: "6px 8px",
+                                      borderRadius: "6px",
+                                      border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
+                                      fontSize: "13px",
+                                      fontWeight: "700",
+                                      textAlign: "right",
+                                      backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
+                                      outline: "none"
+                                    }}
+                                  />
+                                </td>
+
+                                {/* Calculated Amount */}
+                                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: "800", color: itemAmount > 0 ? "#ea580c" : "#94a3b8" }}>
+                                  ₹{itemAmount.toLocaleString("en-IN")}
+                                </td>
+
+                                {/* Row Actions: Edit ✏️ and Delete 🗑️ */}
+                                <td style={{ padding: "8px 8px", textAlign: "center" }}>
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleEditMaterialRow(row.rowId)}
+                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                      style={{
+                                        background: "#f8fafc",
+                                        border: "1px solid #cbd5e1",
+                                        borderRadius: "6px",
+                                        padding: "4px 6px",
+                                        cursor: "pointer",
+                                        color: "var(--primary-700)",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "all 0.15s ease"
+                                      }}
+                                      title="Edit Quantity"
+                                    >
+                                      <Edit2 size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveMaterialRow(row.rowId)}
+                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                      style={{
+                                        background: "#fef2f2",
+                                        border: "1px solid #fecaca",
+                                        borderRadius: "6px",
+                                        padding: "4px 6px",
+                                        color: "#dc2626",
+                                        cursor: "pointer",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        transition: "all 0.15s ease"
+                                      }}
+                                      title="Delete item from list"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* + Add Material Button */}
+                  {(() => {
+                    const existingMatIds = new Set(materialUsageRows.map(r => r.materialId));
+                    const remainingCount = teamMaterials.filter(m => !existingMatIds.has(m.id)).length;
+                    const allAdded = remainingCount === 0;
+
+                    return (
+                      <div>
+                        <button
+                          type="button"
+                          onClick={handleAddMaterialRow}
+                          disabled={isBulkMaterialLocked || bulkMaterialSubmitting || allAdded}
+                          style={{
+                            backgroundColor: allAdded ? "#f1f5f9" : "#fff7ed",
+                            border: allAdded ? "1px solid #cbd5e1" : "1px solid #ffedd5",
+                            color: allAdded ? "#94a3b8" : "#ea580c",
+                            padding: "8px 14px",
+                            borderRadius: "8px",
+                            fontSize: "12.5px",
+                            fontWeight: "750",
+                            cursor: allAdded ? "not-allowed" : "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            transition: "all 0.15s ease"
+                          }}
+                          title={allAdded ? "All materials for this team have been added" : "Add another material"}
+                        >
+                          <Plus size={15} />
+                          <span>{allAdded ? "All Materials Added" : "+ Add Material"}</span>
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Running Total & Submit Footer */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "1px solid #e2e8f0", paddingTop: "14px", marginTop: "4px" }}>
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "12px 16px",
+                      backgroundColor: "#fff7ed",
+                      borderRadius: "10px",
+                      border: "1px solid #ffedd5"
+                    }}>
+                      <div>
+                        <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
+                          {selectedTeam?.name} Usage Summary
+                        </span>
+                        <strong style={{ fontSize: "13.5px", color: "#1e3a8a" }}>
+                          {itemsWithQtyCount} {itemsWithQtyCount === 1 ? "Material Item" : "Material Items"}
+                        </strong>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
+                          Total Amount (Qty × Rate)
+                        </span>
+                        <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>
+                          ₹{grandTotalAmount.toLocaleString("en-IN")}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <Button
+                      type="submit"
+                      variant={isBulkMaterialLocked ? "outline" : "primary"}
+                      disabled={isBulkMaterialLocked || itemsWithQtyCount === 0 || bulkMaterialSubmitting}
+                      style={{
+                        width: "100%",
+                        height: "48px",
+                        fontSize: "15px",
+                        fontWeight: "800",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "8px",
+                        backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : undefined,
+                        color: isBulkMaterialLocked ? "#64748b" : undefined,
+                        borderColor: isBulkMaterialLocked ? "#cbd5e1" : undefined
+                      }}
+                    >
+                      {isBulkMaterialLocked ? <Lock size={18} /> : <Save size={18} />}
+                      <span>
+                        {bulkMaterialSubmitting
+                          ? "Submitting..."
+                          : isBulkMaterialLocked
+                          ? `Locked for ${bulkMaterialDate} (Submitted)`
+                          : `Submit Material Usage (₹${grandTotalAmount.toLocaleString("en-IN")})`}
+                      </span>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+          </form>
         )}
 
-        {/* Site Requisitions & Logs View */}
+        {/* ── SUB-TAB 2: SITE LOGS & HISTORY ── */}
         {materialTabMode === "logs" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            {/* Search bar & filter */}
+            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", border: "1px solid var(--border-color)", padding: "8px 12px", borderRadius: "var(--radius-md)", backgroundColor: "#ffffff" }}>
+                <Search size={16} style={{ color: "var(--text-muted)" }} />
+                <input 
+                  type="text" 
+                  placeholder="Search site material logs, suppliers..."
+                  value={materialSearch}
+                  onChange={(e) => setMaterialSearch(e.target.value)}
+                  style={{ border: "none", outline: "none", width: "100%", fontSize: "13px", padding: 0, margin: 0 }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+                <div style={{ flex: 1 }}>
+                  <input 
+                    type="date" 
+                    value={materialDateFilter} 
+                    onChange={(e) => setMaterialDateFilter(e.target.value)} 
+                    style={{ width: "100%", padding: "8px 12px", border: "1.5px solid var(--border-color)", borderRadius: "var(--radius-sm)", fontSize: "12px", height: "38px" }}
+                  />
+                </div>
+                {materialDateFilter && (
+                  <button 
+                    type="button" 
+                    onClick={() => setMaterialDateFilter("")}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "var(--danger-600)",
+                      fontSize: "12px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      textDecoration: "underline"
+                    }}
+                  >
+                    Clear Date
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Site Requisitions & Logs List */}
             {activeMaterials.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
                 <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)" }}>No material logs matching filter criteria.</p>
               </div>
             ) : (
-            activeMaterials.map(m => {
-              const processed = processMaterialPaymentAndDelivery(m);
-              const isApproved = processed.status === "Approved" || processed.status === "approved";
-              
-              return (
-                <div key={processed.id} className="mobile-material-card" style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                    <div>
-                      <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{processed.category}</span>
-                      <h4 style={{ margin: "2px 0 0 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{processed.materialName}</h4>
+              activeMaterials.map(m => {
+                const processed = processMaterialPaymentAndDelivery(m);
+                const isApproved = processed.status === "Approved" || processed.status === "approved";
+                
+                return (
+                  <div key={processed.id} className="mobile-material-card" style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{processed.category}</span>
+                        <h4 style={{ margin: "2px 0 0 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{processed.materialName}</h4>
+                      </div>
+                      <Badge status={processed.status === "Approved" ? "success" : processed.status === "Rejected" ? "danger" : "pending"}>
+                        {processed.status ? processed.status.toUpperCase() : "PENDING"}
+                      </Badge>
                     </div>
-                    <Badge status={processed.status === "Approved" ? "success" : processed.status === "Rejected" ? "danger" : "pending"}>
-                      {processed.status ? processed.status.toUpperCase() : "PENDING"}
-                    </Badge>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px", color: "#475569" }}>
+                      <div>
+                        <strong>Required:</strong> {processed.requiredQuantity} {processed.unit}
+                      </div>
+                      <div>
+                        <strong>Received:</strong> {processed.receivedQuantity} {processed.unit}
+                      </div>
+                      <div>
+                        <strong>Remaining Stock:</strong> <span style={{ color: "var(--success-700)", fontWeight: "700" }}>{processed.remainingStock} {processed.unit}</span>
+                      </div>
+                      <div>
+                        <strong>Delivery Status:</strong> <span style={{ fontWeight: "700" }}>{processed.deliveryStatus}</span>
+                      </div>
+                    </div>
+
+                    {processed.notes && (
+                      <p style={{ margin: "4px 0 0 0", fontSize: "11px", fontStyle: "italic", color: "var(--text-muted)", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px" }}>
+                        "{processed.notes}"
+                      </p>
+                    )}
+
+                    {/* Actions for approved material records */}
+                    {isApproved && (
+                      <div style={{ display: "flex", gap: "8px", marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDelivery(processed)}
+                          style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--primary-50)", border: "none", borderRadius: "6px", color: "var(--primary-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
+                        >
+                          <Truck size={14} />
+                          <span>Log Delivery</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenUsage(processed)}
+                          style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--accent-50)", border: "none", borderRadius: "6px", color: "var(--accent-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
+                        >
+                          <Layers size={14} />
+                          <span>Log Usage</span>
+                        </button>
+                      </div>
+                    )}
+
+                    {/* usage history list log */}
+                    {processed.usageHistory && processed.usageHistory.length > 0 && (
+                      <div style={{ marginTop: "6px", backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px", fontSize: "10.5px" }}>
+                        <span style={{ fontWeight: "800", color: "var(--primary-750)", display: "block", marginBottom: "4px" }}>Stock Usage History:</span>
+                        {processed.usageHistory.map((u, ui) => (
+                          <div key={ui} style={{ color: "#475569", marginBottom: "2px" }}>
+                            • {u.date}: <strong>-{u.quantity} {processed.unit}</strong> ({u.notes})
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px", color: "#475569" }}>
-                    <div>
-                      <strong>Required:</strong> {processed.requiredQuantity} {processed.unit}
-                    </div>
-                    <div>
-                      <strong>Received:</strong> {processed.receivedQuantity} {processed.unit}
-                    </div>
-                    <div>
-                      <strong>Remaining Stock:</strong> <span style={{ color: "var(--success-700)", fontWeight: "700" }}>{processed.remainingStock} {processed.unit}</span>
-                    </div>
-                    <div>
-                      <strong>Delivery Status:</strong> <span style={{ fontWeight: "700" }}>{processed.deliveryStatus}</span>
-                    </div>
-                  </div>
-
-                  {processed.notes && (
-                    <p style={{ margin: "4px 0 0 0", fontSize: "11px", fontStyle: "italic", color: "var(--text-muted)", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px" }}>
-                      "{processed.notes}"
-                    </p>
-                  )}
-
-                  {/* Actions for approved material records */}
-                  {isApproved && (
-                    <div style={{ display: "flex", gap: "8px", marginTop: "8px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenDelivery(processed)}
-                        style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--primary-50)", border: "none", borderRadius: "6px", color: "var(--primary-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
-                      >
-                        <Truck size={14} />
-                        <span>Log Delivery</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenUsage(processed)}
-                        style={{ flex: 1, padding: "8px 10px", backgroundColor: "var(--accent-50)", border: "none", borderRadius: "6px", color: "var(--accent-750)", fontSize: "11.5px", fontWeight: "800", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: "4px" }}
-                      >
-                        <Layers size={14} />
-                        <span>Log Usage</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* usage history list log */}
-                  {processed.usageHistory && processed.usageHistory.length > 0 && (
-                    <div style={{ marginTop: "6px", backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px", fontSize: "10.5px" }}>
-                      <span style={{ fontWeight: "800", color: "var(--primary-750)", display: "block", marginBottom: "4px" }}>Stock Usage History:</span>
-                      {processed.usageHistory.map((u, ui) => (
-                        <div key={ui} style={{ color: "#475569", marginBottom: "2px" }}>
-                          • {u.date}: <strong>-{u.quantity} {processed.unit}</strong> ({u.notes})
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+                );
+              })
+            )}
+          </div>
         )}
 
         {/* Modal: Log Delivery */}
@@ -4223,206 +4836,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </form>
           </Modal>
         )}
-
-        <button
-          type="button"
-          className="mobile-btn-large"
-          onClick={() => {
-            setMaterialFlow("add");
-            setMaterialStep(1);
-          }}
-          style={{ position: "sticky", bottom: "16px", zIndex: 10, boxShadow: "0 4px 10px rgba(14, 165, 233, 0.3)" }}
-        >
-          <Plus size={18} />
-          <span>Log New Material</span>
-        </button>
-
-        {/* Bulk Material Entry Modal */}
-        <Modal
-          isOpen={materialFlow === "add"}
-          onClose={handleCloseMaterialModal}
-          title="Bulk Material Entry"
-          maxWidth="640px"
-        >
-          <form onSubmit={handleBulkMaterialSubmit} style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-            {/* Site & Date Controls */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Construction Site</span>
-                <select
-                  value={activeSiteId}
-                  onChange={(e) => setActiveSiteId(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}
-                >
-                  {assignedSites.map(s => (
-                    <option key={s.id} value={s.id}>{s.siteName}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Entry Date</span>
-                <input
-                  type="date"
-                  value={bulkMaterialDate}
-                  onChange={(e) => setBulkMaterialDate(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "13px", fontWeight: "700" }}
-                />
-              </div>
-            </div>
-
-            {/* Submission Lock Warning */}
-            {isBulkMaterialLocked && (
-              <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "12px 14px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", color: "var(--danger-700)", fontSize: "12.5px", fontWeight: "700" }}>
-                <Lock size={18} />
-                <div>
-                  <span>Material entry for this Site and Date is <strong>SUBMITTED & LOCKED</strong>.</span>
-                  <div style={{ fontSize: "11px", fontWeight: "normal", color: "#991b1b", marginTop: "2px" }}>
-                    Duplicate submission disabled.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Scrollable list of Admin Material Master items */}
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "360px", overflowY: "auto", paddingRight: "4px" }}>
-              <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-900)", textTransform: "uppercase" }}>
-                Admin Material Master ({materialMaster.filter(m => m.status === "Active").length} Materials Available)
-              </span>
-
-              {materialMaster.filter(m => m.status === "Active").length === 0 ? (
-                <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#f8fafc", borderRadius: "8px" }}>
-                  <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                    No active materials configured in Admin Material Master yet.
-                  </p>
-                </div>
-              ) : (
-                materialMaster.filter(m => m.status === "Active").map(m => {
-                  const itemKey = m.id || m.name;
-                  const qtyVal = bulkQuantitiesMap[itemKey] || "";
-                  const qtyNum = Number(qtyVal) || 0;
-                  const uPrice = Number(m.unitPrice) || 0;
-                  const itemAmount = qtyNum * uPrice;
-
-                  return (
-                    <div
-                      key={itemKey}
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "8px",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        border: qtyNum > 0 ? "1.5px solid var(--accent-500)" : "1px solid #e2e8f0",
-                        backgroundColor: qtyNum > 0 ? "#fff7ed" : "#ffffff",
-                        transition: "all 0.15s ease"
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <div>
-                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{m.category}</span>
-                          <strong style={{ fontSize: "13.5px", color: "var(--primary-950)", display: "block" }}>{m.name}</strong>
-                        </div>
-                        <div style={{ textAlign: "right" }}>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Unit: <strong>{m.unit || "Unit"}</strong></span>
-                          <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)" }}>
-                            {uPrice > 0 ? `₹${uPrice.toLocaleString("en-IN")} / ${m.unit || "Unit"}` : "Price Not Set"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Input Row: Quantity & Calculated Amount */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
-                        <div>
-                          <label style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "3px" }}>
-                            Quantity ({m.unit || "Unit"})
-                          </label>
-                          <input
-                            type="number"
-                            min="0"
-                            step="any"
-                            placeholder="Enter quantity (0 if none)..."
-                            value={qtyVal}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              setBulkQuantitiesMap(prev => ({ ...prev, [itemKey]: val }));
-                            }}
-                            disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                            style={{
-                              width: "100%",
-                              padding: "8px 10px",
-                              borderRadius: "6px",
-                              border: qtyNum > 0 ? "2px solid var(--accent-600)" : "1px solid #cbd5e1",
-                              fontSize: "14px",
-                              fontWeight: "700",
-                              backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
-                              outline: "none"
-                            }}
-                          />
-                        </div>
-
-                        <div style={{ textAlign: "right" }}>
-                          <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", display: "block", marginBottom: "3px" }}>
-                            Calculated Amount
-                          </span>
-                          <strong style={{ fontSize: "15px", color: itemAmount > 0 ? "#ea580c" : "var(--text-muted)" }}>
-                            ₹{itemAmount.toLocaleString("en-IN")}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Running Grand Total & Footer Controls */}
-            {(() => {
-              const activeMasterItems = materialMaster.filter(m => m.status === "Active");
-              let totalItemsCount = 0;
-              let grandTotalCost = 0;
-
-              activeMasterItems.forEach(m => {
-                const itemKey = m.id || m.name;
-                const qtyNum = Number(bulkQuantitiesMap[itemKey]) || 0;
-                if (qtyNum > 0) {
-                  totalItemsCount++;
-                  grandTotalCost += qtyNum * (Number(m.unitPrice) || 0);
-                }
-              });
-
-              return (
-                <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "2px solid #e2e8f0", paddingTop: "12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 14px", backgroundColor: "#fff7ed", borderRadius: "8px", border: "1px solid #ffedd5" }}>
-                    <div>
-                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>Selected Materials</span>
-                      <strong style={{ fontSize: "14px", color: "#1e3a8a" }}>{totalItemsCount} Material Items</strong>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>Running Grand Total</span>
-                      <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>₹{grandTotalCost.toLocaleString("en-IN")}</strong>
-                    </div>
-                  </div>
-
-                  <div style={{ display: "flex", gap: "10px" }}>
-                    <Button type="button" variant="outline" style={{ flex: 1 }} onClick={handleCloseMaterialModal}>
-                      Cancel
-                    </Button>
-                    <Button
-                      type="submit"
-                      variant="primary"
-                      style={{ flex: 2 }}
-                      disabled={isBulkMaterialLocked || totalItemsCount === 0 || bulkMaterialSubmitting}
-                    >
-                      {bulkMaterialSubmitting ? "Submitting Bulk Entry..." : isBulkMaterialLocked ? "Locked for Selected Date" : `Submit Entry (₹${grandTotalCost.toLocaleString("en-IN")})`}
-                    </Button>
-                  </div>
-                </div>
-              );
-            })()}
-          </form>
-        </Modal>
       </div>
     );
   };
