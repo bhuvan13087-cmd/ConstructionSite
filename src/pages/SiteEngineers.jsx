@@ -22,6 +22,7 @@ import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
+import ViewToggle from "../components/common/ViewToggle";
 import { useAuth } from "../context/AuthContext";
 import { 
   Plus, 
@@ -51,6 +52,7 @@ export default function SiteEngineers() {
   const [sites, setSites] = useState([]);
   const [selectedEngineerId, setSelectedEngineerId] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
+  const [viewMode, setViewMode] = useState("normal");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
 
@@ -481,32 +483,36 @@ export default function SiteEngineers() {
         })}
       </div>
 
-      {/* ── Toolbar: Search ── */}
+      {/* ── Toolbar: Search & View Toggle ── */}
       <div style={{
         display: "flex",
         alignItems: "center",
+        justifyContent: "space-between",
         gap: "10px",
         marginBottom: "12px",
         flexWrap: "wrap"
       }}>
-        <div className="input-wrapper search-wrapper" style={{ flex: 1, minWidth: "200px", maxWidth: "360px" }}>
-          <Search className="input-icon" size={15} />
-          <input
-            type="text"
-            placeholder="Search by name or email…"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            style={{ fontSize: "13px" }}
-          />
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: "200px", maxWidth: "420px" }}>
+          <div className="input-wrapper search-wrapper" style={{ flex: 1 }}>
+            <Search className="input-icon" size={15} />
+            <input
+              type="text"
+              placeholder="Search by name or email…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              style={{ fontSize: "13px" }}
+            />
+          </div>
+          {searchQuery && (
+            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600, whiteSpace: "nowrap" }}>
+              {filteredEngineers.length} result{filteredEngineers.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
-        {searchQuery && (
-          <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: 600 }}>
-            {filteredEngineers.length} result{filteredEngineers.length !== 1 ? "s" : ""}
-          </span>
-        )}
+        <ViewToggle viewMode={viewMode} onChange={setViewMode} />
       </div>
 
-      {/* ── Engineer Table ── */}
+      {/* ── Engineer Table / Grid ── */}
       <div style={{
         background: "#fff",
         border: "1px solid var(--border-color)",
@@ -523,6 +529,159 @@ export default function SiteEngineers() {
             <div style={{ fontSize: "12px" }}>
               {searchQuery ? "Try a different name or email." : `Click "Add Engineer" to register one.`}
             </div>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "16px", padding: "16px" }}>
+            {filteredEngineers.map((eng) => {
+              const isActive = eng.status === "active";
+              const initials = eng.fullName
+                ? eng.fullName.split(" ").map(n => n[0]).join("").substring(0, 2).toUpperCase()
+                : "SE";
+              const sitesCount = eng.assignedSites ? eng.assignedSites.length : 0;
+
+              return (
+                <div
+                  key={eng.id}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "12px",
+                    padding: "16px",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "14px",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <div>
+                    {/* Header: Avatar, Name, Email & Status Badge */}
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div
+                          onClick={() => setSelectedEngineerId(eng.id)}
+                          style={{
+                            width: "38px",
+                            height: "38px",
+                            borderRadius: "10px",
+                            background: isActive
+                              ? "linear-gradient(135deg, #fff7ed, #ffedd5)"
+                              : "linear-gradient(135deg, var(--primary-100), var(--primary-200))",
+                            border: `1.5px solid ${isActive ? "#ffedd5" : "var(--border-color)"}`,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "800",
+                            fontSize: "13px",
+                            color: isActive ? "#c2410c" : "var(--primary-600)",
+                            cursor: "pointer",
+                            flexShrink: 0
+                          }}
+                        >
+                          {initials}
+                        </div>
+                        <div>
+                          <h4 
+                            onClick={() => setSelectedEngineerId(eng.id)}
+                            style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#0f172a", cursor: "pointer" }}
+                            onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                            onMouseLeave={e => e.currentTarget.style.color = "#0f172a"}
+                          >
+                            {eng.fullName}
+                          </h4>
+                          <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block" }}>{eng.email}</span>
+                        </div>
+                      </div>
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        backgroundColor: isActive ? "var(--success-50)" : "var(--danger-50)",
+                        color: isActive ? "var(--success-600)" : "var(--danger-600)",
+                        border: `1px solid ${isActive ? "var(--success-100)" : "var(--danger-100)"}`
+                      }}>
+                        <span style={{
+                          width: "5px",
+                          height: "5px",
+                          borderRadius: "50%",
+                          backgroundColor: isActive ? "var(--success-500)" : "var(--danger-500)"
+                        }} />
+                        {isActive ? "Active" : "Inactive"}
+                      </span>
+                    </div>
+
+                    {/* Details: Phone & Assigned Sites */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px", color: "#475569" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <Phone size={13} style={{ color: "var(--text-muted)", flexShrink: 0 }} />
+                        <span>{eng.phoneNumber || "No phone number"}</span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                        <span style={{ color: "#64748b" }}>Assigned Sites:</span>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "2px 8px",
+                          borderRadius: "6px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          backgroundColor: sitesCount > 0 ? "#fff7ed" : "var(--primary-50)",
+                          color: sitesCount > 0 ? "#c2410c" : "var(--primary-600)"
+                        }}>
+                          <Building2 size={11} />
+                          {sitesCount} Site{sitesCount !== 1 ? "s" : ""}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Footer */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px", borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
+                    <Button 
+                      onClick={() => setSelectedEngineerId(eng.id)} 
+                      variant="outline" 
+                      style={{ height: "30px", padding: "0 10px", fontSize: "11.5px" }}
+                    >
+                      Activity
+                    </Button>
+                    <button
+                      className="btn-icon btn-edit-action"
+                      onClick={() => handleOpenEditModal(eng)}
+                      title="Edit Profile"
+                      style={{
+                        width: "30px", height: "30px",
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        borderRadius: "6px", border: "1px solid var(--border-color)",
+                        background: "#fff", color: "var(--primary-600)",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Edit3 size={13} />
+                    </button>
+                    <button
+                      className="btn-icon btn-delete-action"
+                      onClick={() => handleDeleteEngineer(eng)}
+                      title="Delete Engineer"
+                      style={{
+                        width: "30px", height: "30px",
+                        display: "inline-flex", alignItems: "center", justifyContent: "center",
+                        borderRadius: "6px", border: "1px solid var(--border-color)",
+                        background: "#fff", color: "var(--danger-500)",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>

@@ -574,34 +574,7 @@ export default function AdminDashboard() {
 
       </div>
 
-      {/* ── 2. EXACTLY SIX QUICK ACTION BUTTONS ── */}
-      <div className="erp-filter-toolbar" style={{ justifyContent: "space-between", marginBottom: "20px" }}>
-        <div style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-700)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-          Quick Actions
-        </div>
-        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-          <Link to="/admin/sites" className="erp-btn-primary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <Building2 size={14} /> Add Site
-          </Link>
-          <Link to="/admin/assignments" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <ClipboardCheck size={14} /> Assign Engineer
-          </Link>
-          <Link to="/admin/labour" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <Users size={14} /> Add Labour
-          </Link>
-          <Link to="/admin/materials" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <Package size={14} /> Add Material
-          </Link>
-          <Link to="/admin/reports" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <FileText size={14} /> Create DPR
-          </Link>
-          <Link to="/admin/reports" className="erp-btn-secondary" style={{ padding: "6px 12px", fontSize: "12px" }}>
-            <TrendingUp size={14} /> Reports
-          </Link>
-        </div>
-      </div>
-
-      {/* ── 3. SECOND ROW: CONSTRUCTION STATUS & EXPENSE OVERVIEW CHART ── */}
+      {/* ── 2. SECOND ROW: CONSTRUCTION STATUS & EXPENSE OVERVIEW CHART ── */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", marginBottom: "20px" }}>
         
         {/* CONSTRUCTION STATUS CARD */}

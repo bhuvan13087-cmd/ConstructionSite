@@ -17,6 +17,7 @@ import Button from "../components/common/Button";
 import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
 import SiteFilterBar from "../components/common/SiteFilterBar";
+import ViewToggle from "../components/common/ViewToggle";
 import { useAuth } from "../context/AuthContext";
 import { firebaseConfig } from "../firebase/config";
 import { 
@@ -329,6 +330,7 @@ export default function Sites() {
   const [formExpectedEndDate, setFormExpectedEndDate] = useState("");
   const [formStatus, setFormStatus] = useState("Planning");
   const [formBudget, setFormBudget] = useState("");
+  const [viewMode, setViewMode] = useState("normal");
 
   // Google Maps States & Refs
   const [isMapsLoaded, setIsMapsLoaded] = useState(false);
@@ -826,9 +828,12 @@ export default function Sites() {
             />
           </div>
         </div>
-        <Button onClick={handleOpenAddModal} icon={Plus} className="btn-add">
-          Add Site
-        </Button>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <ViewToggle viewMode={viewMode} onChange={setViewMode} />
+          <Button onClick={handleOpenAddModal} icon={Plus} className="btn-add">
+            Add Site
+          </Button>
+        </div>
       </div>
 
       {/* KPI Summary Bar */}
@@ -888,6 +893,158 @@ export default function Sites() {
             <div style={{ fontSize: "12px" }}>
               {searchQuery ? "Try searching with a different name, client, or location." : `Click "Add Site" to register your first project.`}
             </div>
+          </div>
+        ) : viewMode === "grid" ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: "16px", padding: "16px" }}>
+            {filteredSites.map((site) => {
+              const statusColors = {
+                Active: { bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)", dot: "var(--success-500)" },
+                Planning: { bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)", dot: "var(--primary-500)" },
+                Completed: { bg: "#f0fdf4", border: "#dcfce7", color: "var(--success-700)", dot: "var(--success-600)" }
+              };
+              const sc = statusColors[site.status] || statusColors["Planning"];
+              const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+              const budgetFormatted = site.budget !== undefined && site.budget !== null && site.budget !== ""
+                ? `₹${Number(site.budget).toLocaleString("en-IN")}`
+                : "—";
+
+              return (
+                <div
+                  key={site.id}
+                  style={{
+                    background: "#ffffff",
+                    border: "1px solid var(--border-color)",
+                    borderRadius: "12px",
+                    padding: "16px",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "space-between",
+                    gap: "14px",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <div>
+                    {/* Card Header: Initials, Name & Status */}
+                    <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "10px", marginBottom: "12px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div
+                          onClick={() => setSelectedSiteId(site.id)}
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "8px",
+                            backgroundColor: "#fff7ed",
+                            border: "1.5px solid #ffedd5",
+                            color: "#c2410c",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "800",
+                            fontSize: "12px",
+                            flexShrink: 0,
+                            cursor: "pointer"
+                          }}
+                        >
+                          {initials}
+                        </div>
+                        <div>
+                          <h4 
+                            onClick={() => setSelectedSiteId(site.id)}
+                            style={{ margin: 0, fontSize: "14px", fontWeight: "700", color: "#0f172a", cursor: "pointer" }}
+                            onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                            onMouseLeave={e => e.currentTarget.style.color = "#0f172a"}
+                          >
+                            {site.siteName}
+                          </h4>
+                          <span style={{ fontSize: "12px", color: "#64748b" }}>{site.clientName || "No Client"}</span>
+                        </div>
+                      </div>
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        backgroundColor: sc.bg,
+                        color: sc.color,
+                        border: `1px solid ${sc.border}`
+                      }}>
+                        <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc.dot }} />
+                        {site.status || "Planning"}
+                      </span>
+                    </div>
+
+                    {/* Details: Location, Budget, Timeline */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <MapPin size={13} style={{ color: "#ea580c", flexShrink: 0 }} />
+                        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{site.location || "—"}</span>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "4px" }}>
+                        <span style={{ color: "#64748b" }}>Budget:</span>
+                        <strong style={{ fontFamily: "monospace", color: "#0f172a" }}>{budgetFormatted}</strong>
+                      </div>
+                      <div style={{ display: "flex", justifyContent: "space-between" }}>
+                        <span style={{ color: "#64748b" }}>Dates:</span>
+                        <span>{site.startDate || "—"} to {site.expectedEndDate || "—"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Actions Footer */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px", borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
+                    <Button 
+                      onClick={() => setSelectedSiteId(site.id)} 
+                      variant="outline" 
+                      style={{ height: "30px", padding: "0 10px", fontSize: "11.5px" }}
+                    >
+                      View Details
+                    </Button>
+                    <button
+                      className="btn-icon btn-edit-action"
+                      onClick={() => handleOpenEditModal(site)}
+                      title="Edit Site"
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        background: "#fff",
+                        color: "var(--primary-600)",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Edit3 size={13} />
+                    </button>
+                    <button
+                      className="btn-icon btn-delete-action"
+                      onClick={() => handleDeleteSite(site)}
+                      title="Delete Site"
+                      style={{
+                        width: "30px",
+                        height: "30px",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "6px",
+                        border: "1px solid var(--border-color)",
+                        background: "#fff",
+                        color: "var(--danger-500)",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div style={{ overflowX: "auto" }}>

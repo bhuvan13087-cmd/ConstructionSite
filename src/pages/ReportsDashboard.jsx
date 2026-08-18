@@ -697,6 +697,124 @@ export default function ReportsDashboard() {
     };
   }, [siteFinancialsList, approvals]);
 
+  // Dedicated Management Overview Data computation (Single Site or Portfolio)
+  const managementOverviewData = useMemo(() => {
+    if (filterSiteId !== "all") {
+      const site = sites.find(s => s.id === filterSiteId) || filteredSites[0] || {};
+      const siteId = site.id || filterSiteId;
+      const siteName = site.siteName || "Selected Project";
+      const siteStatus = site.status || "Active";
+
+      // Resolve assigned engineers
+      let assignedEngineers = "Not Assigned";
+      const assignedIds = site.assignedEngineers || [];
+      const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+      if (assignedNames.length > 0) {
+        assignedEngineers = assignedNames.join(", ");
+      } else {
+        const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(siteId)).map(e => e.fullName).filter(Boolean);
+        if (matchingEngs.length > 0) {
+          assignedEngineers = matchingEngs.join(", ");
+        }
+      }
+
+      // Calculate Progress from canonical DPR records or site
+      const siteDprs = allDprs.filter(d => d.siteId === siteId);
+      let progressPercent = 0;
+      if (site.status === "Completed") {
+        progressPercent = 100;
+      } else if (siteDprs.length > 0) {
+        const sortedDprs = [...siteDprs].sort((a, b) => {
+          const tA = a.createdAt?.seconds || (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+          const tB = b.createdAt?.seconds || (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+          return tB - tA;
+        });
+        const rawProg = sortedDprs[0].progress || sortedDprs[0].completionPercent || "0";
+        progressPercent = Math.min(100, Math.max(0, Number(rawProg.toString().replace(/%/g, '')) || 0));
+      } else if (site.progress !== undefined) {
+        progressPercent = Math.min(100, Math.max(0, Number(site.progress.toString().replace(/%/g, '')) || 0));
+      }
+
+      // Financials
+      const projectValue = Number(site.budget || site.totalBudget || site.contractValue) || 0;
+      
+      const siteMats = materials.filter(m => m.siteId === siteId);
+      const siteLabour = labourHistoryMap[siteId] || [];
+      const siteFin = getSiteFinancials(site, siteMats, siteLabour, siteDprs, labourMaster, generalExpenses, labourPayments);
+      const totalCostSoFar = siteFin.totalSpent;
+      const remainingBudget = projectValue - totalCostSoFar;
+
+      // Timeline & Milestones
+      const startDate = site.startDate ? formatDDMMYYYY(site.startDate) : "Not Configured";
+      const expectedCompletion = (site.expectedEndDate || site.endDate || site.completionDate) 
+        ? formatDDMMYYYY(site.expectedEndDate || site.endDate || site.completionDate) 
+        : "Not Configured";
+      
+      const plannedProgress = calculatePlannedProgress(site.startDate, site.expectedEndDate || site.endDate);
+      const isDelayed = site.status !== "Completed" && (isSiteDelayed(site) || (plannedProgress > 0 && progressPercent < plannedProgress - 5));
+      const milestonesDelayed = isDelayed ? 1 : 0;
+      const timelineStatus = site.status === "Completed" ? "Completed" : (isDelayed ? "Delayed" : "On Schedule");
+
+      // Approvals for this site
+      const sitePendingApprovals = approvals.filter(a => 
+        (a.siteId === siteId || a.site === siteName) && (a.status || "").toLowerCase() === "pending"
+      ).length;
+
+      return {
+        isSingleSite: true,
+        siteName,
+        assignedEngineers,
+        projectStatus: siteStatus,
+        projectProgress: progressPercent,
+        milestonesDelayed,
+        projectValue,
+        totalCostSoFar,
+        remainingBudget,
+        startDate,
+        expectedCompletion,
+        timelineStatus,
+        plannedProgress,
+        pendingApprovals: sitePendingApprovals
+      };
+    } else {
+      // Portfolio (All Sites) Context
+      const totalSites = filteredSites.length;
+      let totalBudget = 0;
+      let totalSpent = 0;
+      let progressSum = 0;
+      let delayedSitesCount = 0;
+
+      siteFinancialsList.forEach(({ site, financials, plannedProgress }) => {
+        totalBudget += financials.budget;
+        totalSpent += financials.totalSpent;
+        progressSum += financials.progressPercent;
+        if (site.status !== "Completed" && (isSiteDelayed(site) || (plannedProgress > 0 && financials.progressPercent < plannedProgress - 5))) {
+          delayedSitesCount++;
+        }
+      });
+
+      const avgProgress = totalSites > 0 ? Math.round(progressSum / totalSites) : 0;
+      const pendingApprovalsCount = approvals.filter(a => (a.status || "").toLowerCase() === "pending").length;
+
+      return {
+        isSingleSite: false,
+        siteName: "All Construction Sites (Portfolio Overview)",
+        assignedEngineers: "All Assigned Engineers",
+        projectStatus: `${overallMetrics.activeSites} Active, ${overallMetrics.completedSites} Completed`,
+        projectProgress: avgProgress,
+        milestonesDelayed: delayedSitesCount,
+        projectValue: totalBudget,
+        totalCostSoFar: totalSpent,
+        remainingBudget: totalBudget - totalSpent,
+        startDate: "Multi-Project Portfolio",
+        expectedCompletion: "Multi-Project Timeline",
+        timelineStatus: delayedSitesCount > 0 ? "Delayed" : "On Schedule",
+        plannedProgress: avgProgress,
+        pendingApprovals: pendingApprovalsCount
+      };
+    }
+  }, [filterSiteId, sites, filteredSites, engineers, engineersMap, allDprs, materials, labourHistoryMap, labourMaster, generalExpenses, labourPayments, approvals, siteFinancialsList, overallMetrics]);
+
   // Cost analysis stats (Breakdowns & Monthly trends)
   const costAnalysisData = useMemo(() => {
     let materialCost = 0;
@@ -2367,142 +2485,284 @@ export default function ReportsDashboard() {
       </div>
 
       {/* ==================================================================== */}
-      {/* 1. OVERVIEW TAB PANEL */}
+      {/* 1. MANAGEMENT OVERVIEW TAB PANEL */}
       {/* ==================================================================== */}
       {activeTab === "overview" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-          {/* Main Key Indicators Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "20px" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+          
+          {/* TOP 5 SUMMARY CARDS */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
             
-            <Card style={{ borderLeft: "4px solid var(--primary-500)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Corporate Projects</span>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-                <span style={{ fontSize: "28px", fontWeight: "800", color: "var(--primary-950)" }}>{overallMetrics.totalSites}</span>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", display: "flex", gap: "6px" }}>
-                  <span style={{ color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.completedSites} Done</span>
-                  <span>•</span>
-                  <span style={{ color: "var(--primary-600)", fontWeight: "700" }}>{overallMetrics.activeSites} Active</span>
+            {/* 1. Project Progress */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Project Progress</span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: "#16a34a", marginTop: "4px" }}>
+                {managementOverviewData.projectProgress}%
+              </div>
+              <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Current completion</span>
+            </div>
+
+            {/* 2. Milestones Delayed */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Milestones Delayed</span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: managementOverviewData.milestonesDelayed > 0 ? "#dc2626" : "#16a34a", marginTop: "4px" }}>
+                {managementOverviewData.milestonesDelayed}
+              </div>
+              <span style={{ fontSize: "11px", color: managementOverviewData.milestonesDelayed > 0 ? "#dc2626" : "#16a34a", marginTop: "2px", display: "block", fontWeight: "600" }}>
+                {managementOverviewData.milestonesDelayed > 0 ? "Delayed" : "On Track"}
+              </span>
+            </div>
+
+            {/* 3. Project Value */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Project Value</span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", marginTop: "4px", fontFamily: "monospace" }}>
+                {formatINR(managementOverviewData.projectValue)}
+              </div>
+              <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Approved budget</span>
+            </div>
+
+            {/* 4. Total Cost So Far */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Cost So Far</span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: "#ea580c", marginTop: "4px", fontFamily: "monospace" }}>
+                {formatINR(managementOverviewData.totalCostSoFar)}
+              </div>
+              <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Recorded expenses</span>
+            </div>
+
+            {/* 5. Remaining Budget */}
+            <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Remaining Budget</span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: managementOverviewData.remainingBudget < 0 ? "#dc2626" : "#2563eb", marginTop: "4px", fontFamily: "monospace" }}>
+                {formatINR(managementOverviewData.remainingBudget)}
+              </div>
+              <span style={{ fontSize: "11px", color: managementOverviewData.remainingBudget < 0 ? "#dc2626" : "#64748b", marginTop: "2px", display: "block" }}>
+                {managementOverviewData.remainingBudget < 0 ? "Budget exceeded" : "Available balance"}
+              </span>
+            </div>
+
+          </div>
+
+          {/* PROJECT PROGRESS VISUAL BAR */}
+          <Card>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+              <span style={{ fontSize: "13px", fontWeight: "800", textTransform: "uppercase", color: "#0f172a", letterSpacing: "0.3px" }}>
+                Project Progress
+              </span>
+              <span style={{ fontSize: "15px", fontWeight: "800", color: "#16a34a" }}>
+                {managementOverviewData.projectProgress}%
+              </span>
+            </div>
+            <div style={{ height: "12px", width: "100%", backgroundColor: "#e2e8f0", borderRadius: "6px", overflow: "hidden" }}>
+              <div style={{
+                height: "100%",
+                width: `${managementOverviewData.projectProgress}%`,
+                background: "linear-gradient(90deg, #22c55e 0%, #16a34a 100%)",
+                borderRadius: "6px",
+                transition: "width 0.4s ease"
+              }} />
+            </div>
+          </Card>
+
+          {/* PROJECT SUMMARY & PROJECT UPDATES GRID */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "20px" }}>
+            
+            {/* Simple Project Summary */}
+            <Card title="Project Summary">
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "14px" }}>
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Project</span>
+                  <strong style={{ fontSize: "13.5px", color: "#0f172a", marginTop: "2px", display: "block" }}>{managementOverviewData.siteName}</strong>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Site Engineer</span>
+                  <strong style={{ fontSize: "13.5px", color: "#0f172a", marginTop: "2px", display: "block" }}>{managementOverviewData.assignedEngineers}</strong>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Project Status</span>
+                  <strong style={{ fontSize: "13.5px", color: "#0f172a", marginTop: "2px", display: "block" }}>{managementOverviewData.projectStatus}</strong>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Project Progress</span>
+                  <strong style={{ fontSize: "13.5px", color: "#16a34a", marginTop: "2px", display: "block" }}>{managementOverviewData.projectProgress}%</strong>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Project Value</span>
+                  <strong style={{ fontSize: "13.5px", color: "#0f172a", fontFamily: "monospace", marginTop: "2px", display: "block" }}>{formatINR(managementOverviewData.projectValue)}</strong>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Total Cost So Far</span>
+                  <strong style={{ fontSize: "13.5px", color: "#ea580c", fontFamily: "monospace", marginTop: "2px", display: "block" }}>{formatINR(managementOverviewData.totalCostSoFar)}</strong>
+                </div>
+
+                <div style={{ gridColumn: "span 2", padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Remaining Budget</span>
+                  <strong style={{ fontSize: "14px", color: managementOverviewData.remainingBudget < 0 ? "#dc2626" : "#2563eb", fontFamily: "monospace", marginTop: "2px", display: "block" }}>
+                    {formatINR(managementOverviewData.remainingBudget)}
+                  </strong>
                 </div>
               </div>
             </Card>
 
-            <Card style={{ borderLeft: "4px solid var(--danger-500)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Milestone Delays</span>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "12px" }}>
-                <span style={{ fontSize: "28px", fontWeight: "800", color: "var(--danger-700)" }}>{overallMetrics.delayedSites}</span>
-                <Badge status={overallMetrics.delayedSites > 0 ? "warning" : "success"}>
-                  {overallMetrics.delayedSites > 0 ? "Risk Flagged" : "On Schedule"}
-                </Badge>
-              </div>
-            </Card>
-
-            <Card style={{ borderLeft: "4px solid var(--success-500)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Financial Value</span>
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-                <span style={{ fontSize: "20px", fontWeight: "800", color: "var(--success-700)" }}>{formatINR(overallMetrics.totalBudget)}</span>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Total Accrued Budget</span>
-              </div>
-            </Card>
-
-            <Card style={{ borderLeft: "4px solid var(--accent-500)" }}>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", textTransform: "uppercase" }}>Accumulated Cost</span>
-              <div style={{ display: "flex", flexDirection: "column", gap: "2px", marginTop: "12px" }}>
-                <span style={{ fontSize: "20px", fontWeight: "800", color: "var(--accent-700)" }}>{formatINR(overallMetrics.totalExpenses)}</span>
-                <span style={{ fontSize: "11px", color: "var(--danger-600)", fontWeight: "600" }}>Pending payouts: {formatINR(overallMetrics.pendingPayments)}</span>
-              </div>
-            </Card>
-
-          </div>
-
-          {/* Charts & Deviation Monitor */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-            
-            <Card title="Average Corporate Execution Progress">
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px 0", gap: "16px" }}>
+            {/* Project Updates (Health & Alerts) */}
+            <Card title="Project Updates">
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                
+                {/* 1. Approvals Update */}
                 <div style={{
-                  position: "relative",
-                  width: "140px",
-                  height: "140px",
-                  borderRadius: "50%",
-                  background: `conic-gradient(var(--primary-600) ${overallMetrics.overallProgress}%, var(--primary-100) 0)`,
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center"
+                  justifyContent: "space-between",
+                  gap: "8px",
+                  padding: "10px 12px",
+                  backgroundColor: managementOverviewData.pendingApprovals > 0 ? "#fffbeb" : "#f0fdf4",
+                  borderRadius: "6px",
+                  border: `1px solid ${managementOverviewData.pendingApprovals > 0 ? "#fef3c7" : "#dcfce7"}`
                 }}>
-                  <div style={{
-                    position: "absolute",
-                    width: "110px",
-                    height: "110px",
-                    borderRadius: "50%",
-                    backgroundColor: "#ffffff",
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center"
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    {managementOverviewData.pendingApprovals > 0 ? (
+                      <AlertTriangle size={16} style={{ color: "#d97706", flexShrink: 0 }} />
+                    ) : (
+                      <CheckCircle2 size={16} style={{ color: "#16a34a", flexShrink: 0 }} />
+                    )}
+                    <span style={{ fontSize: "12.5px", fontWeight: "700", color: managementOverviewData.pendingApprovals > 0 ? "#92400e" : "#166534" }}>
+                      {managementOverviewData.pendingApprovals > 0 
+                        ? `${managementOverviewData.pendingApprovals} Requisition(s) pending approval`
+                        : "No pending approvals"
+                      }
+                    </span>
+                  </div>
+                  {managementOverviewData.pendingApprovals > 0 && (
+                    <Link to="/superadmin/approvals" style={{ fontSize: "11.5px", fontWeight: "700", color: "#ea580c", textDecoration: "none", whiteSpace: "nowrap" }}>
+                      Go to Approval Center →
+                    </Link>
+                  )}
+                </div>
+
+                {/* 2. Timeline Schedule Update */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "10px 12px",
+                  backgroundColor: managementOverviewData.timelineStatus === "Delayed" ? "#fef2f2" : "#f0fdf4",
+                  borderRadius: "6px",
+                  border: `1px solid ${managementOverviewData.timelineStatus === "Delayed" ? "#fee2e2" : "#dcfce7"}`
+                }}>
+                  {managementOverviewData.timelineStatus === "Delayed" ? (
+                    <AlertTriangle size={16} style={{ color: "#dc2626", flexShrink: 0 }} />
+                  ) : (
+                    <CheckCircle2 size={16} style={{ color: "#16a34a", flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: "12.5px", fontWeight: "700", color: managementOverviewData.timelineStatus === "Delayed" ? "#991b1b" : "#166534" }}>
+                    {managementOverviewData.timelineStatus === "Delayed"
+                      ? "Project timeline is delayed"
+                      : "Project timeline is on schedule"
+                    }
+                  </span>
+                </div>
+
+                {/* 3. Milestones Update */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "10px 12px",
+                  backgroundColor: managementOverviewData.milestonesDelayed > 0 ? "#fef2f2" : "#f0fdf4",
+                  borderRadius: "6px",
+                  border: `1px solid ${managementOverviewData.milestonesDelayed > 0 ? "#fee2e2" : "#dcfce7"}`
+                }}>
+                  {managementOverviewData.milestonesDelayed > 0 ? (
+                    <AlertTriangle size={16} style={{ color: "#dc2626", flexShrink: 0 }} />
+                  ) : (
+                    <CheckCircle2 size={16} style={{ color: "#16a34a", flexShrink: 0 }} />
+                  )}
+                  <span style={{ fontSize: "12.5px", fontWeight: "700", color: managementOverviewData.milestonesDelayed > 0 ? "#991b1b" : "#166534" }}>
+                    {managementOverviewData.milestonesDelayed > 0
+                      ? `${managementOverviewData.milestonesDelayed} milestone(s) delayed`
+                      : "All project milestones are on track"
+                    }
+                  </span>
+                </div>
+
+                {/* 4. Budget Usage Update */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "10px 12px",
+                  backgroundColor: managementOverviewData.remainingBudget < 0 
+                    ? "#fef2f2" 
+                    : (managementOverviewData.projectValue > 0 && managementOverviewData.totalCostSoFar > managementOverviewData.projectValue * 0.85 ? "#fffbeb" : "#f0fdf4"),
+                  borderRadius: "6px",
+                  border: `1px solid ${managementOverviewData.remainingBudget < 0 
+                    ? "#fee2e2" 
+                    : (managementOverviewData.projectValue > 0 && managementOverviewData.totalCostSoFar > managementOverviewData.projectValue * 0.85 ? "#fef3c7" : "#dcfce7")}`
+                }}>
+                  {managementOverviewData.remainingBudget < 0 ? (
+                    <AlertTriangle size={16} style={{ color: "#dc2626", flexShrink: 0 }} />
+                  ) : (
+                    managementOverviewData.projectValue > 0 && managementOverviewData.totalCostSoFar > managementOverviewData.projectValue * 0.85 ? (
+                      <AlertTriangle size={16} style={{ color: "#d97706", flexShrink: 0 }} />
+                    ) : (
+                      <CheckCircle2 size={16} style={{ color: "#16a34a", flexShrink: 0 }} />
+                    )
+                  )}
+                  <span style={{
+                    fontSize: "12.5px",
+                    fontWeight: "700",
+                    color: managementOverviewData.remainingBudget < 0 
+                      ? "#991b1b" 
+                      : (managementOverviewData.projectValue > 0 && managementOverviewData.totalCostSoFar > managementOverviewData.projectValue * 0.85 ? "#92400e" : "#166534")
                   }}>
-                    <span style={{ fontSize: "28px", fontWeight: "900", color: "var(--primary-900)" }}>{overallMetrics.overallProgress}%</span>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Avg Complete</span>
-                  </div>
-                </div>
-                <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "var(--text-muted)" }}>
-                    <span>Budget Invoiced (Work completed)</span>
-                    <span style={{ fontWeight: "700" }}>{formatINR(overallMetrics.paymentsReceived)}</span>
-                  </div>
-                  <div style={{ height: "8px", width: "100%", backgroundColor: "var(--primary-100)", borderRadius: "4px", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${overallMetrics.overallProgress}%`, backgroundColor: "var(--primary-600)", borderRadius: "4px" }} />
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Important Actions & Security Operations Ledger" subtitle="Review approvals and delayed schedule warnings.">
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", backgroundColor: overallMetrics.pendingApprovals > 0 ? "var(--warning-50)" : "var(--success-50)", borderRadius: "6px", border: `1px solid ${overallMetrics.pendingApprovals > 0 ? "var(--warning-200)" : "var(--success-200)"}` }}>
-                  {overallMetrics.pendingApprovals > 0 ? (
-                    <>
-                      <AlertTriangle size={18} style={{ color: "var(--warning-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--warning-800)" }}>
-                        {overallMetrics.pendingApprovals} Requisition(s) pending approval
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-800)" }}>
-                        No pending approvals in workflow queue
-                      </span>
-                    </>
-                  )}
+                    {managementOverviewData.remainingBudget < 0
+                      ? `Budget exceeded by ${formatINR(Math.abs(managementOverviewData.remainingBudget))}`
+                      : (managementOverviewData.projectValue > 0 && managementOverviewData.totalCostSoFar > managementOverviewData.projectValue * 0.85
+                          ? `Budget usage is high (${Math.round((managementOverviewData.totalCostSoFar / managementOverviewData.projectValue) * 100)}% utilized)`
+                          : (managementOverviewData.projectValue > 0
+                              ? `Budget usage is within approved limits (${Math.round((managementOverviewData.totalCostSoFar / managementOverviewData.projectValue) * 100)}% utilized)`
+                              : "Budget not configured for this project"
+                            )
+                        )
+                    }
+                  </span>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "12px", backgroundColor: overallMetrics.delayedSites > 0 ? "var(--danger-50)" : "var(--success-50)", borderRadius: "6px", border: `1px solid ${overallMetrics.delayedSites > 0 ? "var(--danger-200)" : "var(--success-200)"}` }}>
-                  {overallMetrics.delayedSites > 0 ? (
-                    <>
-                      <AlertTriangle size={18} style={{ color: "var(--danger-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--danger-800)" }}>
-                        {overallMetrics.delayedSites} Site(s) has delayed schedule milestones
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <CheckCircle2 size={18} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-800)" }}>
-                        All projects timeline executing on schedule
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                <div style={{ borderTop: "1px dashed var(--border-color)", paddingTop: "12px", marginTop: "4px" }}>
-                  <Link to="/superadmin/approvals" style={{ fontSize: "12.5px", fontWeight: "800", color: "var(--primary-700)", textDecoration: "none" }} className="no-print">
-                    Go to Approval Center queue →
-                  </Link>
-                </div>
               </div>
             </Card>
 
           </div>
+
+          {/* PROJECT TIMELINE */}
+          <Card title="Project Timeline">
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "14px" }}>
+              <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Start Date</span>
+                <strong style={{ fontSize: "13px", color: "#0f172a", marginTop: "2px", display: "block" }}>{managementOverviewData.startDate}</strong>
+              </div>
+              <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Expected Completion</span>
+                <strong style={{ fontSize: "13px", color: "#0f172a", marginTop: "2px", display: "block" }}>{managementOverviewData.expectedCompletion}</strong>
+              </div>
+              <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Current Progress</span>
+                <strong style={{ fontSize: "13px", color: "#16a34a", marginTop: "2px", display: "block" }}>{managementOverviewData.projectProgress}%</strong>
+              </div>
+              <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b", display: "block" }}>Status</span>
+                <strong style={{ fontSize: "13px", color: managementOverviewData.timelineStatus === "Delayed" ? "#dc2626" : "#16a34a", marginTop: "2px", display: "block" }}>
+                  {managementOverviewData.timelineStatus === "Delayed" ? "⚠ Delayed" : "✓ On Schedule"}
+                </strong>
+              </div>
+            </div>
+          </Card>
+
         </div>
       )}
 

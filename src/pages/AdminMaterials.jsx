@@ -6,6 +6,7 @@ import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
+import ViewToggle from "../components/common/ViewToggle";
 import { useAuth } from "../context/AuthContext";
 import {
   getSites,
@@ -57,6 +58,7 @@ import {
 export default function AdminMaterials() {
   const { userProfile } = useAuth();
   const [activeTab, setActiveTab] = useState("master"); // master, requests, inventory, payments
+  const [viewMode, setViewMode] = useState("grid");
   const [loading, setLoading] = useState(true);
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState("all");
@@ -640,8 +642,8 @@ export default function AdminMaterials() {
                 </p>
               </div>
 
-              <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                <div style={{ position: "relative", minWidth: "220px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ position: "relative", minWidth: "200px" }}>
                   <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
                   <input
                     type="text"
@@ -651,6 +653,7 @@ export default function AdminMaterials() {
                     style={{ width: "100%", padding: "8px 10px 8px 32px", borderRadius: "8px", border: "1px solid #cbd5e1", fontSize: "12.5px", outline: "none" }}
                   />
                 </div>
+                <ViewToggle viewMode={viewMode} onChange={setViewMode} />
                 <Button
                   onClick={handleOpenAddTeamModal}
                   variant="primary"
@@ -662,7 +665,7 @@ export default function AdminMaterials() {
               </div>
             </div>
 
-            {/* TEAM DISPLAY GRID (COMPACT ENTERPRISE CARDS) */}
+            {/* TEAM DISPLAY (GRID / NORMAL LIST) */}
             {materialTeams.length === 0 ? (
               <Card style={{ padding: "48px 24px", textAlign: "center", color: "#64748b" }}>
                 <Package size={36} style={{ color: "#94a3b8", marginBottom: "10px" }} />
@@ -673,7 +676,7 @@ export default function AdminMaterials() {
                   <span>Create First Material Team</span>
                 </Button>
               </Card>
-            ) : (
+            ) : viewMode === "grid" ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "18px" }}>
                 {materialTeams
                   .filter(t => {
@@ -762,9 +765,9 @@ export default function AdminMaterials() {
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                setTargetTeam(team);
-                                setRenamingTeamName(team.name);
-                                setShowRenameTeamModal(true);
+                                setEditingTeam(team);
+                                setEditTeamName(team.name || "");
+                                setShowEditTeamModal(true);
                               }}
                               style={{ fontSize: "12px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                             >
@@ -787,6 +790,139 @@ export default function AdminMaterials() {
                       </div>
                     );
                   })}
+              </div>
+            ) : (
+              <div style={{
+                background: "#ffffff",
+                border: "1px solid var(--border-color)",
+                borderRadius: "14px",
+                overflow: "hidden",
+                boxShadow: "var(--shadow-sm)"
+              }}>
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" style={{ width: "100%", borderCollapse: "collapse", minWidth: "600px" }}>
+                    <thead>
+                      <tr style={{ background: "var(--primary-50)", borderBottom: "1px solid var(--border-color)" }}>
+                        <th style={{ width: "35%", paddingLeft: "20px" }}>Material Team</th>
+                        <th style={{ width: "20%", textAlign: "center" }}>Status</th>
+                        <th style={{ width: "25%", textAlign: "center" }}>Cataloged Materials</th>
+                        <th style={{ width: "20%", textAlign: "right", paddingRight: "20px" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {materialTeams
+                        .filter(t => {
+                          if (!teamSearch.trim()) return true;
+                          const q = teamSearch.toLowerCase().trim();
+                          const matchesTeam = (t.name || "").toLowerCase().includes(q);
+                          const matchesMat = (t.materials || []).some(m => (m.name || "").toLowerCase().includes(q));
+                          return matchesTeam || matchesMat;
+                        })
+                        .map((team) => {
+                          const mats = team.materials || [];
+                          return (
+                            <tr
+                              key={team.id}
+                              style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                              onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                              onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                            >
+                              <td style={{ paddingLeft: "20px" }}>
+                                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                                  <div style={{
+                                    width: "34px",
+                                    height: "34px",
+                                    borderRadius: "8px",
+                                    backgroundColor: "#fff7ed",
+                                    border: "1px solid #ffedd5",
+                                    color: "#c2410c",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontWeight: "800",
+                                    fontSize: "12px",
+                                    flexShrink: 0
+                                  }}>
+                                    <Package size={16} />
+                                  </div>
+                                  <div>
+                                    <div 
+                                      style={{ fontWeight: "700", fontSize: "13.5px", color: "#0f172a", cursor: "pointer" }}
+                                      onClick={() => handleOpenViewTeamModal(team)}
+                                    >
+                                      {team.name}
+                                    </div>
+                                    <span style={{ fontSize: "11.5px", color: "#64748b" }}>Material Supply Team</span>
+                                  </div>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: "5px", color: "#16a34a", fontSize: "12px", fontWeight: "700" }}>
+                                  <span style={{ display: "inline-block", width: "7px", height: "7px", borderRadius: "50%", backgroundColor: "#16a34a" }}></span>
+                                  <span>Active</span>
+                                </div>
+                              </td>
+                              <td style={{ textAlign: "center" }}>
+                                <span style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "5px",
+                                  padding: "3px 10px",
+                                  borderRadius: "8px",
+                                  fontSize: "12px",
+                                  fontWeight: "700",
+                                  backgroundColor: "#fff7ed",
+                                  color: "#c2410c",
+                                  border: "1px solid #ffedd5"
+                                }}>
+                                  {mats.length} {mats.length === 1 ? "Material" : "Materials"}
+                                </span>
+                              </td>
+                              <td style={{ paddingRight: "20px", textAlign: "right" }}>
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleOpenViewTeamModal(team)}
+                                    style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                                  >
+                                    <Eye size={12} />
+                                    <span>View</span>
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      setEditingTeam(team);
+                                      setEditTeamName(team.name || "");
+                                      setShowEditTeamModal(true);
+                                    }}
+                                    style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                                  >
+                                    <Edit2 size={12} />
+                                    <span>Edit</span>
+                                  </Button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRequestDeleteTeam(team)}
+                                    style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px 6px", display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11.5px", fontWeight: "600" }}
+                                    title="Delete Team"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{ borderTop: "1px solid var(--border-color)", padding: "10px 20px", background: "#f8fafc" }}>
+                  <span style={{ fontSize: "11.5px", color: "var(--text-muted)", fontWeight: 600 }}>
+                    Showing {materialTeams.length} registered material team{materialTeams.length !== 1 ? "s" : ""}
+                  </span>
+                </div>
               </div>
             )}
           </div>

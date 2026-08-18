@@ -2,7 +2,7 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { hasPermission } from "../../services/businessLogic";
-import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History } from "lucide-react";
+import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History, ChevronLeft, ChevronRight, Menu } from "lucide-react";
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
 import ConfirmationModal from "../common/ConfirmationModal";
@@ -13,7 +13,7 @@ const NavGroupTitle = ({ children }) => (
   </div>
 );
 
-export default function Sidebar({ isOpen, onClose }) {
+export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse }) {
   const { userProfile, logout } = useAuth();
   
   // Custom Confirmation Modal state
@@ -212,14 +212,42 @@ export default function Sidebar({ isOpen, onClose }) {
         }
       `}</style>
 
-      <div className="sidebar-header">
-        <div className="sidebar-brand">
-          <CivilEngineerLogo className="brand-icon" size={24} />
-          <span className="brand-text">Construction Site</span>
+      <div className="sidebar-header" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 14px 16px 16px" }}>
+        <div className="sidebar-brand" style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, overflow: "hidden" }}>
+          <CivilEngineerLogo className="brand-icon" size={24} style={{ flexShrink: 0 }} />
+          <span className="brand-text" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "14px", fontWeight: "800", letterSpacing: "0.5px" }}>
+            VISVAS BUILDERS
+          </span>
         </div>
-        <button className="sidebar-close-btn" onClick={onClose} type="button">
-          <X size={18} />
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>
+          {/* Sidebar Collapse Toggle Button */}
+          <button 
+            className="sidebar-collapse-btn" 
+            onClick={onToggleCollapse} 
+            type="button" 
+            title="Collapse Sidebar" 
+            aria-label="Collapse Sidebar"
+            style={{
+              background: "rgba(255, 255, 255, 0.05)",
+              border: "1px solid rgba(255, 255, 255, 0.1)",
+              borderRadius: "6px",
+              color: "#94a3b8",
+              cursor: "pointer",
+              padding: "6px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              transition: "all 0.2s ease"
+            }}
+          >
+            <ChevronLeft size={16} />
+          </button>
+          
+          {/* Mobile Drawer Close Button */}
+          <button className="sidebar-close-btn" onClick={onClose} type="button" aria-label="Close Sidebar">
+            <X size={18} />
+          </button>
+        </div>
       </div>
 
       <nav className="sidebar-nav">
