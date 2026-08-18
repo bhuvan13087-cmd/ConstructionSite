@@ -33,13 +33,17 @@ import {
   Camera, 
   FileText, 
   Printer, 
-  Clock,
-  Filter,
-  Activity,
-  User,
-  Edit3,
-  Trash2,
-  DollarSign
+  Clock, 
+  Filter, 
+  Activity, 
+  User, 
+  Edit3, 
+  Trash2, 
+  DollarSign,
+  Info,
+  CheckCircle2,
+  AlertCircle,
+  X
 } from "lucide-react";
 
 export default function SiteDetails({ siteId, onBack }) {
@@ -57,6 +61,8 @@ export default function SiteDetails({ siteId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+  const [showSiteInfoModal, setShowSiteInfoModal] = useState(false);
+  const [showPendingActionsModal, setShowPendingActionsModal] = useState(false);
 
   const siteLabourFinancials = useMemo(() => {
     let grossAmount = 0;
@@ -436,21 +442,80 @@ export default function SiteDetails({ siteId, onBack }) {
     labourSummaryMap.totalDays += 1;
   });
 
-  // Materials spent
   const matSpent = processedMaterials.reduce((acc, m) => acc + ((m.receivedQuantity || m.quantity || 0) * (m.unitPrice || 0)), 0);
-
   const totalSpent = matSpent + laborSpent;
-  let budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : null;
-  if (budget === null || isNaN(budget)) {
-    const siteSeed = site.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    budget = (50 + (siteSeed % 50)) * 100000;
-  }
   
-  // Dynamic Total Expense = Sum of all approved expenses for the selected site
+  // Canonical Budget Calculations (Strictly real data with no mock seed values)
+  const actualBudget = site.budget !== undefined && site.budget !== null && site.budget !== "" ? Number(site.budget) : 0;
   const approvedExpenses = expenses.filter(e => e.status === "Approved" || e.status === "approved");
   const totalExpense = approvedExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-  const remainingBudget = budget - totalExpense;
-  const budgetUtilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
+  const remainingBudget = actualBudget > 0 ? (actualBudget - totalExpense) : 0;
+  const budgetUtilization = actualBudget > 0 ? (totalExpense / actualBudget) * 100 : 0;
+  const budget = actualBudget;
+
+  // CANONICAL OVERVIEW METRICS:
+  const todayDateStr = new Date().toISOString().split("T")[0];
+
+  // 1. Today Labour (actual workers logged today for this site)
+  const todayAttendance = (attendance || []).filter(a => a.date === todayDateStr);
+  const todayLabourRecords = (labourHistory || []).filter(l => l.date === todayDateStr);
+  const todayLabourCount = todayAttendance.length > 0
+    ? todayAttendance.reduce((sum, a) => sum + (Number(a.workerCount) || (a.memberId ? 1 : 0) || 1), 0)
+    : (todayLabourRecords.length > 0 
+        ? todayLabourRecords.reduce((sum, l) => sum + (Number(l.workerCount) || Number(l.units) || 1), 0) 
+        : 0);
+
+  // 2. Today Material (actual material entries logged today for this site)
+  const todayMaterials = (materials || []).filter(m => (m.purchaseDate === todayDateStr || m.date === todayDateStr));
+  const todayMaterialCount = todayMaterials.length;
+
+  // 3. Today Expense (actual expense logged today for this site)
+  const todayExpenses = (expenses || []).filter(e => e.date === todayDateStr);
+  const todayExpenseSum = todayExpenses.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+  // 4. Overall Progress (latest actual progress from DPR or site metadata)
+  const latestProgressRecord = progressUpdates && progressUpdates.length > 0 ? progressUpdates[0] : null;
+  const overallProgressPct = latestProgressRecord && latestProgressRecord.progress !== undefined && latestProgressRecord.progress !== null && latestProgressRecord.progress !== ""
+    ? Math.min(100, Math.max(0, Number(latestProgressRecord.progress)))
+    : Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
+
+  // PENDING ACTIONS
+  const pendingDprToday = !progressUpdates.some(p => p.date === todayDateStr);
+  const pendingExpenseCount = expenses.filter(e => e.status === "Pending" || e.status === "pending").length;
+  const pendingItemsList = [];
+  if (pendingDprToday) {
+    pendingItemsList.push({ title: "Today's Daily Progress (DPR)", status: "Pending submission for today", type: "dpr", linkTab: "progress" });
+  }
+  if (totalPendingDel > 0) {
+    pendingItemsList.push({ title: "Material Deliveries", status: `${totalPendingDel} item(s) pending delivery`, type: "material", linkTab: "materials" });
+  }
+  if (pendingExpenseCount > 0) {
+    pendingItemsList.push({ title: "Expense Approvals", status: `${pendingExpenseCount} expense(s) awaiting approval`, type: "expense", linkTab: "overview" });
+  }
+  if (siteLabourFinancials.netPayable > 0) {
+    pendingItemsList.push({ title: "Labour Net Payable", status: `₹${siteLabourFinancials.netPayable.toLocaleString("en-IN")} pending payout`, type: "labour", linkTab: "labour_advance" });
+  }
+
+  // Visual Date Formatter for Overview (DD-MM-YYYY)
+  const formatDateDDMMYYYY = (dateStr) => {
+    if (!dateStr) return "--";
+    if (typeof dateStr === "string") {
+      const isoMatch = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})/);
+      if (isoMatch) {
+        return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+      }
+    }
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return String(dateStr);
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const year = d.getFullYear();
+      return `${day}-${month}-${year}`;
+    } catch {
+      return String(dateStr);
+    }
+  };
 
   // Handle Print Action for Reports tab
   const handlePrint = () => {
@@ -707,160 +772,229 @@ export default function SiteDetails({ siteId, onBack }) {
         {activeTab === "overview" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
             
-            {/* EXACT 4 COMPACT KPI CARDS */}
+            {/* COMPACT TOP ACTION / STATUS BAR */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "12px",
+              background: "#ffffff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "10px",
+              padding: "10px 16px"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>Today's Summary</span>
+                <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600" }}>({formatDateDDMMYYYY(todayDateStr)})</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {/* Small Site Info Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowSiteInfoModal(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "5px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    color: "#334155",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease"
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f8fafc"; e.currentTarget.style.borderColor = "#94a3b8"; }}
+                  onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#ffffff"; e.currentTarget.style.borderColor = "#cbd5e1"; }}
+                >
+                  <Building2 size={13} style={{ color: "#ea580c" }} />
+                  <span>Site Info</span>
+                </button>
+
+                {/* Small Pending Actions Button */}
+                <button
+                  type="button"
+                  onClick={() => setShowPendingActionsModal(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: pendingItemsList.length > 0 ? "1px solid #fed7aa" : "1px solid #bbf7d0",
+                    backgroundColor: pendingItemsList.length > 0 ? "#fff7ed" : "#f0fdf4",
+                    color: pendingItemsList.length > 0 ? "#ea580c" : "#16a34a",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease"
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.opacity = "0.9"}
+                  onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                >
+                  <ClipboardCheck size={13} />
+                  <span>Pending Actions: {pendingItemsList.length}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* EXACT 4 PRIMARY SUMMARY CARDS */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
               
-              {/* KPI 1: Today's Labour */}
+              {/* 1. TODAY LABOUR */}
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Labour</span>
-                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-                    <Users size={18} style={{ margin: "auto" }} />
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>TODAY LABOUR</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Users size={17} />
                   </div>
                 </div>
                 <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-                  {attendance.filter(a => a.date === new Date().toISOString().split("T")[0]).length || labourHistory.length}
+                  {todayLabourCount}
                 </div>
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Attendance check-ins today</span>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>
+                  {todayLabourCount > 0 ? `${todayLabourCount} worker${todayLabourCount !== 1 ? "s" : ""} logged today` : "0 workers logged today"}
+                </span>
               </div>
 
-              {/* KPI 2: Today's Material Entries */}
+              {/* 2. TODAY MATERIAL */}
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Material Entries</span>
-                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-                    <Package size={18} style={{ margin: "auto" }} />
-                  </div>
-                </div>
-                <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{processedMaterials.length}</div>
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Registered material items</span>
-              </div>
-
-              {/* KPI 3: Today's Expenses */}
-              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Today's Expenses</span>
-                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fef3c7", color: "#b45309", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-                    <DollarSign size={18} style={{ margin: "auto" }} />
-                  </div>
-                </div>
-                <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>₹{totalExpense.toLocaleString("en-IN")}</div>
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Approved site expenses</span>
-              </div>
-
-              {/* KPI 4: Overall Progress */}
-              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                  <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Overall Progress</span>
-                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyCenter: "center" }}>
-                    <Activity size={18} style={{ margin: "auto" }} />
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>TODAY MATERIAL</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Package size={17} />
                   </div>
                 </div>
                 <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-                  {Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%
+                  {todayMaterialCount}
                 </div>
-                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>Milestone completion meter</span>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>
+                  {todayMaterialCount > 0 ? `${todayMaterialCount} material ${todayMaterialCount === 1 ? "entry" : "entries"} today` : "0 material entries today"}
+                </span>
+              </div>
+
+              {/* 3. TODAY EXPENSE */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>TODAY EXPENSE</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#fef3c7", color: "#b45309", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <DollarSign size={17} />
+                  </div>
+                </div>
+                <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+                  ₹{todayExpenseSum.toLocaleString("en-IN")}
+                </div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>
+                  {todayExpenses.length > 0 ? `${todayExpenses.length} expense ${todayExpenses.length === 1 ? "record" : "records"} today` : "₹0 logged today"}
+                </span>
+              </div>
+
+              {/* 4. OVERALL PROGRESS */}
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 18px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>OVERALL PROGRESS</span>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#ffedd5", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Activity size={17} />
+                  </div>
+                </div>
+                <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
+                  {overallProgressPct}%
+                </div>
+                <span style={{ fontSize: "11px", color: "#64748b", marginTop: "8px", display: "block" }}>
+                  {latestProgressRecord ? `Latest DPR: ${formatDateDDMMYYYY(latestProgressRecord.date)}` : "Current milestone status"}
+                </span>
               </div>
 
             </div>
 
-            {/* TWO-COLUMN RESPONSIVE LAYOUT */}
-            <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: "20px" }}>
+            {/* TWO COMPACT MAIN PANELS: PROGRESS SUMMARY & BUDGET SUMMARY */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "20px" }}>
               
-              {/* LEFT COLUMN: PROGRESS SUMMARY & SITE INFORMATION */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                
-                {/* PROGRESS SUMMARY (LATEST DPR) */}
-                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                    <span style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "6px" }}>
-                      <FileText size={16} style={{ color: "#ea580c" }} /> Progress Summary (Latest DPR)
-                    </span>
-                    <button type="button" onClick={() => setActiveTab("progress")} className="btn btn-outline" style={{ padding: "4px 10px", fontSize: "11px" }}>
-                      View All DPRs →
-                    </button>
+              {/* PROGRESS SUMMARY */}
+              <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", display: "flex", alignItems: "center", gap: "8px" }}>
+                    <FileText size={16} style={{ color: "#ea580c" }} />
+                    <span>Progress Summary</span>
                   </div>
+                  <button 
+                    type="button" 
+                    onClick={() => setActiveTab("progress")} 
+                    className="btn btn-outline" 
+                    style={{ padding: "4px 10px", fontSize: "11.5px", fontWeight: "600" }}
+                  >
+                    View All DPRs →
+                  </button>
+                </div>
 
-                  {progressUpdates.length === 0 ? (
-                    <div style={{ textAlign: "center", padding: "20px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                      <span style={{ fontSize: "12.5px", color: "#64748b" }}>No daily progress reports logged for this site yet.</span>
+                {/* Progress bar */}
+                <div style={{ marginBottom: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: "700", marginBottom: "6px" }}>
+                    <span style={{ color: "#475569" }}>Actual Completion</span>
+                    <span style={{ color: "#ea580c", fontSize: "13px" }}>{overallProgressPct}%</span>
+                  </div>
+                  <div style={{ width: "100%", height: "8px", backgroundColor: "#f1f5f9", borderRadius: "100px", overflow: "hidden" }}>
+                    <div style={{ width: `${overallProgressPct}%`, height: "100%", backgroundColor: "#ea580c", transition: "width 0.3s ease" }} />
+                  </div>
+                </div>
+
+                {/* Latest actual DPR info */}
+                {latestProgressRecord ? (
+                  <div style={{ backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "14px 16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
+                      <strong style={{ fontSize: "13px", color: "#0f172a" }}>Work Update ({formatDateDDMMYYYY(latestProgressRecord.date)})</strong>
+                      <span style={{ fontSize: "11px", fontWeight: "700", backgroundColor: "#dcfce7", color: "#16a34a", padding: "2px 8px", borderRadius: "100px" }}>
+                        By: {latestProgressRecord.engineerName || "Site Engineer"}
+                      </span>
                     </div>
-                  ) : (
-                    <div style={{ backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", padding: "14px 16px" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>Work Summary ({progressUpdates[0].date || "Today"})</strong>
-                        <span style={{ fontSize: "11px", fontWeight: "700", backgroundColor: "#dcfce7", color: "#16a34a", padding: "2px 8px", borderRadius: "100px" }}>
-                          By: {progressUpdates[0].engineerName || "Site Engineer"}
-                        </span>
+                    <p style={{ margin: "0 0 6px 0", fontSize: "12.5px", color: "#334155", lineHeight: "1.45" }}>
+                      {latestProgressRecord.workDone || latestProgressRecord.description || "Daily progress updates logged successfully."}
+                    </p>
+                    {latestProgressRecord.remarks && (
+                      <div style={{ fontSize: "11.5px", color: "#64748b", fontStyle: "italic", borderTop: "1px solid #e2e8f0", paddingTop: "6px", marginTop: "6px" }}>
+                        Remarks: {latestProgressRecord.remarks}
                       </div>
-                      <p style={{ margin: "0 0 8px 0", fontSize: "12px", color: "#334155", lineHeight: "1.4" }}>
-                        {progressUpdates[0].workDone || progressUpdates[0].description || "Daily progress updates logged successfully."}
-                      </p>
-                      {progressUpdates[0].remarks && (
-                        <div style={{ fontSize: "11px", color: "#64748b", fontStyle: "italic", borderTop: "1px solid #e2e8f0", paddingTop: "6px" }}>
-                          Remarks: {progressUpdates[0].remarks}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </Card>
+                    )}
+                  </div>
+                ) : (
+                  <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", color: "#64748b", fontSize: "12.5px" }}>
+                    No daily progress reports logged for this site yet.
+                  </div>
+                )}
+              </Card>
 
-                {/* SITE INFORMATION */}
-                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <Building2 size={16} style={{ color: "#ea580c" }} /> Site Information
+              {/* BUDGET SUMMARY */}
+              <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "8px" }}>
+                  <DollarSign size={16} style={{ color: "#16a34a" }} />
+                  <span>Budget Summary</span>
+                </div>
+
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Budget</span>
+                    <strong style={{ fontSize: "13.5px", color: "#0f172a", fontFamily: "monospace" }}>
+                      {actualBudget > 0 ? `₹${actualBudget.toLocaleString("en-IN")}` : "Not Allocated"}
+                    </strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Used / Spent</span>
+                    <strong style={{ fontSize: "13.5px", color: "#ea580c", fontFamily: "monospace" }}>
+                      ₹{totalExpense.toLocaleString("en-IN")}
+                    </strong>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Remaining Budget</span>
+                    <strong style={{ fontSize: "13.5px", color: actualBudget > 0 ? (remainingBudget < 0 ? "#ef4444" : "#16a34a") : "#64748b", fontFamily: "monospace" }}>
+                      {actualBudget > 0 ? `₹${remainingBudget.toLocaleString("en-IN")}` : "—"}
+                    </strong>
                   </div>
 
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", fontSize: "12px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ color: "#64748b", fontWeight: "600" }}>Client / Owner</span>
-                      <strong style={{ color: "#0f172a" }}>{site.clientName || "Internal Project"}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ color: "#64748b", fontWeight: "600" }}>Site Address</span>
-                      <strong style={{ color: "#0f172a", textAlign: "right", maxWidth: "200px" }}>{site.location}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ color: "#64748b", fontWeight: "600" }}>Start Date</span>
-                      <strong style={{ color: "#0f172a" }}>{site.startDate || "--"}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ color: "#64748b", fontWeight: "600" }}>Expected End</span>
-                      <strong style={{ color: "#0f172a" }}>{site.expectedEndDate || "--"}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ color: "#64748b", fontWeight: "600" }}>GPS Radius</span>
-                      <strong style={{ color: "#0f172a" }}>{site.radius ? `${site.radius}m` : "100m"}</strong>
-                    </div>
-                  </div>
-                </Card>
-
-              </div>
-
-              {/* RIGHT COLUMN: BUDGET SUMMARY & PENDING ACTIONS */}
-              <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-                
-                {/* BUDGET SUMMARY CARD */}
-                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <DollarSign size={16} style={{ color: "#16a34a" }} /> Budget Summary
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Total Budget</span>
-                      <strong style={{ fontSize: "13px", color: "#0f172a", fontFamily: "monospace" }}>₹{budget.toLocaleString("en-IN")}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Approved Expense</span>
-                      <strong style={{ fontSize: "13px", color: "#0f172a", fontFamily: "monospace" }}>₹{totalExpense.toLocaleString("en-IN")}</strong>
-                    </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "6px" }}>
-                      <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>Remaining</span>
-                      <strong style={{ fontSize: "13px", color: remainingBudget < 0 ? "#ef4444" : "#16a34a", fontFamily: "monospace" }}>₹{remainingBudget.toLocaleString("en-IN")}</strong>
-                    </div>
-
-                    <div style={{ marginTop: "4px" }}>
+                  {actualBudget > 0 && (
+                    <div style={{ marginTop: "2px" }}>
                       <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", fontWeight: "700", marginBottom: "4px" }}>
                         <span style={{ color: "#64748b" }}>Utilization</span>
                         <span style={{ color: budgetUtilization > 100 ? "#ef4444" : "#16a34a" }}>{budgetUtilization.toFixed(1)}%</span>
@@ -869,58 +1003,9 @@ export default function SiteDetails({ siteId, onBack }) {
                         <div style={{ width: `${Math.min(budgetUtilization, 100)}%`, height: "100%", backgroundColor: budgetUtilization > 100 ? "#ef4444" : (budgetUtilization > 80 ? "#f97316" : "#16a34a") }} />
                       </div>
                     </div>
-                  </div>
-                </Card>
-
-                {/* IMPROVED SITE-SPECIFIC PENDING ACTIONS CARD */}
-                <Card style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", padding: "18px 20px" }}>
-                  <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginBottom: "14px", display: "flex", alignItems: "center", gap: "6px" }}>
-                    <ClipboardCheck size={16} style={{ color: "#b45309" }} /> Pending Actions
-                  </div>
-
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "12px" }}>
-                    {/* 1. Pending Daily Progress */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Daily Progress</span>
-                      {progressUpdates.some(p => p.date === new Date().toISOString().split("T")[0]) ? (
-                        <span style={{ fontWeight: "700", color: "#16a34a", fontSize: "11px" }}>Logged Today ✓</span>
-                      ) : (
-                        <span style={{ fontWeight: "700", color: "#b45309", fontSize: "11px" }}>Pending Today's DPR</span>
-                      )}
-                    </div>
-
-                    {/* 2. Pending Material Approval */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Material Approval</span>
-                      <span style={{ fontWeight: "700", color: totalPendingDel > 0 ? "#b45309" : "#16a34a", fontSize: "11px" }}>
-                        {totalPendingDel > 0 ? `${totalPendingDel} Deliveries Pending` : "All Delivered ✓"}
-                      </span>
-                    </div>
-
-                    {/* 3. Pending Labour Update */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Labour Update</span>
-                      <span style={{ fontWeight: "700", color: siteLabourFinancials.netPayable > 0 ? "#ea580c" : "#16a34a", fontSize: "11px" }}>
-                        ₹{siteLabourFinancials.netPayable.toLocaleString("en-IN")} Net Payable
-                      </span>
-                    </div>
-
-                    {/* 4. Pending Expense Approval */}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                      <span style={{ color: "#334155", fontWeight: "500" }}>Pending Expense Approval</span>
-                      {(() => {
-                        const pendingExpCount = expenses.filter(e => e.status === "Pending" || e.status === "pending").length;
-                        return (
-                          <span style={{ fontWeight: "700", color: pendingExpCount > 0 ? "#ef4444" : "#16a34a", fontSize: "11px" }}>
-                            {pendingExpCount > 0 ? `${pendingExpCount} Pending Approval` : "All Approved ✓"}
-                          </span>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                </Card>
-
-              </div>
+                  )}
+                </div>
+              </Card>
 
             </div>
 
@@ -1908,6 +1993,106 @@ export default function SiteDetails({ siteId, onBack }) {
         )}
 
       </div>
+
+      {/* MODAL: COMPACT SITE INFORMATION */}
+      <Modal
+        isOpen={showSiteInfoModal}
+        onClose={() => setShowSiteInfoModal(false)}
+        title="Site Information"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "12px", fontSize: "13px", padding: "4px 0" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Site Name</span>
+            <strong style={{ color: "#0f172a" }}>{site.siteName}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Client / Owner</span>
+            <strong style={{ color: "#0f172a" }}>{site.clientName || "Internal Project"}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Location</span>
+            <strong style={{ color: "#0f172a", textAlign: "right", maxWidth: "260px" }}>{site.location || "—"}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Assigned Engineer(s)</span>
+            <strong style={{ color: "#0f172a" }}>{engineers.map(e => e.fullName).join(", ") || "Unassigned"}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Project Status</span>
+            <Badge status={(site.status || "Planning").toLowerCase()}>{site.status || "Planning"}</Badge>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Timeline</span>
+            <strong style={{ color: "#0f172a" }}>{formatDateDDMMYYYY(site.startDate)} to {formatDateDDMMYYYY(site.expectedEndDate)}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>GPS Radius</span>
+            <strong style={{ color: "#0f172a" }}>{site.radius ? `${site.radius}m` : "100m"}</strong>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <span style={{ color: "#64748b", fontWeight: "600" }}>Allocated Budget</span>
+            <strong style={{ color: "#0f172a", fontFamily: "monospace" }}>
+              {actualBudget > 0 ? `₹${actualBudget.toLocaleString("en-IN")}` : "Not Allocated"}
+            </strong>
+          </div>
+        </div>
+        <div style={{ marginTop: "18px", textAlign: "right" }}>
+          <Button variant="outline" onClick={() => setShowSiteInfoModal(false)}>Close</Button>
+        </div>
+      </Modal>
+
+      {/* MODAL: COMPACT PENDING ACTIONS */}
+      <Modal
+        isOpen={showPendingActionsModal}
+        onClose={() => setShowPendingActionsModal(false)}
+        title="Pending Site Actions"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "10px", padding: "4px 0" }}>
+          {pendingItemsList.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 16px", color: "#16a34a" }}>
+              <CheckCircle2 size={32} style={{ margin: "0 auto 8px" }} />
+              <div style={{ fontWeight: "700", fontSize: "14px" }}>All Actions Completed!</div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>No pending reports, deliveries, or approvals for this site.</div>
+            </div>
+          ) : (
+            pendingItemsList.map((item, idx) => (
+              <div
+                key={idx}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 14px",
+                  borderRadius: "8px",
+                  border: "1px solid #e2e8f0",
+                  backgroundColor: "#f8fafc"
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>{item.title}</div>
+                  <div style={{ fontSize: "11.5px", color: "#ea580c", fontWeight: "600" }}>{item.status}</div>
+                </div>
+                {item.linkTab && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setShowPendingActionsModal(false);
+                      setActiveTab(item.linkTab);
+                    }}
+                    style={{ fontSize: "11.5px", padding: "4px 10px" }}
+                  >
+                    Resolve →
+                  </Button>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+        <div style={{ marginTop: "18px", textAlign: "right" }}>
+          <Button variant="outline" onClick={() => setShowPendingActionsModal(false)}>Close</Button>
+        </div>
+      </Modal>
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
     </Layout>
