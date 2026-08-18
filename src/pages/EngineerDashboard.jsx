@@ -7385,7 +7385,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         margin: "0 auto",
         padding: "8px 4px 80px 4px"
       }}>
-        {/* Segmented Control (Material 3        {/* Segmented Control (Orange / Light Grey Production Theme) */}
+        {/* Segmented Control (Orange / Light Grey Production Theme) */}
         <div style={{
           display: "flex",
           backgroundColor: "#f1f5f9",
@@ -7393,14 +7393,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           padding: "4px",
           gap: "4px",
           border: "1px solid #cbd5e1",
-          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)"
+          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)",
+          width: "100%",
+          boxSizing: "border-box"
         }}>
           <button
             type="button"
             onClick={() => setActiveWorkforceSubTab("new-entry")}
             style={{
               flex: 1,
-              padding: "10px 12px",
+              padding: "10px 8px",
+              minHeight: "42px",
               borderRadius: "20px",
               fontSize: "14px",
               fontWeight: "750",
@@ -7409,7 +7412,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               backgroundColor: activeWorkforceSubTab === "new-entry" ? "#ffffff" : "transparent",
               color: activeWorkforceSubTab === "new-entry" ? "#ea580c" : "#64748b",
               boxShadow: activeWorkforceSubTab === "new-entry" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
-              transition: "all 0.2s ease"
+              transition: "all 0.2s ease",
+              textAlign: "center",
+              boxSizing: "border-box",
+              whiteSpace: "nowrap"
             }}
           >
             Record Attendance
@@ -7419,7 +7425,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             onClick={() => setActiveWorkforceSubTab("history")}
             style={{
               flex: 1,
-              padding: "10px 12px",
+              padding: "10px 8px",
+              minHeight: "42px",
               borderRadius: "20px",
               fontSize: "14px",
               fontWeight: "750",
@@ -7428,7 +7435,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               backgroundColor: activeWorkforceSubTab === "history" ? "#ffffff" : "transparent",
               color: activeWorkforceSubTab === "history" ? "#ea580c" : "#64748b",
               boxShadow: activeWorkforceSubTab === "history" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
-              transition: "all 0.2s ease"
+              transition: "all 0.2s ease",
+              textAlign: "center",
+              boxSizing: "border-box",
+              whiteSpace: "nowrap"
             }}
           >
             Attendance History
@@ -7460,9 +7470,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 Attendance Date
               </label>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
+                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c", pointerEvents: "none" }} />
                 <input 
                   type="date" 
+                  className="no-native-calendar-icon"
                   value={labourDate} 
                   onChange={(e) => setLabourDate(e.target.value)} 
                   style={{
@@ -7661,16 +7672,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: "1px solid #cbd5e1",
-                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f5f9" : "#ffffff",
-                              color: isLabourSubmitted ? "#94a3b8" : "#475569",
+                              border: (count <= 0 || isLabourSubmitted) ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
+                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f5f9" : "#fff7ed",
+                              color: (count <= 0 || isLabourSubmitted) ? "#94a3b8" : "#ea580c",
                               fontWeight: "900",
                               cursor: (count <= 0 || isLabourSubmitted) ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              outline: "none"
+                              outline: "none",
+                              transition: "all 0.15s ease"
                             }}
                           >
                             -
@@ -7684,8 +7696,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: "1px solid #ea580c",
-                              backgroundColor: isLabourSubmitted ? "#cbd5e1" : "#ea580c",
+                              border: isLabourSubmitted ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
+                              backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ea580c",
                               color: isLabourSubmitted ? "#94a3b8" : "#ffffff",
                               fontWeight: "900",
                               cursor: isLabourSubmitted ? "not-allowed" : "pointer",
@@ -7693,7 +7705,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               display: "flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              outline: "none"
+                              outline: "none",
+                              transition: "all 0.15s ease"
                             }}
                           >
                             +
@@ -7701,44 +7714,60 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </div>
                       </div>
 
-                      {/* Work Units Single Editable Numeric Field */}
+                      {/* Work Units & Calculated Amount Section */}
                       <div style={{
                         display: "flex",
                         flexDirection: "column",
                         gap: "8px",
                         borderTop: "1px solid #e2e8f0",
-                        paddingTop: "10px"
+                        paddingTop: "12px"
                       }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                          <span style={{ fontSize: "12px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                            Work Units
-                          </span>
-                          <span style={{ fontSize: "14px", fontWeight: "800", color: rowAmount > 0 ? "#ea580c" : "#64748b" }}>
-                            Calculated Amount: ₹{rowAmount.toLocaleString("en-IN")}
-                          </span>
-                        </div>
+                        <div style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          padding: "10px 14px",
+                          backgroundColor: "#f8fafc",
+                          borderRadius: "12px",
+                          border: "1px solid #e2e8f0"
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                              Work Units
+                            </span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0.01"
+                              placeholder="1.0"
+                              value={currentUnitsStr}
+                              onChange={(e) => handleWorkUnitsChange(cat.id, e.target.value)}
+                              disabled={isLabourSubmitted}
+                              style={{
+                                width: "72px",
+                                height: "36px",
+                                boxSizing: "border-box",
+                                padding: "6px 8px",
+                                borderRadius: "8px",
+                                border: "1.5px solid #ea580c",
+                                fontSize: "14px",
+                                fontWeight: "800",
+                                textAlign: "center",
+                                backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
+                                outline: "none"
+                              }}
+                            />
+                          </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc", borderRadius: "12px", border: "1px solid #cbd5e1" }}>
-                          <input
-                            type="number"
-                            step="any"
-                            min="0.01"
-                            placeholder="1.0"
-                            value={currentUnitsStr}
-                            onChange={(e) => handleWorkUnitsChange(cat.id, e.target.value)}
-                            disabled={isLabourSubmitted}
-                            style={{
-                              width: "110px",
-                              padding: "8px 12px",
-                              borderRadius: "8px",
-                              border: "1.5px solid #ea580c",
-                              fontSize: "15px",
-                              fontWeight: "800",
-                              textAlign: "center",
-                              backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
-                              outline: "none"
-                            }}
-                          />
+                          <div style={{ textAlign: "right" }}>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                              Calculated Amount
+                            </span>
+                            <span style={{ fontSize: "15px", fontWeight: "850", color: rowAmount > 0 ? "#ea580c" : "#0f172a" }}>
+                              ₹{rowAmount.toLocaleString("en-IN")}
+                            </span>
+                          </div>
                         </div>
                       </div>
 
@@ -7746,7 +7775,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   );
                 })}
 
-                {/* Production Workforce Summary Dashboard (Orange Palette) */}
+                {/* Production Workforce Summary Dashboard (Consistent Color-per-Metric) */}
                 {(() => {
                   let totalWorkers = 0;
                   let presentCategoriesCount = 0;
@@ -7793,49 +7822,52 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           border: isLabourSubmitted ? "1px solid #fca5a5" : "1px solid #bbf7d0",
                           display: "flex",
                           alignItems: "center",
-                          gap: "6px"
+                          gap: "6px",
+                          whiteSpace: "nowrap",
+                          flexShrink: 0,
+                          lineHeight: "1.2"
                         }}>
                           {isLabourSubmitted ? "🔒 Submitted & Locked" : "🟢 Open & Editable"}
                         </span>
                       </div>
 
-                      {/* Metric Grid */}
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "10px" }}>
+                      {/* Metric Grid (Consistent 2x2 with clear color mapping) */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
                         <div style={{ backgroundColor: "#fff7ed", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #ffedd5" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase" }}>Total Workers</span>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Workers</span>
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#9a3412", marginTop: "2px" }}>{totalWorkers}</div>
                         </div>
 
-                        <div style={{ backgroundColor: "#f0fdf4", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #dcfce7" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#166534", textTransform: "uppercase" }}>Active Groups</span>
-                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#14532d", marginTop: "2px" }}>{presentCategoriesCount}</div>
+                        <div style={{ backgroundColor: "#f0f9ff", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #e0f2fe" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#0284c7", textTransform: "uppercase", letterSpacing: "0.5px" }}>Active Groups</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#0369a1", marginTop: "2px" }}>{presentCategoriesCount}</div>
                         </div>
 
-                        <div style={{ backgroundColor: "#fff7ed", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #ffedd5" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase" }}>Avg Work Units</span>
-                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#075985", marginTop: "2px" }}>{avgUnits}</div>
+                        <div style={{ backgroundColor: "#f8fafc", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #e2e8f0" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>Avg Work Units</span>
+                          <div style={{ fontSize: "20px", fontWeight: "900", color: "#0f172a", marginTop: "2px" }}>{avgUnits}</div>
                         </div>
 
                         <div style={{ backgroundColor: "#fefce8", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #fef9c3" }}>
-                          <span style={{ fontSize: "10.5px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase" }}>Work Units Sum</span>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Work Units Sum</span>
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#854d0e", marginTop: "2px" }}>{totalWorkUnits.toFixed(2)}</div>
                         </div>
                       </div>
 
-                      {/* Total Cost Banner */}
+                      {/* Total Cost Informational Banner (Distinct from Action Button) */}
                       <div style={{
                         display: "flex",
                         justifyContent: "space-between",
                         alignItems: "center",
                         padding: "14px 18px",
-                        backgroundColor: "#ea580c",
+                        backgroundColor: "#fff7ed",
                         borderRadius: "12px",
-                        color: "#ffffff"
+                        border: "1.5px solid #fed7aa"
                       }}>
-                        <span style={{ fontSize: "13px", fontWeight: "750", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                        <span style={{ fontSize: "13px", fontWeight: "750", textTransform: "uppercase", letterSpacing: "0.5px", color: "#c2410c" }}>
                           Calculated Amount
                         </span>
-                        <span style={{ fontSize: "22px", fontWeight: "900" }}>
+                        <span style={{ fontSize: "22px", fontWeight: "900", color: "#1e3a8a" }}>
                           ₹{totalLabourCost.toLocaleString("en-IN")}
                         </span>
                       </div>
@@ -7852,15 +7884,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       width: "100%",
                       padding: "14px 16px",
                       borderRadius: "14px",
-                      backgroundColor: "#ea580c",
-                      color: "#ffffff",
-                      border: "none",
+                      backgroundColor: (labourSubmitting || attendanceRows.length === 0) ? "#f1f5f9" : "#ea580c",
+                      color: (labourSubmitting || attendanceRows.length === 0) ? "#94a3b8" : "#ffffff",
+                      border: (labourSubmitting || attendanceRows.length === 0) ? "1px solid #cbd5e1" : "none",
                       fontSize: "16px",
                       fontWeight: "750",
-                      cursor: labourSubmitting || attendanceRows.length === 0 ? "not-allowed" : "pointer",
-                      opacity: labourSubmitting || attendanceRows.length === 0 ? 0.6 : 1,
+                      cursor: (labourSubmitting || attendanceRows.length === 0) ? "not-allowed" : "pointer",
                       marginTop: "16px",
-                      boxShadow: "0px 2px 4px rgba(234,88,12,0.2)",
+                      boxShadow: (labourSubmitting || attendanceRows.length === 0) ? "none" : "0px 2px 6px rgba(234,88,12,0.25)",
                       transition: "all 0.2s ease"
                     }}
                   >
@@ -8007,16 +8038,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
         
-        {/* Production Grand Total Summary Cards (Orange / Neutral Theme) */}
+        {/* Production Grand Total Summary Cards (Aligned Color-Per-Metric Theme) */}
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-          gap: "12px",
+          gridTemplateColumns: "1fr 1fr",
+          gap: "10px",
           width: "100%"
         }}>
           <div style={{
             backgroundColor: "#fff7ed",
-            borderRadius: "16px",
+            borderRadius: "14px",
             padding: "14px 16px",
             border: "1px solid #ffedd5",
             display: "flex",
@@ -8028,28 +8059,32 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
 
           <div style={{
-            backgroundColor: "#fff7ed",
-            borderRadius: "16px",
+            backgroundColor: "#fefce8",
+            borderRadius: "14px",
             padding: "14px 16px",
-            border: "1px solid #ffedd5",
+            border: "1px solid #fef9c3",
             display: "flex",
             flexDirection: "column",
             gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
-            <span style={{ fontSize: "22px", fontWeight: "900", color: "#075985" }}>{grandTotalWorkUnits.toFixed(2)}</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
+            <span style={{ fontSize: "22px", fontWeight: "900", color: "#854d0e" }}>{grandTotalWorkUnits.toFixed(2)}</span>
           </div>
 
           <div style={{
+            gridColumn: "1 / -1",
             backgroundColor: "#f0fdf4",
-            borderRadius: "16px",
+            borderRadius: "14px",
             padding: "14px 16px",
             border: "1px solid #dcfce7",
             display: "flex",
-            flexDirection: "column",
-            gap: "4px"
+            justifyContent: "space-between",
+            alignItems: "center"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#166534", textTransform: "uppercase", letterSpacing: "0.5px" }}>Grand Total Cost</span>
+            <div>
+              <span style={{ fontSize: "11px", fontWeight: "750", color: "#166534", textTransform: "uppercase", letterSpacing: "0.5px", display: "block" }}>Grand Total Cost</span>
+              <span style={{ fontSize: "12px", color: "#15803d", fontWeight: "600" }}>Total calculated workforce expense</span>
+            </div>
             <span style={{ fontSize: "22px", fontWeight: "900", color: "#14532d" }}>₹{grandTotalLabourCost.toLocaleString("en-IN")}</span>
           </div>
         </div>
@@ -8097,7 +8132,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           
           {/* Search Input */}
           <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-            <Search size={18} style={{ position: "absolute", left: "14px", color: "#ea580c" }} />
+            <Search size={18} style={{ position: "absolute", left: "14px", color: "#ea580c", pointerEvents: "none" }} />
             <input 
               type="text"
               placeholder="Search category name..."
@@ -8147,22 +8182,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             {/* Custom Date Picker */}
             <div style={{ display: "flex", flexDirection: "column", gap: "4px", opacity: filterDateMode === "Custom Date" ? 1 : 0.5 }}>
               <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569" }}>Custom Date</span>
-              <input 
-                type="date"
-                value={filterDate}
-                disabled={filterDateMode !== "Custom Date"}
-                onChange={(e) => setFilterDate(e.target.value)}
-                style={{
-                  height: "42px",
-                  padding: "8px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid #cbd5e1",
-                  backgroundColor: filterDateMode === "Custom Date" ? "#ffffff" : "#f1f5f9",
-                  fontSize: "13px",
-                  outline: "none",
-                  color: "#0f172a"
-                }}
-              />
+              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+                <Calendar size={16} style={{ position: "absolute", left: "12px", color: "#ea580c", pointerEvents: "none" }} />
+                <input 
+                  type="date"
+                  className="no-native-calendar-icon"
+                  value={filterDate}
+                  disabled={filterDateMode !== "Custom Date"}
+                  onChange={(e) => setFilterDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "42px",
+                    padding: "8px 12px 8px 38px",
+                    borderRadius: "10px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: filterDateMode === "Custom Date" ? "#ffffff" : "#f1f5f9",
+                    fontSize: "13px",
+                    outline: "none",
+                    color: "#0f172a"
+                  }}
+                />
+              </div>
             </div>
 
             {/* Category Filter */}
@@ -8197,12 +8237,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           {sortedDates.length === 0 ? (
             <div style={{
               textAlign: "center",
-              padding: "48px 20px",
-              backgroundColor: "#ffffff",
+              padding: "40px 20px",
+              backgroundColor: "#f8fafc",
               borderRadius: "16px",
-              border: "1px dashed #cbd5e1",
+              border: "1.5px dashed #cbd5e1",
               color: "#64748b",
-              fontSize: "15px",
+              fontSize: "14px",
               fontWeight: "600"
             }}>
               {labourHistoryRecords.length === 0 
