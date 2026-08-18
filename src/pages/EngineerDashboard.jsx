@@ -5137,7 +5137,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           return (
                             <div
                               key={row.rowId}
-                              onClick={() => handleOpenMaterialDetails(row)}
                               style={{
                                 display: "grid",
                                 gridTemplateColumns: "minmax(0, 2.2fr) minmax(60px, 1fr) minmax(46px, 0.7fr) minmax(40px, 0.6fr)",
@@ -5145,76 +5144,36 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 padding: "8px 8px",
                                 borderBottom: "1px solid #f1f5f9",
                                 backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff",
-                                cursor: "pointer",
-                                transition: "background-color 0.15s ease",
                                 gap: "6px"
                               }}
-                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f8fafc"; }}
-                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff"; }}
-                              title="Tap row for Rate & Amount details"
-                              aria-label="Tap to view material details"
                             >
-                              {/* 1. Material Select / Name (Unboxed list-style presentation with visible chevron & icon-only hint) */}
+                              {/* 1. Material Name (Static display text + icon-only details hint) */}
                               <div style={{ minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <div style={{ position: "relative", width: "100%", display: "flex", alignItems: "center" }}>
-                                  <div style={{
-                                    display: "flex",
-                                    alignItems: "center",
-                                    justifyContent: "space-between",
-                                    gap: "4px",
+                                <div style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  width: "100%",
+                                  padding: "2px 2px",
+                                  minHeight: "28px",
+                                  boxSizing: "border-box"
+                                }}>
+                                  <span style={{
+                                    fontSize: "13px",
+                                    fontWeight: "750",
+                                    color: "#0f172a",
+                                    lineHeight: "1.3",
+                                    wordBreak: "break-word",
+                                    whiteSpace: "normal",
                                     width: "100%",
-                                    padding: "2px 2px",
-                                    minHeight: "30px",
-                                    boxSizing: "border-box"
+                                    userSelect: "text"
                                   }}>
-                                    <span style={{
-                                      fontSize: "13px",
-                                      fontWeight: "750",
-                                      color: "#0f172a",
-                                      lineHeight: "1.3",
-                                      wordBreak: "break-word",
-                                      whiteSpace: "normal"
-                                    }}>
-                                      {(() => {
-                                        const matObj = teamMaterials.find(m => m.id === row.materialId);
-                                        if (!matObj) return row.materialName || "Select Material";
-                                        const isMatCustom = matObj.type === "custom";
-                                        return `${matObj.name}${isMatCustom ? " (Custom)" : ""}`;
-                                      })()}
-                                    </span>
-                                    <ChevronDown size={14} style={{ color: "#ea580c", flexShrink: 0, marginTop: "1px" }} />
-                                  </div>
-
-                                  {/* Invisible native select overlay for tap interaction without any box/border */}
-                                  <select
-                                    value={row.materialId}
-                                    onClick={(e) => e.stopPropagation()}
-                                    onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
-                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                    style={{
-                                      position: "absolute",
-                                      top: 0,
-                                      left: 0,
-                                      width: "100%",
-                                      height: "100%",
-                                      opacity: 0,
-                                      cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
-                                      appearance: "none",
-                                      WebkitAppearance: "none",
-                                      zIndex: 2
-                                    }}
-                                    aria-label="Select Material"
-                                  >
-                                    {teamMaterials.map(m => {
-                                      const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
-                                      const isMatCustom = m.type === "custom";
-                                      return (
-                                        <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
-                                          {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Added" : ""}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
+                                    {(() => {
+                                      const matObj = teamMaterials.find(m => m.id === row.materialId);
+                                      if (!matObj) return row.materialName || "Select Material";
+                                      const isMatCustom = matObj.type === "custom";
+                                      return `${matObj.name}${isMatCustom ? " (Custom)" : ""}`;
+                                    })()}
+                                  </span>
                                 </div>
 
                                 {/* Icon-only details trigger with accessible title/aria-label */}
