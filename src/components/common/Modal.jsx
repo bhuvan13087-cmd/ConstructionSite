@@ -9,6 +9,8 @@ export const Modal = ({
   footer,
   maxWidth = '600px',
   closeOnOverlayClick = false,
+  centered = false,
+  className = '',
   ...props
 }) => {
   const [isDirty, setIsDirty] = useState(false);
@@ -83,7 +85,7 @@ export const Modal = ({
   };
 
   return (
-    <div className="modal-overlay" onClick={handleOverlayClick} {...props}>
+    <div className={`modal-overlay ${centered ? 'modal-centered' : ''} ${className}`.trim()} onClick={handleOverlayClick} {...props}>
       <div 
         className="modal-card" 
         style={{ maxWidth }} 

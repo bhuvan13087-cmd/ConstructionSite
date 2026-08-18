@@ -118,7 +118,9 @@ import {
   Edit2, 
   Edit,
   ArrowRightLeft,
-  Inbox
+  Inbox,
+  ChevronDown,
+  Check
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -497,6 +499,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [materialMaster, setMaterialMaster] = useState([]);
   const [materialTeams, setMaterialTeams] = useState([]);
   const [selectedMaterialTeamId, setSelectedMaterialTeamId] = useState("");
+  const [isMaterialTeamDropdownOpen, setIsMaterialTeamDropdownOpen] = useState(false);
+  const materialTeamDropdownRef = useRef(null);
   const [materialUsageRows, setMaterialUsageRows] = useState([]);
   const [showDeliveryModal, setShowDeliveryModal] = useState(false);
   const [selectedMatDelivery, setSelectedMatDelivery] = useState(null);
@@ -947,6 +951,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       });
     });
   }, [materialTeams, selectedMaterialTeamId]);
+
+  // Close Material Team dropdown when tapping outside
+  useEffect(() => {
+    const handleMaterialTeamOutsideClick = (e) => {
+      if (materialTeamDropdownRef.current && !materialTeamDropdownRef.current.contains(e.target)) {
+        setIsMaterialTeamDropdownOpen(false);
+      }
+    };
+    if (isMaterialTeamDropdownOpen) {
+      document.addEventListener("mousedown", handleMaterialTeamOutsideClick);
+      document.addEventListener("touchstart", handleMaterialTeamOutsideClick);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleMaterialTeamOutsideClick);
+      document.removeEventListener("touchstart", handleMaterialTeamOutsideClick);
+    };
+  }, [isMaterialTeamDropdownOpen]);
 
   // Check Labour Attendance submission status for selected site and date
   useEffect(() => {
@@ -4700,12 +4721,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 Usage Date
               </label>
               <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
+                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c", pointerEvents: "none" }} />
                 <input 
                   id="material-entry-date"
                   type="date" 
                   value={bulkMaterialDate} 
                   onChange={(e) => setBulkMaterialDate(e.target.value)} 
+                  className="no-native-calendar-icon"
                   style={{
                     width: "100%",
                     height: "48px",
@@ -4716,7 +4738,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     fontSize: "15px",
                     outline: "none",
                     color: "#0f172a",
-                    fontWeight: "600"
+                    fontWeight: "600",
+                    boxSizing: "border-box"
                   }}
                 />
               </div>
@@ -4731,7 +4754,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
               display: "flex",
               flexDirection: "column",
-              gap: "8px"
+              gap: "8px",
+              position: "relative",
+              zIndex: isMaterialTeamDropdownOpen ? 30 : 1
             }}>
               <label htmlFor="select-material-team-dropdown" style={{
                 fontSize: "12px",
@@ -4742,24 +4767,214 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               }}>
                 Selected Team
               </label>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <Users size={20} style={{ position: "absolute", left: "12px", color: "#ea580c" }} />
-                <select
-                  id="select-material-team-dropdown"
-                  value={selectedMaterialTeamId}
-                  onChange={(e) => handleSelectMaterialTeam(e.target.value)}
+              
+              <div 
+                ref={materialTeamDropdownRef}
+                style={{ position: "relative", width: "100%", maxWidth: "100%" }}
+              >
+                {/* Responsive Dropdown Trigger */}
+                <button
+                  type="button"
+                  id="select-material-team-trigger"
+                  onClick={() => setIsMaterialTeamDropdownOpen(!isMaterialTeamDropdownOpen)}
                   style={{
                     width: "100%",
-                    height: "48px",
-                    padding: "12px 14px 12px 44px",
+                    minHeight: "48px",
+                    padding: "10px 14px 10px 44px",
                     borderRadius: "12px",
-                    border: "1px solid #cbd5e1",
+                    border: isMaterialTeamDropdownOpen ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
                     backgroundColor: "#ffffff",
                     fontSize: "15px",
                     outline: "none",
                     color: "#0f172a",
-                    fontWeight: "600"
+                    fontWeight: "600",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "8px",
+                    cursor: "pointer",
+                    textAlign: "left",
+                    boxShadow: isMaterialTeamDropdownOpen ? "0 0 0 3px rgba(234, 88, 12, 0.12)" : "none",
+                    transition: "border-color 0.15s ease, box-shadow 0.15s ease",
+                    boxSizing: "border-box"
                   }}
+                >
+                  <Users size={20} style={{ position: "absolute", left: "12px", color: "#ea580c", pointerEvents: "none" }} />
+                  
+                  <span style={{
+                    flex: 1,
+                    minWidth: 0,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                    color: selectedMaterialTeamId ? "#0f172a" : "#64748b",
+                    fontSize: "15px",
+                    fontWeight: selectedMaterialTeamId ? "600" : "500"
+                  }}>
+                    {(() => {
+                      const selectedTeam = materialTeams.find(t => t.id === selectedMaterialTeamId);
+                      if (!selectedTeam) return "-- Select Material Team --";
+                      const activeCount = (selectedTeam.materials || []).filter(m => m.status !== "Inactive").length;
+                      return `${selectedTeam.name} (${activeCount} material${activeCount !== 1 ? "s" : ""})`;
+                    })()}
+                  </span>
+
+                  <ChevronDown
+                    size={18}
+                    style={{
+                      color: "#ea580c",
+                      flexShrink: 0,
+                      transform: isMaterialTeamDropdownOpen ? "rotate(180deg)" : "rotate(0deg)",
+                      transition: "transform 0.2s ease"
+                    }}
+                  />
+                </button>
+
+                {/* Dropdown Options Popup Menu */}
+                {isMaterialTeamDropdownOpen && (
+                  <div
+                    id="material-team-dropdown-list"
+                    style={{
+                      position: "absolute",
+                      top: "calc(100% + 6px)",
+                      left: 0,
+                      right: 0,
+                      width: "100%",
+                      maxWidth: "100%",
+                      backgroundColor: "#ffffff",
+                      borderRadius: "12px",
+                      border: "1px solid #cbd5e1",
+                      boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)",
+                      zIndex: 60,
+                      maxHeight: "260px",
+                      overflowY: "auto",
+                      WebkitOverflowScrolling: "touch",
+                      boxSizing: "border-box",
+                      padding: "6px"
+                    }}
+                  >
+                    {/* Default None option */}
+                    <div
+                      role="option"
+                      aria-selected={!selectedMaterialTeamId}
+                      onClick={() => {
+                        handleSelectMaterialTeam("");
+                        setIsMaterialTeamDropdownOpen(false);
+                      }}
+                      style={{
+                        padding: "10px 12px",
+                        borderRadius: "8px",
+                        cursor: "pointer",
+                        fontSize: "14px",
+                        fontWeight: "600",
+                        color: !selectedMaterialTeamId ? "#ea580c" : "#64748b",
+                        backgroundColor: !selectedMaterialTeamId ? "#fff7ed" : "transparent",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        transition: "background-color 0.15s ease",
+                        marginBottom: "2px",
+                        boxSizing: "border-box"
+                      }}
+                    >
+                      <span style={{ fontSize: "14px", fontWeight: "600" }}>
+                        -- Select Material Team --
+                      </span>
+                      {!selectedMaterialTeamId && (
+                        <Check size={16} style={{ color: "#ea580c", flexShrink: 0 }} />
+                      )}
+                    </div>
+
+                    {materialTeams.length === 0 ? (
+                      <div style={{
+                        padding: "14px 12px",
+                        textAlign: "center",
+                        fontSize: "13px",
+                        color: "#94a3b8",
+                        fontWeight: "500"
+                      }}>
+                        No material teams available
+                      </div>
+                    ) : (
+                      materialTeams.map((team) => {
+                        const isSelected = team.id === selectedMaterialTeamId;
+                        const activeMatsCount = (team.materials || []).filter(m => m.status !== "Inactive").length;
+
+                        return (
+                          <div
+                            key={team.id}
+                            role="option"
+                            aria-selected={isSelected}
+                            onClick={() => {
+                              handleSelectMaterialTeam(team.id);
+                              setIsMaterialTeamDropdownOpen(false);
+                            }}
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: "8px",
+                              cursor: "pointer",
+                              backgroundColor: isSelected ? "#fff7ed" : "transparent",
+                              border: isSelected ? "1px solid #fed7aa" : "1px solid transparent",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              gap: "8px",
+                              transition: "background-color 0.15s ease",
+                              marginBottom: "2px",
+                              boxSizing: "border-box",
+                              width: "100%"
+                            }}
+                            onMouseEnter={(e) => {
+                              if (!isSelected) e.currentTarget.style.backgroundColor = "#f8fafc";
+                            }}
+                            onMouseLeave={(e) => {
+                              if (!isSelected) e.currentTarget.style.backgroundColor = "transparent";
+                            }}
+                          >
+                            <div style={{
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "2px",
+                              minWidth: 0,
+                              flex: 1
+                            }}>
+                              <span style={{
+                                fontSize: "14px",
+                                fontWeight: isSelected ? "700" : "600",
+                                color: isSelected ? "#c2410c" : "#0f172a",
+                                lineHeight: "1.3",
+                                wordBreak: "break-word",
+                                overflowWrap: "anywhere"
+                              }}>
+                                {team.name}
+                              </span>
+                              <span style={{
+                                fontSize: "11px",
+                                fontWeight: "500",
+                                color: isSelected ? "#ea580c" : "#64748b"
+                              }}>
+                                {activeMatsCount} material{activeMatsCount !== 1 ? "s" : ""}
+                              </span>
+                            </div>
+
+                            {isSelected && (
+                              <Check size={18} style={{ color: "#ea580c", flexShrink: 0, marginLeft: "6px" }} />
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+
+                {/* Hidden native select for form accessibility and element lookup */}
+                <select
+                  id="select-material-team-dropdown"
+                  value={selectedMaterialTeamId}
+                  onChange={(e) => handleSelectMaterialTeam(e.target.value)}
+                  style={{ display: "none" }}
+                  aria-hidden="true"
+                  tabIndex={-1}
                 >
                   <option value="">-- Select Material Team --</option>
                   {materialTeams.map(t => (
@@ -4852,21 +5067,40 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   flexDirection: "column",
                   gap: "14px"
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <div>
-                      <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <h4 style={{ 
+                        margin: 0, 
+                        fontSize: "15px", 
+                        fontWeight: "800", 
+                        color: "#0f172a",
+                        lineHeight: "1.3",
+                        wordBreak: "break-word",
+                        whiteSpace: "normal"
+                      }}>
                         {selectedTeam?.name} Materials
                       </h4>
-                      <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "600" }}>
+                      <span style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "600", display: "block", marginTop: "2px" }}>
                         Configured master rates
                       </span>
                     </div>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", backgroundColor: "#fff7ed", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
+                    <span style={{ 
+                      fontSize: "11px", 
+                      fontWeight: "750", 
+                      color: "#ea580c", 
+                      backgroundColor: "#fff7ed", 
+                      padding: "4px 8px", 
+                      borderRadius: "12px", 
+                      border: "1px solid #ffedd5",
+                      whiteSpace: "nowrap",
+                      flexShrink: 0,
+                      lineHeight: "1.2"
+                    }}>
                       {teamMaterials.length} Available Items
                     </span>
                   </div>
 
-                  {/* Clean Compact Table / Rows */}
+                  {/* Clean Strict CSS Grid Table */}
                   {materialUsageRows.length === 0 ? (
                     <div style={{ textAlign: "center", padding: "28px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px dashed #cbd5e1" }}>
                       <p style={{ margin: 0, fontSize: "13px", color: "var(--text-muted)", fontStyle: "italic" }}>
@@ -4874,147 +5108,243 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       </p>
                     </div>
                   ) : (
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", backgroundColor: "#ffffff" }}>
-                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
-                        <thead>
-                          <tr style={{ background: "#f8fafc", borderBottom: "1.5px solid #e2e8f0", color: "#475569" }}>
-                            <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: "750" }}>Material</th>
-                            <th style={{ padding: "10px 6px", textAlign: "center", width: "72px", fontWeight: "750" }}>Quantity</th>
-                            <th style={{ padding: "10px 6px", textAlign: "center", width: "55px", fontWeight: "750" }}>Unit</th>
-                            <th style={{ padding: "10px 6px", textAlign: "center", width: "45px", fontWeight: "750" }}>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {materialUsageRows.map((row) => {
-                            const isCustom = row.type === "custom";
-                            const qtyNum = Number(row.quantity) || 0;
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", backgroundColor: "#ffffff", width: "100%", boxSizing: "border-box" }}>
+                      {/* Fixed 4-Column Header Grid */}
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 2.2fr) minmax(60px, 1fr) minmax(46px, 0.7fr) minmax(40px, 0.6fr)",
+                        alignItems: "center",
+                        background: "#f8fafc",
+                        padding: "10px 8px",
+                        borderBottom: "1.5px solid #e2e8f0",
+                        color: "#475569",
+                        fontSize: "12px",
+                        fontWeight: "750",
+                        gap: "6px"
+                      }}>
+                        <div style={{ textAlign: "left", paddingLeft: "4px" }}>Material</div>
+                        <div style={{ textAlign: "center" }}>Quantity</div>
+                        <div style={{ textAlign: "center" }}>Unit</div>
+                        <div style={{ textAlign: "center" }}>Action</div>
+                      </div>
 
-                            return (
-                              <tr
-                                key={row.rowId}
-                                onClick={() => handleOpenMaterialDetails(row)}
-                                style={{
-                                  borderBottom: "1px solid #f1f5f9",
-                                  backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff",
-                                  cursor: "pointer",
-                                  transition: "background-color 0.15s ease"
-                                }}
-                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f8fafc"; }}
-                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff"; }}
-                                title="Tap to view full material details (Rate, Amount)"
+                      {/* Fixed 4-Column Row Grids */}
+                      <div>
+                        {materialUsageRows.map((row) => {
+                          const isCustom = row.type === "custom";
+                          const qtyNum = Number(row.quantity) || 0;
+
+                          return (
+                            <div
+                              key={row.rowId}
+                              onClick={() => handleOpenMaterialDetails(row)}
+                              style={{
+                                display: "grid",
+                                gridTemplateColumns: "minmax(0, 2.2fr) minmax(60px, 1fr) minmax(46px, 0.7fr) minmax(40px, 0.6fr)",
+                                alignItems: "center",
+                                padding: "8px 8px",
+                                borderBottom: "1px solid #f1f5f9",
+                                backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff",
+                                cursor: "pointer",
+                                transition: "background-color 0.15s ease",
+                                gap: "6px"
+                              }}
+                              onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f8fafc"; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff"; }}
+                              title="Tap row for Rate & Amount details"
+                              aria-label="Tap to view material details"
+                            >
+                              {/* 1. Material Select / Name (Unboxed list-style presentation with visible chevron & icon-only hint) */}
+                              <div style={{ minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                <div style={{ position: "relative", width: "100%", display: "flex", alignItems: "center" }}>
+                                  <div style={{
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
+                                    gap: "4px",
+                                    width: "100%",
+                                    padding: "2px 2px",
+                                    minHeight: "30px",
+                                    boxSizing: "border-box"
+                                  }}>
+                                    <span style={{
+                                      fontSize: "13px",
+                                      fontWeight: "750",
+                                      color: "#0f172a",
+                                      lineHeight: "1.3",
+                                      wordBreak: "break-word",
+                                      whiteSpace: "normal"
+                                    }}>
+                                      {(() => {
+                                        const matObj = teamMaterials.find(m => m.id === row.materialId);
+                                        if (!matObj) return row.materialName || "Select Material";
+                                        const isMatCustom = matObj.type === "custom";
+                                        return `${matObj.name}${isMatCustom ? " (Custom)" : ""}`;
+                                      })()}
+                                    </span>
+                                    <ChevronDown size={14} style={{ color: "#ea580c", flexShrink: 0, marginTop: "1px" }} />
+                                  </div>
+
+                                  {/* Invisible native select overlay for tap interaction without any box/border */}
+                                  <select
+                                    value={row.materialId}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
+                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                    style={{
+                                      position: "absolute",
+                                      top: 0,
+                                      left: 0,
+                                      width: "100%",
+                                      height: "100%",
+                                      opacity: 0,
+                                      cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
+                                      appearance: "none",
+                                      WebkitAppearance: "none",
+                                      zIndex: 2
+                                    }}
+                                    aria-label="Select Material"
+                                  >
+                                    {teamMaterials.map(m => {
+                                      const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
+                                      const isMatCustom = m.type === "custom";
+                                      return (
+                                        <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
+                                          {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Added" : ""}
+                                        </option>
+                                      );
+                                    })}
+                                  </select>
+                                </div>
+
+                                {/* Icon-only details trigger with accessible title/aria-label */}
+                                <div style={{ paddingLeft: "2px", display: "flex", alignItems: "center" }}>
+                                  <span
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenMaterialDetails(row);
+                                    }}
+                                    style={{
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      color: "#ea580c",
+                                      cursor: "pointer",
+                                      padding: "1px 4px 1px 0"
+                                    }}
+                                    title="View Rate & Amount details"
+                                    aria-label="View Rate & Amount details"
+                                  >
+                                    <Eye size={12} style={{ color: "#ea580c" }} />
+                                  </span>
+                                </div>
+                              </div>
+
+                              {/* 2. Quantity Input / Uniform Box */}
+                              <div 
+                                style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}
+                                onClick={(e) => e.stopPropagation()}
                               >
-                                {/* 1. Material Select / Name */}
-                                <td style={{ padding: "8px 10px" }}>
-                                  <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                                    <select
-                                      value={row.materialId}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
-                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                      style={{
-                                        width: "100%",
-                                        padding: "6px 8px",
-                                        borderRadius: "6px",
-                                        border: "1px solid #cbd5e1",
-                                        fontSize: "12.5px",
-                                        fontWeight: "750",
-                                        color: "#0f172a",
-                                        backgroundColor: "#ffffff",
-                                        outline: "none"
-                                      }}
-                                    >
-                                      {teamMaterials.map(m => {
-                                        const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
-                                        const isMatCustom = m.type === "custom";
-                                        return (
-                                          <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
-                                            {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Added" : ""}
-                                          </option>
-                                        );
-                                      })}
-                                    </select>
-                                    <span style={{ fontSize: "10.5px", color: "#64748b", display: "inline-flex", alignItems: "center", gap: "3px", paddingLeft: "2px" }}>
-                                      <Eye size={10} style={{ color: "#ea580c" }} />
-                                      <span>Tap row for Rate & Amount</span>
-                                    </span>
+                                {isCustom ? (
+                                  <div style={{
+                                    width: "100%",
+                                    maxWidth: "60px",
+                                    height: "36px",
+                                    boxSizing: "border-box",
+                                    borderRadius: "6px",
+                                    border: "1px solid #cbd5e1",
+                                    backgroundColor: "#f8fafc",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    fontSize: "13px",
+                                    fontWeight: "750",
+                                    color: "#64748b"
+                                  }}>
+                                    1
                                   </div>
-                                </td>
+                                ) : (
+                                  <input
+                                    id={`qty-input-${row.rowId}`}
+                                    type="number"
+                                    min="0"
+                                    step="any"
+                                    placeholder="0"
+                                    value={row.quantity}
+                                    onClick={(e) => e.stopPropagation()}
+                                    onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
+                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                    style={{
+                                      width: "100%",
+                                      maxWidth: "60px",
+                                      height: "36px",
+                                      boxSizing: "border-box",
+                                      padding: "6px 4px",
+                                      borderRadius: "6px",
+                                      border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
+                                      fontSize: "13px",
+                                      fontWeight: "750",
+                                      textAlign: "center",
+                                      backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
+                                      outline: "none"
+                                    }}
+                                  />
+                                )}
+                              </div>
 
-                                {/* 2. Quantity Input */}
-                                <td style={{ padding: "6px 4px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                                  {isCustom ? (
-                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px" }}>1</span>
-                                  ) : (
-                                    <input
-                                      id={`qty-input-${row.rowId}`}
-                                      type="number"
-                                      min="0"
-                                      step="any"
-                                      placeholder="0"
-                                      value={row.quantity}
-                                      onClick={(e) => e.stopPropagation()}
-                                      onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
-                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                      style={{
-                                        width: "100%",
-                                        maxWidth: "68px",
-                                        padding: "6px 4px",
-                                        borderRadius: "6px",
-                                        border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
-                                        fontSize: "13px",
-                                        fontWeight: "750",
-                                        textAlign: "center",
-                                        backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
-                                        outline: "none"
-                                      }}
-                                    />
-                                  )}
-                                </td>
+                              {/* 3. Unit / Uniform Box */}
+                              <div style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                                <span className="font-mono" style={{
+                                  backgroundColor: "#f1f5f9",
+                                  padding: "3px 6px",
+                                  borderRadius: "4px",
+                                  fontSize: "11px",
+                                  fontWeight: "750",
+                                  color: isCustom ? "#94a3b8" : "#475569",
+                                  whiteSpace: "nowrap",
+                                  textAlign: "center",
+                                  minWidth: "32px",
+                                  display: "inline-block"
+                                }}>
+                                  {isCustom ? "—" : (row.unit || "Unit")}
+                                </span>
+                              </div>
 
-                                {/* 3. Unit */}
-                                <td style={{ padding: "6px 4px", textAlign: "center" }}>
-                                  {isCustom ? (
-                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "11px" }}>—</span>
-                                  ) : (
-                                    <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 5px", borderRadius: "4px", fontSize: "11px", fontWeight: "700", color: "#475569" }}>
-                                      {row.unit || "Unit"}
-                                    </span>
-                                  )}
-                                </td>
-
-                                {/* 4. Action */}
-                                <td style={{ padding: "6px 4px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleRemoveMaterialRow(row.rowId);
-                                      }}
-                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                      style={{
-                                        background: "#fef2f2",
-                                        border: "1px solid #fecaca",
-                                        borderRadius: "6px",
-                                        padding: "5px 6px",
-                                        color: "#dc2626",
-                                        cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
-                                        display: "flex",
-                                        alignItems: "center",
-                                        justifyContent: "center",
-                                        transition: "all 0.15s ease"
-                                      }}
-                                      title="Delete item from list"
-                                    >
-                                      <Trash2 size={13} />
-                                    </button>
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                              {/* 4. Action */}
+                              <div 
+                                style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleRemoveMaterialRow(row.rowId);
+                                  }}
+                                  disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                  style={{
+                                    background: "#fef2f2",
+                                    border: "1px solid #fecaca",
+                                    borderRadius: "8px",
+                                    width: "36px",
+                                    height: "36px",
+                                    color: "#dc2626",
+                                    cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    padding: "0",
+                                    transition: "all 0.15s ease"
+                                  }}
+                                  aria-label="Delete item from list"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
 
@@ -5025,71 +5355,86 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     const allAdded = remainingCount === 0;
 
                     return (
-                      <div>
+                      <div style={{ width: "100%" }}>
                         <button
                           type="button"
                           onClick={handleAddMaterialRow}
                           disabled={isBulkMaterialLocked || bulkMaterialSubmitting || allAdded}
                           style={{
-                            backgroundColor: allAdded ? "#f1f5f9" : "#fff7ed",
-                            border: allAdded ? "1px solid #cbd5e1" : "1px solid #ffedd5",
-                            color: allAdded ? "#94a3b8" : "#ea580c",
-                            padding: "8px 14px",
-                            borderRadius: "8px",
-                            fontSize: "12.5px",
+                            width: "100%",
+                            boxSizing: "border-box",
+                            backgroundColor: allAdded ? "#f8fafc" : "#fff7ed",
+                            border: allAdded ? "1px dashed #cbd5e1" : "1.5px dashed #ea580c",
+                            color: allAdded ? "#64748b" : "#ea580c",
+                            padding: "10px 16px",
+                            borderRadius: "10px",
+                            fontSize: "13px",
                             fontWeight: "750",
                             cursor: allAdded ? "not-allowed" : "pointer",
-                            display: "inline-flex",
+                            display: "flex",
                             alignItems: "center",
-                            gap: "6px",
+                            justifyContent: "center",
+                            gap: "8px",
                             transition: "all 0.15s ease"
                           }}
-                          title={allAdded ? "All materials for this team have been added" : "Add another material"}
+                          aria-label={allAdded ? "All materials for this team have been added" : "Add another material"}
                         >
-                          <Plus size={15} />
-                          <span>{allAdded ? "All Materials Added" : "+ Add Material"}</span>
+                          {allAdded ? <Check size={16} style={{ color: "#64748b" }} /> : <Plus size={16} />}
+                          <span>{allAdded ? "All Materials Added for this Team" : "+ Add Material"}</span>
                         </button>
                       </div>
                     );
                   })()}
 
                   {/* Running Total & Submit Footer */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px", borderTop: "1px solid #e2e8f0", paddingTop: "14px", marginTop: "4px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", borderTop: "1px solid #e2e8f0", paddingTop: "16px", marginTop: "4px" }}>
                     <div style={{
                       display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      padding: "12px 16px",
+                      flexDirection: "column",
+                      gap: "14px",
+                      padding: "16px",
                       backgroundColor: "#fff7ed",
-                      borderRadius: "10px",
-                      border: "1px solid #ffedd5",
-                      flexWrap: "wrap",
-                      gap: "10px"
+                      borderRadius: "14px",
+                      border: "1px solid #ffedd5"
                     }}>
-                      <div>
-                        <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
-                          {selectedTeam?.name} Usage Summary
-                        </span>
-                        <strong style={{ fontSize: "13.5px", color: "#1e3a8a" }}>
-                          {itemsWithQtyCount} {itemsWithQtyCount === 1 ? "Material Item" : "Material Items"}
-                        </strong>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "750", color: "#ea580c", letterSpacing: "0.5px", display: "block" }}>
+                            {selectedTeam?.name} Usage Summary
+                          </span>
+                          <strong style={{ fontSize: "14px", color: "#0f172a", display: "block", marginTop: "2px" }}>
+                            {itemsWithQtyCount} {itemsWithQtyCount === 1 ? "Material Item" : "Material Items"}
+                          </strong>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "750", color: "#64748b", letterSpacing: "0.5px", display: "block" }}>
+                            Total Amount
+                          </span>
+                          <strong style={{ fontSize: "18px", color: "#1e3a8a", fontWeight: "800" }}>
+                            ₹{grandTotalAmount.toLocaleString("en-IN")}
+                          </strong>
+                        </div>
                       </div>
 
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                      {/* Equal-Width Symmetrical Button Pair */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%" }}>
                         {/* Compact Pending Action Button */}
                         <button
                           type="button"
                           onClick={handleOpenPendingModal}
                           style={{
-                            display: "inline-flex",
+                            flex: 1,
+                            display: "flex",
                             alignItems: "center",
-                            gap: "5px",
-                            padding: "7px 12px",
+                            justifyContent: "center",
+                            gap: "6px",
+                            height: "38px",
+                            padding: "0 12px",
                             borderRadius: "8px",
                             border: "1.5px solid #ea580c",
                             backgroundColor: "#ffffff",
                             color: "#ea580c",
-                            fontSize: "12.5px",
+                            fontSize: "13px",
                             fontWeight: "750",
                             cursor: "pointer",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
@@ -5099,7 +5444,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#ffffff"; }}
                           title="Record material with pending balance delivery"
                         >
-                          <Clock size={14} />
+                          <Clock size={15} />
                           <span>Pending</span>
                         </button>
 
@@ -5108,15 +5453,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           type="button"
                           onClick={() => handleOpenTransferModal()}
                           style={{
-                            display: "inline-flex",
+                            flex: 1,
+                            display: "flex",
                             alignItems: "center",
-                            gap: "5px",
-                            padding: "7px 12px",
+                            justifyContent: "center",
+                            gap: "6px",
+                            height: "38px",
+                            padding: "0 12px",
                             borderRadius: "8px",
                             border: "1.5px solid #0284c7",
                             backgroundColor: "#ffffff",
                             color: "#0284c7",
-                            fontSize: "12.5px",
+                            fontSize: "13px",
                             fontWeight: "750",
                             cursor: "pointer",
                             boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
@@ -5126,18 +5474,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#ffffff"; }}
                           title="Transfer material to another construction site"
                         >
-                          <ArrowRightLeft size={14} />
+                          <ArrowRightLeft size={15} />
                           <span>Transfer</span>
                         </button>
-
-                        <div style={{ textAlign: "right" }}>
-                          <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
-                            Total Amount
-                          </span>
-                          <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>
-                            ₹{grandTotalAmount.toLocaleString("en-IN")}
-                          </strong>
-                        </div>
                       </div>
                     </div>
 
@@ -6321,6 +6660,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               onClose={() => setShowMaterialDetailsModal(false)}
               title="Material Details"
               maxWidth="420px"
+              centered={true}
             >
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {/* Header Title Card */}
@@ -6330,30 +6670,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   borderRadius: "12px",
                   border: "1px solid #ffedd5"
                 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
-                    <div>
-                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                        {isCustom ? "Custom Item" : "Material Item"}
-                      </span>
-                      <h3 style={{ margin: "3px 0 0 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
-                        {row.materialName}
-                      </h3>
-                    </div>
-                    <span style={{
-                      backgroundColor: "#ffffff",
-                      padding: "3px 8px",
-                      borderRadius: "6px",
-                      border: "1px solid #fed7aa",
-                      fontSize: "11px",
-                      fontWeight: "750",
-                      color: "#c2410c"
-                    }}>
-                      {unitLabel}
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      {isCustom ? "Custom Item" : "Material Item"}
                     </span>
+                    <h3 style={{ margin: "3px 0 0 0", fontSize: "16px", fontWeight: "800", color: "#0f172a", wordBreak: "break-word" }}>
+                      {row.materialName}
+                    </h3>
                   </div>
                 </div>
 
-                {/* 5 Details Cards / Grid */}
+                {/* 4 Details Cards / 2-Column Labeled Grid Pattern */}
                 <div style={{
                   display: "grid",
                   gridTemplateColumns: "1fr 1fr",
