@@ -65,7 +65,26 @@ const normalizeDateStr = (dateVal) => {
       return new Date(dateVal.seconds * 1000).toISOString().split("T")[0];
     }
   }
-  return String(dateVal || "");
+};
+
+// Universal DD-MM-YYYY date formatter
+const formatDDMMYYYY = (dateVal) => {
+  if (dateVal === null || dateVal === undefined || dateVal === "") return "";
+  const cleanStr = normalizeDateStr(dateVal);
+  if (!cleanStr) return "";
+  const parts = cleanStr.split("-");
+  if (parts.length === 3) {
+    // If format is YYYY-MM-DD
+    if (parts[0].length === 4) {
+      const [y, m, d] = parts;
+      return `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}`;
+    }
+    // If format is DD-MM-YYYY
+    if (parts[2].length === 4) {
+      return `${parts[0].padStart(2, '0')}-${parts[1].padStart(2, '0')}-${parts[2]}`;
+    }
+  }
+  return cleanStr;
 };
 
 // Safe JSX child renderer to prevent "Objects are not valid as a React child" errors
@@ -1001,36 +1020,107 @@ export default function ReportsDashboard() {
     };
   }, [filteredSites, generalExpenses]);
 
-  // Calculate Labour Date Range Report Data from production records (labourAttendance state)
+  // Calculate Labour Date Range Report Data from canonical production records (labourAttendance state)
   const labourDateRangeReportData = useMemo(() => {
-    const grouped = {};
-    const uniqueDatesSet = new Set();
+    // 1. Deduplicate by doc ID to prevent double counting
+    const uniqueRecordsMap = new Map();
+    labourAttendance.forEach(r => {
+      if (!r || !r.id) return;
+      if (uniqueRecordsMap.has(r.id)) return;
+      uniqueRecordsMap.set(r.id, r);
+    });
 
-    labourAttendance.forEach((r) => {
-      if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
-      if (!allowedSiteIds.has(r.siteId)) return;
+    // 2. Filter records by Site and Date Range only (automatic team and engineer resolution)
+    const filteredRecords = Array.from(uniqueRecordsMap.values()).filter((r) => {
+      if (filterSiteId !== "all" && r.siteId !== filterSiteId) return false;
+      if (!allowedSiteIds.has(r.siteId)) return false;
 
-      const rDate = r.attendanceDate || "";
-      if (!rDate) return;
-      if (filterStartDate && rDate < filterStartDate) return;
-      if (filterEndDate && rDate > filterEndDate) return;
+      const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+      if (!rDate) return false;
+      if (filterStartDate && rDate < filterStartDate) return false;
+      if (filterEndDate && rDate > filterEndDate) return false;
 
-      uniqueDatesSet.add(rDate);
+      return true;
+    });
 
-      const category = (r.categoryId || r.categoryName || "Others").trim();
-      if (!grouped[category]) {
-        const masterWage = labourMaster[category]?.dailyWage || 0;
-        grouped[category] = {
-          category,
-          dailyWage: Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : masterWage)) || 0,
-          totalWorkers: 0,
-          totalUnits: 0,
-          totalAmount: 0
+    // 3. Group by Date -> Team -> Categories
+    const dateMap = {};
+
+    filteredRecords.forEach((r) => {
+      const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+      if (!dateMap[rDate]) {
+        dateMap[rDate] = {
+          dateStr: rDate,
+          teamMap: {},
+          dailyWorkers: 0,
+          dailyCost: 0
         };
       }
 
-      const workerCount = Number(r.workerCount) || 1;
-      const workUnitsPerWorker = Number(
+      // Resolve team
+      const teamObj = teams.find(t => t.id === r.teamId);
+      const teamId = r.teamId || "default_team";
+      const teamName = teamObj?.teamName || r.teamName || "General Labour";
+
+      // Resolve engineer
+      let engineerName = "";
+      const creatorId = r.createdBy || r.markedBy;
+      if (creatorId && engineersMap[creatorId]) {
+        engineerName = engineersMap[creatorId];
+      } else {
+        const siteObj = sites.find(s => s.id === r.siteId);
+        const assignedIds = siteObj?.assignedEngineers || [];
+        const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+        if (assignedNames.length > 0) {
+          engineerName = assignedNames.join(", ");
+        } else {
+          const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(r.siteId)).map(e => e.fullName).filter(Boolean);
+          engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+        }
+      }
+
+      if (!dateMap[rDate].teamMap[teamId]) {
+        dateMap[rDate].teamMap[teamId] = {
+          teamId,
+          teamName,
+          engineerName,
+          categories: []
+        };
+      }
+
+      // Resolve Category Name
+      let catName = r.categoryName;
+      if (!catName && teamObj?.categories) {
+        if (Array.isArray(teamObj.categories)) {
+          const c = teamObj.categories.find(x => x.id === r.categoryId);
+          if (c) catName = c.name;
+        } else if (teamObj.categories[r.categoryId]) {
+          catName = teamObj.categories[r.categoryId].name;
+        }
+      }
+      if (!catName && labourMaster[r.categoryId]) {
+        catName = labourMaster[r.categoryId].name;
+      }
+      if (!catName) {
+        catName = r.categoryId || "Worker";
+      }
+
+      // Resolve Daily Wage from canonical config
+      let dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : 0));
+      if (!dailyWage && teamObj?.categories) {
+        if (Array.isArray(teamObj.categories)) {
+          const c = teamObj.categories.find(x => x.id === r.categoryId);
+          if (c) dailyWage = Number(c.baseWage || c.wage || c.salaryAmount || 0);
+        } else if (teamObj.categories[r.categoryId]) {
+          dailyWage = Number(teamObj.categories[r.categoryId].baseWage || teamObj.categories[r.categoryId].wage || 0);
+        }
+      }
+      if (!dailyWage && labourMaster[r.categoryId]) {
+        dailyWage = Number(labourMaster[r.categoryId].dailyWage || 0);
+      }
+
+      const workerCount = Number(r.workerCount) || (r.attendanceValue !== undefined ? Number(r.attendanceValue) : 1);
+      const customWorkUnits = Number(
         r.customWorkUnits !== undefined 
           ? r.customWorkUnits 
           : (r.units !== undefined 
@@ -1038,89 +1128,599 @@ export default function ReportsDashboard() {
               : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
       ) || 1.0;
 
-      const rowUnits = workerCount * workUnitsPerWorker;
-      const rowWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (labourMaster[category]?.dailyWage || 0))) || 0;
-      
-      const rowAmount = Number(r.calculatedAmount) || Number(r.totalAmount) || (workerCount * workUnitsPerWorker * rowWage);
+      const categoryTotal = Number(r.calculatedAmount) || Number(r.totalAmount) || (workerCount * customWorkUnits * dailyWage);
 
-      grouped[category].totalWorkers += workerCount;
-      grouped[category].totalUnits += rowUnits;
-      grouped[category].totalAmount += rowAmount;
-      if (rowWage > 0 && grouped[category].dailyWage === 0) {
-        grouped[category].dailyWage = rowWage;
-      }
+      dateMap[rDate].teamMap[teamId].categories.push({
+        recordId: r.id,
+        categoryId: r.categoryId,
+        categoryName: catName,
+        workerCount,
+        customWorkUnits,
+        dailyWage,
+        categoryTotal
+      });
+
+      dateMap[rDate].dailyWorkers += workerCount;
+      dateMap[rDate].dailyCost += categoryTotal;
     });
 
-    const categories = Object.values(grouped);
-    categories.sort((a, b) => a.category.localeCompare(b.category));
-    const grandTotalLabourCost = categories.reduce((sum, item) => sum + item.totalAmount, 0);
+    // 4. Sort dates chronologically
+    const sortedDates = Object.keys(dateMap).sort((a, b) => a.localeCompare(b));
+
+    let grandTotalWorkers = 0;
+    let grandTotalLabourCost = 0;
+
+    const dailySections = sortedDates.map(dateStr => {
+      const d = dateMap[dateStr];
+      const teamsList = Object.values(d.teamMap).map(t => {
+        t.categories.sort((a, b) => a.categoryName.localeCompare(b.categoryName));
+        const teamWorkers = t.categories.reduce((sum, c) => sum + c.workerCount, 0);
+        const teamCost = t.categories.reduce((sum, c) => sum + c.categoryTotal, 0);
+        return {
+          ...t,
+          teamWorkers,
+          teamCost
+        };
+      });
+
+      grandTotalWorkers += d.dailyWorkers;
+      grandTotalLabourCost += d.dailyCost;
+
+      return {
+        dateStr,
+        teams: teamsList,
+        dailyWorkers: d.dailyWorkers,
+        dailyCost: d.dailyCost
+      };
+    });
+
+    // Resolve site name display & assigned engineers
+    let siteNameDisplay = "All Sites";
+    let assignedEngineersDisplay = "";
+    if (filterSiteId !== "all") {
+      const selectedSite = sites.find(s => s.id === filterSiteId);
+      siteNameDisplay = selectedSite?.siteName || "Selected Site";
+      const assignedEngIds = selectedSite?.assignedEngineers || [];
+      const names = assignedEngIds.map(id => engineersMap[id]).filter(Boolean);
+      if (names.length > 0) {
+        assignedEngineersDisplay = names.join(", ");
+      }
+    }
 
     return {
-      categories,
+      dailySections,
+      totalWorkingDays: dailySections.length,
+      grandTotalWorkers,
       grandTotalLabourCost,
-      totalWorkingDays: uniqueDatesSet.size,
+      siteNameDisplay,
+      assignedEngineersDisplay,
       startDate: filterStartDate,
       endDate: filterEndDate
     };
-  }, [labourAttendance, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate, labourMaster]);
+  }, [labourAttendance, filterSiteId, allowedSiteIds, filterTeamId, filterEngineerId, filterStartDate, filterEndDate, sites, teams, engineers, engineersMap, labourMaster]);
 
-  // Calculate Material Date Range Report Data from production records (materials state)
+  // Calculate Material Date Range Report Data from canonical production records (materials state)
   const materialDateRangeReportData = useMemo(() => {
-    const grouped = {};
-
-    materials.forEach((m) => {
-      if (!m.id || m.id.startsWith("lock_") || m.id === "__material_master__" || m.type === "material_lock" || m.type === "labour_attendance_lock") {
+    // 1. Deduplicate by doc ID to prevent double counting
+    const uniqueRecordsMap = new Map();
+    materials.forEach(m => {
+      if (!m || !m.id) return;
+      if (m.id.startsWith("lock_") || m.id === "__material_master__" || m.type === "material_lock" || m.type === "labour_attendance_lock") {
         return;
       }
+      if (uniqueRecordsMap.has(m.id)) return;
+      uniqueRecordsMap.set(m.id, m);
+    });
 
-      if (filterSiteId !== "all" && m.siteId !== filterSiteId) return;
-      if (!allowedSiteIds.has(m.siteId)) return;
+    // 2. Filter records by Site and Date Range only (automatic team and engineer resolution)
+    const filteredRecords = Array.from(uniqueRecordsMap.values()).filter((m) => {
+      if (filterSiteId !== "all" && m.siteId !== filterSiteId) return false;
+      if (!allowedSiteIds.has(m.siteId)) return false;
 
-      const mDate = m.purchaseDate || m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split('T')[0] : '');
-      if (!mDate) return;
-      if (filterStartDate && mDate < filterStartDate) return;
-      if (filterEndDate && mDate > filterEndDate) return;
+      const mDate = normalizeDateStr(m.purchaseDate || m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      if (!mDate) return false;
+      if (filterStartDate && mDate < filterStartDate) return false;
+      if (filterEndDate && mDate > filterEndDate) return false;
 
-      const materialName = (m.materialName || m.name || "General Material").trim();
-      if (!grouped[materialName]) {
-        grouped[materialName] = {
-          materialName,
-          totalQuantity: 0,
-          unit: m.unit || "Unit",
-          unitPrice: Number(m.unitPrice) || Number(m.unitCost) || 0,
-          totalAmount: 0
+      return true;
+    });
+
+    // 3. Group by Date -> Team / Supplier -> Materials
+    const dateMap = {};
+    const materialSummaryMap = {};
+
+    filteredRecords.forEach((m) => {
+      const mDate = normalizeDateStr(m.purchaseDate || m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      if (!dateMap[mDate]) {
+        dateMap[mDate] = {
+          dateStr: mDate,
+          teamMap: {},
+          dailyItems: 0,
+          dailyCost: 0
         };
       }
 
-      const qty = Number(m.quantity) || Number(m.requiredQuantity) || 0;
-      const uPrice = Number(m.unitPrice) || Number(m.unitCost) || 0;
-      const rowAmount = Number(m.totalAmount) || Number(m.totalCost) || (qty * uPrice);
+      // Resolve team / supplier
+      const teamId = m.teamId || m.supplierName || m.category || "general_material";
+      const teamName = m.teamName || m.category || m.supplierName || "General Materials";
 
-      grouped[materialName].totalQuantity += qty;
-      grouped[materialName].totalAmount += rowAmount;
-      if (uPrice > 0) {
-        grouped[materialName].unitPrice = uPrice;
+      // Resolve engineer
+      let engineerName = "";
+      const creatorId = m.engineerId || m.createdBy || m.markedBy;
+      if (creatorId && engineersMap[creatorId]) {
+        engineerName = engineersMap[creatorId];
+      } else {
+        const siteObj = sites.find(s => s.id === m.siteId);
+        const assignedIds = siteObj?.assignedEngineers || [];
+        const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+        if (assignedNames.length > 0) {
+          engineerName = assignedNames.join(", ");
+        } else {
+          const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(m.siteId)).map(e => e.fullName).filter(Boolean);
+          engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+        }
+      }
+
+      if (!dateMap[mDate].teamMap[teamId]) {
+        dateMap[mDate].teamMap[teamId] = {
+          teamId,
+          teamName,
+          engineerName,
+          items: []
+        };
+      }
+
+      const matName = (m.materialName || m.name || "General Material").trim();
+      const isCustom = m.isCustom || m.isCustomType || false;
+      const qty = Number(m.quantity !== undefined ? m.quantity : (m.receivedQuantity !== undefined ? m.receivedQuantity : 0)) || 0;
+      const unit = m.unit || (isCustom ? "--" : "Unit");
+      const unitPrice = Number(m.unitPrice !== undefined ? m.unitPrice : (m.rate !== undefined ? m.rate : (m.unitCost !== undefined ? m.unitCost : 0))) || 0;
+      
+      let totalAmount = Number(m.totalAmount !== undefined ? m.totalAmount : (m.totalCost !== undefined ? m.totalCost : 0));
+      if (!totalAmount && qty && unitPrice) {
+        totalAmount = qty * unitPrice;
+      }
+
+      dateMap[mDate].teamMap[teamId].items.push({
+        recordId: m.id,
+        materialName: matName,
+        quantity: qty,
+        unit,
+        unitPrice,
+        totalAmount,
+        isCustom,
+        notes: m.notes || ""
+      });
+
+      dateMap[mDate].dailyItems += 1;
+      dateMap[mDate].dailyCost += totalAmount;
+
+      // Aggregate into material-wise summary
+      if (!materialSummaryMap[matName]) {
+        materialSummaryMap[matName] = {
+          materialName: matName,
+          totalQuantity: 0,
+          unit,
+          unitPrice,
+          totalAmount: 0,
+          isCustom
+        };
+      }
+      materialSummaryMap[matName].totalQuantity += qty;
+      materialSummaryMap[matName].totalAmount += totalAmount;
+      if (unitPrice > 0) {
+        materialSummaryMap[matName].unitPrice = unitPrice;
       }
     });
 
-    const materialRows = Object.values(grouped).map(row => {
-      const unitPrice = row.unitPrice > 0 ? row.unitPrice : (row.totalQuantity > 0 ? (row.totalAmount / row.totalQuantity) : 0);
+    // 4. Sort dates chronologically
+    const sortedDates = Object.keys(dateMap).sort((a, b) => a.localeCompare(b));
+
+    let grandTotalMaterialCost = 0;
+    let grandTotalMaterialItems = 0;
+
+    const dailySections = sortedDates.map(dateStr => {
+      const d = dateMap[dateStr];
+      const teamsList = Object.values(d.teamMap).map(t => {
+        t.items.sort((a, b) => a.materialName.localeCompare(b.materialName));
+        const teamCost = t.items.reduce((sum, item) => sum + item.totalAmount, 0);
+        return {
+          ...t,
+          teamCost
+        };
+      });
+
+      grandTotalMaterialCost += d.dailyCost;
+      grandTotalMaterialItems += d.dailyItems;
+
       return {
-        ...row,
-        unitPrice
+        dateStr,
+        teams: teamsList,
+        dailyItems: d.dailyItems,
+        dailyCost: d.dailyCost
       };
     });
-    materialRows.sort((a, b) => a.materialName.localeCompare(b.materialName));
 
-    const grandTotalMaterialCost = materialRows.reduce((sum, item) => sum + item.totalAmount, 0);
+    // Material-wise sorted summary
+    const materialSummaryList = Object.values(materialSummaryMap).map(row => {
+      const effectiveUnitPrice = row.unitPrice > 0 ? row.unitPrice : (row.totalQuantity > 0 ? (row.totalAmount / row.totalQuantity) : 0);
+      return {
+        ...row,
+        unitPrice: effectiveUnitPrice
+      };
+    });
+    materialSummaryList.sort((a, b) => a.materialName.localeCompare(b.materialName));
+
+    // Resolve site name display & assigned engineers
+    let siteNameDisplay = "All Sites";
+    let assignedEngineersDisplay = "";
+    if (filterSiteId !== "all") {
+      const selectedSite = sites.find(s => s.id === filterSiteId);
+      siteNameDisplay = selectedSite?.siteName || "Selected Site";
+      const assignedEngIds = selectedSite?.assignedEngineers || [];
+      const names = assignedEngIds.map(id => engineersMap[id]).filter(Boolean);
+      if (names.length > 0) {
+        assignedEngineersDisplay = names.join(", ");
+      }
+    }
 
     return {
-      materials: materialRows,
+      dailySections,
+      materialSummary: materialSummaryList,
+      totalWorkingDays: dailySections.length,
       grandTotalMaterialCost,
+      grandTotalMaterialItems,
+      siteNameDisplay,
+      assignedEngineersDisplay,
       startDate: filterStartDate,
       endDate: filterEndDate
     };
-  }, [materials, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate]);
+  }, [materials, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate, sites, engineers, engineersMap]);
+
+  // Calculate Expense Date Range Report Data from canonical production records (generalExpenses state)
+  const expenseDateRangeReportData = useMemo(() => {
+    // 1. Deduplicate by record ID to prevent double counting
+    const uniqueRecordsMap = new Map();
+    generalExpenses.forEach(exp => {
+      if (!exp) return;
+      const recId = exp.id || `exp_${exp.siteId}_${exp.date}_${exp.amount}_${exp.description}`;
+      if (uniqueRecordsMap.has(recId)) return;
+      uniqueRecordsMap.set(recId, { ...exp, id: recId });
+    });
+
+    // 2. Filter records by Site and Date Range only (automatic engineer resolution)
+    const filteredRecords = Array.from(uniqueRecordsMap.values()).filter((exp) => {
+      if (filterSiteId !== "all" && exp.siteId !== filterSiteId) return false;
+      if (!allowedSiteIds.has(exp.siteId)) return false;
+
+      const expDate = normalizeDateStr(exp.date || (exp.createdAt?.seconds ? new Date(exp.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      if (!expDate) return false;
+      if (filterStartDate && expDate < filterStartDate) return false;
+      if (filterEndDate && expDate > filterEndDate) return false;
+
+      return true;
+    });
+
+    // 3. Group by Date -> Items
+    const dateMap = {};
+    const categorySummaryMap = {};
+
+    filteredRecords.forEach((exp) => {
+      const expDate = normalizeDateStr(exp.date || (exp.createdAt?.seconds ? new Date(exp.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      if (!dateMap[expDate]) {
+        dateMap[expDate] = {
+          dateStr: expDate,
+          items: [],
+          dailyItems: 0,
+          dailyCost: 0
+        };
+      }
+
+      // Resolve engineer
+      let engineerName = exp.createdBy || "";
+      if (!engineerName || engineerName === "Engineer") {
+        const creatorId = exp.engineerId || exp.userId;
+        if (creatorId && engineersMap[creatorId]) {
+          engineerName = engineersMap[creatorId];
+        } else {
+          const siteObj = sites.find(s => s.id === exp.siteId);
+          const assignedIds = siteObj?.assignedEngineers || [];
+          const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+          if (assignedNames.length > 0) {
+            engineerName = assignedNames.join(", ");
+          } else {
+            const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(exp.siteId)).map(e => e.fullName).filter(Boolean);
+            engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+          }
+        }
+      }
+
+      const catName = (exp.category || "General Expense").trim();
+      const amount = Number(exp.amount) || 0;
+      const desc = exp.description || exp.name || exp.notes || "Expense Item";
+      const status = exp.status || "Approved";
+
+      dateMap[expDate].items.push({
+        recordId: exp.id,
+        category: catName,
+        description: desc,
+        amount,
+        status,
+        engineerName,
+        notes: exp.notes || ""
+      });
+
+      dateMap[expDate].dailyItems += 1;
+      dateMap[expDate].dailyCost += amount;
+
+      // Aggregate into category summary map
+      if (!categorySummaryMap[catName]) {
+        categorySummaryMap[catName] = {
+          categoryName: catName,
+          totalEntries: 0,
+          totalAmount: 0
+        };
+      }
+      categorySummaryMap[catName].totalEntries += 1;
+      categorySummaryMap[catName].totalAmount += amount;
+    });
+
+    // 4. Sort dates chronologically
+    const sortedDates = Object.keys(dateMap).sort((a, b) => a.localeCompare(b));
+
+    let grandTotalExpenseCost = 0;
+    let grandTotalExpenseItems = 0;
+
+    const dailySections = sortedDates.map(dateStr => {
+      const d = dateMap[dateStr];
+      d.items.sort((a, b) => a.category.localeCompare(b.category));
+
+      grandTotalExpenseCost += d.dailyCost;
+      grandTotalExpenseItems += d.dailyItems;
+
+      return {
+        dateStr,
+        items: d.items,
+        dailyItems: d.dailyItems,
+        dailyCost: d.dailyCost
+      };
+    });
+
+    // Category-wise sorted summary list
+    const categorySummaryList = Object.values(categorySummaryMap).map(row => ({
+      ...row,
+      percentage: grandTotalExpenseCost > 0 ? (row.totalAmount / grandTotalExpenseCost) * 100 : 0
+    }));
+    categorySummaryList.sort((a, b) => b.totalAmount - a.totalAmount);
+
+    // Resolve site name display & assigned engineers
+    let siteNameDisplay = "All Sites";
+    let assignedEngineersDisplay = "";
+    if (filterSiteId !== "all") {
+      const selectedSite = sites.find(s => s.id === filterSiteId);
+      siteNameDisplay = selectedSite?.siteName || "Selected Site";
+      const assignedEngIds = selectedSite?.assignedEngineers || [];
+      const names = assignedEngIds.map(id => engineersMap[id]).filter(Boolean);
+      if (names.length > 0) {
+        assignedEngineersDisplay = names.join(", ");
+      }
+    }
+
+    return {
+      dailySections,
+      categorySummary: categorySummaryList,
+      totalWorkingDays: dailySections.length,
+      grandTotalExpenseCost,
+      grandTotalExpenseItems,
+      siteNameDisplay,
+      assignedEngineersDisplay,
+      startDate: filterStartDate,
+      endDate: filterEndDate
+    };
+  }, [generalExpenses, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate, sites, engineers, engineersMap]);
+
+  // Calculate Progress Date Range Report Data from canonical production records (allDprs state)
+  const progressDateRangeReportData = useMemo(() => {
+    // 1. Deduplicate by doc ID
+    const uniqueRecordsMap = new Map();
+    allDprs.forEach(d => {
+      if (!d || !d.id) return;
+      if (uniqueRecordsMap.has(d.id)) return;
+      uniqueRecordsMap.set(d.id, d);
+    });
+
+    // 2. Filter records by Site and Date Range
+    const filteredRecords = Array.from(uniqueRecordsMap.values()).filter((d) => {
+      if (filterSiteId !== "all" && d.siteId !== filterSiteId) return false;
+      if (!allowedSiteIds.has(d.siteId)) return false;
+
+      const dDate = normalizeDateStr(d.date || (d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      if (!dDate) return false;
+      if (filterStartDate && dDate < filterStartDate) return false;
+      if (filterEndDate && dDate > filterEndDate) return false;
+
+      return true;
+    });
+
+    // 3. Sort chronologically
+    filteredRecords.sort((a, b) => {
+      const dateA = normalizeDateStr(a.date || (a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      const dateB = normalizeDateStr(b.date || (b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      return dateA.localeCompare(dateB);
+    });
+
+    // 4. Parse progress values and track trends
+    let previousProgress = null;
+    const dailyEntries = [];
+
+    filteredRecords.forEach((d) => {
+      const dDate = normalizeDateStr(d.date || (d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString().split('T')[0] : ''));
+      
+      // Parse progress number from "65%" or 65
+      let rawProg = d.progress;
+      if (typeof rawProg === "string") {
+        rawProg = parseFloat(rawProg.replace("%", ""));
+      }
+      const progressPercent = isNaN(rawProg) ? 0 : Math.min(100, Math.max(0, Number(rawProg)));
+
+      // Calculate progress change from previous entry
+      let progressChange = null;
+      if (previousProgress !== null) {
+        progressChange = progressPercent - previousProgress;
+      }
+      previousProgress = progressPercent;
+
+      // Resolve engineer
+      let engineerName = "";
+      const creatorId = d.engineerId || d.userId;
+      if (creatorId && engineersMap[creatorId]) {
+        engineerName = engineersMap[creatorId];
+      } else {
+        const siteObj = sites.find(s => s.id === d.siteId);
+        const assignedIds = siteObj?.assignedEngineers || [];
+        const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+        if (assignedNames.length > 0) {
+          engineerName = assignedNames.join(", ");
+        } else {
+          const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(d.siteId)).map(e => e.fullName).filter(Boolean);
+          engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+        }
+      }
+
+      const workDetails = d.currentlyRunning || d.workCompleted || d.notes || d.pendingWork || "Daily progress logged";
+      const remarks = d.problemsFaced || d.nextActivity || d.materialsStatus || "--";
+
+      dailyEntries.push({
+        id: d.id,
+        dateStr: dDate,
+        engineerName,
+        progressPercent,
+        progressChange,
+        workDetails,
+        remarks,
+        raw: d
+      });
+    });
+
+    const totalReportingDays = dailyEntries.length;
+    const startingProgress = totalReportingDays > 0 ? dailyEntries[0].progressPercent : 0;
+    const latestProgress = totalReportingDays > 0 ? dailyEntries[totalReportingDays - 1].progressPercent : 0;
+    const progressAchieved = Math.max(0, latestProgress - startingProgress);
+    const remainingProgress = Math.max(0, 100 - latestProgress);
+
+    // Average progress rate per reporting day
+    const averageProgressRate = totalReportingDays > 1 
+      ? (progressAchieved / (totalReportingDays - 1))
+      : (totalReportingDays === 1 ? progressAchieved : 0);
+
+    // Estimated completion date calculation
+    let estimatedCompletionDate = null;
+    let estimatedDaysRemaining = null;
+    let isEstimateReliable = false;
+
+    if (latestProgress >= 100) {
+      isEstimateReliable = true;
+      estimatedCompletionDate = "Completed (100%)";
+      estimatedDaysRemaining = 0;
+    } else if (averageProgressRate > 0 && totalReportingDays >= 2) {
+      isEstimateReliable = true;
+      estimatedDaysRemaining = Math.ceil(remainingProgress / averageProgressRate);
+      const lastEntryDate = new Date(dailyEntries[dailyEntries.length - 1].dateStr);
+      if (!isNaN(lastEntryDate.getTime())) {
+        const estDate = new Date(lastEntryDate.getTime() + estimatedDaysRemaining * 24 * 60 * 60 * 1000);
+        const yyyy = estDate.getFullYear();
+        const mm = String(estDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(estDate.getDate()).padStart(2, '0');
+        estimatedCompletionDate = `${dd}-${mm}-${yyyy}`;
+      }
+    }
+
+    // Resolve site & project health status
+    let siteNameDisplay = "All Sites";
+    let assignedEngineersDisplay = "";
+    let projectStatus = "On Track";
+    let selectedSiteObj = null;
+
+    if (filterSiteId !== "all") {
+      selectedSiteObj = sites.find(s => s.id === filterSiteId);
+      siteNameDisplay = selectedSiteObj?.siteName || "Selected Site";
+      const assignedEngIds = selectedSiteObj?.assignedEngineers || [];
+      const names = assignedEngIds.map(id => engineersMap[id]).filter(Boolean);
+      if (names.length > 0) {
+        assignedEngineersDisplay = names.join(", ");
+      }
+
+      // Check planned schedule if target dates exist
+      if (selectedSiteObj?.startDate && selectedSiteObj?.endDate) {
+        const startTs = new Date(selectedSiteObj.startDate).getTime();
+        const endTs = new Date(selectedSiteObj.endDate).getTime();
+        const nowTs = Date.now();
+        if (endTs > startTs) {
+          const expectedPct = Math.min(100, Math.max(0, ((nowTs - startTs) / (endTs - startTs)) * 100));
+          if (latestProgress >= 100) {
+            projectStatus = "Completed";
+          } else if (latestProgress >= expectedPct + 5) {
+            projectStatus = "Ahead of Schedule";
+          } else if (latestProgress >= expectedPct - 8) {
+            projectStatus = "On Track";
+          } else {
+            projectStatus = "Behind / Delayed";
+          }
+        }
+      } else if (latestProgress >= 100) {
+        projectStatus = "Completed";
+      } else if (totalReportingDays > 0) {
+        projectStatus = averageProgressRate > 0 ? "On Track" : "Pacing Slow";
+      } else {
+        projectStatus = "No Activity";
+      }
+    } else {
+      if (latestProgress >= 100) projectStatus = "Completed";
+      else if (totalReportingDays > 0) projectStatus = "On Track";
+      else projectStatus = "No Activity";
+    }
+
+    // AI Management Insights generation purely from real data
+    let aiAnalysis = "";
+    if (totalReportingDays === 0) {
+      aiAnalysis = "No progress records have been logged for this period. Recommend scheduling regular daily progress submissions with the site team.";
+    } else {
+      const paceText = averageProgressRate > 1.5 
+        ? "demonstrating strong velocity" 
+        : (averageProgressRate > 0.5 ? "advancing at a steady, consistent pace" : "experiencing a plateau or slower execution velocity");
+      
+      const completionText = isEstimateReliable && estimatedCompletionDate !== "Completed (100%)"
+        ? `At the current average rate of ${averageProgressRate.toFixed(1)}% per reporting log, the milestone completion is projected for ${estimatedCompletionDate} (~${estimatedDaysRemaining} working days).`
+        : (latestProgress >= 100 ? "Project works are fully completed (100%)." : "Insufficient progress history for reliable completion estimate.");
+
+      const healthObservation = projectStatus === "Ahead of Schedule"
+        ? "Field operations are currently running ahead of the planned timeline."
+        : (projectStatus === "Behind / Delayed" 
+            ? "Site progress is lagging behind planned benchmarks; consider expediting material dispatch or increasing trade labor allocation." 
+            : "Execution milestones are tracking satisfactorily within expected operational parameters.");
+
+      aiAnalysis = `Current recorded progress is ${latestProgress.toFixed(1)}% (net gain of +${progressAchieved.toFixed(1)}% across ${totalReportingDays} daily logs, ${paceText}). ${completionText} ${healthObservation}`;
+    }
+
+    return {
+      dailyEntries,
+      totalReportingDays,
+      startingProgress,
+      latestProgress,
+      progressAchieved,
+      remainingProgress,
+      averageProgressRate,
+      estimatedCompletionDate,
+      estimatedDaysRemaining,
+      isEstimateReliable,
+      projectStatus,
+      aiAnalysis,
+      siteNameDisplay,
+      assignedEngineersDisplay,
+      startDate: filterStartDate,
+      endDate: filterEndDate
+    };
+  }, [allDprs, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate, sites, engineers, engineersMap]);
 
   // Excel and CSV Exporter
   const exportToExcel = (type, extension = "xls") => {
@@ -1155,43 +1755,100 @@ export default function ReportsDashboard() {
         ]);
       });
     } else if (type === "labour") {
-      const fromStr = filterStartDate || "Start";
-      const toStr = filterEndDate || "End";
-      filename = `Labour_Date_Range_Report_${fromStr}_to_${toStr}.${extension}`;
-      headers = ["Category", "Daily Wage", "Total Workers", "Total Units", "Total Amount"];
+      const fromStr = formatDDMMYYYY(filterStartDate) || "Start";
+      const toStr = formatDDMMYYYY(filterEndDate) || "End";
+      const siteClean = (labourDateRangeReportData.siteNameDisplay || "Site").replace(/[^a-zA-Z0-9_-]/g, "_");
+      filename = `Labour_Report_${siteClean}_${fromStr}_to_${toStr}.${extension}`;
+      headers = ["Date", "Site Engineer", "Labour Team", "Category", "Workers", "Daily Wage", "Category Total"];
 
-      labourDateRangeReportData.categories.forEach(row => {
+      labourDateRangeReportData.dailySections.forEach(day => {
+        const formattedDayDate = formatDDMMYYYY(day.dateStr);
+        day.teams.forEach(team => {
+          team.categories.forEach(cat => {
+            rows.push([
+              formattedDayDate,
+              `"${team.engineerName}"`,
+              `"${team.teamName}"`,
+              `"${cat.categoryName}"`,
+              cat.workerCount,
+              cat.dailyWage,
+              cat.categoryTotal.toFixed(2)
+            ]);
+          });
+        });
         rows.push([
-          `"${row.category}"`,
-          row.dailyWage,
-          row.totalWorkers,
-          row.totalUnits.toFixed(2),
-          row.totalAmount.toFixed(2)
+          `"${formattedDayDate} Daily Total"`,
+          "",
+          "",
+          "",
+          day.dailyWorkers,
+          "",
+          day.dailyCost.toFixed(2)
         ]);
+        rows.push([]);
       });
-      rows.push([]);
-      rows.push(["Grand Total Labour Cost", "", "", "", labourDateRangeReportData.grandTotalLabourCost.toFixed(2)]);
-      rows.push(["Selected Period", `"${(filterStartDate || 'Beginning') + ' to ' + (filterEndDate || 'Today')}"`]);
-      rows.push(["Total Working Days", labourDateRangeReportData.totalWorkingDays]);
-      rows.push(["Total Labour Cost", labourDateRangeReportData.grandTotalLabourCost.toFixed(2)]);
+
+      rows.push(["FINAL SUMMARY", "", "", "", "", "", ""]);
+      rows.push(["Total Days", labourDateRangeReportData.totalWorkingDays, "", "", "", "", ""]);
+      rows.push(["Total Workers", labourDateRangeReportData.grandTotalWorkers, "", "", "", "", ""]);
+      rows.push(["Total Labour Cost", labourDateRangeReportData.grandTotalLabourCost.toFixed(2), "", "", "", "", ""]);
     } else if (type === "material") {
-      const fromStr = filterStartDate || "Start";
-      const toStr = filterEndDate || "End";
-      filename = `Material_Date_Range_Report_${fromStr}_to_${toStr}.${extension}`;
-      headers = ["Material", "Qty", "Unit", "Unit Price", "Total Amount"];
+      const fromStr = formatDDMMYYYY(filterStartDate) || "Start";
+      const toStr = formatDDMMYYYY(filterEndDate) || "End";
+      const siteClean = (materialDateRangeReportData.siteNameDisplay || "Site").replace(/[^a-zA-Z0-9_-]/g, "_");
+      filename = `Material_Report_${siteClean}_${fromStr}_to_${toStr}.${extension}`;
+      headers = ["Date", "Site Engineer", "Material Team", "Material", "Qty", "Unit", "Unit Price", "Total Amount"];
 
-      materialDateRangeReportData.materials.forEach(row => {
+      materialDateRangeReportData.dailySections.forEach(day => {
+        const formattedDayDate = formatDDMMYYYY(day.dateStr);
+        day.teams.forEach(team => {
+          team.items.forEach(item => {
+            rows.push([
+              formattedDayDate,
+              `"${team.engineerName}"`,
+              `"${team.teamName}"`,
+              `"${item.materialName}"`,
+              item.quantity || (item.isCustom ? "--" : 0),
+              `"${item.unit || '--'}"`,
+              item.unitPrice ? item.unitPrice.toFixed(2) : (item.isCustom ? "--" : "0.00"),
+              item.totalAmount.toFixed(2)
+            ]);
+          });
+        });
         rows.push([
-          `"${row.materialName}"`,
-          row.totalQuantity,
-          `"${row.unit}"`,
-          row.unitPrice.toFixed(2),
-          row.totalAmount.toFixed(2)
+          `"${formattedDayDate} Daily Total"`,
+          "",
+          "",
+          "",
+          "",
+          "",
+          "",
+          day.dailyCost.toFixed(2)
         ]);
+        rows.push([]);
       });
-      rows.push([]);
-      rows.push(["Grand Total Material Cost", "", "", "", materialDateRangeReportData.grandTotalMaterialCost.toFixed(2)]);
-      rows.push(["Selected Date Range", `"${(filterStartDate || 'Beginning') + ' to ' + (filterEndDate || 'Today')}"`]);
+
+      if (materialDateRangeReportData.materialSummary.length > 0) {
+        rows.push(["MATERIAL-WISE SUMMARY", "", "", "", "", "", "", ""]);
+        rows.push(["Material", "Total Quantity", "Unit", "Avg Unit Price", "Total Amount", "", "", ""]);
+        materialDateRangeReportData.materialSummary.forEach(m => {
+          rows.push([
+            `"${m.materialName}"`,
+            m.totalQuantity || (m.isCustom ? "--" : 0),
+            `"${m.unit || '--'}"`,
+            m.unitPrice ? m.unitPrice.toFixed(2) : "--",
+            m.totalAmount.toFixed(2),
+            "",
+            "",
+            ""
+          ]);
+        });
+        rows.push([]);
+      }
+
+      rows.push(["FINAL SUMMARY", "", "", "", "", "", "", ""]);
+      rows.push(["Total Days", materialDateRangeReportData.totalWorkingDays, "", "", "", "", "", ""]);
+      rows.push(["Total Material Cost", materialDateRangeReportData.grandTotalMaterialCost.toFixed(2), "", "", "", "", "", ""]);
     } else if (type === "salary") {
       filename = `Salary_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
       headers = ["Site Engineer Salary", "Labour Salary", "Paid Payouts", "Pending Payouts", "Total Payroll"];
@@ -1203,15 +1860,88 @@ export default function ReportsDashboard() {
         salaryReportData.totalPayroll
       ]);
     } else if (type === "expense") {
-      filename = `Expense_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
-      headers = ["Site Expenses", "Material Expenses", "Labour Expenses", "Other Expenses", "Total Expenses"];
-      rows.push([
-        expenseReportData.siteExpense,
-        expenseReportData.materialExpense,
-        expenseReportData.labourExpense,
-        expenseReportData.otherExpense,
-        expenseReportData.totalExpense
-      ]);
+      const fromStr = formatDDMMYYYY(filterStartDate) || "Start";
+      const toStr = formatDDMMYYYY(filterEndDate) || "End";
+      const siteClean = (expenseDateRangeReportData.siteNameDisplay || "Site").replace(/[^a-zA-Z0-9_-]/g, "_");
+      filename = `Expense_Report_${siteClean}_${fromStr}_to_${toStr}.${extension}`;
+      headers = ["Date", "Site Engineer", "Category", "Description", "Status", "Amount"];
+
+      expenseDateRangeReportData.dailySections.forEach(day => {
+        const formattedDayDate = formatDDMMYYYY(day.dateStr);
+        day.items.forEach(item => {
+          rows.push([
+            formattedDayDate,
+            `"${item.engineerName}"`,
+            `"${item.category}"`,
+            `"${item.description.replace(/"/g, '""')}"`,
+            `"${item.status}"`,
+            item.amount.toFixed(2)
+          ]);
+        });
+        rows.push([
+          `"${formattedDayDate} Daily Total"`,
+          "",
+          "",
+          "",
+          "",
+          day.dailyCost.toFixed(2)
+        ]);
+        rows.push([]);
+      });
+
+      if (expenseDateRangeReportData.categorySummary.length > 0) {
+        rows.push(["CATEGORY-WISE SUMMARY", "", "", "", "", ""]);
+        rows.push(["Category", "Total Entries", "Share %", "Total Amount", "", ""]);
+        expenseDateRangeReportData.categorySummary.forEach(c => {
+          rows.push([
+            `"${c.categoryName}"`,
+            c.totalEntries,
+            `${c.percentage.toFixed(1)}%`,
+            c.totalAmount.toFixed(2),
+            "",
+            ""
+          ]);
+        });
+        rows.push([]);
+      }
+
+      rows.push(["FINAL SUMMARY", "", "", "", "", ""]);
+      rows.push(["Total Days", expenseDateRangeReportData.totalWorkingDays, "", "", "", ""]);
+      rows.push(["Total Expenses Cost", expenseDateRangeReportData.grandTotalExpenseCost.toFixed(2), "", "", "", ""]);
+    } else if (type === "progress") {
+      const fromStr = formatDDMMYYYY(filterStartDate) || "Start";
+      const toStr = formatDDMMYYYY(filterEndDate) || "End";
+      const siteClean = (progressDateRangeReportData.siteNameDisplay || "Site").replace(/[^a-zA-Z0-9_-]/g, "_");
+      filename = `Progress_Report_${siteClean}_${fromStr}_to_${toStr}.${extension}`;
+      headers = ["Date", "Site Engineer", "Recorded Progress %", "Change %", "Work Details", "Problems / Remarks"];
+
+      progressDateRangeReportData.dailyEntries.forEach(entry => {
+        const formattedDayDate = formatDDMMYYYY(entry.dateStr);
+        rows.push([
+          formattedDayDate,
+          `"${entry.engineerName}"`,
+          `${entry.progressPercent.toFixed(1)}%`,
+          entry.progressChange !== null ? `${entry.progressChange >= 0 ? '+' : ''}${entry.progressChange.toFixed(1)}%` : "--",
+          `"${entry.workDetails.replace(/"/g, '""')}"`,
+          `"${entry.remarks.replace(/"/g, '""')}"`
+        ]);
+      });
+      rows.push([]);
+
+      rows.push(["PROGRESS METRICS & CALCULATIONS", "", "", "", "", ""]);
+      rows.push(["Starting Progress", `${progressDateRangeReportData.startingProgress.toFixed(1)}%`, "", "", "", ""]);
+      rows.push(["Latest Recorded Progress", `${progressDateRangeReportData.latestProgress.toFixed(1)}%`, "", "", "", ""]);
+      rows.push(["Progress Achieved in Period", `+${progressDateRangeReportData.progressAchieved.toFixed(1)}%`, "", "", "", ""]);
+      rows.push(["Remaining Progress", `${progressDateRangeReportData.remainingProgress.toFixed(1)}%`, "", "", "", ""]);
+      rows.push(["Average Progress Rate", `${progressDateRangeReportData.averageProgressRate.toFixed(1)}% per log day`, "", "", "", ""]);
+      rows.push(["Estimated Completion Date", progressDateRangeReportData.estimatedCompletionDate || "Insufficient data", "", "", "", ""]);
+      rows.push(["Project Health Status", `"${progressDateRangeReportData.projectStatus}"`, "", "", "", ""]);
+      rows.push([]);
+      rows.push(["AI MANAGEMENT INSIGHTS", `"${progressDateRangeReportData.aiAnalysis.replace(/"/g, '""')}"`, "", "", "", ""]);
+      rows.push([]);
+      rows.push(["FINAL SUMMARY", "", "", "", "", ""]);
+      rows.push(["Total Reporting Days", progressDateRangeReportData.totalReportingDays, "", "", "", ""]);
+      rows.push(["Latest Overall Progress", `${progressDateRangeReportData.latestProgress.toFixed(1)}%`, "", "", "", ""]);
     } else if (type === "budget") {
       filename = `Budget_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
       headers = ["Total Budget", "Total Expense", "Remaining Budget", "Budget Usage %"];
@@ -1247,17 +1977,23 @@ export default function ReportsDashboard() {
 
   useEffect(() => {
     if (isPrinting) {
+      const originalTitle = document.title;
+      document.title = "";
       const timer = setTimeout(() => {
         window.print();
         setIsPrinting(false);
-      }, 600);
-      return () => clearTimeout(timer);
+        document.title = originalTitle;
+      }, 300);
+      return () => {
+        clearTimeout(timer);
+        document.title = originalTitle;
+      };
     }
   }, [isPrinting]);
 
   if (loading) {
     return (
-      <Layout title="BI Console" description="Aggregating corporate datasets...">
+      <Layout hideNavbar={true}>
         <Loading show={true} text="Assembling Management dashboard..." />
       </Layout>
     );
@@ -1266,88 +2002,85 @@ export default function ReportsDashboard() {
   // Label resolving for printable header titles
   const getSelectedReportTemplateLabel = () => {
     switch (reportTemplate) {
-      case "daily_attendance": return "Daily Attendance Report Summary";
-      case "weekly_attendance": return "Weekly Site Attendance Report Summary";
-      case "monthly_attendance": return "Monthly Site Attendance Report Summary";
-      case "labour": return "Labour Date Range Report";
-      case "material": return "Material Date Range Report";
-      case "salary": return "Salary & Payroll Cost Ledger";
-      case "expense": return "Consolidated Site Expense Breakdowns";
-      case "budget": return "Project Budgets & Utilization Standings";
-      default: return "Corporate Statement";
+      case "daily_attendance": return "DAILY ATTENDANCE REPORT";
+      case "weekly_attendance": return "WEEKLY ATTENDANCE REPORT";
+      case "monthly_attendance": return "MONTHLY ATTENDANCE REPORT";
+      case "labour": return "LABOR REPORT";
+      case "material": return "MATERIAL REPORT";
+      case "salary": return "SALARY & PAYROLL REPORT";
+      case "expense": return "EXPENSE REPORT";
+      case "progress": return "PROGRESS REPORT";
+      case "budget": return "BUDGET REPORT";
+      default: return "SITE REPORT";
     }
   };
 
   return (
-    <Layout
-      title="Reports & Analytics Dashboard"
-      description="Corporate Business Intelligence monitors, milestone comparisons, and export-ready dynamic tables."
-    >
-      {/* Dynamic landscape or portrait print stylesheet overrides */}
-      {reportTemplate === "weekly_attendance" || reportTemplate === "monthly_attendance" || reportTemplate === "labour" ? (
-        <style>{`@media print { @page { size: landscape; } }`}</style>
-      ) : (
-        <style>{`@media print { @page { size: portrait; } }`}</style>
-      )}
-
-      {/* Printable CSS style definitions (modular design) */}
+    <Layout hideNavbar={true}>
+      {/* A4 Portrait Print Stylesheet with browser headers/footers suppression */}
       <style>{`
         @media print {
-          body {
-            background-color: #ffffff;
-            color: #000000;
+          @page {
+            size: A4 portrait;
+            margin: 0;
+          }
+          html, body {
+            margin: 0 !important;
+            padding: 0 !important;
+            background-color: #ffffff !important;
+            color: #000000 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           .no-print, header, footer, nav, aside, .sidebar, .navbar, .filters-card {
             display: none !important;
           }
           .printable-report-container {
             display: block !important;
-            position: absolute;
-            left: 0;
-            top: 0;
-            width: 100%;
-            margin: 0;
-            padding: 0;
-            background: #ffffff;
-            z-index: 9999;
-          }
-          @page {
-            margin: 15mm 15mm 15mm 15mm;
+            position: relative !important;
+            box-sizing: border-box !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 12mm 12mm 12mm 12mm !important;
+            background: #ffffff !important;
+            z-index: 9999 !important;
           }
         }
         
         .printable-report-container {
           display: none;
-          font-family: 'Inter', sans-serif;
+          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
           color: #0f172a;
           background: #ffffff;
         }
         
         .report-header-block {
           border-bottom: 2px solid #0f172a;
-          padding-bottom: 12px;
-          margin-bottom: 20px;
+          padding-bottom: 10px;
+          margin-bottom: 14px;
         }
         
         .printable-table {
           width: 100%;
           border-collapse: collapse;
-          margin-top: 15px;
-          font-size: 11px;
+          margin-top: 8px;
+          font-size: 10.5px;
         }
         
         .printable-table th {
           background-color: #f1f5f9 !important;
           border: 1px solid #94a3b8;
-          padding: 8px 10px;
+          padding: 6px 8px;
           font-weight: 700;
           text-align: left;
           color: #0f172a;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
         
         .printable-table td {
           border: 1px solid #cbd5e1;
-          padding: 8px 10px;
+          padding: 6px 8px;
           color: #334155;
         }
       `}</style>
@@ -1357,10 +2090,11 @@ export default function ReportsDashboard() {
         background: "#ffffff",
         border: "1px solid #e2e8f0",
         borderRadius: "12px",
-        padding: "20px 24px",
+        padding: "18px 24px",
         marginBottom: "20px",
         boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
       }}>
+        {/* Top Header Row: Left Title & Right-Aligned Controls */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1374,29 +2108,95 @@ export default function ReportsDashboard() {
             </p>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+          {/* Compact Right-Aligned Controls Group */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "nowrap", flexShrink: 0 }}>
+            {/* 1. Report Selection Dropdown */}
             <select
               value={reportTemplate}
               onChange={(e) => setReportTemplate(e.target.value)}
-              style={{ padding: "8px 12px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "700", color: "#0f172a", outline: "none" }}
+              style={{
+                height: "36px",
+                padding: "0 12px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                fontSize: "12.5px",
+                fontWeight: "600",
+                color: "#0f172a",
+                outline: "none",
+                cursor: "pointer",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+              }}
             >
               <option value="daily_attendance">Daily Attendance Report</option>
               <option value="weekly_attendance">Weekly Attendance Report</option>
               <option value="monthly_attendance">Monthly Attendance Report</option>
               <option value="labour">Labour Allocation Report</option>
               <option value="material">Material Log Report</option>
-              <option value="salary">Salary &amp; Payroll Report</option>
               <option value="expense">Expense Report</option>
+              <option value="progress">Progress Report</option>
+              <option value="salary">Salary &amp; Payroll Report</option>
               <option value="budget">Budget Report</option>
             </select>
-            <Button onClick={handlePrint} variant="primary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Printer size={16} />
+
+            {/* 2. Generate PDF Button (Original Orange) */}
+            <button
+              type="button"
+              onClick={() => {
+                if (activeTab === "labour_report") setReportTemplate("labour");
+                else if (activeTab === "material_report") setReportTemplate("material");
+                else if (activeTab === "expense_report") setReportTemplate("expense");
+                else if (activeTab === "progress_report") setReportTemplate("progress");
+                handlePrint();
+              }}
+              style={{
+                height: "36px",
+                padding: "0 14px",
+                borderRadius: "6px",
+                border: "none",
+                backgroundColor: "#ea580c",
+                backgroundImage: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                color: "#ffffff",
+                fontSize: "12.5px",
+                fontWeight: "600",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                boxShadow: "0 1px 2px rgba(234, 88, 12, 0.2)",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <Printer size={15} />
               <span>Generate PDF</span>
-            </Button>
-            <Button onClick={() => exportToExcel(activeTab.replace("_report", ""), "csv")} variant="outline" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Download size={16} />
+            </button>
+
+            {/* 3. Export CSV Button */}
+            <button
+              type="button"
+              onClick={() => exportToExcel(activeTab.replace("_report", ""), "csv")}
+              style={{
+                height: "36px",
+                padding: "0 14px",
+                borderRadius: "6px",
+                border: "1px solid #cbd5e1",
+                backgroundColor: "#ffffff",
+                color: "#334155",
+                fontSize: "12.5px",
+                fontWeight: "600",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                cursor: "pointer",
+                whiteSpace: "nowrap",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.04)",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <Download size={15} />
               <span>Export CSV</span>
-            </Button>
+            </button>
           </div>
         </div>
 
@@ -1423,7 +2223,14 @@ export default function ReportsDashboard() {
             <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Report Category</label>
             <select
               value={activeTab}
-              onChange={(e) => setActiveTab(e.target.value)}
+              onChange={(e) => {
+                const tab = e.target.value;
+                setActiveTab(tab);
+                if (tab === "labour_report") setReportTemplate("labour");
+                else if (tab === "material_report") setReportTemplate("material");
+                else if (tab === "expense_report") setReportTemplate("expense");
+                else if (tab === "progress_report") setReportTemplate("progress");
+              }}
               style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
             >
               <option value="overview">Management Overview</option>
@@ -1434,39 +2241,9 @@ export default function ReportsDashboard() {
             </select>
           </div>
 
-          {/* Team Filter */}
+          {/* From Date */}
           <div>
-            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Labour Team</label>
-            <select
-              value={filterTeamId}
-              onChange={(e) => setFilterTeamId(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
-            >
-              <option value="all">All Labour Teams</option>
-              {teams.map(t => (
-                <option key={t.id} value={t.id}>{t.teamName}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Site Engineer Filter */}
-          <div>
-            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Site Engineer</label>
-            <select
-              value={filterEngineerId}
-              onChange={(e) => setFilterEngineerId(e.target.value)}
-              style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
-            >
-              <option value="all">All Engineers</option>
-              {engineers.map(eng => (
-                <option key={eng.id} value={eng.id}>{eng.fullName}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Start Date */}
-          <div>
-            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Start Date</label>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>From Date</label>
             <input
               type="date"
               value={filterStartDate}
@@ -1475,9 +2252,9 @@ export default function ReportsDashboard() {
             />
           </div>
 
-          {/* End Date */}
+          {/* To Date */}
           <div>
-            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>End Date</label>
+            <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>To Date</label>
             <input
               type="date"
               value={filterEndDate}
@@ -1485,6 +2262,8 @@ export default function ReportsDashboard() {
               style={{ width: "100%", padding: "7px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", outline: "none" }}
             />
           </div>
+
+
 
         </div>
       </div>
@@ -1525,7 +2304,7 @@ export default function ReportsDashboard() {
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>
-            {labourDateRangeReportData?.categories ? labourDateRangeReportData.categories.reduce((acc, c) => acc + (c.totalWorkers || 0), 0) : 0}
+            {labourDateRangeReportData.grandTotalWorkers || 0}
           </div>
           <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Attendance units logged</span>
         </div>
@@ -1554,11 +2333,17 @@ export default function ReportsDashboard() {
           { id: "progress_report", label: "Progress Reports", icon: Activity }
         ].map(tab => {
           const TabIcon = tab.icon;
-          const isActive = activeTab === tab.id || (tab.id === "progress_report" && activeTab === "attendance_report");
+          const isActive = activeTab === tab.id;
           return (
             <button
               key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              onClick={() => {
+                setActiveTab(tab.id);
+                if (tab.id === "labour_report") setReportTemplate("labour");
+                else if (tab.id === "material_report") setReportTemplate("material");
+                else if (tab.id === "expense_report") setReportTemplate("expense");
+                else if (tab.id === "progress_report") setReportTemplate("progress");
+              }}
               style={{
                 padding: "10px 18px",
                 border: "none",
@@ -1891,175 +2676,469 @@ export default function ReportsDashboard() {
       {/* 3. LABOUR REPORT TAB PANEL */}
       {/* ==================================================================== */}
       {activeTab === "labour_report" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-          <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+          <div style={{ display: "flex", gap: "16px", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Labour Date Range Report</h3>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Calculated live directly from saved production labour attendance records</p>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Labour Report</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+                Canonical daily production records for {labourDateRangeReportData.siteNameDisplay} ({formatDDMMYYYY(filterStartDate) || "Beginning"} to {formatDDMMYYYY(filterEndDate) || "Today"})
+              </p>
             </div>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <Button onClick={handlePrint} variant="outline" icon={Printer}>Print</Button>
-              <Button onClick={() => { setReportTemplate("labour"); handlePrint(); }} variant="outline" icon={FileText}>Export PDF</Button>
-              <Button onClick={() => exportToExcel("labour", "xls")} variant="outline" icon={Download}>Export Excel</Button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("labour"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Printer size={15} />
+                <span>Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("labour"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ea580c",
+                  backgroundImage: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                  color: "#ffffff",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(234, 88, 12, 0.2)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <FileText size={15} />
+                <span>Export PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => exportToExcel("labour", "xls")}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Download size={15} />
+                <span>Export Excel</span>
+              </button>
             </div>
           </div>
-          
-          <Card title="Labour Category Wise Breakdown" variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
-                    <th style={{ textAlign: "left", padding: "12px" }}>Category</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Daily Wage</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Total Workers</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Total Units</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {labourDateRangeReportData.categories.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                        No saved labour attendance records found for the selected filter parameters.
-                      </td>
-                    </tr>
-                  ) : (
-                    labourDateRangeReportData.categories.map((row, idx) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                        <td style={{ fontWeight: "700", padding: "12px", color: "var(--primary-950)" }}>{row.category}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace" }}>₹{row.dailyWage.toLocaleString("en-IN")}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "600" }}>{row.totalWorkers}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "700" }}>{row.totalUnits.toFixed(2)}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "800", color: "var(--primary-700)" }}>
-                          ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {labourDateRangeReportData.categories.length > 0 && (
-                  <tfoot>
-                    <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800" }}>
-                      <td colSpan={4} style={{ padding: "14px", textAlign: "right", fontSize: "14px", color: "var(--primary-950)" }}>
-                        Grand Total Labour Cost:
-                      </td>
-                      <td style={{ padding: "14px", textAlign: "right", fontSize: "15px", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                        ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </Card>
 
-          <Card style={{ backgroundColor: "#fafafa", border: "1px solid var(--border-color)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", padding: "8px 4px" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Selected Period</span>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                  {filterStartDate || "Beginning"} &rarr; {filterEndDate || "Today"}
+          {labourDateRangeReportData.dailySections.length === 0 ? (
+            <Card>
+              <div style={{ textAlign: "center", padding: "36px 16px", color: "var(--text-muted)" }}>
+                <Users size={40} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                  No labor records found for the selected site and date range.
                 </div>
               </div>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Working Days</span>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                  {labourDateRangeReportData.totalWorkingDays} Days
+            </Card>
+          ) : (
+            labourDateRangeReportData.dailySections.map((day, dIdx) => (
+              <Card key={dIdx} variant="default" style={{ overflow: "hidden", padding: 0 }}>
+                {day.teams.map((team, tIdx) => (
+                  <div key={tIdx} style={{ borderBottom: tIdx < day.teams.length - 1 ? "1px solid var(--border-color)" : "none" }}>
+                    {/* Daily Section Meta Header */}
+                    <div style={{
+                      backgroundColor: "#f8fafc",
+                      padding: "12px 16px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      flexWrap: "wrap",
+                      gap: "12px",
+                      borderBottom: "1px solid var(--border-color)"
+                    }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>DATE:</span>
+                        <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
+                          {formatDDMMYYYY(day.dateStr)}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>SITE ENGINEER:</span>
+                        <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                          {team.engineerName || labourDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>LABOUR TEAM:</span>
+                        <span style={{ fontSize: "13px", fontWeight: "700", color: "#ea580c" }}>
+                          {team.teamName}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Category Level Calculation Table */}
+                    <div style={{ overflowX: "auto" }}>
+                      <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ backgroundColor: "#ffffff", borderBottom: "1px solid var(--border-color)" }}>
+                            <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category</th>
+                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Workers</th>
+                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Daily Wage</th>
+                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {team.categories.map((cat, cIdx) => (
+                            <tr key={cIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                              <td style={{ fontWeight: "700", padding: "10px 16px", color: "#0f172a", fontSize: "13px" }}>{cat.categoryName}</td>
+                              <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "600", fontSize: "13px" }}>{cat.workerCount}</td>
+                              <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontSize: "13px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
+                              <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a", fontSize: "13px" }}>
+                                ₹{cat.categoryTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ))}
+
+                {/* Daily Total Summary Footer */}
+                <div style={{
+                  backgroundColor: "#f1f5f9",
+                  padding: "10px 16px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "10px",
+                  borderTop: "1px solid var(--border-color)",
+                  fontWeight: "800",
+                  fontSize: "13px"
+                }}>
+                  <span style={{ color: "#334155" }}>
+                    Daily Total Workers: <span style={{ color: "#0f172a", fontFamily: "monospace" }}>{day.dailyWorkers}</span>
+                  </span>
+                  <span style={{ color: "#334155" }}>
+                    Daily Labour Cost: <span style={{ color: "#16a34a", fontFamily: "monospace", fontSize: "14px" }}>
+                      ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </span>
+                  </span>
+                </div>
+              </Card>
+            ))
+          )}
+
+          {/* FINAL SUMMARY */}
+          {labourDateRangeReportData.dailySections.length > 0 && (
+            <Card style={{ backgroundColor: "#ffffff", border: "2px solid #0f172a", borderRadius: "8px" }}>
+              <div style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#0f172a", marginBottom: "12px", letterSpacing: "0.5px" }}>
+                REPORT SUMMARY
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+                <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Days</span>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                    {labourDateRangeReportData.totalWorkingDays}
+                  </div>
+                </div>
+                <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Workers</span>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                    {labourDateRangeReportData.grandTotalWorkers}
+                  </div>
+                </div>
+                <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Labour Cost</span>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a", marginTop: "4px", fontFamily: "monospace" }}>
+                    ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </div>
                 </div>
               </div>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Labour Cost</span>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-700)", marginTop: "4px", fontFamily: "monospace" }}>
-                  ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                </div>
-              </div>
-            </div>
-          </Card>
+            </Card>
+          )}
         </div>
       )}
 
       {/* ==================================================================== */}
-      {/* MATERIAL REPORT TAB PANEL */}
+      {/* 4. MATERIAL REPORT TAB PANEL */}
       {/* ==================================================================== */}
       {activeTab === "material_report" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-          <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+          <div style={{ display: "flex", gap: "16px", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Material Date Range Report</h3>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Calculated live directly from saved production material logs</p>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Material Report</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+                Canonical daily production records for {materialDateRangeReportData.siteNameDisplay} ({formatDDMMYYYY(filterStartDate) || "Beginning"} to {formatDDMMYYYY(filterEndDate) || "Today"})
+              </p>
             </div>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <Button onClick={handlePrint} variant="outline" icon={Printer}>Print</Button>
-              <Button onClick={() => { setReportTemplate("material"); handlePrint(); }} variant="outline" icon={FileText}>Export PDF</Button>
-              <Button onClick={() => exportToExcel("material", "xls")} variant="outline" icon={Download}>Export Excel</Button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("material"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Printer size={15} />
+                <span>Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("material"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ea580c",
+                  backgroundImage: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                  color: "#ffffff",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(234, 88, 12, 0.2)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <FileText size={15} />
+                <span>Export PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => exportToExcel("material", "xls")}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Download size={15} />
+                <span>Export Excel</span>
+              </button>
             </div>
           </div>
-          
-          <Card title="Material Wise Cost & Quantity Summary" variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
-                <thead>
-                  <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
-                    <th style={{ textAlign: "left", padding: "12px" }}>Material</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Qty</th>
-                    <th style={{ textAlign: "center", padding: "12px" }}>Unit</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Unit Price</th>
-                    <th style={{ textAlign: "right", padding: "12px" }}>Total Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {materialDateRangeReportData.materials.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>
-                        No saved material logs found for the selected filter parameters.
-                      </td>
-                    </tr>
-                  ) : (
-                    materialDateRangeReportData.materials.map((row, idx) => (
-                      <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
-                        <td style={{ fontWeight: "700", padding: "12px", color: "var(--primary-950)" }}>{row.materialName}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "700" }}>{row.totalQuantity}</td>
-                        <td style={{ textAlign: "center", padding: "12px" }}>{row.unit}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace" }}>₹{row.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
-                        <td style={{ textAlign: "right", padding: "12px", fontFamily: "monospace", fontWeight: "800", color: "var(--primary-700)" }}>
-                          ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                {materialDateRangeReportData.materials.length > 0 && (
-                  <tfoot>
-                    <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800" }}>
-                      <td colSpan={4} style={{ padding: "14px", textAlign: "right", fontSize: "14px", color: "var(--primary-950)" }}>
-                        Grand Total Material Cost:
-                      </td>
-                      <td style={{ padding: "14px", textAlign: "right", fontSize: "15px", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                        ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                      </td>
-                    </tr>
-                  </tfoot>
-                )}
-              </table>
-            </div>
-          </Card>
 
-          <Card style={{ backgroundColor: "#fafafa", border: "1px solid var(--border-color)" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", padding: "8px 4px" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Selected Date Range</span>
-                <div style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
-                  {filterStartDate || "Beginning"} &rarr; {filterEndDate || "Today"}
+          {materialDateRangeReportData.dailySections.length === 0 ? (
+            <Card>
+              <div style={{ textAlign: "center", padding: "36px 16px", color: "var(--text-muted)" }}>
+                <Building2 size={40} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                  No material records found for the selected site and date range.
                 </div>
               </div>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Grand Total Material Cost</span>
-                <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-700)", marginTop: "4px", fontFamily: "monospace" }}>
-                  ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            </Card>
+          ) : (
+            <>
+              {materialDateRangeReportData.dailySections.map((day, dIdx) => (
+                <Card key={dIdx} variant="default" style={{ overflow: "hidden", padding: 0 }}>
+                  {day.teams.map((team, tIdx) => (
+                    <div key={tIdx} style={{ borderBottom: tIdx < day.teams.length - 1 ? "1px solid var(--border-color)" : "none" }}>
+                      {/* Daily Section Meta Header */}
+                      <div style={{
+                        backgroundColor: "#f8fafc",
+                        padding: "12px 16px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: "12px",
+                        borderBottom: "1px solid var(--border-color)"
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>DATE:</span>
+                          <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
+                            {formatDDMMYYYY(day.dateStr)}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>SITE ENGINEER:</span>
+                          <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                            {team.engineerName || materialDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>MATERIAL TEAM:</span>
+                          <span style={{ fontSize: "13px", fontWeight: "700", color: "#2563eb" }}>
+                            {team.teamName}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Material Breakdown Table */}
+                      <div style={{ overflowX: "auto" }}>
+                        <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                          <thead>
+                            <tr style={{ backgroundColor: "#ffffff", borderBottom: "1px solid var(--border-color)" }}>
+                              <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Material</th>
+                              <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Quantity</th>
+                              <th style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Unit</th>
+                              <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Unit Price</th>
+                              <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Total Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {team.items.map((item, iIdx) => (
+                              <tr key={iIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                <td style={{ fontWeight: "700", padding: "10px 16px", color: "#0f172a", fontSize: "13px" }}>{item.materialName}</td>
+                                <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "600", fontSize: "13px" }}>
+                                  {item.quantity ? item.quantity.toLocaleString("en-IN") : (item.isCustom ? "--" : "0")}
+                                </td>
+                                <td style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#64748b" }}>{item.unit || "--"}</td>
+                                <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontSize: "13px" }}>
+                                  {item.unitPrice ? `₹${item.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (item.isCustom ? "--" : "₹0.00")}
+                                </td>
+                                <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a", fontSize: "13px" }}>
+                                  ₹{item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Daily Total Summary Footer */}
+                  <div style={{
+                    backgroundColor: "#f1f5f9",
+                    padding: "10px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                    borderTop: "1px solid var(--border-color)",
+                    fontWeight: "800",
+                    fontSize: "13px"
+                  }}>
+                    <span style={{ color: "#334155" }}>
+                      Daily Total Entries: <span style={{ color: "#0f172a", fontFamily: "monospace" }}>{day.dailyItems}</span>
+                    </span>
+                    <span style={{ color: "#334155" }}>
+                      Daily Material Cost: <span style={{ color: "#16a34a", fontFamily: "monospace", fontSize: "14px" }}>
+                        ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </span>
+                  </div>
+                </Card>
+              ))}
+
+              {/* MATERIAL-WISE AGGREGATED SUMMARY TABLE */}
+              {materialDateRangeReportData.materialSummary.length > 0 && (
+                <Card title="Material Wise Cost & Quantity Summary" variant="table">
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
+                          <th style={{ textAlign: "left", padding: "10px 16px" }}>Material</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Total Qty</th>
+                          <th style={{ textAlign: "center", padding: "10px 16px" }}>Unit</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Avg Unit Price</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Total Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {materialDateRangeReportData.materialSummary.map((row, idx) => (
+                          <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                            <td style={{ fontWeight: "700", padding: "10px 16px", color: "var(--primary-950)" }}>{row.materialName}</td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "700" }}>
+                              {row.totalQuantity ? row.totalQuantity.toLocaleString("en-IN") : (row.isCustom ? "--" : "0")}
+                            </td>
+                            <td style={{ textAlign: "center", padding: "10px 16px", color: "#64748b" }}>{row.unit || "--"}</td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace" }}>
+                              {row.unitPrice ? `₹${row.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"}
+                            </td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a" }}>
+                              ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+
+              {/* REPORT SUMMARY */}
+              <Card style={{ backgroundColor: "#ffffff", border: "2px solid #0f172a", borderRadius: "8px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#0f172a", marginBottom: "12px", letterSpacing: "0.5px" }}>
+                  REPORT SUMMARY
                 </div>
-              </div>
-            </div>
-          </Card>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Days</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                      {materialDateRangeReportData.totalWorkingDays}
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Material Cost</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a", marginTop: "4px", fontFamily: "monospace" }}>
+                      ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -2110,42 +3189,500 @@ export default function ReportsDashboard() {
       {/* 5. EXPENSE REPORT TAB PANEL */}
       {/* ==================================================================== */}
       {activeTab === "expense_report" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-          <div style={{ display: "flex", gap: "10px", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+          <div style={{ display: "flex", gap: "16px", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
             <div>
-              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Corporate Expense Report</h3>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>Site-wise approved expenses classified by material supply, labor payroll, general, and miscellaneous categories</p>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Expense Report</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+                Canonical daily production records for {expenseDateRangeReportData.siteNameDisplay} ({formatDDMMYYYY(filterStartDate) || "Beginning"} to {formatDDMMYYYY(filterEndDate) || "Today"})
+              </p>
             </div>
-            <div style={{ display: "flex", gap: "10px" }}>
-              <Button onClick={() => exportToExcel("expense", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-              <Button onClick={() => exportToExcel("expense", "csv")} variant="outline" icon={Download}>Export CSV</Button>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("expense"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Printer size={15} />
+                <span>Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("expense"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ea580c",
+                  backgroundImage: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                  color: "#ffffff",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(234, 88, 12, 0.2)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <FileText size={15} />
+                <span>Export PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => exportToExcel("expense", "xls")}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Download size={15} />
+                <span>Export Excel</span>
+              </button>
             </div>
           </div>
-          
-          <Card title="Approved Project Expenditures Breakdown" variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: "right" }}>Site Expenses</th>
-                    <th style={{ textAlign: "right" }}>Material Expenses</th>
-                    <th style={{ textAlign: "right" }}>Labour Expenses</th>
-                    <th style={{ textAlign: "right" }}>Other Expenses</th>
-                    <th style={{ textAlign: "right", fontWeight: "700" }}>Total Project Expense</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.siteExpense)}</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.materialExpense)}</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.labourExpense)}</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(expenseReportData.otherExpense)}</td>
-                    <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "800", fontSize: "14px" }}>{formatINR(expenseReportData.totalExpense)}</td>
-                  </tr>
-                </tbody>
-              </table>
+
+          {expenseDateRangeReportData.dailySections.length === 0 ? (
+            <Card>
+              <div style={{ textAlign: "center", padding: "36px 16px", color: "var(--text-muted)" }}>
+                <Building2 size={40} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                  No expense records found for the selected site and date range.
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <>
+              {expenseDateRangeReportData.dailySections.map((day, dIdx) => (
+                <Card key={dIdx} variant="default" style={{ overflow: "hidden", padding: 0 }}>
+                  {/* Daily Section Meta Header */}
+                  <div style={{
+                    backgroundColor: "#f8fafc",
+                    padding: "12px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "12px",
+                    borderBottom: "1px solid var(--border-color)"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>DATE:</span>
+                      <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
+                        {formatDDMMYYYY(day.dateStr)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>SITE ENGINEER / LOGGED BY:</span>
+                      <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
+                        {day.items[0]?.engineerName || expenseDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>DAILY ENTRIES:</span>
+                      <span style={{ fontSize: "13px", fontWeight: "700", color: "#ea580c" }}>
+                        {day.dailyItems}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Expense Breakdown Table */}
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ backgroundColor: "#ffffff", borderBottom: "1px solid var(--border-color)" }}>
+                          <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category</th>
+                          <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Description / Details</th>
+                          <th style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Status</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {day.items.map((item, iIdx) => (
+                          <tr key={iIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ fontWeight: "700", padding: "10px 16px", color: "#0f172a", fontSize: "13px" }}>{item.category}</td>
+                            <td style={{ padding: "10px 16px", fontSize: "13px", color: "#334155" }}>
+                              {item.description}
+                              {item.notes && <div style={{ fontSize: "11px", color: "#64748b", marginTop: "2px" }}>{item.notes}</div>}
+                            </td>
+                            <td style={{ textAlign: "center", padding: "10px 16px" }}>
+                              <span style={{
+                                padding: "3px 8px",
+                                borderRadius: "10px",
+                                fontSize: "11px",
+                                fontWeight: "700",
+                                backgroundColor: item.status === "Approved" || item.status === "approved" || item.status === "Paid" ? "#dcfce7" : (item.status === "Rejected" ? "#fee2e2" : "#fef9c3"),
+                                color: item.status === "Approved" || item.status === "approved" || item.status === "Paid" ? "#15803d" : (item.status === "Rejected" ? "#b91c1c" : "#a16207")
+                              }}>
+                                {item.status}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a", fontSize: "13px" }}>
+                              ₹{item.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  {/* Daily Total Summary Footer */}
+                  <div style={{
+                    backgroundColor: "#f1f5f9",
+                    padding: "10px 16px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    flexWrap: "wrap",
+                    gap: "10px",
+                    borderTop: "1px solid var(--border-color)",
+                    fontWeight: "800",
+                    fontSize: "13px"
+                  }}>
+                    <span style={{ color: "#334155" }}>
+                      Daily Total Entries: <span style={{ color: "#0f172a", fontFamily: "monospace" }}>{day.dailyItems}</span>
+                    </span>
+                    <span style={{ color: "#334155" }}>
+                      Daily Expense Total: <span style={{ color: "#16a34a", fontFamily: "monospace", fontSize: "14px" }}>
+                        ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                      </span>
+                    </span>
+                  </div>
+                </Card>
+              ))}
+
+              {/* CATEGORY-WISE AGGREGATED SUMMARY TABLE */}
+              {expenseDateRangeReportData.categorySummary.length > 0 && (
+                <Card title="Category Wise Expense Summary" variant="table">
+                  <div style={{ overflowX: "auto" }}>
+                    <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                      <thead>
+                        <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
+                          <th style={{ textAlign: "left", padding: "10px 16px" }}>Category</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Total Entries</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Share %</th>
+                          <th style={{ textAlign: "right", padding: "10px 16px" }}>Total Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {expenseDateRangeReportData.categorySummary.map((row, idx) => (
+                          <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                            <td style={{ fontWeight: "700", padding: "10px 16px", color: "var(--primary-950)" }}>{row.categoryName}</td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "700" }}>{row.totalEntries}</td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", color: "#64748b" }}>{row.percentage.toFixed(1)}%</td>
+                            <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a" }}>
+                              ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              )}
+
+              {/* REPORT SUMMARY */}
+              <Card style={{ backgroundColor: "#ffffff", border: "2px solid #0f172a", borderRadius: "8px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#0f172a", marginBottom: "12px", letterSpacing: "0.5px" }}>
+                  REPORT SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px" }}>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Days</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                      {expenseDateRangeReportData.totalWorkingDays}
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Expenses Cost</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a", marginTop: "4px", fontFamily: "monospace" }}>
+                      ₹{expenseDateRangeReportData.grandTotalExpenseCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* 6. PROGRESS REPORT TAB PANEL */}
+      {/* ==================================================================== */}
+      {activeTab === "progress_report" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+          <div style={{ display: "flex", gap: "16px", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Progress Report</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>
+                Canonical daily production records for {progressDateRangeReportData.siteNameDisplay} ({formatDDMMYYYY(filterStartDate) || "Beginning"} to {formatDDMMYYYY(filterEndDate) || "Today"})
+              </p>
             </div>
-          </Card>
+            <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "nowrap", flexShrink: 0 }}>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("progress"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Printer size={15} />
+                <span>Print</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setReportTemplate("progress"); handlePrint(); }}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "none",
+                  backgroundColor: "#ea580c",
+                  backgroundImage: "linear-gradient(135deg, #f97316 0%, #ea580c 100%)",
+                  color: "#ffffff",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(234, 88, 12, 0.2)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <FileText size={15} />
+                <span>Export PDF</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => exportToExcel("progress", "xls")}
+                style={{
+                  height: "36px",
+                  padding: "0 14px",
+                  borderRadius: "6px",
+                  border: "1px solid #cbd5e1",
+                  backgroundColor: "#ffffff",
+                  color: "#334155",
+                  fontSize: "12.5px",
+                  fontWeight: "600",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                  boxShadow: "0 1px 2px rgba(0,0,0,0.04)"
+                }}
+              >
+                <Download size={15} />
+                <span>Export Excel</span>
+              </button>
+            </div>
+          </div>
+
+          {progressDateRangeReportData.dailyEntries.length === 0 ? (
+            <Card>
+              <div style={{ textAlign: "center", padding: "36px 16px", color: "var(--text-muted)" }}>
+                <Activity size={40} style={{ margin: "0 auto 12px", opacity: 0.4 }} />
+                <div style={{ fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                  No progress records found for the selected site and date range.
+                </div>
+              </div>
+            </Card>
+          ) : (
+            <>
+              {/* 4 Metric Summary Cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" }}>
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Latest Recorded Progress</span>
+                  <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", marginTop: "4px" }}>
+                    {progressDateRangeReportData.latestProgress.toFixed(1)}%
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "2px", display: "block", fontWeight: "600" }}>Current standing</span>
+                </div>
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Progress Achieved</span>
+                  <div style={{ fontSize: "22px", fontWeight: "800", color: "#2563eb", marginTop: "4px" }}>
+                    +{progressDateRangeReportData.progressAchieved.toFixed(1)}%
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Net gain in period</span>
+                </div>
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Remaining Progress</span>
+                  <div style={{ fontSize: "22px", fontWeight: "800", color: "#ea580c", marginTop: "4px" }}>
+                    {progressDateRangeReportData.remainingProgress.toFixed(1)}%
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>To completion</span>
+                </div>
+                <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Average Daily Rate</span>
+                  <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", marginTop: "4px" }}>
+                    {progressDateRangeReportData.averageProgressRate.toFixed(1)}%
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "2px", display: "block" }}>Per reporting log</span>
+                </div>
+              </div>
+
+              {/* Daily Progress DPR Log Table */}
+              <Card title="Daily Progress DPR Log & Work Details" variant="table">
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "#f8fafc", borderBottom: "2px solid var(--border-color)" }}>
+                        <th style={{ textAlign: "left", padding: "10px 16px" }}>Date</th>
+                        <th style={{ textAlign: "left", padding: "10px 16px" }}>Site Engineer</th>
+                        <th style={{ textAlign: "right", padding: "10px 16px" }}>Progress %</th>
+                        <th style={{ textAlign: "right", padding: "10px 16px" }}>Change</th>
+                        <th style={{ textAlign: "left", padding: "10px 16px" }}>Work Completed / Running</th>
+                        <th style={{ textAlign: "left", padding: "10px 16px" }}>Problems / Remarks</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {progressDateRangeReportData.dailyEntries.map((row, idx) => (
+                        <tr key={idx} style={{ borderBottom: "1px solid var(--border-color)" }}>
+                          <td style={{ fontWeight: "700", padding: "10px 16px", color: "var(--primary-950)", whiteSpace: "nowrap" }}>
+                            {formatDDMMYYYY(row.dateStr)}
+                          </td>
+                          <td style={{ padding: "10px 16px", color: "#334155" }}>{row.engineerName}</td>
+                          <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#0f172a" }}>
+                            {row.progressPercent.toFixed(1)}%
+                          </td>
+                          <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "700", color: row.progressChange && row.progressChange > 0 ? "#16a34a" : "#64748b" }}>
+                            {row.progressChange !== null ? `${row.progressChange >= 0 ? '+' : ''}${row.progressChange.toFixed(1)}%` : "--"}
+                          </td>
+                          <td style={{ padding: "10px 16px", fontSize: "12.5px", color: "#0f172a" }}>{row.workDetails}</td>
+                          <td style={{ padding: "10px 16px", fontSize: "12px", color: "#64748b" }}>{row.remarks}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+
+              {/* AI ANALYTICS & EXECUTION FORECAST */}
+              <Card style={{ backgroundColor: "#f8fafc", border: "1.5px solid #6366f1", borderRadius: "10px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#e0e7ff", padding: "10px 16px", display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #c7d2fe" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <Activity size={18} style={{ color: "#4338ca" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#312e81", letterSpacing: "0.5px" }}>
+                      AI MANAGEMENT INSIGHTS &amp; EXECUTION FORECAST
+                    </span>
+                  </div>
+                  <span style={{
+                    padding: "3px 10px",
+                    borderRadius: "12px",
+                    fontSize: "11px",
+                    fontWeight: "800",
+                    backgroundColor: progressDateRangeReportData.projectStatus === "Ahead of Schedule" ? "#dcfce7" : (progressDateRangeReportData.projectStatus === "Behind / Delayed" ? "#fee2e2" : "#e0f2fe"),
+                    color: progressDateRangeReportData.projectStatus === "Ahead of Schedule" ? "#15803d" : (progressDateRangeReportData.projectStatus === "Behind / Delayed" ? "#b91c1c" : "#0369a1")
+                  }}>
+                    STATUS: {progressDateRangeReportData.projectStatus.toUpperCase()}
+                  </span>
+                </div>
+                <div style={{ padding: "16px" }}>
+                  <p style={{ margin: "0 0 14px 0", fontSize: "13.5px", lineHeight: "1.6", color: "#1e1b4b" }}>
+                    {progressDateRangeReportData.aiAnalysis}
+                  </p>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "12px", borderTop: "1px solid #e0e7ff", paddingTop: "12px" }}>
+                    <div>
+                      <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Project Health Status</span>
+                      <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                        {progressDateRangeReportData.projectStatus}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Estimated Completion</span>
+                      <div style={{ fontSize: "14px", fontWeight: "800", color: "#4338ca", marginTop: "2px" }}>
+                        {progressDateRangeReportData.estimatedCompletionDate || "Insufficient progress history"}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Estimated Days Remaining</span>
+                      <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                        {progressDateRangeReportData.estimatedDaysRemaining !== null ? `~${progressDateRangeReportData.estimatedDaysRemaining} days` : "--"}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </Card>
+
+              {/* FINAL REPORT SUMMARY */}
+              <Card style={{ backgroundColor: "#ffffff", border: "2px solid #0f172a", borderRadius: "8px" }}>
+                <div style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#0f172a", marginBottom: "12px", letterSpacing: "0.5px" }}>
+                  FINAL PROGRESS SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px" }}>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Total Reporting Days</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                      {progressDateRangeReportData.totalReportingDays}
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Starting Progress</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", marginTop: "4px" }}>
+                      {progressDateRangeReportData.startingProgress.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Latest Recorded Progress</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#16a34a", marginTop: "4px" }}>
+                      {progressDateRangeReportData.latestProgress.toFixed(1)}%
+                    </div>
+                  </div>
+                  <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", color: "var(--text-muted)" }}>Remaining Work</span>
+                    <div style={{ fontSize: "18px", fontWeight: "800", color: "#ea580c", marginTop: "4px" }}>
+                      {progressDateRangeReportData.remainingProgress.toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            </>
+          )}
         </div>
       )}
 
@@ -2198,30 +3735,55 @@ export default function ReportsDashboard() {
       <div className="printable-report-container" id="pdf-report-print-container">
         
         {/* Company header details */}
-        <div className="report-header-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <img src="/app-icon.png" alt="Visvas Builders" width="40" height="40" style={{ borderRadius: "8px", objectFit: "contain", display: "inline-block" }} />
+        <div className="report-header-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <img src="/app-icon.png" alt="Visvas Builders" width="36" height="36" style={{ borderRadius: "6px", objectFit: "contain", display: "inline-block" }} />
             <div>
-              <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit" }}>Visvas Builders</h2>
-              <span style={{ fontSize: "10px", color: "#64748b", fontWeight: "600", textTransform: "uppercase", letterSpacing: "0.5px" }}>Corporate Field Operations &amp; Auditing Ledger</span>
+              <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit, sans-serif" }}>Visvas Builders</h2>
+              <div style={{ fontSize: "12px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                {getSelectedReportTemplateLabel()}
+              </div>
             </div>
           </div>
           <div style={{ textAlign: "right", fontSize: "10px", color: "#475569" }}>
-            <div><strong>Report Date:</strong> {new Date().toLocaleDateString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', year: 'numeric' })} {new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true })} IST</div>
-            <div><strong>Generated By:</strong> {userProfile?.fullName || "System Admin"} ({userProfile?.role || "Admin"})</div>
+            <div><strong>Report Date:</strong> {formatDDMMYYYY(new Date())}</div>
+            {userProfile?.fullName && <div><strong>Generated By:</strong> {userProfile.fullName}</div>}
           </div>
         </div>
 
-        {/* Report metadata block */}
-        <div style={{ marginBottom: "20px", backgroundColor: "#f8fafc", padding: "12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-          <h1 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "#0f172a", textTransform: "uppercase", borderBottom: "1.5px solid #cbd5e1", paddingBottom: "6px" }}>
-            {getSelectedReportTemplateLabel()}
-          </h1>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginTop: "10px", fontSize: "11px", color: "#334155" }}>
-            <div><strong>Site Scope:</strong> {filterSiteId === "all" ? "All Corporate Sites" : (sites.find(s => s.id === filterSiteId)?.siteName || "Selected Site")}</div>
-            <div><strong>Engineer Selection:</strong> {filterEngineerId === "all" ? "All Engineers" : (engineers.find(e => e.id === filterEngineerId)?.fullName || "Selected Engineer")}</div>
-            <div><strong>Filter Date Range:</strong> {filterStartDate ? `${filterStartDate} to ${filterEndDate || "Today"}` : "All Recorded Periods"}</div>
-            <div><strong>Target Month / Year:</strong> {filterMonthVal !== "all" ? filterMonthVal : "All Months"} / {filterYearVal !== "all" ? filterYearVal : "All Years"}</div>
+        {/* Clean Unified Report Information Area (Single Source of Truth, no duplicate labels) */}
+        <div style={{ marginBottom: "14px", padding: "8px 12px", backgroundColor: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "4px" }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", fontSize: "11px", color: "#0f172a" }}>
+            <div>
+              <strong>Site:</strong> {
+                reportTemplate === "labour" 
+                  ? labourDateRangeReportData.siteNameDisplay 
+                  : (filterSiteId === "all" ? "All Sites" : (sites.find(s => s.id === filterSiteId)?.siteName || "Selected Site"))
+              }
+            </div>
+            <div>
+              <strong>Report Period:</strong> {
+                (filterStartDate && filterEndDate)
+                  ? `${formatDDMMYYYY(filterStartDate)} to ${formatDDMMYYYY(filterEndDate)}`
+                  : (filterStartDate ? `From ${formatDDMMYYYY(filterStartDate)}` : (filterEndDate ? `Up to ${formatDDMMYYYY(filterEndDate)}` : "All Dates"))
+              }
+            </div>
+            {/* Show Site Engineer once if applicable and available */}
+            {(() => {
+              const engDisplay = reportTemplate === "labour"
+                ? labourDateRangeReportData.assignedEngineersDisplay
+                : (filterEngineerId !== "all" 
+                    ? engineersMap[filterEngineerId] 
+                    : (filterSiteId !== "all" 
+                        ? (sites.find(s => s.id === filterSiteId)?.assignedEngineers || []).map(id => engineersMap[id]).filter(Boolean).join(", ") 
+                        : ""));
+              if (!engDisplay) return null;
+              return (
+                <div style={{ gridColumn: "span 2" }}>
+                  <strong>Site Engineer:</strong> {engDisplay}
+                </div>
+              );
+            })()}
           </div>
         </div>
 
@@ -2458,69 +4020,229 @@ export default function ReportsDashboard() {
         {/* PDF TEMPLATE: LABOUR REPORT */}
         {reportTemplate === "labour" && (
           <div>
-            <table className="printable-table">
-              <thead>
-                <tr>
-                  <th>Labour Team</th>
-                  <th>Labour Category</th>
-                  <th style={{ textAlign: "right" }}>Worker Count (Anchor Date)</th>
-                  <th style={{ textAlign: "right" }}>Daily Units</th>
-                  <th style={{ textAlign: "right" }}>Weekly Units</th>
-                  <th style={{ textAlign: "right" }}>Monthly Units</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(() => {
-                  const anchor = filterStartDate || new Date().toISOString().split("T")[0];
-                  const grouped = {};
-                  labourAttendance.forEach(r => {
-                    if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
-                    if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
-                    if (!allowedSiteIds.has(r.siteId)) return;
-                    
-                    const key = `${r.teamId}_${r.categoryId}`;
-                    if (!grouped[key]) {
-                      grouped[key] = {
-                        teamId: r.teamId,
-                        categoryId: r.categoryId,
-                        dailyUnits: 0,
-                        weeklyUnits: 0,
-                        monthlyUnits: 0,
-                        workerCount: 0
-                      };
-                    }
-                    const count = Number(r.workerCount) || 1;
-                    const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
-                    const units = count * factor;
-                    if (r.attendanceDate === anchor) {
-                      grouped[key].dailyUnits += units;
-                      grouped[key].workerCount += count;
-                    }
-                    if (isDateInWeek(r.attendanceDate, anchor)) {
-                      grouped[key].weeklyUnits += units;
-                    }
-                    if (isDateInMonth(r.attendanceDate, anchor)) {
-                      grouped[key].monthlyUnits += units;
-                    }
-                  });
-                  const rows = Object.values(grouped);
-                  if (rows.length === 0) return <tr><td colSpan={6} style={{ textAlign: "center" }}>No labour logs available.</td></tr>;
-                  return rows.map((row, idx) => {
-                    const teamObj = teams.find(t => t.id === row.teamId) || { teamName: "Unknown Team" };
-                    return (
+            {labourDateRangeReportData.dailySections.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "12px" }}>
+                No labor records found for the selected site and date range.
+              </div>
+            ) : (
+              labourDateRangeReportData.dailySections.map((day, dIdx) => (
+                <div key={dIdx} style={{ pageBreakInside: "avoid", breakInside: "avoid", marginBottom: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                  {day.teams.map((team, tIdx) => (
+                    <div key={tIdx} style={{ borderBottom: tIdx < day.teams.length - 1 ? "1px solid #cbd5e1" : "none" }}>
+                      <div style={{
+                        backgroundColor: "#f1f5f9",
+                        padding: "5px 8px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "10.5px",
+                        fontWeight: "700",
+                        color: "#0f172a",
+                        borderBottom: "1px solid #cbd5e1"
+                      }}>
+                        <span>DATE: {formatDDMMYYYY(day.dateStr)}</span>
+                        <span>SITE ENGINEER: {team.engineerName || labourDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}</span>
+                        <span>LABOUR TEAM: {team.teamName}</span>
+                      </div>
+                      <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ padding: "5px 8px", textAlign: "left", width: "40%", fontSize: "10px" }}>Category</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Workers</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Daily Wage</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "22%", fontSize: "10px" }}>Category Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {team.categories.map((cat, cIdx) => (
+                            <tr key={cIdx}>
+                              <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{cat.categoryName}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>{cat.workerCount}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
+                                ₹{cat.categoryTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                  <div style={{
+                    backgroundColor: "#e2e8f0",
+                    padding: "5px 8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    fontSize: "10.5px",
+                    fontWeight: "800",
+                    color: "#0f172a"
+                  }}>
+                    <span>Daily Total Workers: {day.dailyWorkers}</span>
+                    <span>Daily Labour Cost: ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* FINAL SUMMARY */}
+            {labourDateRangeReportData.dailySections.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "14px", border: "1.5px solid #0f172a", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#0f172a", color: "#ffffff", padding: "6px 10px", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
+                  FINAL SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc" }}>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Days</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{labourDateRangeReportData.totalWorkingDays}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Workers</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{labourDateRangeReportData.grandTotalWorkers}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Labour Cost</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                      ₹{labourDateRangeReportData.grandTotalLabourCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PDF TEMPLATE: MATERIAL REPORT */}
+        {reportTemplate === "material" && (
+          <div>
+            {materialDateRangeReportData.dailySections.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "12px" }}>
+                No material records found for the selected site and date range.
+              </div>
+            ) : (
+              materialDateRangeReportData.dailySections.map((day, dIdx) => (
+                <div key={dIdx} style={{ pageBreakInside: "avoid", breakInside: "avoid", marginBottom: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                  {day.teams.map((team, tIdx) => (
+                    <div key={tIdx} style={{ borderBottom: tIdx < day.teams.length - 1 ? "1px solid #cbd5e1" : "none" }}>
+                      <div style={{
+                        backgroundColor: "#f1f5f9",
+                        padding: "5px 8px",
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: "10.5px",
+                        fontWeight: "700",
+                        color: "#0f172a",
+                        borderBottom: "1px solid #cbd5e1"
+                      }}>
+                        <span>DATE: {formatDDMMYYYY(day.dateStr)}</span>
+                        <span>SITE ENGINEER: {team.engineerName || materialDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}</span>
+                        <span>MATERIAL TEAM: {team.teamName}</span>
+                      </div>
+                      <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr>
+                            <th style={{ padding: "5px 8px", textAlign: "left", width: "35%", fontSize: "10px" }}>Material</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "15%", fontSize: "10px" }}>Quantity</th>
+                            <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Unit</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Unit Price</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Total Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {team.items.map((item, iIdx) => (
+                            <tr key={iIdx}>
+                              <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{item.materialName}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>
+                                {item.quantity ? item.quantity.toLocaleString("en-IN") : (item.isCustom ? "--" : "0")}
+                              </td>
+                              <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{item.unit || "--"}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>
+                                {item.unitPrice ? `₹${item.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : (item.isCustom ? "--" : "₹0.00")}
+                              </td>
+                              <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
+                                ₹{item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ))}
+                  <div style={{
+                    backgroundColor: "#e2e8f0",
+                    padding: "5px 8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    fontSize: "10.5px",
+                    fontWeight: "800",
+                    color: "#0f172a"
+                  }}>
+                    <span>Daily Total Entries: {day.dailyItems}</span>
+                    <span>Daily Material Cost: ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* MATERIAL-WISE AGGREGATED SUMMARY TABLE IN PRINT */}
+            {materialDateRangeReportData.materialSummary.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#f1f5f9", padding: "5px 8px", fontSize: "10.5px", fontWeight: "700", color: "#0f172a", borderBottom: "1px solid #cbd5e1" }}>
+                  MATERIAL WISE COST & QUANTITY SUMMARY
+                </div>
+                <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "35%", fontSize: "10px" }}>Material</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "15%", fontSize: "10px" }}>Total Qty</th>
+                      <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Unit</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Avg Unit Price</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Total Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {materialDateRangeReportData.materialSummary.map((row, idx) => (
                       <tr key={idx}>
-                        <td>{teamObj.teamName}</td>
-                        <td>{row.categoryId}</td>
-                        <td style={{ textAlign: "right" }}>{row.workerCount}</td>
-                        <td style={{ textAlign: "right" }}>{row.dailyUnits.toFixed(1)}</td>
-                        <td style={{ textAlign: "right" }}>{row.weeklyUnits.toFixed(1)}</td>
-                        <td style={{ textAlign: "right" }}>{row.monthlyUnits.toFixed(1)}</td>
+                        <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{row.materialName}</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>
+                          {row.totalQuantity ? row.totalQuantity.toLocaleString("en-IN") : (row.isCustom ? "--" : "0")}
+                        </td>
+                        <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{row.unit || "--"}</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>
+                          {row.unitPrice ? `₹${row.unitPrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"}
+                        </td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
+                          ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
                       </tr>
-                    );
-                  });
-                })()}
-              </tbody>
-            </table>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* FINAL SUMMARY */}
+            {materialDateRangeReportData.dailySections.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "14px", border: "1.5px solid #0f172a", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#0f172a", color: "#ffffff", padding: "6px 10px", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
+                  FINAL SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc" }}>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Days</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{materialDateRangeReportData.totalWorkingDays}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Material Cost</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                      ₹{materialDateRangeReportData.grandTotalMaterialCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2553,26 +4275,218 @@ export default function ReportsDashboard() {
         {/* PDF TEMPLATE: EXPENSE REPORT */}
         {reportTemplate === "expense" && (
           <div>
-            <table className="printable-table">
-              <thead>
-                <tr>
-                  <th style={{ textAlign: "right" }}>Site Expenses</th>
-                  <th style={{ textAlign: "right" }}>Material Expenses</th>
-                  <th style={{ textAlign: "right" }}>Labour Expenses</th>
-                  <th style={{ textAlign: "right" }}>Other Expenses</th>
-                  <th style={{ textAlign: "right" }}>Total Expense Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr>
-                  <td style={{ textAlign: "right" }}>{formatINR(expenseReportData.siteExpense)}</td>
-                  <td style={{ textAlign: "right" }}>{formatINR(expenseReportData.materialExpense)}</td>
-                  <td style={{ textAlign: "right" }}>{formatINR(expenseReportData.labourExpense)}</td>
-                  <td style={{ textAlign: "right" }}>{formatINR(expenseReportData.otherExpense)}</td>
-                  <td style={{ textAlign: "right", fontWeight: "700" }}>{formatINR(expenseReportData.totalExpense)}</td>
-                </tr>
-              </tbody>
-            </table>
+            {expenseDateRangeReportData.dailySections.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "12px" }}>
+                No expense records found for the selected site and date range.
+              </div>
+            ) : (
+              expenseDateRangeReportData.dailySections.map((day, dIdx) => (
+                <div key={dIdx} style={{ pageBreakInside: "avoid", breakInside: "avoid", marginBottom: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                  <div style={{
+                    backgroundColor: "#f1f5f9",
+                    padding: "5px 8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    fontSize: "10.5px",
+                    fontWeight: "700",
+                    color: "#0f172a",
+                    borderBottom: "1px solid #cbd5e1"
+                  }}>
+                    <span>DATE: {formatDDMMYYYY(day.dateStr)}</span>
+                    <span>SITE ENGINEER: {day.items[0]?.engineerName || expenseDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}</span>
+                    <span>ENTRIES: {day.dailyItems}</span>
+                  </div>
+                  <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr>
+                        <th style={{ padding: "5px 8px", textAlign: "left", width: "25%", fontSize: "10px" }}>Category</th>
+                        <th style={{ padding: "5px 8px", textAlign: "left", width: "45%", fontSize: "10px" }}>Description</th>
+                        <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Status</th>
+                        <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Amount</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {day.items.map((item, iIdx) => (
+                        <tr key={iIdx}>
+                          <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{item.category}</td>
+                          <td style={{ padding: "5px 8px", fontSize: "10px" }}>{item.description}</td>
+                          <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{item.status}</td>
+                          <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
+                            ₹{item.amount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <div style={{
+                    backgroundColor: "#e2e8f0",
+                    padding: "5px 8px",
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    fontSize: "10.5px",
+                    fontWeight: "800",
+                    color: "#0f172a"
+                  }}>
+                    <span>Daily Total Entries: {day.dailyItems}</span>
+                    <span>Daily Expense Total: ₹{day.dailyCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              ))
+            )}
+
+            {/* CATEGORY-WISE AGGREGATED SUMMARY TABLE IN PRINT */}
+            {expenseDateRangeReportData.categorySummary.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#f1f5f9", padding: "5px 8px", fontSize: "10.5px", fontWeight: "700", color: "#0f172a", borderBottom: "1px solid #cbd5e1" }}>
+                  CATEGORY WISE EXPENSE SUMMARY
+                </div>
+                <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "40%", fontSize: "10px" }}>Category</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Total Entries</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Share %</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Total Amount</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expenseDateRangeReportData.categorySummary.map((row, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{row.categoryName}</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>{row.totalEntries}</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>{row.percentage.toFixed(1)}%</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
+                          ₹{row.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* FINAL SUMMARY */}
+            {expenseDateRangeReportData.dailySections.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "14px", border: "1.5px solid #0f172a", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#0f172a", color: "#ffffff", padding: "6px 10px", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
+                  FINAL SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc" }}>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Days</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{expenseDateRangeReportData.totalWorkingDays}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Expenses Cost</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                      ₹{expenseDateRangeReportData.grandTotalExpenseCost.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PDF TEMPLATE: PROGRESS REPORT */}
+        {reportTemplate === "progress" && (
+          <div>
+            {progressDateRangeReportData.dailyEntries.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "#64748b", border: "1px solid #cbd5e1", borderRadius: "4px", fontSize: "12px" }}>
+                No progress records found for the selected site and date range.
+              </div>
+            ) : (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginBottom: "12px", border: "1px solid #94a3b8", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{
+                  backgroundColor: "#f1f5f9",
+                  padding: "5px 8px",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  fontSize: "10.5px",
+                  fontWeight: "700",
+                  color: "#0f172a",
+                  borderBottom: "1px solid #cbd5e1"
+                }}>
+                  <span>SITE: {progressDateRangeReportData.siteNameDisplay}</span>
+                  <span>RECORDED ENTRIES: {progressDateRangeReportData.totalReportingDays}</span>
+                  <span>CURRENT PROGRESS: {progressDateRangeReportData.latestProgress.toFixed(1)}%</span>
+                </div>
+                <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "15%", fontSize: "10px" }}>Date</th>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "20%", fontSize: "10px" }}>Site Engineer</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "12%", fontSize: "10px" }}>Progress %</th>
+                      <th style={{ padding: "5px 8px", textAlign: "right", width: "10%", fontSize: "10px" }}>Change</th>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "25%", fontSize: "10px" }}>Work Details</th>
+                      <th style={{ padding: "5px 8px", textAlign: "left", width: "18%", fontSize: "10px" }}>Problems / Remarks</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {progressDateRangeReportData.dailyEntries.map((row, idx) => (
+                      <tr key={idx}>
+                        <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{formatDDMMYYYY(row.dateStr)}</td>
+                        <td style={{ padding: "5px 8px", fontSize: "10px" }}>{row.engineerName}</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>{row.progressPercent.toFixed(1)}%</td>
+                        <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>
+                          {row.progressChange !== null ? `${row.progressChange >= 0 ? '+' : ''}${row.progressChange.toFixed(1)}%` : "--"}
+                        </td>
+                        <td style={{ padding: "5px 8px", fontSize: "10px" }}>{row.workDetails}</td>
+                        <td style={{ padding: "5px 8px", fontSize: "10px" }}>{row.remarks}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* AI MANAGEMENT INSIGHTS IN PRINT */}
+            {progressDateRangeReportData.dailyEntries.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "12px", border: "1px solid #6366f1", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#e0e7ff", padding: "5px 8px", fontSize: "10.5px", fontWeight: "800", color: "#312e81", display: "flex", justifyContent: "space-between", borderBottom: "1px solid #c7d2fe" }}>
+                  <span>AI MANAGEMENT INSIGHTS &amp; EXECUTION FORECAST</span>
+                  <span>STATUS: {progressDateRangeReportData.projectStatus.toUpperCase()}</span>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", fontSize: "10.5px", lineHeight: "1.5", color: "#1e1b4b" }}>
+                  <p style={{ margin: "0 0 6px 0" }}>{progressDateRangeReportData.aiAnalysis}</p>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", borderTop: "1px solid #e0e7ff", paddingTop: "6px", fontSize: "10px" }}>
+                    <div><strong>Project Health:</strong> {progressDateRangeReportData.projectStatus}</div>
+                    <div><strong>Est. Completion:</strong> {progressDateRangeReportData.estimatedCompletionDate || "Insufficient history"}</div>
+                    <div><strong>Est. Days Remaining:</strong> {progressDateRangeReportData.estimatedDaysRemaining !== null ? `~${progressDateRangeReportData.estimatedDaysRemaining} days` : "--"}</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* FINAL SUMMARY */}
+            {progressDateRangeReportData.dailyEntries.length > 0 && (
+              <div style={{ pageBreakInside: "avoid", breakInside: "avoid", marginTop: "14px", border: "1.5px solid #0f172a", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ backgroundColor: "#0f172a", color: "#ffffff", padding: "6px 10px", fontSize: "11px", fontWeight: "800", textTransform: "uppercase" }}>
+                  FINAL PROGRESS SUMMARY
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: "10px", padding: "8px 12px", backgroundColor: "#f8fafc" }}>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Total Reporting Days</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{progressDateRangeReportData.totalReportingDays}</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Starting Progress</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{progressDateRangeReportData.startingProgress.toFixed(1)}%</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Latest Progress</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>{progressDateRangeReportData.latestProgress.toFixed(1)}%</div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "9px", fontWeight: "700", textTransform: "uppercase", color: "#64748b" }}>Progress Gain</div>
+                    <div style={{ fontSize: "13px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>+{progressDateRangeReportData.progressAchieved.toFixed(1)}%</div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -2600,14 +4514,7 @@ export default function ReportsDashboard() {
           </div>
         )}
 
-        {/* Signature Verification Block */}
-        <div style={{ borderTop: "1.5px solid #94a3b8", marginTop: "40px", paddingTop: "20px", display: "flex", justifyContent: "space-between", fontSize: "10px", color: "#64748b" }}>
-          <p>Document Security Verification: VISVAS-BI-{new Date().getFullYear()}-{Math.floor(Math.random() * 90000) + 10000}</p>
-          <div style={{ textAlign: "right" }}>
-            <p style={{ borderTop: "1.5px solid #0f172a", width: "160px", display: "inline-block", marginTop: "24px" }}></p>
-            <p style={{ margin: "2px 0 0 0" }}>Authorized Signature</p>
-          </div>
-        </div>
+
 
       </div>
     </Layout>

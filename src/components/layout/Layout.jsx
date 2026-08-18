@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import Sidebar from "./Sidebar";
 import Navbar from "./Navbar";
 
-export default function Layout({ children, title, description }) {
+export default function Layout({ children, title, description, hideNavbar = false }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
@@ -12,11 +12,13 @@ export default function Layout({ children, title, description }) {
       )}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <main className="main-content">
-        <Navbar 
-          title={title} 
-          description={description} 
-          onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} 
-        />
+        {!hideNavbar && (
+          <Navbar 
+            title={title} 
+            description={description} 
+            onToggleSidebar={() => setSidebarOpen(!sidebarOpen)} 
+          />
+        )}
         <div style={{ width: "100%", flex: 1, display: "flex", flexDirection: "column" }}>
           {children}
         </div>
