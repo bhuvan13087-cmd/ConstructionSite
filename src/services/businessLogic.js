@@ -73,23 +73,27 @@ export function verifySiteGeofence(coords, savedLocation, siteRadius) {
  */
 export function processMaterialPaymentAndDelivery(mat) {
   if (!mat) return {};
-  const isApproved = mat.status === "approved" || mat.status === "Approved";
-  const isPending = mat.status === "pending" || mat.status === "Pending" || !mat.status;
-  const isRejected = mat.status === "rejected" || mat.status === "Rejected";
+  const normalizedStatus = (mat.status || "").toLowerCase();
+  const isApproved = normalizedStatus === "approved" || normalizedStatus === "received" || normalizedStatus === "partial received" || normalizedStatus === "partially received";
+  const isPending = normalizedStatus === "pending" || normalizedStatus === "in transit" || normalizedStatus === "awaiting receipt" || !mat.status;
+  const isRejected = normalizedStatus === "rejected";
 
-  const reqQty = mat.requiredQuantity !== undefined && mat.requiredQuantity !== null ? Number(mat.requiredQuantity) : (Number(mat.quantity) || 0);
-  const ordQty = mat.orderedQuantity !== undefined && mat.orderedQuantity !== null ? Number(mat.orderedQuantity) : (Number(mat.quantity) || 0);
+  const reqQty = mat.requiredQuantity !== undefined && mat.requiredQuantity !== null ? Number(mat.requiredQuantity) : (Number(mat.transferQuantity) || Number(mat.quantity) || 0);
+  const ordQty = mat.orderedQuantity !== undefined && mat.orderedQuantity !== null ? Number(mat.orderedQuantity) : reqQty;
   const recQty = isApproved ? (Number(mat.quantity) || 0) : 0;
   const consumedQty = Number(mat.consumedQuantity) || 0;
   const remainingStock = Math.max(0, recQty - consumedQty);
   
-  // Standard prices: Cement: ₹400, Steel: ₹5000, Sand: ₹2500, Bricks: ₹10, Other/else: ₹1500
-  let unitCost = 500;
-  if (mat.category === "Steel") unitCost = 5000;
-  else if (mat.category === "Sand") unitCost = 2500;
-  else if (mat.category === "Bricks") unitCost = 10;
-  else if (mat.category === "Cement") unitCost = 400;
-  else if (mat.category === "Other") unitCost = 1500;
+  // Standard prices with precedence to canonical unitPrice / rate
+  let unitCost = Number(mat.unitPrice || mat.rate) || 0;
+  if (!unitCost) {
+    if (mat.category === "Steel") unitCost = 5000;
+    else if (mat.category === "Sand") unitCost = 2500;
+    else if (mat.category === "Bricks") unitCost = 10;
+    else if (mat.category === "Cement") unitCost = 400;
+    else if (mat.category === "Other") unitCost = 1500;
+    else unitCost = 500;
+  }
 
   const totalAmount = mat.totalAmount !== undefined && mat.totalAmount !== null ? Number(mat.totalAmount) : (recQty * unitCost);
   const paidAmount = Number(mat.paidAmount) || 0;
@@ -99,6 +103,12 @@ export function processMaterialPaymentAndDelivery(mat) {
   let delStatus = "Fully Delivered";
   if (isRejected) {
     delStatus = "Rejected";
+  } else if (normalizedStatus === "in transit" || normalizedStatus === "awaiting receipt") {
+    delStatus = "In Transit";
+  } else if (normalizedStatus === "received") {
+    delStatus = "Fully Delivered";
+  } else if (normalizedStatus === "partial received" || normalizedStatus === "partially received") {
+    delStatus = "Partial Delivery";
   } else if (isPending) {
     delStatus = "Awaiting Approval";
   } else if (recQty === 0) {

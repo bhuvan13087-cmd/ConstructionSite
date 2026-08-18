@@ -59,7 +59,11 @@ import {
   checkLabourSubmissionStatus,
   submitLabourAttendance,
   checkMaterialSubmissionStatus,
-  saveBulkMaterialEntry
+  saveBulkMaterialEntry,
+  updateMaterial,
+  transferMaterialBetweenSites,
+  receiveMaterialTransfer,
+  subscribeMaterialTransfersForSite
 } from "../services/firebaseService";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
@@ -82,37 +86,39 @@ import {
   Camera, 
   Upload, 
   Save, 
-  X,
-  ClipboardCheck,
-  Percent,
-  Calendar,
-  AlertTriangle,
-  Package,
-  Users,
-  Search,
-  Plus,
-  Minus,
-  Trash2,
-  Clock,
-  Briefcase,
-  Sliders,
-  TrendingUp,
-  Activity,
-  ChevronRight,
-  LayoutDashboard,
-  LogOut,
-  HardHat,
-  Lock,
-  Eye,
-  EyeOff,
-  ArrowRightCircle,
-  ArrowLeftCircle,
-  DollarSign,
-  History,
-  Truck,
-  Layers,
-  Edit2,
-  Edit
+  X, 
+  ClipboardCheck, 
+  Percent, 
+  Calendar, 
+  AlertTriangle, 
+  Package, 
+  Users, 
+  Search, 
+  Plus, 
+  Minus, 
+  Trash2, 
+  Clock, 
+  Briefcase, 
+  Sliders, 
+  TrendingUp, 
+  Activity, 
+  ChevronRight, 
+  LayoutDashboard, 
+  LogOut, 
+  HardHat, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  ArrowRightCircle, 
+  ArrowLeftCircle, 
+  DollarSign, 
+  History, 
+  Truck, 
+  Layers, 
+  Edit2, 
+  Edit,
+  ArrowRightLeft,
+  Inbox
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import EXIF from "exif-js";
@@ -511,6 +517,48 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [bulkMaterialLockInfo, setBulkMaterialLockInfo] = useState(null);
   const [bulkMaterialSubmitting, setBulkMaterialSubmitting] = useState(false);
 
+  // Material Pending Tracking States
+  const [showPendingModal, setShowPendingModal] = useState(false);
+  const [pendingDate, setPendingDate] = useState(new Date().toISOString().split("T")[0]);
+  const [pendingTeamId, setPendingTeamId] = useState("");
+  const [pendingMaterialId, setPendingMaterialId] = useState("");
+  const [pendingTotalQty, setPendingTotalQty] = useState("");
+  const [pendingReceivedQty, setPendingReceivedQty] = useState("");
+  const [pendingSupplier, setPendingSupplier] = useState("");
+  const [pendingNotes, setPendingNotes] = useState("");
+  const [savingPending, setSavingPending] = useState(false);
+
+  // Material Pending Resolution States
+  const [showResolvePendingModal, setShowResolvePendingModal] = useState(false);
+  const [selectedPendingRecord, setSelectedPendingRecord] = useState(null);
+  const [newlyReceivedQty, setNewlyReceivedQty] = useState("");
+  const [savingResolvePending, setSavingResolvePending] = useState(false);
+
+  // Material Row Details Modal State
+  const [showMaterialDetailsModal, setShowMaterialDetailsModal] = useState(false);
+  const [selectedMaterialForDetails, setSelectedMaterialForDetails] = useState(null);
+
+  // Material Transfer States
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [transferMaterialId, setTransferMaterialId] = useState("");
+  const [transferQuantity, setTransferQuantity] = useState("");
+  const [transferDestSiteId, setTransferDestSiteId] = useState("");
+  const [transferDate, setTransferDate] = useState(new Date().toISOString().split("T")[0]);
+  const [transferNotes, setTransferNotes] = useState("");
+  const [savingTransfer, setSavingTransfer] = useState(false);
+
+  // Material Receive Transfer States
+  const [showReceiveTransferModal, setShowReceiveTransferModal] = useState(false);
+  const [selectedTransferForReceive, setSelectedTransferForReceive] = useState(null);
+  const [receiveQuantity, setReceiveQuantity] = useState("");
+  const [receiveDate, setReceiveDate] = useState(new Date().toISOString().split("T")[0]);
+  const [receiveNotes, setReceiveNotes] = useState("");
+  const [savingReceiveTransfer, setSavingReceiveTransfer] = useState(false);
+
+  // Material Transfers List & Filter States
+  const [siteTransfers, setSiteTransfers] = useState([]);
+  const [transferFilterMode, setTransferFilterMode] = useState("all"); // "all" | "outgoing" | "incoming"
+
   // 7. General Expense states
   const [generalExpenses, setGeneralExpenses] = useState([]);
   const [labourPayments, setLabourPayments] = useState([]);
@@ -829,7 +877,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const unsubSiteMats = subscribeMaterialsDetailed(activeSiteId, (siteMats) => {
       setMaterials(siteMats);
     });
-    return () => unsubSiteMats();
+    const unsubTransfers = subscribeMaterialTransfersForSite(activeSiteId, (txs) => {
+      setSiteTransfers(txs || []);
+    });
+    return () => {
+      unsubSiteMats();
+      unsubTransfers();
+    };
   }, [activeSiteId]);
 
   // Check Bulk Material Entry submission status for selected site and date
@@ -2210,6 +2264,351 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast(`Submission failed: ${err.message}`, "error");
     } finally {
       setBulkMaterialSubmitting(false);
+    }
+  };
+
+  // Open Track Pending Modal
+  const handleOpenPendingModal = () => {
+    if (!activeSiteId) {
+      showToast("Please select an active construction site first.", "error");
+      return;
+    }
+    setPendingDate(bulkMaterialDate || new Date().toISOString().split("T")[0]);
+    const teamIdToUse = selectedMaterialTeamId || (materialTeams.length > 0 ? materialTeams[0].id : "");
+    setPendingTeamId(teamIdToUse);
+    const initialTeam = materialTeams.find(t => t.id === teamIdToUse);
+    const firstMat = (initialTeam?.materials || []).find(m => m.status !== "Inactive");
+    setPendingMaterialId(firstMat ? firstMat.id : "");
+    setPendingTotalQty("");
+    setPendingReceivedQty("");
+    setPendingSupplier(initialTeam?.name || "");
+    setPendingNotes("");
+    setShowPendingModal(true);
+  };
+
+  // Save New Pending Material Record
+  const handleSavePendingMaterial = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (savingPending) return;
+
+    if (!activeSiteId) {
+      showToast("Please select construction site.", "error");
+      return;
+    }
+    if (!pendingDate) {
+      showToast("Please select report date.", "error");
+      return;
+    }
+    if (!pendingTeamId) {
+      showToast("Please select a Material Team.", "error");
+      return;
+    }
+    if (!pendingMaterialId) {
+      showToast("Please select a Material.", "error");
+      return;
+    }
+    const totQty = Number(pendingTotalQty);
+    if (!pendingTotalQty || isNaN(totQty) || totQty <= 0) {
+      showToast("Please enter a valid Total Quantity greater than 0.", "error");
+      return;
+    }
+    const recQty = pendingReceivedQty === "" ? 0 : Number(pendingReceivedQty);
+    if (isNaN(recQty) || recQty < 0) {
+      showToast("Received Quantity cannot be negative.", "error");
+      return;
+    }
+    if (recQty > totQty) {
+      showToast("Received Quantity cannot exceed Total Quantity.", "error");
+      return;
+    }
+
+    const currentTeam = materialTeams.find(t => t.id === pendingTeamId);
+    const selectedMat = (currentTeam?.materials || []).find(m => m.id === pendingMaterialId);
+    if (!selectedMat) {
+      showToast("Selected material not found in team configuration.", "error");
+      return;
+    }
+
+    const pendingQty = Math.max(0, totQty - recQty);
+    const unitCost = Number(selectedMat.rate || selectedMat.amount || selectedMat.unitPrice) || 0;
+    const isCustom = selectedMat.type === "custom";
+    const totalAmount = isCustom ? unitCost : (recQty > 0 ? recQty * unitCost : totQty * unitCost);
+
+    setSavingPending(true);
+    try {
+      const engineerId = currentEngineerId || userProfile?.uid || userProfile?.id || "";
+      await addMaterial({
+        siteId: activeSiteId,
+        engineerId,
+        teamId: currentTeam.id,
+        teamName: currentTeam.name,
+        materialName: selectedMat.name,
+        materialType: isCustom ? "custom" : "standard",
+        category: currentTeam.name,
+        unit: isCustom ? "" : (selectedMat.unit || "Unit"),
+        quantity: recQty, // actual received quantity
+        requiredQuantity: totQty, // total ordered quantity
+        orderedQuantity: totQty,
+        pendingDelivery: pendingQty,
+        isPendingDelivery: pendingQty > 0,
+        unitPrice: unitCost,
+        rate: unitCost,
+        amount: totalAmount,
+        totalAmount: totalAmount,
+        supplierName: pendingSupplier.trim() || currentTeam.name || "Material Supplier",
+        purchaseDate: pendingDate,
+        notes: pendingNotes.trim() || `Material Pending Entry: ${recQty}/${totQty} ${selectedMat.unit || "units"} received on ${pendingDate} (Pending: ${pendingQty})`,
+        status: "Approved",
+        type: "material_log"
+      });
+
+      showToast(`Pending record saved for ${selectedMat.name} (Pending: ${pendingQty} ${selectedMat.unit || ""})`, "success");
+      setShowPendingModal(false);
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Save pending error:", err);
+      showToast(`Failed to save pending record: ${err.message}`, "error");
+    } finally {
+      setSavingPending(false);
+    }
+  };
+
+  // Open Resolve Existing Pending Modal
+  const handleOpenResolvePending = (mat) => {
+    setSelectedPendingRecord(mat);
+    const currentPending = Number(mat.pendingDelivery) || Math.max(0, (Number(mat.requiredQuantity || mat.orderedQuantity) || 0) - (Number(mat.receivedQuantity || mat.quantity) || 0));
+    setNewlyReceivedQty(currentPending > 0 ? String(currentPending) : "");
+    setShowResolvePendingModal(true);
+  };
+
+  // Submit Resolve Pending Delivery
+  const handleResolvePendingSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (savingResolvePending || !selectedPendingRecord) return;
+
+    const newlyRec = Number(newlyReceivedQty);
+    if (!newlyReceivedQty || isNaN(newlyRec) || newlyRec <= 0) {
+      showToast("Please enter a valid received quantity greater than 0.", "error");
+      return;
+    }
+
+    const currentRec = Number(selectedPendingRecord.receivedQuantity !== undefined ? selectedPendingRecord.receivedQuantity : selectedPendingRecord.quantity) || 0;
+    const totalReq = Number(selectedPendingRecord.requiredQuantity || selectedPendingRecord.orderedQuantity) || (currentRec + (Number(selectedPendingRecord.pendingDelivery) || 0));
+    const updatedRec = currentRec + newlyRec;
+
+    if (updatedRec > totalReq) {
+      showToast(`Total received (${updatedRec}) cannot exceed ordered total (${totalReq}).`, "error");
+      return;
+    }
+
+    const updatedPending = Math.max(0, totalReq - updatedRec);
+
+    setSavingResolvePending(true);
+    try {
+      const todayIso = new Date().toISOString().split("T")[0];
+      const appendNote = `\n[${todayIso}] Received +${newlyRec} ${selectedPendingRecord.unit || ""}. Total received: ${updatedRec}/${totalReq} (Remaining pending: ${updatedPending})`;
+      
+      await updateMaterial(selectedPendingRecord.id, {
+        quantity: updatedRec, // Canonical received quantity
+        receivedQuantity: updatedRec,
+        requiredQuantity: totalReq,
+        orderedQuantity: totalReq,
+        pendingDelivery: updatedPending,
+        isPendingDelivery: updatedPending > 0,
+        deliveryStatus: updatedPending === 0 ? "Fully Delivered" : "Partial Delivery",
+        notes: (selectedPendingRecord.notes || "") + appendNote
+      });
+
+      showToast(
+        updatedPending === 0 
+          ? `Delivery completed! ${selectedPendingRecord.materialName} is now fully received (${totalReq} ${selectedPendingRecord.unit || ""}).` 
+          : `Updated delivery for ${selectedPendingRecord.materialName}. Remaining pending: ${updatedPending} ${selectedPendingRecord.unit || ""}.`,
+        "success"
+      );
+      setShowResolvePendingModal(false);
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Resolve pending error:", err);
+      showToast(`Failed to update delivery: ${err.message}`, "error");
+    } finally {
+      setSavingResolvePending(false);
+    }
+  };
+
+  // Open Material Row Details Modal
+  const handleOpenMaterialDetails = (row) => {
+    setSelectedMaterialForDetails(row);
+    setShowMaterialDetailsModal(true);
+  };
+
+  // Open Material Transfer Modal
+  const handleOpenTransferModal = (preselectedMat = null) => {
+    if (!activeSiteId) {
+      showToast("Please select an active construction site first.", "error");
+      return;
+    }
+
+    const availableSiteMats = materials
+      .filter(m => m.siteId === activeSiteId)
+      .map(m => processMaterialPaymentAndDelivery(m))
+      .filter(m => m.remainingStock > 0);
+
+    if (availableSiteMats.length === 0) {
+      showToast("No available material stock at this site to transfer.", "warning");
+      return;
+    }
+
+    const otherSites = allSites.filter(s => s.id !== activeSiteId);
+    if (otherSites.length === 0) {
+      showToast("No other destination sites available for transfer.", "warning");
+      return;
+    }
+
+    const matToUse = preselectedMat && availableSiteMats.some(m => m.id === preselectedMat.id)
+      ? preselectedMat.id
+      : availableSiteMats[0].id;
+
+    setTransferDate(bulkMaterialDate || new Date().toISOString().split("T")[0]);
+    setTransferMaterialId(matToUse);
+    setTransferDestSiteId(otherSites[0].id);
+    setTransferQuantity("");
+    setTransferNotes("");
+    setShowTransferModal(true);
+  };
+
+  // Submit Material Transfer
+  const handleTransferSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (savingTransfer) return;
+
+    if (!activeSiteId) {
+      showToast("Please select source construction site.", "error");
+      return;
+    }
+
+    if (!transferDestSiteId) {
+      showToast("Please select a destination site.", "error");
+      return;
+    }
+
+    if (transferDestSiteId === activeSiteId) {
+      showToast("Destination site cannot be the same as the source site.", "error");
+      return;
+    }
+
+    if (!transferMaterialId) {
+      showToast("Please select a material to transfer.", "error");
+      return;
+    }
+
+    const transferQtyNum = Number(transferQuantity);
+    if (!transferQuantity || isNaN(transferQtyNum) || transferQtyNum <= 0) {
+      showToast("Please enter a valid transfer quantity greater than 0.", "error");
+      return;
+    }
+
+    const rawMat = materials.find(m => m.id === transferMaterialId);
+    if (!rawMat) {
+      showToast("Selected material record not found.", "error");
+      return;
+    }
+
+    const processedMat = processMaterialPaymentAndDelivery(rawMat);
+    if (transferQtyNum > processedMat.remainingStock) {
+      showToast(`Transfer quantity (${transferQtyNum}) exceeds available stock (${processedMat.remainingStock} ${processedMat.unit || "units"}).`, "error");
+      return;
+    }
+
+    const currentSiteObj = assignedSites.find(s => s.id === activeSiteId) || allSites.find(s => s.id === activeSiteId);
+    const destSiteObj = allSites.find(s => s.id === transferDestSiteId);
+    const engineerId = currentEngineerId || userProfile?.uid || "";
+    const engineerName = userProfile?.fullName || userProfile?.name || "Site Engineer";
+
+    setSavingTransfer(true);
+    try {
+      await transferMaterialBetweenSites({
+        sourceSiteId: activeSiteId,
+        sourceSiteName: currentSiteObj?.siteName || "Source Site",
+        destinationSiteId: transferDestSiteId,
+        destinationSiteName: destSiteObj?.siteName || "Destination Site",
+        sourceMaterialId: transferMaterialId,
+        transferQuantity: transferQtyNum,
+        transferDate: transferDate || new Date().toISOString().split("T")[0],
+        engineerId,
+        engineerName,
+        notes: transferNotes.trim()
+      });
+
+      showToast(`Successfully transferred ${transferQtyNum} ${processedMat.unit || ""} to ${destSiteObj?.siteName || "Destination Site"}!`, "success");
+      setShowTransferModal(false);
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Transfer error:", err);
+      showToast(`Transfer failed: ${err.message}`, "error");
+    } finally {
+      setSavingTransfer(false);
+    }
+  };
+
+  // Open Receive Material Transfer Modal
+  const handleOpenReceiveTransfer = (transferRecord) => {
+    setSelectedTransferForReceive(transferRecord);
+    const totalTransferred = Number(transferRecord.transferQuantity || transferRecord.requiredQuantity || transferRecord.orderedQuantity) || 0;
+    const previouslyReceived = Number(transferRecord.quantity) || 0;
+    const pendingToReceive = Math.max(0, totalTransferred - previouslyReceived);
+    setReceiveQuantity(pendingToReceive > 0 ? pendingToReceive.toString() : "");
+    setReceiveDate(bulkMaterialDate || new Date().toISOString().split("T")[0]);
+    setReceiveNotes("");
+    setShowReceiveTransferModal(true);
+  };
+
+  // Submit Material Transfer Receipt
+  const handleReceiveTransferSubmit = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (savingReceiveTransfer || !selectedTransferForReceive) return;
+
+    const rxQtyNum = Number(receiveQuantity);
+    if (!receiveQuantity || isNaN(rxQtyNum) || rxQtyNum <= 0) {
+      showToast("Please enter a valid receive quantity greater than 0.", "error");
+      return;
+    }
+
+    const totalTransferred = Number(selectedTransferForReceive.transferQuantity || selectedTransferForReceive.requiredQuantity || selectedTransferForReceive.orderedQuantity) || 0;
+    const previouslyReceived = Number(selectedTransferForReceive.quantity) || 0;
+    const currentPending = Math.max(0, totalTransferred - previouslyReceived);
+
+    if (rxQtyNum > currentPending) {
+      showToast(`Receive quantity (${rxQtyNum}) cannot exceed pending quantity (${currentPending} ${selectedTransferForReceive.unit || "units"}).`, "error");
+      return;
+    }
+
+    const engineerId = currentEngineerId || userProfile?.uid || "";
+    const engineerName = userProfile?.fullName || userProfile?.name || "Site Engineer";
+
+    setSavingReceiveTransfer(true);
+    try {
+      const res = await receiveMaterialTransfer({
+        transferId: selectedTransferForReceive.id,
+        receivedQuantity: rxQtyNum,
+        receiveDate: receiveDate || new Date().toISOString().split("T")[0],
+        engineerId,
+        engineerName,
+        notes: receiveNotes.trim()
+      });
+
+      showToast(
+        res.isFullyReceived
+          ? `Receipt confirmed! Full ${res.receivedQuantity} ${selectedTransferForReceive.unit || ""} received from ${selectedTransferForReceive.sourceSiteName || "source site"}.`
+          : `Partial receipt recorded (+${rxQtyNum} ${selectedTransferForReceive.unit || ""}). Remaining pending: ${res.pendingQuantity} ${selectedTransferForReceive.unit || ""}.`,
+        "success"
+      );
+      setShowReceiveTransferModal(false);
+      await loadDashboardData();
+    } catch (err) {
+      console.error("Receive transfer error:", err);
+      showToast(`Failed to record receipt: ${err.message}`, "error");
+    } finally {
+      setSavingReceiveTransfer(false);
     }
   };
 
@@ -4024,6 +4423,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderMaterialView = () => {
+    const sitePendingMaterials = materials
+      .filter(m => m.siteId === activeSiteId)
+      .map(m => processMaterialPaymentAndDelivery(m))
+      .filter(m => m.pendingDelivery > 0);
+
     const activeMaterials = materials
       .filter(m => m.siteId === activeSiteId)
       .filter(m => {
@@ -4148,53 +4552,126 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         margin: "0 auto",
         padding: "8px 4px 80px 4px"
       }}>
-        {/* Segmented Control */}
+        {/* ── SUB-TABS: RECORD USAGE vs PENDING MATERIALS vs SITE LOGS ── */}
         <div style={{
           display: "flex",
           backgroundColor: "#f1f5f9",
-          borderRadius: "24px",
           padding: "4px",
-          gap: "4px",
-          border: "1px solid #cbd5e1",
-          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)"
+          borderRadius: "24px",
+          boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)",
+          gap: "4px"
         }}>
           <button
             type="button"
             onClick={() => setMaterialTabMode("entry")}
             style={{
               flex: 1,
-              padding: "10px 12px",
+              padding: "10px 8px",
               borderRadius: "20px",
-              fontSize: "14px",
+              fontSize: "13px",
               fontWeight: "750",
               border: "none",
               cursor: "pointer",
               backgroundColor: materialTabMode === "entry" ? "#ffffff" : "transparent",
               color: materialTabMode === "entry" ? "#ea580c" : "#64748b",
               boxShadow: materialTabMode === "entry" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
-              transition: "all 0.2s ease"
+              transition: "all 0.2s ease",
+              whiteSpace: "nowrap"
             }}
           >
-            Record Material Usage
+            Record Usage
+          </button>
+          <button
+            type="button"
+            onClick={() => setMaterialTabMode("pending")}
+            style={{
+              flex: 1,
+              padding: "10px 8px",
+              borderRadius: "20px",
+              fontSize: "13px",
+              fontWeight: "750",
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: materialTabMode === "pending" ? "#ffffff" : "transparent",
+              color: materialTabMode === "pending" ? "#ea580c" : "#64748b",
+              boxShadow: materialTabMode === "pending" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+              transition: "all 0.2s ease",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "5px",
+              whiteSpace: "nowrap"
+            }}
+          >
+            <span>Pending</span>
+            {sitePendingMaterials.length > 0 && (
+              <span style={{
+                backgroundColor: materialTabMode === "pending" ? "#ea580c" : "#cbd5e1",
+                color: "#ffffff",
+                fontSize: "11px",
+                fontWeight: "800",
+                padding: "1px 6px",
+                borderRadius: "100px"
+              }}>
+                {sitePendingMaterials.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setMaterialTabMode("transfers")}
+            style={{
+              flex: 1,
+              padding: "10px 8px",
+              borderRadius: "20px",
+              fontSize: "13px",
+              fontWeight: "750",
+              border: "none",
+              cursor: "pointer",
+              backgroundColor: materialTabMode === "transfers" ? "#ffffff" : "transparent",
+              color: materialTabMode === "transfers" ? "#ea580c" : "#64748b",
+              boxShadow: materialTabMode === "transfers" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+              transition: "all 0.2s ease",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "5px",
+              whiteSpace: "nowrap"
+            }}
+          >
+            <span>Transfers</span>
+            {siteTransfers.length > 0 && (
+              <span style={{
+                backgroundColor: materialTabMode === "transfers" ? "#ea580c" : "#cbd5e1",
+                color: "#ffffff",
+                fontSize: "11px",
+                fontWeight: "800",
+                padding: "1px 6px",
+                borderRadius: "100px"
+              }}>
+                {siteTransfers.length}
+              </span>
+            )}
           </button>
           <button
             type="button"
             onClick={() => setMaterialTabMode("logs")}
             style={{
               flex: 1,
-              padding: "10px 12px",
+              padding: "10px 8px",
               borderRadius: "20px",
-              fontSize: "14px",
+              fontSize: "13px",
               fontWeight: "750",
               border: "none",
               cursor: "pointer",
               backgroundColor: materialTabMode === "logs" ? "#ffffff" : "transparent",
               color: materialTabMode === "logs" ? "#ea580c" : "#64748b",
               boxShadow: materialTabMode === "logs" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
-              transition: "all 0.2s ease"
+              transition: "all 0.2s ease",
+              whiteSpace: "nowrap"
             }}
           >
-            Site Logs & History ({activeMaterials.length})
+            Logs ({activeMaterials.length})
           </button>
         </div>
 
@@ -4397,78 +4874,76 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       </p>
                     </div>
                   ) : (
-                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", overflowX: "auto" }}>
+                    <div style={{ border: "1px solid #e2e8f0", borderRadius: "10px", overflow: "hidden", backgroundColor: "#ffffff" }}>
                       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12.5px" }}>
                         <thead>
-                          <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0", color: "#475569" }}>
-                            <th style={{ padding: "10px 12px", textAlign: "left" }}>Material</th>
-                            <th style={{ padding: "10px 10px", textAlign: "left", width: "75px" }}>Unit</th>
-                            <th style={{ padding: "10px 10px", textAlign: "right", width: "110px" }}>Rate / Bill Amt</th>
-                            <th style={{ padding: "10px 10px", textAlign: "left", width: "95px" }}>Quantity</th>
-                            <th style={{ padding: "10px 12px", textAlign: "right", width: "105px" }}>Amount</th>
-                            <th style={{ padding: "10px 8px", textAlign: "center", width: "80px" }}>Actions</th>
+                          <tr style={{ background: "#f8fafc", borderBottom: "1.5px solid #e2e8f0", color: "#475569" }}>
+                            <th style={{ padding: "10px 12px", textAlign: "left", fontWeight: "750" }}>Material</th>
+                            <th style={{ padding: "10px 6px", textAlign: "center", width: "72px", fontWeight: "750" }}>Quantity</th>
+                            <th style={{ padding: "10px 6px", textAlign: "center", width: "55px", fontWeight: "750" }}>Unit</th>
+                            <th style={{ padding: "10px 6px", textAlign: "center", width: "45px", fontWeight: "750" }}>Action</th>
                           </tr>
                         </thead>
                         <tbody>
                           {materialUsageRows.map((row) => {
                             const isCustom = row.type === "custom";
                             const qtyNum = Number(row.quantity) || 0;
-                            const itemAmount = isCustom 
-                              ? (Number(row.amount !== undefined ? row.amount : row.rate) || 0)
-                              : (qtyNum * (Number(row.rate) || 0));
 
                             return (
-                              <tr key={row.rowId} style={{ borderBottom: "1px solid #f1f5f9", backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "transparent" }}>
-                                {/* Material Select */}
+                              <tr
+                                key={row.rowId}
+                                onClick={() => handleOpenMaterialDetails(row)}
+                                style={{
+                                  borderBottom: "1px solid #f1f5f9",
+                                  backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff",
+                                  cursor: "pointer",
+                                  transition: "background-color 0.15s ease"
+                                }}
+                                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = "#f8fafc"; }}
+                                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff"; }}
+                                title="Tap to view full material details (Rate, Amount)"
+                              >
+                                {/* 1. Material Select / Name */}
                                 <td style={{ padding: "8px 10px" }}>
-                                  <select
-                                    value={row.materialId}
-                                    onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
-                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                    style={{
-                                      width: "100%",
-                                      padding: "6px 8px",
-                                      borderRadius: "6px",
-                                      border: "1px solid #cbd5e1",
-                                      fontSize: "12.5px",
-                                      fontWeight: "700",
-                                      color: "#0f172a",
-                                      backgroundColor: "#ffffff",
-                                      outline: "none"
-                                    }}
-                                  >
-                                    {teamMaterials.map(m => {
-                                      const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
-                                      const isMatCustom = m.type === "custom";
-                                      return (
-                                        <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
-                                          {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Already Added" : ""}
-                                        </option>
-                                      );
-                                    })}
-                                  </select>
-                                </td>
-
-                                {/* Unit */}
-                                <td style={{ padding: "8px 10px" }}>
-                                  {isCustom ? (
-                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px", paddingLeft: "4px" }}>—</span>
-                                  ) : (
-                                    <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "4px", fontSize: "11px", fontWeight: "600", color: "#475569" }}>
-                                      {row.unit}
+                                  <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                                    <select
+                                      value={row.materialId}
+                                      onClick={(e) => e.stopPropagation()}
+                                      onChange={(e) => handleMaterialRowChange(row.rowId, e.target.value)}
+                                      disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                      style={{
+                                        width: "100%",
+                                        padding: "6px 8px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #cbd5e1",
+                                        fontSize: "12.5px",
+                                        fontWeight: "750",
+                                        color: "#0f172a",
+                                        backgroundColor: "#ffffff",
+                                        outline: "none"
+                                      }}
+                                    >
+                                      {teamMaterials.map(m => {
+                                        const isAlreadyInOtherRow = materialUsageRows.some(r => r.rowId !== row.rowId && r.materialId === m.id);
+                                        const isMatCustom = m.type === "custom";
+                                        return (
+                                          <option key={m.id} value={m.id} disabled={isAlreadyInOtherRow}>
+                                            {m.name} {isMatCustom ? "(Custom)" : ""} {isAlreadyInOtherRow ? "— Added" : ""}
+                                          </option>
+                                        );
+                                      })}
+                                    </select>
+                                    <span style={{ fontSize: "10.5px", color: "#64748b", display: "inline-flex", alignItems: "center", gap: "3px", paddingLeft: "2px" }}>
+                                      <Eye size={10} style={{ color: "#ea580c" }} />
+                                      <span>Tap row for Rate & Amount</span>
                                     </span>
-                                  )}
+                                  </div>
                                 </td>
 
-                                {/* Rate / Bill Amount */}
-                                <td style={{ padding: "8px 10px", textAlign: "right", fontFamily: "monospace", color: isCustom ? "#4338ca" : "#16a34a", fontWeight: "800" }}>
-                                  ₹{Number((isCustom && row.amount !== undefined) ? row.amount : (row.rate || 0)).toLocaleString("en-IN")}
-                                </td>
-
-                                {/* Quantity Input */}
-                                <td style={{ padding: "8px 10px" }}>
+                                {/* 2. Quantity Input */}
+                                <td style={{ padding: "6px 4px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                                   {isCustom ? (
-                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px", paddingLeft: "4px" }}>—</span>
+                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px" }}>1</span>
                                   ) : (
                                     <input
                                       id={`qty-input-${row.rowId}`}
@@ -4477,16 +4952,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       step="any"
                                       placeholder="0"
                                       value={row.quantity}
+                                      onClick={(e) => e.stopPropagation()}
                                       onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
                                       disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
                                       style={{
                                         width: "100%",
-                                        padding: "6px 8px",
+                                        maxWidth: "68px",
+                                        padding: "6px 4px",
                                         borderRadius: "6px",
                                         border: qtyNum > 0 ? "1.5px solid #ea580c" : "1px solid #cbd5e1",
                                         fontSize: "13px",
-                                        fontWeight: "700",
-                                        textAlign: "right",
+                                        fontWeight: "750",
+                                        textAlign: "center",
                                         backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
                                         outline: "none"
                                       }}
@@ -4494,47 +4971,34 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                   )}
                                 </td>
 
-                                {/* Calculated Amount */}
-                                <td style={{ padding: "8px 12px", textAlign: "right", fontFamily: "monospace", fontWeight: "800", color: itemAmount > 0 ? "#ea580c" : "#94a3b8" }}>
-                                  ₹{itemAmount.toLocaleString("en-IN")}
+                                {/* 3. Unit */}
+                                <td style={{ padding: "6px 4px", textAlign: "center" }}>
+                                  {isCustom ? (
+                                    <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "11px" }}>—</span>
+                                  ) : (
+                                    <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 5px", borderRadius: "4px", fontSize: "11px", fontWeight: "700", color: "#475569" }}>
+                                      {row.unit || "Unit"}
+                                    </span>
+                                  )}
                                 </td>
 
-                                {/* Row Actions: Edit ✏️ and Delete 🗑️ */}
-                                <td style={{ padding: "8px 8px", textAlign: "center" }}>
-                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
-                                    {!isCustom && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleEditMaterialRow(row.rowId)}
-                                        disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
-                                        style={{
-                                          background: "#f8fafc",
-                                          border: "1px solid #cbd5e1",
-                                          borderRadius: "6px",
-                                          padding: "4px 6px",
-                                          cursor: "pointer",
-                                          color: "var(--primary-700)",
-                                          display: "flex",
-                                          alignItems: "center",
-                                          justifyContent: "center",
-                                          transition: "all 0.15s ease"
-                                        }}
-                                        title="Edit Quantity"
-                                      >
-                                        <Edit2 size={13} />
-                                      </button>
-                                    )}
+                                {/* 4. Action */}
+                                <td style={{ padding: "6px 4px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                                  <div style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
                                     <button
                                       type="button"
-                                      onClick={() => handleRemoveMaterialRow(row.rowId)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleRemoveMaterialRow(row.rowId);
+                                      }}
                                       disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
                                       style={{
                                         background: "#fef2f2",
                                         border: "1px solid #fecaca",
                                         borderRadius: "6px",
-                                        padding: "4px 6px",
+                                        padding: "5px 6px",
                                         color: "#dc2626",
-                                        cursor: "pointer",
+                                        cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
                                         display: "flex",
                                         alignItems: "center",
                                         justifyContent: "center",
@@ -4598,7 +5062,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       padding: "12px 16px",
                       backgroundColor: "#fff7ed",
                       borderRadius: "10px",
-                      border: "1px solid #ffedd5"
+                      border: "1px solid #ffedd5",
+                      flexWrap: "wrap",
+                      gap: "10px"
                     }}>
                       <div>
                         <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
@@ -4608,13 +5074,70 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           {itemsWithQtyCount} {itemsWithQtyCount === 1 ? "Material Item" : "Material Items"}
                         </strong>
                       </div>
-                      <div style={{ textAlign: "right" }}>
-                        <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
-                          Total Amount
-                        </span>
-                        <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>
-                          ₹{grandTotalAmount.toLocaleString("en-IN")}
-                        </strong>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                        {/* Compact Pending Action Button */}
+                        <button
+                          type="button"
+                          onClick={handleOpenPendingModal}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "7px 12px",
+                            borderRadius: "8px",
+                            border: "1.5px solid #ea580c",
+                            backgroundColor: "#ffffff",
+                            color: "#ea580c",
+                            fontSize: "12.5px",
+                            fontWeight: "750",
+                            cursor: "pointer",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                            transition: "all 0.15s ease"
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#fff7ed"; }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#ffffff"; }}
+                          title="Record material with pending balance delivery"
+                        >
+                          <Clock size={14} />
+                          <span>Pending</span>
+                        </button>
+
+                        {/* Compact Transfer Action Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenTransferModal()}
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "5px",
+                            padding: "7px 12px",
+                            borderRadius: "8px",
+                            border: "1.5px solid #0284c7",
+                            backgroundColor: "#ffffff",
+                            color: "#0284c7",
+                            fontSize: "12.5px",
+                            fontWeight: "750",
+                            cursor: "pointer",
+                            boxShadow: "0 1px 2px rgba(0,0,0,0.05)",
+                            transition: "all 0.15s ease"
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#f0f9ff"; }}
+                          onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#ffffff"; }}
+                          title="Transfer material to another construction site"
+                        >
+                          <ArrowRightLeft size={14} />
+                          <span>Transfer</span>
+                        </button>
+
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "11px", textTransform: "uppercase", fontWeight: "700", color: "#c2410c", display: "block" }}>
+                            Total Amount
+                          </span>
+                          <strong style={{ fontSize: "18px", color: "#1e3a8a" }}>
+                            ₹{grandTotalAmount.toLocaleString("en-IN")}
+                          </strong>
+                        </div>
                       </div>
                     </div>
 
@@ -4652,7 +5175,512 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </form>
         )}
 
-        {/* ── SUB-TAB 2: SITE LOGS & HISTORY ── */}
+        {/* ACTIVE PENDING DELIVERIES SECTION (ENTRY VIEW & LOGS VIEW) */}
+        {sitePendingMaterials.length > 0 && (
+          <div style={{
+            backgroundColor: "#ffffff",
+            borderRadius: "16px",
+            padding: "16px 18px",
+            border: "1px solid #fed7aa",
+            boxShadow: "0px 1px 4px rgba(234, 88, 12, 0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: "12px"
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <div style={{ width: "28px", height: "28px", borderRadius: "8px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                  <Clock size={16} />
+                </div>
+                <div>
+                  <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                    Pending Material Deliveries
+                  </h4>
+                  <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600" }}>
+                    Awaiting remaining shipment arrivals
+                  </span>
+                </div>
+              </div>
+              <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", backgroundColor: "#fff7ed", padding: "2px 8px", borderRadius: "100px", border: "1px solid #fed7aa" }}>
+                {sitePendingMaterials.length} Pending
+              </span>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              {sitePendingMaterials.map(pendingItem => {
+                return (
+                  <div
+                    key={pendingItem.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "10px 12px",
+                      backgroundColor: "#f8fafc",
+                      borderRadius: "10px",
+                      border: "1px solid #e2e8f0",
+                      flexWrap: "wrap",
+                      gap: "8px"
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>{pendingItem.materialName}</strong>
+                        <span style={{ fontSize: "10px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", backgroundColor: "#e2e8f0", padding: "1px 5px", borderRadius: "4px" }}>
+                          {pendingItem.category}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: "#475569", marginTop: "3px" }}>
+                        Total: <strong>{pendingItem.requiredQuantity} {pendingItem.unit}</strong> | Received: <strong style={{ color: "#16a34a" }}>{pendingItem.receivedQuantity} {pendingItem.unit}</strong> | Pending: <strong style={{ color: "#ea580c" }}>{pendingItem.pendingDelivery} {pendingItem.unit}</strong>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleOpenResolvePending(pendingItem)}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "5px",
+                        padding: "6px 12px",
+                        borderRadius: "6px",
+                        backgroundColor: "#ea580c",
+                        color: "#ffffff",
+                        border: "none",
+                        fontSize: "12px",
+                        fontWeight: "750",
+                        cursor: "pointer",
+                        boxShadow: "0 1px 2px rgba(234,88,12,0.2)",
+                        transition: "all 0.15s ease"
+                      }}
+                      onMouseEnter={e => e.currentTarget.style.opacity = "0.9"}
+                      onMouseLeave={e => e.currentTarget.style.opacity = "1"}
+                    >
+                      <Truck size={13} />
+                      <span>Log Received</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ── SUB-TAB 2: PENDING MATERIALS ── */}
+        {materialTabMode === "pending" && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+            {/* Header Card */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "10px",
+              padding: "14px 18px",
+              backgroundColor: "#ffffff",
+              borderRadius: "14px",
+              border: "1px solid #fed7aa",
+              boxShadow: "0 1px 3px rgba(234,88,12,0.06)"
+            }}>
+              <div>
+                <h4 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  Active Pending Materials
+                </h4>
+                <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
+                  {sitePendingMaterials.length} {sitePendingMaterials.length === 1 ? "material item" : "material items"} awaiting balance delivery
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleOpenPendingModal}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px",
+                  padding: "8px 14px",
+                  borderRadius: "8px",
+                  backgroundColor: "#ea580c",
+                  color: "#ffffff",
+                  border: "none",
+                  fontSize: "12.5px",
+                  fontWeight: "750",
+                  cursor: "pointer",
+                  boxShadow: "0 1px 3px rgba(234,88,12,0.25)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <Plus size={15} />
+                <span>+ Track New Pending</span>
+              </button>
+            </div>
+
+            {/* List of Pending Items */}
+            {sitePendingMaterials.length === 0 ? (
+              <div style={{
+                textAlign: "center",
+                padding: "48px 20px",
+                backgroundColor: "#ffffff",
+                borderRadius: "16px",
+                border: "1px dashed #cbd5e1"
+              }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "12px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: "8px" }}>
+                  <CheckCircle2 size={24} />
+                </div>
+                <h4 style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                  No Pending Material Balances
+                </h4>
+                <p style={{ margin: "0 0 14px 0", fontSize: "13px", color: "#64748b" }}>
+                  All material deliveries for this site are up to date and fully received.
+                </p>
+                <button
+                  type="button"
+                  onClick={handleOpenPendingModal}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    backgroundColor: "#fff7ed",
+                    border: "1px solid #fed7aa",
+                    color: "#ea580c",
+                    fontSize: "12.5px",
+                    fontWeight: "750",
+                    cursor: "pointer"
+                  }}
+                >
+                  <Plus size={14} />
+                  <span>Track a New Pending Shipment</span>
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                {sitePendingMaterials.map(pendingItem => {
+                  const isTransfer = pendingItem.type === "material_transfer" || pendingItem.isIncomingTransfer;
+                  return (
+                    <div
+                      key={pendingItem.id}
+                      style={{
+                        backgroundColor: "#ffffff",
+                        borderRadius: "14px",
+                        padding: "16px",
+                        border: isTransfer ? "1.5px solid #bbf7d0" : "1px solid #fed7aa",
+                        boxShadow: isTransfer ? "0px 1px 4px rgba(22, 163, 74, 0.08)" : "0px 1px 3px rgba(234, 88, 12, 0.06)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "10px"
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                        <div>
+                          <span style={{ fontSize: "10.5px", fontWeight: "800", color: isTransfer ? "#16a34a" : "#64748b", textTransform: "uppercase" }}>
+                            {isTransfer ? `Incoming Transfer • ${pendingItem.category}` : pendingItem.category}
+                          </span>
+                          <h4 style={{ margin: "2px 0 0 0", fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>
+                            {pendingItem.materialName}
+                          </h4>
+                        </div>
+                        <span style={{
+                          fontSize: "11px",
+                          fontWeight: "800",
+                          color: isTransfer ? "#15803d" : "#ea580c",
+                          backgroundColor: isTransfer ? "#f0fdf4" : "#fff7ed",
+                          padding: "3px 8px",
+                          borderRadius: "6px",
+                          border: isTransfer ? "1px solid #bbf7d0" : "1px solid #fed7aa"
+                        }}>
+                          {isTransfer ? `From ${pendingItem.sourceSiteName || "Other Site"}` : "Pending Delivery"}
+                        </span>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", fontSize: "12px", backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <div>
+                          <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>
+                            {isTransfer ? "Transferred" : "Total Ordered"}
+                          </span>
+                          <strong>{pendingItem.requiredQuantity || pendingItem.transferQuantity} {pendingItem.unit}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Received So Far</span>
+                          <strong style={{ color: "#16a34a" }}>{pendingItem.receivedQuantity || 0} {pendingItem.unit}</strong>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: "10.5px", color: "#c2410c", display: "block" }}>
+                            {isTransfer ? "Pending to Receive" : "Current Pending"}
+                          </span>
+                          <strong style={{ color: "#ea580c", fontSize: "13px" }}>{pendingItem.pendingDelivery} {pendingItem.unit}</strong>
+                        </div>
+                      </div>
+
+                      {pendingItem.notes && (
+                        <div style={{ fontSize: "11.5px", color: "#64748b", fontStyle: "italic" }}>
+                          "{pendingItem.notes.split("\n")[0]}"
+                        </div>
+                      )}
+
+                      <div style={{ display: "flex", justifyContent: "flex-end", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                        {isTransfer ? (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenReceiveTransfer(pendingItem)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "8px 14px",
+                              borderRadius: "8px",
+                              backgroundColor: "#16a34a",
+                              color: "#ffffff",
+                              border: "none",
+                              fontSize: "12.5px",
+                              fontWeight: "750",
+                              cursor: "pointer",
+                              boxShadow: "0 1px 2px rgba(22,163,74,0.25)"
+                            }}
+                          >
+                            <Inbox size={14} />
+                            <span>Receive Transfer</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleOpenResolvePending(pendingItem)}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              padding: "8px 14px",
+                              borderRadius: "8px",
+                              backgroundColor: "#ea580c",
+                              color: "#ffffff",
+                              border: "none",
+                              fontSize: "12.5px",
+                              fontWeight: "750",
+                              cursor: "pointer",
+                              boxShadow: "0 1px 2px rgba(234,88,12,0.2)"
+                            }}
+                          >
+                            <Truck size={14} />
+                            <span>Update / Receive Balance</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── SUB-TAB 2.5: MATERIAL TRANSFERS HISTORY & SITE-SCOPED REFLECTION ── */}
+        {materialTabMode === "transfers" && (() => {
+          const outgoingCount = siteTransfers.filter(t => t.isOutgoing).length;
+          const incomingCount = siteTransfers.filter(t => t.isIncoming).length;
+          const displayedTransfers = siteTransfers.filter(t => {
+            if (transferFilterMode === "outgoing") return t.isOutgoing;
+            if (transferFilterMode === "incoming") return t.isIncoming;
+            return true;
+          });
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {/* Filter Pills */}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("all")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "all" ? "#ea580c" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "all" ? "#ea580c" : "#ffffff",
+                    color: transferFilterMode === "all" ? "#ffffff" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  All Transfers ({siteTransfers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("outgoing")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "outgoing" ? "#2563eb" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "outgoing" ? "#eff6ff" : "#ffffff",
+                    color: transferFilterMode === "outgoing" ? "#1d4ed8" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  ↗ Outgoing ({outgoingCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("incoming")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "incoming" ? "#16a34a" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "incoming" ? "#f0fdf4" : "#ffffff",
+                    color: transferFilterMode === "incoming" ? "#15803d" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  ↙ Incoming ({incomingCount})
+                </button>
+              </div>
+
+              {/* Transfer Cards List */}
+              {displayedTransfers.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "36px 16px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)" }}>
+                  <ArrowRightLeft size={32} style={{ color: "#94a3b8", display: "block", margin: "0 auto 8px auto" }} />
+                  <strong style={{ fontSize: "14px", color: "#475569", display: "block" }}>
+                    No {transferFilterMode !== "all" ? transferFilterMode : ""} material transfers recorded for this site yet.
+                  </strong>
+                  <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                    Use the Transfer button to transfer materials to another site.
+                  </span>
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  {displayedTransfers.map(tx => {
+                    const isOutgoing = tx.isOutgoing;
+                    const isIncoming = tx.isIncoming;
+                    const totalQty = tx.transferQuantity || 0;
+                    const recQty = tx.receivedQuantity || 0;
+                    const pendingQty = tx.pendingQuantity || 0;
+                    const isCompleted = pendingQty === 0 || tx.status === "Received";
+
+                    return (
+                      <div
+                        key={tx.id}
+                        style={{
+                          backgroundColor: "#ffffff",
+                          borderRadius: "14px",
+                          padding: "16px",
+                          border: isOutgoing ? "1.5px solid #bfdbfe" : "1.5px solid #bbf7d0",
+                          boxShadow: "0px 1px 4px rgba(0,0,0,0.04)",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px"
+                        }}
+                      >
+                        {/* Header with Direction badge & Status */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", flexWrap: "wrap" }}>
+                          <div>
+                            <span style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              fontSize: "11px",
+                              fontWeight: "800",
+                              color: isOutgoing ? "#1d4ed8" : "#15803d",
+                              backgroundColor: isOutgoing ? "#eff6ff" : "#f0fdf4",
+                              padding: "3px 8px",
+                              borderRadius: "6px",
+                              border: isOutgoing ? "1px solid #bfdbfe" : "1px solid #bbf7d0",
+                              textTransform: "uppercase"
+                            }}>
+                              {isOutgoing ? `↗ OUTGOING TO ${tx.counterpartSiteName}` : `↙ INCOMING FROM ${tx.counterpartSiteName}`}
+                            </span>
+                            <h4 style={{ margin: "4px 0 0 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                              {tx.materialName} <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>({tx.category})</span>
+                            </h4>
+                          </div>
+
+                          <Badge status={isCompleted ? "success" : tx.status === "Partial Received" ? "pending" : "warning"}>
+                            {isCompleted ? "COMPLETED" : tx.status === "Partial Received" ? `PARTIAL (${recQty}/${totalQty})` : "IN TRANSIT"}
+                          </Badge>
+                        </div>
+
+                        {/* 3-Grid Stats */}
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", fontSize: "12px", backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                          <div>
+                            <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Transferred</span>
+                            <strong>{totalQty} {tx.unit}</strong>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Received So Far</span>
+                            <strong style={{ color: "#16a34a" }}>{recQty} {tx.unit}</strong>
+                          </div>
+                          <div>
+                            <span style={{ fontSize: "10.5px", color: pendingQty > 0 ? "#c2410c" : "#16a34a", display: "block" }}>
+                              {isOutgoing ? "Pending Receipt" : "Pending to Receive"}
+                            </span>
+                            <strong style={{ color: pendingQty > 0 ? "#ea580c" : "#16a34a", fontSize: "13px" }}>
+                              {pendingQty} {tx.unit}
+                            </strong>
+                          </div>
+                        </div>
+
+                        {/* Meta & notes */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "#64748b", flexWrap: "wrap", gap: "4px" }}>
+                          <span>Date: {tx.transferDate || tx.purchaseDate || "--"} • Transferred by {tx.transferredByName || "Site Engineer"}</span>
+                          {tx.notes && <span style={{ fontStyle: "italic" }}>"{tx.notes.split("\n")[0]}"</span>}
+                        </div>
+
+                        {/* Bottom action / status note */}
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+                          {isIncoming && pendingQty > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenReceiveTransfer(tx)}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                padding: "8px 14px",
+                                borderRadius: "8px",
+                                backgroundColor: "#16a34a",
+                                color: "#ffffff",
+                                border: "none",
+                                fontSize: "12.5px",
+                                fontWeight: "750",
+                                cursor: "pointer",
+                                boxShadow: "0 1px 2px rgba(22,163,74,0.25)",
+                                marginLeft: "auto"
+                              }}
+                            >
+                              <Inbox size={14} />
+                              <span>Receive Transfer ({pendingQty} remaining)</span>
+                            </button>
+                          ) : isIncoming && isCompleted ? (
+                            <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700", display: "flex", alignItems: "center", gap: "4px" }}>
+                              <CheckCircle2 size={14} />
+                              All {totalQty} {tx.unit} Received & Counted in Site Stock
+                            </span>
+                          ) : isOutgoing && pendingQty > 0 ? (
+                            <span style={{ fontSize: "12px", color: "#ea580c", fontWeight: "600", display: "flex", alignItems: "center", gap: "4px" }}>
+                              <Clock size={14} />
+                              {pendingQty} {tx.unit} Awaiting Receipt at {tx.counterpartSiteName}
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: "12px", color: "#16a34a", fontWeight: "700", display: "flex", alignItems: "center", gap: "4px" }}>
+                              <CheckCircle2 size={14} />
+                              Received by {tx.counterpartSiteName}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* ── SUB-TAB 3: SITE LOGS & HISTORY ── */}
         {materialTabMode === "logs" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
             {/* Search bar & filter */}
@@ -4704,23 +5732,36 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             ) : (
               activeMaterials.map(m => {
                 const processed = processMaterialPaymentAndDelivery(m);
-                const isApproved = processed.status === "Approved" || processed.status === "approved";
+                const isApproved = processed.status === "Approved" || processed.status === "approved" || processed.status === "Received" || processed.status === "received";
+                const isTransfer = processed.type === "material_transfer" || processed.isIncomingTransfer;
                 
                 return (
                   <div key={processed.id} className="mobile-material-card" style={{ display: "flex", flexDirection: "column", gap: "8px", padding: "14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "6px" }}>
                       <div>
-                        <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{processed.category}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                          <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)", textTransform: "uppercase" }}>{processed.category}</span>
+                          {isTransfer && (
+                            <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }}>
+                              Transferred from {processed.sourceSiteName || "Other Site"}
+                            </span>
+                          )}
+                          {processed.transfersOut && processed.transfersOut.length > 0 && (
+                            <span style={{ fontSize: "10px", fontWeight: "800", color: "#c2410c", backgroundColor: "#fff7ed", padding: "1px 6px", borderRadius: "4px", border: "1px solid #fed7aa" }}>
+                              Transferred Out ({processed.transferredOutQuantity || 0} {processed.unit})
+                            </span>
+                          )}
+                        </div>
                         <h4 style={{ margin: "2px 0 0 0", fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>{processed.materialName}</h4>
                       </div>
-                      <Badge status={processed.status === "Approved" ? "success" : processed.status === "Rejected" ? "danger" : "pending"}>
+                      <Badge status={isApproved ? "success" : processed.status === "Rejected" ? "danger" : "pending"}>
                         {processed.status ? processed.status.toUpperCase() : "PENDING"}
                       </Badge>
                     </div>
 
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px", color: "#475569" }}>
                       <div>
-                        <strong>Required:</strong> {processed.requiredQuantity} {processed.unit}
+                        <strong>{isTransfer ? "Transferred:" : "Required:"}</strong> {processed.requiredQuantity} {processed.unit}
                       </div>
                       <div>
                         <strong>Received:</strong> {processed.receivedQuantity} {processed.unit}
@@ -4735,7 +5776,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                     {processed.notes && (
                       <p style={{ margin: "4px 0 0 0", fontSize: "11px", fontStyle: "italic", color: "var(--text-muted)", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px" }}>
-                        "{processed.notes}"
+                        "{processed.notes.split("\n")[0]}"
                       </p>
                     )}
 
@@ -4900,6 +5941,953 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </form>
           </Modal>
         )}
+
+        {/* MODAL: TRACK PENDING MATERIAL */}
+        {showPendingModal && (
+          <Modal
+            isOpen={showPendingModal}
+            onClose={() => !savingPending && setShowPendingModal(false)}
+            title="Track Pending Material"
+            maxWidth="480px"
+          >
+            <form onSubmit={handleSavePendingMaterial} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              {/* 1. Report Date */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                  Report Date
+                </label>
+                <input
+                  type="date"
+                  value={pendingDate}
+                  onChange={(e) => setPendingDate(e.target.value)}
+                  required
+                  style={{
+                    width: "100%",
+                    height: "42px",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    color: "#0f172a",
+                    outline: "none"
+                  }}
+                />
+              </div>
+
+              {/* 2. Material Team */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                  Material Team
+                </label>
+                <select
+                  value={pendingTeamId}
+                  onChange={(e) => {
+                    const newTeamId = e.target.value;
+                    setPendingTeamId(newTeamId);
+                    const team = materialTeams.find(t => t.id === newTeamId);
+                    const firstMat = (team?.materials || []).find(m => m.status !== "Inactive");
+                    setPendingMaterialId(firstMat ? firstMat.id : "");
+                    setPendingSupplier(team?.name || "");
+                  }}
+                  required
+                  style={{
+                    width: "100%",
+                    height: "42px",
+                    padding: "8px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "14px",
+                    fontWeight: "600",
+                    color: "#0f172a",
+                    outline: "none",
+                    backgroundColor: "#ffffff"
+                  }}
+                >
+                  <option value="">-- Select Material Team --</option>
+                  {materialTeams.map(t => (
+                    <option key={t.id} value={t.id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 3. Material (Belonging to selected team) */}
+              {(() => {
+                const teamObj = materialTeams.find(t => t.id === pendingTeamId);
+                const teamMats = (teamObj?.materials || []).filter(m => m.status !== "Inactive");
+                const selectedMatObj = teamMats.find(m => m.id === pendingMaterialId);
+                const unitLabel = selectedMatObj?.unit || "Units";
+
+                const totalNum = Number(pendingTotalQty) || 0;
+                const recNum = Number(pendingReceivedQty) || 0;
+                const autoPendingQty = Math.max(0, totalNum - recNum);
+
+                return (
+                  <>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                        Material
+                      </label>
+                      <select
+                        value={pendingMaterialId}
+                        onChange={(e) => setPendingMaterialId(e.target.value)}
+                        required
+                        disabled={teamMats.length === 0}
+                        style={{
+                          width: "100%",
+                          height: "42px",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "14px",
+                          fontWeight: "600",
+                          color: "#0f172a",
+                          outline: "none",
+                          backgroundColor: "#ffffff"
+                        }}
+                      >
+                        {teamMats.length === 0 ? (
+                          <option value="">No materials configured for this team</option>
+                        ) : (
+                          teamMats.map(m => (
+                            <option key={m.id} value={m.id}>
+                              {m.name} {m.unit ? `(${m.unit})` : ""} — ₹{m.rate || m.amount || m.unitPrice || 0}
+                            </option>
+                          ))
+                        )}
+                      </select>
+                    </div>
+
+                    {/* 4. Total Quantity & Received Quantity Side by Side */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>
+                          Total Quantity ({unitLabel})
+                        </label>
+                        <input
+                          type="number"
+                          min="0.01"
+                          step="any"
+                          placeholder="e.g. 100"
+                          value={pendingTotalQty}
+                          onChange={(e) => setPendingTotalQty(e.target.value)}
+                          required
+                          style={{
+                            width: "100%",
+                            height: "42px",
+                            padding: "8px 12px",
+                            borderRadius: "8px",
+                            border: "1.5px solid #cbd5e1",
+                            fontSize: "15px",
+                            fontWeight: "700",
+                            color: "#0f172a",
+                            outline: "none"
+                          }}
+                        />
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                        <label style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a" }}>
+                          Received Quantity ({unitLabel})
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          max={totalNum > 0 ? totalNum : undefined}
+                          step="any"
+                          placeholder="e.g. 50"
+                          value={pendingReceivedQty}
+                          onChange={(e) => setPendingReceivedQty(e.target.value)}
+                          required
+                          style={{
+                            width: "100%",
+                            height: "42px",
+                            padding: "8px 12px",
+                            borderRadius: "8px",
+                            border: "1.5px solid #cbd5e1",
+                            fontSize: "15px",
+                            fontWeight: "700",
+                            color: "#16a34a",
+                            outline: "none"
+                          }}
+                        />
+                      </div>
+                    </div>
+
+                    {/* 5. Automatically Calculated Pending Quantity (Live Display) */}
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "12px 14px",
+                      backgroundColor: "#fff7ed",
+                      borderRadius: "10px",
+                      border: "1.5px solid #fed7aa"
+                    }}>
+                      <div>
+                        <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                          Automatically Calculated
+                        </span>
+                        <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>
+                          Pending Quantity
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <span style={{ fontSize: "20px", fontWeight: "900", color: "#ea580c", fontFamily: "monospace" }}>
+                          {autoPendingQty} {unitLabel}
+                        </span>
+                        <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>
+                          ({totalNum} Total - {recNum} Received)
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Notes / Remarks */}
+                    <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                      <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                        Notes / Supplier (Optional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. Balance shipment arriving tomorrow"
+                        value={pendingNotes}
+                        onChange={(e) => setPendingNotes(e.target.value)}
+                        style={{
+                          width: "100%",
+                          height: "40px",
+                          padding: "8px 12px",
+                          borderRadius: "8px",
+                          border: "1px solid #cbd5e1",
+                          fontSize: "13px",
+                          outline: "none"
+                        }}
+                      />
+                    </div>
+                  </>
+                );
+              })()}
+
+              <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setShowPendingModal(false)}
+                  disabled={savingPending}
+                  style={{ flex: 1 }}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  disabled={savingPending || !pendingTotalQty}
+                  style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                >
+                  <Save size={16} />
+                  <span>{savingPending ? "Saving..." : "Save Pending Record"}</span>
+                </Button>
+              </div>
+            </form>
+          </Modal>
+        )}
+
+        {/* MODAL: RESOLVE / UPDATE PENDING MATERIAL */}
+        {showResolvePendingModal && selectedPendingRecord && (
+          <Modal
+            isOpen={showResolvePendingModal}
+            onClose={() => !savingResolvePending && setShowResolvePendingModal(false)}
+            title="Receive Pending Material Shipment"
+            maxWidth="480px"
+          >
+            {(() => {
+              const currentRec = Number(selectedPendingRecord.receivedQuantity !== undefined ? selectedPendingRecord.receivedQuantity : selectedPendingRecord.quantity) || 0;
+              const totalReq = Number(selectedPendingRecord.requiredQuantity || selectedPendingRecord.orderedQuantity) || (currentRec + (Number(selectedPendingRecord.pendingDelivery) || 0));
+              const currentPending = Math.max(0, totalReq - currentRec);
+              const newlyRecNum = Number(newlyReceivedQty) || 0;
+              const newTotalRec = currentRec + newlyRecNum;
+              const updatedRemainingPending = Math.max(0, totalReq - newTotalRec);
+              const unit = selectedPendingRecord.unit || "Units";
+
+              return (
+                <form onSubmit={handleResolvePendingSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  <div style={{ backgroundColor: "#f8fafc", padding: "12px 14px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                        {selectedPendingRecord.materialName}
+                      </h4>
+                      <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", backgroundColor: "#fff7ed", padding: "2px 8px", borderRadius: "6px" }}>
+                        {selectedPendingRecord.category}
+                      </span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", fontSize: "12px", marginTop: "8px", color: "#475569" }}>
+                      <div>Total Ordered: <strong>{totalReq} {unit}</strong></div>
+                      <div>Previously Received: <strong style={{ color: "#16a34a" }}>{currentRec} {unit}</strong></div>
+                      <div>Current Pending: <strong style={{ color: "#ea580c" }}>{currentPending} {unit}</strong></div>
+                      <div>Report Date: <strong>{selectedPendingRecord.purchaseDate || "--"}</strong></div>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                    <label style={{ fontSize: "12.5px", fontWeight: "750", color: "#0f172a" }}>
+                      Newly Received Quantity Today ({unit})
+                    </label>
+                    <input
+                      type="number"
+                      min="0.01"
+                      max={currentPending}
+                      step="any"
+                      placeholder={`Enter quantity up to ${currentPending}`}
+                      value={newlyReceivedQty}
+                      onChange={(e) => setNewlyReceivedQty(e.target.value)}
+                      required
+                      autoFocus
+                      style={{
+                        width: "100%",
+                        height: "44px",
+                        padding: "8px 12px",
+                        borderRadius: "8px",
+                        border: "1.5px solid #ea580c",
+                        fontSize: "16px",
+                        fontWeight: "700",
+                        color: "#0f172a",
+                        outline: "none"
+                      }}
+                    />
+                  </div>
+
+                  {/* Live Automatic Recalculation Summary */}
+                  <div style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "12px 14px",
+                    backgroundColor: updatedRemainingPending === 0 ? "#f0fdf4" : "#fff7ed",
+                    borderRadius: "10px",
+                    border: updatedRemainingPending === 0 ? "1.5px solid #bbf7d0" : "1.5px solid #fed7aa"
+                  }}>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: updatedRemainingPending === 0 ? "#16a34a" : "#ea580c", textTransform: "uppercase" }}>
+                        {updatedRemainingPending === 0 ? "Status After Update: FULLY DELIVERED" : "Status After Update: PARTIAL DELIVERY"}
+                      </span>
+                      <div style={{ fontSize: "12.5px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>
+                        New Total Received: <span style={{ color: "#16a34a" }}>{newTotalRec} {unit}</span>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <span style={{ fontSize: "18px", fontWeight: "900", color: updatedRemainingPending === 0 ? "#16a34a" : "#ea580c", fontFamily: "monospace" }}>
+                        Pending: {updatedRemainingPending} {unit}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowResolvePendingModal(false)}
+                      disabled={savingResolvePending}
+                      style={{ flex: 1 }}
+                    >
+                      Cancel
+                    </Button>
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      disabled={savingResolvePending || !newlyReceivedQty || newlyRecNum <= 0}
+                      style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}
+                    >
+                      <Truck size={16} />
+                      <span>{savingResolvePending ? "Updating..." : "Update Material Delivery"}</span>
+                    </Button>
+                  </div>
+                </form>
+              );
+            })()}
+          </Modal>
+        )}
+
+        {/* MODAL / BOTTOM SHEET: MATERIAL ROW DETAILS */}
+        {showMaterialDetailsModal && selectedMaterialForDetails && (() => {
+          const row = selectedMaterialForDetails;
+          const isCustom = row.type === "custom";
+          const qtyNum = isCustom ? 1 : (Number(row.quantity) || 0);
+          const rateNum = Number((isCustom && row.amount !== undefined) ? row.amount : (row.rate || 0));
+          const amountNum = isCustom ? rateNum : (qtyNum * rateNum);
+          const unitLabel = isCustom ? "Fixed Bill" : (row.unit || "Unit");
+
+          return (
+            <Modal
+              isOpen={showMaterialDetailsModal}
+              onClose={() => setShowMaterialDetailsModal(false)}
+              title="Material Details"
+              maxWidth="420px"
+            >
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                {/* Header Title Card */}
+                <div style={{
+                  backgroundColor: "#fff7ed",
+                  padding: "14px 16px",
+                  borderRadius: "12px",
+                  border: "1px solid #ffedd5"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                        {isCustom ? "Custom Item" : "Material Item"}
+                      </span>
+                      <h3 style={{ margin: "3px 0 0 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                        {row.materialName}
+                      </h3>
+                    </div>
+                    <span style={{
+                      backgroundColor: "#ffffff",
+                      padding: "3px 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #fed7aa",
+                      fontSize: "11px",
+                      fontWeight: "750",
+                      color: "#c2410c"
+                    }}>
+                      {unitLabel}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 5 Details Cards / Grid */}
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr 1fr",
+                  gap: "10px"
+                }}>
+                  {/* Unit */}
+                  <div style={{
+                    backgroundColor: "#f8fafc",
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid #e2e8f0"
+                  }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                      Unit
+                    </span>
+                    <strong style={{ fontSize: "14px", color: "#0f172a", marginTop: "2px", display: "block" }}>
+                      {unitLabel}
+                    </strong>
+                  </div>
+
+                  {/* Rate */}
+                  <div style={{
+                    backgroundColor: "#f8fafc",
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid #e2e8f0"
+                  }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                      Rate / Unit
+                    </span>
+                    <strong style={{ fontSize: "14px", color: "#16a34a", marginTop: "2px", display: "block", fontFamily: "monospace" }}>
+                      ₹{rateNum.toLocaleString("en-IN")}
+                    </strong>
+                  </div>
+
+                  {/* Quantity */}
+                  <div style={{
+                    backgroundColor: "#f8fafc",
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid #e2e8f0"
+                  }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                      Entered Quantity
+                    </span>
+                    <strong style={{ fontSize: "15px", color: qtyNum > 0 ? "#ea580c" : "#0f172a", marginTop: "2px", display: "block" }}>
+                      {qtyNum} {unitLabel}
+                    </strong>
+                  </div>
+
+                  {/* Total Amount */}
+                  <div style={{
+                    backgroundColor: "#fff7ed",
+                    padding: "12px",
+                    borderRadius: "10px",
+                    border: "1px solid #fed7aa"
+                  }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#c2410c", textTransform: "uppercase", display: "block" }}>
+                      Calculated Amount
+                    </span>
+                    <strong style={{ fontSize: "16px", color: "#1e3a8a", marginTop: "2px", display: "block", fontFamily: "monospace" }}>
+                      ₹{amountNum.toLocaleString("en-IN")}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* Action button inside details */}
+                <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={() => setShowMaterialDetailsModal(false)}
+                    style={{ width: "100%", height: "42px", fontWeight: "750" }}
+                  >
+                    Close Details
+                  </Button>
+                </div>
+              </div>
+            </Modal>
+          );
+        })()}
+
+        {/* MODAL: TRANSFER MATERIAL TO ANOTHER SITE */}
+        {showTransferModal && (() => {
+          const availableSiteMats = materials
+            .filter(m => m.siteId === activeSiteId)
+            .map(m => processMaterialPaymentAndDelivery(m))
+            .filter(m => m.remainingStock > 0);
+
+          const selectedMat = availableSiteMats.find(m => m.id === transferMaterialId) || availableSiteMats[0];
+          const availStock = selectedMat ? selectedMat.remainingStock : 0;
+          const unitLabel = selectedMat?.unit || "Units";
+          const transferQtyNum = Number(transferQuantity) || 0;
+          const remainingAfterTransfer = Math.max(0, availStock - transferQtyNum);
+          const otherSites = allSites.filter(s => s.id !== activeSiteId);
+          const destSite = otherSites.find(s => s.id === transferDestSiteId);
+          const isValidTransfer = transferQtyNum > 0 && transferQtyNum <= availStock && transferDestSiteId && transferDestSiteId !== activeSiteId;
+
+          return (
+            <Modal
+              isOpen={showTransferModal}
+              onClose={() => !savingTransfer && setShowTransferModal(false)}
+              title="Transfer Material to Another Site"
+              maxWidth="480px"
+            >
+              <form onSubmit={handleTransferSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {/* 1. Date */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Transfer Date
+                  </label>
+                  <input
+                    type="date"
+                    value={transferDate}
+                    onChange={(e) => setTransferDate(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      height: "42px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "14px",
+                      fontWeight: "600",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                {/* 2. Source Material Selection */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Select Material from Current Site
+                  </label>
+                  <select
+                    value={transferMaterialId}
+                    onChange={(e) => setTransferMaterialId(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      height: "44px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13.5px",
+                      fontWeight: "700",
+                      color: "#0f172a",
+                      outline: "none",
+                      backgroundColor: "#ffffff"
+                    }}
+                  >
+                    {availableSiteMats.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.materialName} ({m.category}) — Available: {m.remainingStock} {m.unit}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. Available Quantity Info */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "10px 14px",
+                  backgroundColor: "#f0f9ff",
+                  borderRadius: "8px",
+                  border: "1px solid #bae6fd"
+                }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#0369a1" }}>
+                    Current Available at this Site:
+                  </span>
+                  <strong style={{ fontSize: "15px", color: "#0284c7", fontFamily: "monospace" }}>
+                    {availStock} {unitLabel}
+                  </strong>
+                </div>
+
+                {/* 4. Destination Site Selection */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Destination Construction Site
+                  </label>
+                  <select
+                    value={transferDestSiteId}
+                    onChange={(e) => setTransferDestSiteId(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      height: "44px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13.5px",
+                      fontWeight: "700",
+                      color: "#0f172a",
+                      outline: "none",
+                      backgroundColor: "#ffffff"
+                    }}
+                  >
+                    {otherSites.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.siteName} {s.city ? `(${s.city})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 5. Transfer Quantity Input */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12.5px", fontWeight: "750", color: "#0f172a" }}>
+                    Transfer Quantity ({unitLabel})
+                  </label>
+                  <input
+                    type="number"
+                    min="0.01"
+                    max={availStock}
+                    step="any"
+                    placeholder={`Enter quantity (max ${availStock})`}
+                    value={transferQuantity}
+                    onChange={(e) => setTransferQuantity(e.target.value)}
+                    required
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      height: "44px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: transferQtyNum > availStock ? "1.5px solid #ef4444" : "1.5px solid #0284c7",
+                      fontSize: "16px",
+                      fontWeight: "700",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
+                  />
+                  {transferQtyNum > availStock && (
+                    <span style={{ fontSize: "11.5px", color: "#dc2626", fontWeight: "600" }}>
+                      ⚠️ Transfer quantity cannot exceed available stock ({availStock} {unitLabel}).
+                    </span>
+                  )}
+                </div>
+
+                {/* 6. Live Stock Balance Calculation */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 14px",
+                  backgroundColor: "#f8fafc",
+                  borderRadius: "10px",
+                  border: "1px solid #e2e8f0"
+                }}>
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>
+                      Source Stock Balance After Transfer
+                    </span>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                      {availStock} Current − {transferQtyNum || 0} Transferred
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", display: "block" }}>
+                      New Available Stock
+                    </span>
+                    <strong style={{ fontSize: "17px", color: "#0f172a", fontFamily: "monospace" }}>
+                      {remainingAfterTransfer} {unitLabel}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* 7. Notes / Remarks */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Transfer Notes / Vehicle / Challan Ref (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Urgent structural requirement, Vehicle TN-58-1234"
+                    value={transferNotes}
+                    onChange={(e) => setTransferNotes(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "40px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowTransferModal(false)}
+                    disabled={savingTransfer}
+                    style={{ flex: 1 }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={savingTransfer || !isValidTransfer}
+                    style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", backgroundColor: "#0284c7" }}
+                  >
+                    <ArrowRightLeft size={16} />
+                    <span>{savingTransfer ? "Transferring..." : "Confirm & Transfer"}</span>
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          );
+        })()}
+
+        {/* MODAL: RECEIVE INCOMING MATERIAL TRANSFER */}
+        {showReceiveTransferModal && selectedTransferForReceive && (() => {
+          const item = selectedTransferForReceive;
+          const totalTransferred = Number(item.transferQuantity || item.requiredQuantity || item.orderedQuantity) || 0;
+          const previouslyReceived = Number(item.quantity) || 0;
+          const currentPending = Math.max(0, totalTransferred - previouslyReceived);
+          const receiveQtyNum = Number(receiveQuantity) || 0;
+          const newTotalReceived = previouslyReceived + receiveQtyNum;
+          const remainingPending = Math.max(0, currentPending - receiveQtyNum);
+          const unitLabel = item.unit || "Units";
+          const isValidReceive = receiveQtyNum > 0 && receiveQtyNum <= currentPending;
+
+          return (
+            <Modal
+              isOpen={showReceiveTransferModal}
+              onClose={() => !savingReceiveTransfer && setShowReceiveTransferModal(false)}
+              title="Confirm Material Transfer Receipt"
+              maxWidth="480px"
+            >
+              <form onSubmit={handleReceiveTransferSubmit} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                {/* Source and Material Info Card */}
+                <div style={{
+                  backgroundColor: "#f0fdf4",
+                  padding: "14px",
+                  borderRadius: "12px",
+                  border: "1.5px solid #bbf7d0"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                    <div>
+                      <span style={{ fontSize: "11px", fontWeight: "800", color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                        Incoming Transfer
+                      </span>
+                      <h4 style={{ margin: "2px 0 0 0", fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                        {item.materialName} ({item.category})
+                      </h4>
+                    </div>
+                    <span style={{
+                      backgroundColor: "#ffffff",
+                      padding: "3px 8px",
+                      borderRadius: "6px",
+                      border: "1px solid #bbf7d0",
+                      fontSize: "11px",
+                      fontWeight: "750",
+                      color: "#16a34a"
+                    }}>
+                      From: {item.sourceSiteName || "Source Site"}
+                    </span>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", fontSize: "12px", marginTop: "10px", paddingTop: "8px", borderTop: "1px solid #dcfce7", color: "#334155" }}>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Transferred</span>
+                      <strong>{totalTransferred} {unitLabel}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "#64748b", display: "block" }}>Previously Received</span>
+                      <strong style={{ color: "#16a34a" }}>{previouslyReceived} {unitLabel}</strong>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "#c2410c", display: "block" }}>Pending to Receive</span>
+                      <strong style={{ color: "#ea580c" }}>{currentPending} {unitLabel}</strong>
+                    </div>
+                  </div>
+                </div>
+
+                {/* 1. Date */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Receipt Date
+                  </label>
+                  <input
+                    type="date"
+                    value={receiveDate}
+                    onChange={(e) => setReceiveDate(e.target.value)}
+                    required
+                    style={{
+                      width: "100%",
+                      height: "42px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "14px",
+                      fontWeight: "600",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                {/* 2. Receive Quantity Input */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <label style={{ fontSize: "12.5px", fontWeight: "750", color: "#0f172a" }}>
+                      Quantity Received Now ({unitLabel})
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setReceiveQuantity(currentPending.toString())}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "#0284c7",
+                        fontSize: "11.5px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        padding: 0,
+                        textDecoration: "underline"
+                      }}
+                    >
+                      Receive All ({currentPending})
+                    </button>
+                  </div>
+                  <input
+                    type="number"
+                    min="0.01"
+                    max={currentPending}
+                    step="any"
+                    placeholder={`Enter received quantity up to ${currentPending}`}
+                    value={receiveQuantity}
+                    onChange={(e) => setReceiveQuantity(e.target.value)}
+                    required
+                    autoFocus
+                    style={{
+                      width: "100%",
+                      height: "44px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: receiveQtyNum > currentPending ? "1.5px solid #ef4444" : "1.5px solid #16a34a",
+                      fontSize: "16px",
+                      fontWeight: "700",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
+                  />
+                  {receiveQtyNum > currentPending && (
+                    <span style={{ fontSize: "11.5px", color: "#dc2626", fontWeight: "600" }}>
+                      ⚠️ Receive quantity cannot exceed pending balance ({currentPending} {unitLabel}).
+                    </span>
+                  )}
+                </div>
+
+                {/* 3. Automatic Status & Live Calculation */}
+                <div style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  padding: "12px 14px",
+                  backgroundColor: remainingPending === 0 && isValidReceive ? "#f0fdf4" : "#fff7ed",
+                  borderRadius: "10px",
+                  border: remainingPending === 0 && isValidReceive ? "1.5px solid #bbf7d0" : "1.5px solid #fed7aa"
+                }}>
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: "800", color: remainingPending === 0 && isValidReceive ? "#16a34a" : "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      {remainingPending === 0 && isValidReceive
+                        ? "Status: COMPLETED (Full Receipt)"
+                        : "Status: PARTIAL RECEIPT (Remains Pending)"}
+                    </span>
+                    <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                      New Total Received at Site: <strong style={{ color: "#16a34a" }}>{newTotalReceived} {unitLabel}</strong>
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", display: "block" }}>
+                      Remaining Pending
+                    </span>
+                    <strong style={{ fontSize: "18px", color: remainingPending === 0 && isValidReceive ? "#16a34a" : "#ea580c", fontFamily: "monospace" }}>
+                      {remainingPending} {unitLabel}
+                    </strong>
+                  </div>
+                </div>
+
+                {/* 4. Notes / Remarks */}
+                <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                  <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>
+                    Receipt Notes / Remarks (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Received in good condition, checked count"
+                    value={receiveNotes}
+                    onChange={(e) => setReceiveNotes(e.target.value)}
+                    style={{
+                      width: "100%",
+                      height: "40px",
+                      padding: "8px 12px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      outline: "none"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setShowReceiveTransferModal(false)}
+                    disabled={savingReceiveTransfer}
+                    style={{ flex: 1 }}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    variant="primary"
+                    disabled={savingReceiveTransfer || !isValidReceive}
+                    style={{ flex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", backgroundColor: "#16a34a" }}
+                  >
+                    <Inbox size={16} />
+                    <span>{savingReceiveTransfer ? "Confirming..." : "Confirm & Receive"}</span>
+                  </Button>
+                </div>
+              </form>
+            </Modal>
+          );
+        })()}
       </div>
     );
   };

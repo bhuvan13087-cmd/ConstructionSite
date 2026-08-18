@@ -509,7 +509,7 @@ export default function Login() {
       <header className="landing-navbar">
         <a href="#home" onClick={(e) => handleSmoothScroll(e, "home")} className="landing-brand">
           <CivilEngineerLogo size={32} className="landing-brand-icon" />
-          <span>Visvas Builders</span>
+          <span>Construction Site</span>
         </a>
         <nav>
           <ul className="landing-nav-links">
@@ -607,10 +607,10 @@ export default function Login() {
       <section id="about" className="landing-section" style={{ borderBottom: "1px solid var(--border-color)" }}>
         <div className="landing-about-wrapper">
           <div className="landing-about-content">
-            <span className="landing-section-tag">About Visvas Builders</span>
+            <span className="landing-section-tag">About This Platform</span>
             <h2 className="landing-section-title" style={{ textAlign: "left" }}>Pioneering Infrastructure Digitization</h2>
             <p className="landing-section-subtitle" style={{ margin: "0", textAlign: "left" }}>
-              Visvas Builders is a leading provider of civil engineering and heavy infrastructure works. Our software platform enables project managers, administrators, and site engineers to collaborate transparently on site progress.
+              A leading construction site management platform designed for civil engineering and heavy infrastructure works. Our software enables project managers, administrators, and site engineers to collaborate transparently on site progress.
             </p>
             <p className="landing-section-subtitle" style={{ margin: "0", textAlign: "left", fontSize: "14px" }}>
               By centralizing labour logs, inventory arrivals, and geo-tagged inspectorial photos, we eliminate coordinate bottlenecks and ensure regulatory accountability across all our building zones.
@@ -622,8 +622,8 @@ export default function Login() {
               "We don't just build skyscrapers and highways; we build the digital infrastructure that guarantees their safety and efficiency."
             </p>
             <div className="landing-about-author">
-              Marcus Vance
-              <span className="landing-about-title">VP of Operations, Visvas Builders</span>
+              Field Operations
+              <span className="landing-about-title">Construction Site Management Platform</span>
             </div>
           </div>
         </div>
@@ -664,7 +664,7 @@ export default function Login() {
               </div>
               <div className="landing-contact-details">
                 <h4>Administrator Email</h4>
-                <p>support@visvasbuilders.com</p>
+                <p>support@constructionsite.app</p>
               </div>
             </div>
           </div>
@@ -676,7 +676,7 @@ export default function Login() {
             </div>
             <div className="landing-contact-form-group">
               <label htmlFor="contact-email" className="landing-contact-label">Corporate Email</label>
-              <input type="email" id="contact-email" placeholder="j.doe@visvasbuilders.com" required className="landing-contact-input" />
+              <input type="email" id="contact-email" placeholder="j.doe@yourorganization.com" required className="landing-contact-input" />
             </div>
             <div className="landing-contact-form-group">
               <label htmlFor="contact-message" className="landing-contact-label">Message Details</label>
@@ -695,7 +695,7 @@ export default function Login() {
           <div className="landing-footer-brand">
             <a href="#home" onClick={(e) => handleSmoothScroll(e, "home")} className="landing-brand" style={{ color: "var(--primary-900)" }}>
               <CivilEngineerLogo size={28} className="landing-brand-icon" />
-              <span>Visvas Builders</span>
+              <span>Construction Site</span>
             </a>
             <p style={{ fontSize: "13px", lineHeight: "1.5" }}>
               Digital engineering control systems for scale constructions.
@@ -714,7 +714,7 @@ export default function Login() {
             <ul className="landing-footer-links">
               <li><a href="#home" onClick={(e) => handleSmoothScroll(e, "home")}>Home Page</a></li>
               <li><a href="#features" onClick={(e) => handleSmoothScroll(e, "features")}>Platform Features</a></li>
-              <li><a href="#about" onClick={(e) => handleSmoothScroll(e, "about")}>About Visvas Builders</a></li>
+              <li><a href="#about" onClick={(e) => handleSmoothScroll(e, "about")}>About This Platform</a></li>
             </ul>
           </div>
           <div className="landing-footer-col">
@@ -726,7 +726,7 @@ export default function Login() {
           </div>
         </div>
         <div className="landing-footer-bottom">
-          <span>&copy; {new Date().getFullYear()} Visvas Builders. All rights reserved.</span>
+          <span>&copy; {new Date().getFullYear()} Construction Site Management. All rights reserved.</span>
           <span>Security Level: Enterprise Grade Encrypted</span>
         </div>
       </footer>
@@ -742,7 +742,7 @@ export default function Login() {
         closeOnOverlayClick={false}
         title={
           loginView === "login" 
-            ? "Visvas Builders Login" 
+            ? "Construction Site Login" 
             : loginView === "forgotPassword" 
               ? "Recover Credentials" 
               : loginView === "verifyOtp"
@@ -759,7 +759,7 @@ export default function Login() {
               <CivilEngineerLogo size={36} className="login-logo-icon" />
             </div>
             <h3 className="login-title">
-              {loginView === "login" && "Welcome to Visvas Builders"}
+              {loginView === "login" && "Construction Site Management"}
               {loginView === "forgotPassword" && "Forgot Password"}
               {loginView === "verifyOtp" && "Enter Verification Code"}
               {loginView === "resetPassword" && "Create New Password"}

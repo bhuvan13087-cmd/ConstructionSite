@@ -216,7 +216,7 @@ export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse
         <div className="sidebar-brand" style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, overflow: "hidden" }}>
           <CivilEngineerLogo className="brand-icon" size={24} style={{ flexShrink: 0 }} />
           <span className="brand-text" style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "14px", fontWeight: "800", letterSpacing: "0.5px" }}>
-            VISVAS BUILDERS
+            {userProfile?.organizationName || userProfile?.orgName || "VISVAS BUILDERS"}
           </span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "4px", flexShrink: 0 }}>

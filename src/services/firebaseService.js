@@ -2658,19 +2658,9 @@ export async function getPhotosForSite(siteId) {
 export async function updateMaterial(materialId, materialData) {
   const db = getDb();
   const docRef = doc(db, "materials", materialId);
-  await updateDoc(docRef, {
-    materialName: materialData.materialName,
-    category: materialData.category,
-    quantity: Number(materialData.quantity),
-    unit: materialData.unit,
-    supplierName: materialData.supplierName,
-    purchaseDate: materialData.purchaseDate,
-    notes: materialData.notes || "",
-    requiredQuantity: Number(materialData.requiredQuantity) || 0,
-    orderedQuantity: Number(materialData.orderedQuantity) || 0,
-    paidQuantity: Number(materialData.paidQuantity) || 0,
-    updatedAt: serverTimestamp()
-  });
+  const cleanData = { ...materialData, updatedAt: serverTimestamp() };
+  Object.keys(cleanData).forEach(key => cleanData[key] === undefined && delete cleanData[key]);
+  await updateDoc(docRef, cleanData);
 }
 
 // Fetch all leaves across all engineers
@@ -5062,3 +5052,292 @@ export async function saveBulkMaterialEntry(bulkData) {
   return { success: true, count: validItems.length };
 }
 
+// Atomic Material Transfer between sites
+export async function transferMaterialBetweenSites({
+  sourceSiteId,
+  sourceSiteName,
+  destinationSiteId,
+  destinationSiteName,
+  sourceMaterialId,
+  transferQuantity,
+  transferDate,
+  engineerId,
+  engineerName,
+  notes
+}) {
+  const db = getDb();
+  if (!sourceSiteId || !destinationSiteId) throw new Error("Source and Destination sites are required.");
+  if (sourceSiteId === destinationSiteId) throw new Error("Cannot transfer material to the same site.");
+  const transferQty = Number(transferQuantity);
+  if (!transferQty || isNaN(transferQty) || transferQty <= 0) throw new Error("Transfer quantity must be greater than 0.");
+
+  const sourceDocRef = doc(db, "materials", sourceMaterialId);
+
+  return await runTransaction(db, async (transaction) => {
+    const sourceSnap = await transaction.get(sourceDocRef);
+    if (!sourceSnap.exists()) throw new Error("Source material record not found.");
+
+    const sourceData = sourceSnap.data();
+    const currentQty = Number(sourceData.quantity) || 0;
+    const consumedQty = Number(sourceData.consumedQuantity) || 0;
+    const availableStock = Math.max(0, currentQty - consumedQty);
+
+    if (transferQty > availableStock) {
+      throw new Error(`Transfer quantity (${transferQty}) exceeds available stock (${availableStock} ${sourceData.unit || "units"}).`);
+    }
+
+    const transferId = `transfer_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const txDate = transferDate || new Date().toISOString().split("T")[0];
+    const newSourceQty = currentQty - transferQty;
+    const currentTransferredOut = Number(sourceData.transferredOutQuantity) || 0;
+
+    const transferOutEntry = {
+      transferId,
+      toSiteId: destinationSiteId,
+      toSiteName: destinationSiteName || "Destination Site",
+      quantity: transferQty,
+      date: txDate,
+      transferredBy: engineerId,
+      transferredByName: engineerName || "Site Engineer",
+      notes: notes || "",
+      timestamp: new Date().toISOString()
+    };
+
+    const existingTransfersOut = Array.isArray(sourceData.transfersOut) ? sourceData.transfersOut : [];
+
+    // 1. Update source site material record atomically
+    transaction.update(sourceDocRef, {
+      quantity: newSourceQty,
+      transferredOutQuantity: currentTransferredOut + transferQty,
+      transfersOut: [...existingTransfersOut, transferOutEntry],
+      notes: (sourceData.notes ? sourceData.notes + "\n" : "") + `[${txDate}] Transferred out -${transferQty} ${sourceData.unit || ""} to ${destinationSiteName || "other site"}`,
+      updatedAt: serverTimestamp()
+    });
+
+    // 2. Create destination incoming transfer record in canonical 'materials' collection
+    const destDocRef = doc(db, "materials", transferId);
+    const uPrice = Number(sourceData.unitPrice || sourceData.rate) || 0;
+    const totAmount = transferQty * uPrice;
+
+    transaction.set(destDocRef, {
+      id: transferId,
+      transferId,
+      type: "material_transfer",
+      sourceSiteId,
+      sourceSiteName: sourceSiteName || "Source Site",
+      destinationSiteId,
+      destinationSiteName: destinationSiteName || "Destination Site",
+      sourceMaterialId,
+      siteId: destinationSiteId, // Canonical siteId for destination site queries
+      engineerId,
+      transferredBy: engineerId,
+      transferredByName: engineerName || "Site Engineer",
+      materialName: sourceData.materialName,
+      materialType: sourceData.materialType || "standard",
+      category: sourceData.category || sourceData.teamName || "General",
+      teamId: sourceData.teamId || null,
+      teamName: sourceData.teamName || "General",
+      unit: sourceData.unit || "Unit",
+      quantity: 0, // In transit - not yet received
+      transferQuantity: transferQty,
+      requiredQuantity: transferQty,
+      unitPrice: uPrice,
+      rate: uPrice,
+      amount: totAmount,
+      totalAmount: totAmount,
+      transferDate: txDate,
+      purchaseDate: txDate,
+      notes: notes?.trim() || `Incoming transfer of ${transferQty} ${sourceData.unit || "units"} from ${sourceSiteName || "Source Site"}`,
+      status: "In Transit", // Canonical status
+      transferStatus: "In Transit",
+      deliveryStatus: "Pending Receipt",
+      isIncomingTransfer: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+
+    return {
+      transferId,
+      transferredQuantity: transferQty,
+      newSourceQuantity: newSourceQty,
+      destinationSiteId
+    };
+  });
+}
+
+// Atomic Material Transfer Receipt Confirmation at Destination Site
+export async function receiveMaterialTransfer({
+  transferId,
+  receivedQuantity,
+  receiveDate,
+  engineerId,
+  engineerName,
+  notes
+}) {
+  const db = getDb();
+  if (!transferId) throw new Error("Transfer record ID is required.");
+  const newlyReceived = Number(receivedQuantity);
+  if (!newlyReceived || isNaN(newlyReceived) || newlyReceived <= 0) {
+    throw new Error("Received quantity must be greater than 0.");
+  }
+
+  const transferDocRef = doc(db, "materials", transferId);
+
+  return await runTransaction(db, async (transaction) => {
+    const transferSnap = await transaction.get(transferDocRef);
+    if (!transferSnap.exists()) throw new Error("Material transfer record not found.");
+
+    const data = transferSnap.data();
+    const totalTransferred = Number(data.transferQuantity || data.requiredQuantity || data.orderedQuantity) || 0;
+    const previouslyReceived = Number(data.quantity) || 0;
+    const currentPending = Math.max(0, totalTransferred - previouslyReceived);
+
+    if (newlyReceived > currentPending) {
+      throw new Error(`Received quantity (${newlyReceived}) cannot exceed pending quantity (${currentPending} ${data.unit || "units"}).`);
+    }
+
+    const updatedReceived = previouslyReceived + newlyReceived;
+    const updatedPending = Math.max(0, totalTransferred - updatedReceived);
+    const isFullyReceived = updatedPending === 0;
+    const rxDate = receiveDate || new Date().toISOString().split("T")[0];
+
+    const uPrice = Number(data.unitPrice || data.rate) || 0;
+    const newTotalAmount = updatedReceived * uPrice;
+
+    const receiptEntry = {
+      id: `rx_${Date.now()}`,
+      receivedQuantity: newlyReceived,
+      date: rxDate,
+      receivedBy: engineerId,
+      receivedByName: engineerName || "Site Engineer",
+      notes: notes || "",
+      timestamp: new Date().toISOString()
+    };
+
+    const existingReceipts = Array.isArray(data.receiptHistory) ? data.receiptHistory : [];
+    const appendNote = `\n[${rxDate}] Received +${newlyReceived} ${data.unit || ""} from ${data.sourceSiteName || "Source Site"} (Total received: ${updatedReceived}/${totalTransferred}${isFullyReceived ? " - Fully Received" : ` - ${updatedPending} remaining`})`;
+
+    // Atomically update the EXACT SAME canonical document in-place
+    transaction.update(transferDocRef, {
+      quantity: updatedReceived, // Canonical received quantity at destination site
+      receivedQuantity: updatedReceived,
+      requiredQuantity: totalTransferred,
+      pendingDelivery: updatedPending,
+      isPendingDelivery: !isFullyReceived,
+      totalAmount: newTotalAmount,
+      amount: newTotalAmount,
+      status: isFullyReceived ? "Received" : "Partial Received",
+      transferStatus: isFullyReceived ? "Received" : "Partial Received",
+      deliveryStatus: isFullyReceived ? "Fully Delivered" : "Partial Delivery",
+      receiptHistory: [...existingReceipts, receiptEntry],
+      lastReceivedAt: serverTimestamp(),
+      receivedBy: engineerId,
+      receivedByName: engineerName || "Site Engineer",
+      purchaseDate: data.purchaseDate || rxDate,
+      notes: (data.notes || "") + appendNote,
+      updatedAt: serverTimestamp()
+    });
+
+    return {
+      transferId,
+      receivedQuantity: updatedReceived,
+      pendingQuantity: updatedPending,
+      isFullyReceived
+    };
+  });
+}
+
+// Real-time site-scoped material transfer subscription (Single Source of Truth)
+export function subscribeMaterialTransfersForSite(siteId, onUpdate) {
+  const db = getDb();
+  const materialsColl = collection(db, "materials");
+  const q = query(materialsColl, where("type", "==", "material_transfer"));
+
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(d => {
+      const data = d.data();
+      // Enforce strict site isolation: only include if site is source OR destination
+      if (siteId) {
+        if (data.sourceSiteId !== siteId && data.destinationSiteId !== siteId && data.siteId !== siteId) {
+          return;
+        }
+      }
+
+      const transferQty = Number(data.transferQuantity || data.requiredQuantity || data.quantity || 0);
+      const recQty = Number(data.receivedQuantity || data.quantity || 0);
+      const pendingQty = Math.max(0, transferQty - recQty);
+      const isOutgoing = data.sourceSiteId === siteId;
+      const isIncoming = data.destinationSiteId === siteId || data.siteId === siteId;
+
+      list.push({
+        id: d.id,
+        transferId: data.transferId || d.id,
+        ...data,
+        transferQuantity: transferQty,
+        receivedQuantity: recQty,
+        pendingQuantity: pendingQty,
+        isOutgoing,
+        isIncoming,
+        direction: isOutgoing ? "OUTGOING" : "INCOMING",
+        counterpartSiteName: isOutgoing ? (data.destinationSiteName || "Destination Site") : (data.sourceSiteName || "Source Site"),
+        counterpartSiteId: isOutgoing ? data.destinationSiteId : data.sourceSiteId
+      });
+    });
+
+    list.sort((a, b) => {
+      const dateA = a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000) : new Date(a.transferDate || 0);
+      const dateB = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : new Date(b.transferDate || 0);
+      return dateB - dateA;
+    });
+
+    onUpdate(list);
+  }, (error) => {
+    console.error("subscribeMaterialTransfersForSite failed:", error);
+  });
+}
+
+// Fetch site-scoped material transfer history
+export async function getMaterialTransfersForSite(siteId) {
+  const db = getDb();
+  const materialsColl = collection(db, "materials");
+  const q = query(materialsColl, where("type", "==", "material_transfer"));
+  const snapshot = await getDocs(q);
+
+  const list = [];
+  snapshot.forEach(d => {
+    const data = d.data();
+    if (siteId) {
+      if (data.sourceSiteId !== siteId && data.destinationSiteId !== siteId && data.siteId !== siteId) {
+        return;
+      }
+    }
+
+    const transferQty = Number(data.transferQuantity || data.requiredQuantity || data.quantity || 0);
+    const recQty = Number(data.receivedQuantity || data.quantity || 0);
+    const pendingQty = Math.max(0, transferQty - recQty);
+    const isOutgoing = data.sourceSiteId === siteId;
+
+    list.push({
+      id: d.id,
+      transferId: data.transferId || d.id,
+      ...data,
+      transferQuantity: transferQty,
+      receivedQuantity: recQty,
+      pendingQuantity: pendingQty,
+      isOutgoing,
+      isIncoming: !isOutgoing,
+      direction: isOutgoing ? "OUTGOING" : "INCOMING",
+      counterpartSiteName: isOutgoing ? (data.destinationSiteName || "Destination Site") : (data.sourceSiteName || "Source Site"),
+      counterpartSiteId: isOutgoing ? data.destinationSiteId : data.sourceSiteId
+    });
+  });
+
+  list.sort((a, b) => {
+    const dateA = a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000) : new Date(a.transferDate || 0);
+    const dateB = b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000) : new Date(b.transferDate || 0);
+    return dateB - dateA;
+  });
+
+  return list;
+}

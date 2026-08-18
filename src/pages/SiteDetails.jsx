@@ -19,7 +19,10 @@ import {
   subscribeGeneralExpenses,
   getLabourPayments,
   saveLabourPayment,
-  getLabourTeams
+  getLabourTeams,
+  subscribeMaterialsDetailed,
+  subscribeMaterialTransfersForSite,
+  subscribeLabourAttendanceRecords
 } from "../services/firebaseService";
 import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress } from "../services/businessLogic";
 import { 
@@ -43,7 +46,11 @@ import {
   Info,
   CheckCircle2,
   AlertCircle,
-  X
+  X,
+  Eye,
+  Truck,
+  ArrowRightLeft,
+  Inbox
 } from "lucide-react";
 
 export default function SiteDetails({ siteId, onBack }) {
@@ -150,7 +157,7 @@ export default function SiteDetails({ siteId, onBack }) {
   const [supplierFilter, setSupplierFilter] = useState("");
   const [deliveryFilter, setDeliveryFilter] = useState("all");
   const [paymentFilter, setPaymentFilter] = useState("all");
-  const [labourDateFilter, setLabourDateFilter] = useState("");
+  const [labourDateFilter, setLabourDateFilter] = useState(new Date().toISOString().split("T")[0]);
 
 
   // Material Edit Modal State
@@ -167,6 +174,29 @@ export default function SiteDetails({ siteId, onBack }) {
   const [editOrderedQuantity, setEditOrderedQuantity] = useState(0);
   const [editPaidQuantity, setEditPaidQuantity] = useState(0);
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Material Details Modal State
+  const [selectedMaterialForDetails, setSelectedMaterialForDetails] = useState(null);
+  const [showMaterialDetailsModal, setShowMaterialDetailsModal] = useState(false);
+
+  // Material Transfers History & SubTab States
+  const [siteTransfers, setSiteTransfers] = useState([]);
+  const [materialSubTab, setMaterialSubTab] = useState("logs"); // "logs" | "transfers"
+  const [transferFilterMode, setTransferFilterMode] = useState("all"); // "all" | "outgoing" | "incoming"
+
+  const handleOpenMaterialDetails = (mat) => {
+    setSelectedMaterialForDetails(mat);
+    setShowMaterialDetailsModal(true);
+  };
+
+  // Labour Record Details Modal State
+  const [selectedLabourForDetails, setSelectedLabourForDetails] = useState(null);
+  const [showLabourDetailsModal, setShowLabourDetailsModal] = useState(false);
+
+  const handleOpenLabourDetails = (record) => {
+    setSelectedLabourForDetails(record);
+    setShowLabourDetailsModal(true);
+  };
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -344,6 +374,29 @@ export default function SiteDetails({ siteId, onBack }) {
     return () => unsubscribe();
   }, [siteId]);
 
+  useEffect(() => {
+    if (!siteId) return;
+    const unsubscribe = subscribeMaterialsDetailed(siteId, (mats) => {
+      setMaterials(mats || []);
+    });
+    const unsubTransfers = subscribeMaterialTransfersForSite(siteId, (txs) => {
+      setSiteTransfers(txs || []);
+    });
+    const unsubLabour = subscribeLabourAttendanceRecords(siteId, async () => {
+      try {
+        const freshLabour = await getLabourDailyCountsSummary(siteId);
+        setLabourHistory(freshLabour || []);
+      } catch (err) {
+        console.error("Error updating site labour history:", err);
+      }
+    });
+    return () => {
+      unsubscribe();
+      unsubTransfers();
+      unsubLabour();
+    };
+  }, [siteId]);
+
   if (loading) {
     return (
       <Layout title="Site Details" description="Loading detailed resource logs...">
@@ -354,34 +407,76 @@ export default function SiteDetails({ siteId, onBack }) {
 
   if (!site) return null;
 
-  // Map materials to include derived tracking values
-  const processedMaterials = materials.map(mat => processMaterialPaymentAndDelivery(mat));
+  // Map materials to include derived tracking values strictly for this site
+  const siteMaterials = materials.filter(m => m.siteId === siteId);
+  const processedMaterials = siteMaterials.map(mat => processMaterialPaymentAndDelivery(mat));
 
-  // Filter materials based on all active filters
+  // Filter materials based on compact active filters
   const filteredMaterials = processedMaterials.filter(mat => {
-    if (materialDateFilter && mat.purchaseDate !== materialDateFilter) return false;
-    if (materialNameFilter && mat.materialName !== materialNameFilter) return false;
-    if (supplierFilter && mat.supplierName !== supplierFilter) return false;
+    if (materialDateFilter && (mat.purchaseDate !== materialDateFilter && mat.transferDate !== materialDateFilter)) return false;
     if (deliveryFilter !== "all" && mat.deliveryStatus !== deliveryFilter) return false;
     if (paymentFilter !== "all" && mat.paymentStatus !== paymentFilter) return false;
     return true;
   });
 
-  // Unique list of materials and suppliers for filters
-  const uniqueMaterialNames = Array.from(new Set(processedMaterials.map(m => m.materialName))).filter(Boolean);
-  const uniqueSuppliers = Array.from(new Set(processedMaterials.map(m => m.supplierName))).filter(Boolean);
-
   // Aggregated totals for summary boxes
-  const totalRequired = processedMaterials.reduce((acc, mat) => acc + mat.requiredQuantity, 0);
-  const totalReceived = processedMaterials.reduce((acc, mat) => acc + mat.receivedQuantity, 0);
-  const totalPendingDel = processedMaterials.reduce((acc, mat) => acc + mat.pendingDelivery, 0);
-  const totalPaid = processedMaterials.reduce((acc, mat) => acc + mat.paidQuantity, 0);
-  const totalPendingPay = processedMaterials.reduce((acc, mat) => acc + mat.pendingPayment, 0);
+  const hasRequiredQuantity = processedMaterials.some(m => m.requiredQuantity && m.requiredQuantity > (m.receivedQuantity || 0));
+  const totalRequired = processedMaterials.reduce((acc, mat) => acc + (mat.requiredQuantity || 0), 0);
+  const totalReceived = processedMaterials.reduce((acc, mat) => acc + (mat.receivedQuantity || 0), 0);
+  const totalPendingDel = processedMaterials.reduce((acc, mat) => acc + (mat.pendingDelivery || 0), 0);
+  const totalMaterialValue = processedMaterials.reduce((acc, mat) => acc + (mat.totalAmount || 0), 0);
+  const totalPaid = processedMaterials.reduce((acc, mat) => acc + (mat.paidAmount || mat.paidQuantity || 0), 0);
+  const totalPendingPay = processedMaterials.reduce((acc, mat) => acc + (mat.pendingPayment || 0), 0);
 
-  // Filter labour by date
+  // Filter labour by date (defaults to today's date)
   const filteredLabour = labourHistory.filter(row => {
+    const rowDate = row.date || row.attendanceDate;
     if (!labourDateFilter) return true;
-    return row.date === labourDateFilter;
+    return rowDate === labourDateFilter;
+  });
+
+  // Calculate Daily Labour Summary for the selected site and date directly from canonical records
+  let dailyTotalWorkers = 0;
+  let dailyPresent = 0;
+  let dailyAbsent = 0;
+  let dailyTotalWage = 0;
+  let dailyTotalLabourCost = 0;
+
+  filteredLabour.forEach(row => {
+    if (row.memberId !== undefined || row.workerCount !== undefined) {
+      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
+      const units = Number(row.units !== undefined ? row.units : (row.attendanceType === "Full Day" ? 1.0 : row.attendanceType === "Half Day" ? 0.5 : 0));
+      const wage = Number(row.wage || row.baseWage || 0);
+      const earnedCost = (Number(row.units) !== undefined && !isNaN(Number(row.units))) 
+        ? (Number(row.units) * wage) 
+        : (units * wage);
+
+      dailyTotalWorkers += count;
+      if (units > 0) {
+        dailyPresent += count;
+      } else {
+        dailyAbsent += count;
+      }
+      dailyTotalWage += (count * wage);
+      dailyTotalLabourCost += earnedCost;
+    } else {
+      // Legacy headcount row
+      const legacyTotal = Number(row.total) || 0;
+      dailyTotalWorkers += legacyTotal;
+      dailyPresent += legacyTotal;
+      let dayCost = 0;
+      Object.keys(row).forEach(key => {
+        if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
+        const count = Number(row[key]) || 0;
+        let rate = 600;
+        if (key === "Masons") rate = 800;
+        else if (key === "Helpers") rate = 500;
+        else if (key === "Electricians" || key === "Plumbers" || key === "Painters") rate = 700;
+        dayCost += count * rate;
+      });
+      dailyTotalWage += dayCost;
+      dailyTotalLabourCost += dayCost;
+    }
   });
 
   // Compute materials summary (aggregates for reports or overview)
@@ -1013,239 +1108,681 @@ export default function SiteDetails({ siteId, onBack }) {
         )}
 
         {/* ===================================================================
-            TAB: MATERIAL LOG
+            TAB: MATERIAL LOG (SITE-SPECIFIC SINGLE SOURCE OF TRUTH)
             =================================================================== */}
         {activeTab === "materials" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
             
-            {/* Aggregated Totals boxes */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "16px" }}>
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Material Delivery Status</span>
-                <div style={{ display: "flex", gap: "24px", marginTop: "12px" }}>
+            {/* Top Compact Summary: Delivery & Payment Status */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "14px" }}>
+              {/* Delivery Status Card */}
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 20px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px"
+              }}>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>
+                  Material Delivery Status
+                </span>
+                <div style={{ display: "flex", gap: "24px", alignItems: "baseline", flexWrap: "wrap" }}>
                   <div>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Required</span>
-                    <strong style={{ fontSize: "20px", color: "var(--primary-900)" }}>{totalRequired}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Total Received</span>
+                    <strong style={{ fontSize: "22px", color: "var(--success-700)", fontFamily: "monospace" }}>{totalReceived}</strong>
                   </div>
                   <div>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Received</span>
-                    <strong style={{ fontSize: "20px", color: "var(--success-700)" }}>{totalReceived}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Pending Delivery</span>
+                    <strong style={{ fontSize: "22px", color: totalPendingDel > 0 ? "#ea580c" : "var(--success-700)", fontFamily: "monospace" }}>
+                      {totalPendingDel}
+                    </strong>
                   </div>
-                  <div>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Pending Delivery</span>
-                    <strong style={{ fontSize: "20px", color: totalPendingDel > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{totalPendingDel}</strong>
-                  </div>
+                  {hasRequiredQuantity && (
+                    <div>
+                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Total Required</span>
+                      <strong style={{ fontSize: "22px", color: "var(--primary-900)", fontFamily: "monospace" }}>{totalRequired}</strong>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div style={{ backgroundColor: "#ffffff", padding: "20px", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Material Payment Status</span>
-                <div style={{ display: "flex", gap: "24px", marginTop: "12px" }}>
+              {/* Material Value & Payment Status Card */}
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 20px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px"
+              }}>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>
+                  Material Value & Payments
+                </span>
+                <div style={{ display: "flex", gap: "24px", alignItems: "baseline", flexWrap: "wrap" }}>
                   <div>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Total Paid</span>
-                    <strong style={{ fontSize: "20px", color: "var(--success-700)" }}>{totalPaid}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Total Value</span>
+                    <strong style={{ fontSize: "22px", color: "var(--primary-900)", fontFamily: "monospace" }}>
+                      ₹{totalMaterialValue.toLocaleString("en-IN")}
+                    </strong>
                   </div>
                   <div>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Pending Payment</span>
-                    <strong style={{ fontSize: "20px", color: totalPendingPay > 0 ? "var(--danger-600)" : "var(--success-600)" }}>{totalPendingPay}</strong>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Total Paid</span>
+                    <strong style={{ fontSize: "22px", color: "var(--success-700)", fontFamily: "monospace" }}>
+                      ₹{totalPaid.toLocaleString("en-IN")}
+                    </strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Pending Payment</span>
+                    <strong style={{ fontSize: "22px", color: totalPendingPay > 0 ? "#dc2626" : "var(--success-700)", fontFamily: "monospace" }}>
+                      ₹{totalPendingPay.toLocaleString("en-IN")}
+                    </strong>
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* Advanced Filters */}
-            <Card title="Advanced Material Filters" subtitle="Filter logs by material, supplier, date, delivery, or payment status">
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "16px", alignItems: "end" }}>
-                
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="filter-mat-name" style={{ fontSize: "11px", fontWeight: "700" }}>Material Name</label>
-                  <select
-                    id="filter-mat-name"
-                    value={materialNameFilter}
-                    onChange={(e) => setMaterialNameFilter(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", marginTop: "4px", outline: "none" }}
-                  >
-                    <option value="">All Materials</option>
-                    {uniqueMaterialNames.map(name => (
-                      <option key={name} value={name}>{name}</option>
-                    ))}
-                  </select>
+            {/* View Sub-Tabs: Material Logs vs Transfer History */}
+            <div style={{
+              display: "flex",
+              backgroundColor: "var(--primary-100)",
+              padding: "4px",
+              borderRadius: "24px",
+              boxShadow: "inset 0px 1px 2px rgba(0,0,0,0.03)",
+              gap: "4px",
+              maxWidth: "380px"
+            }}>
+              <button
+                type="button"
+                onClick={() => setMaterialSubTab("logs")}
+                style={{
+                  flex: 1,
+                  padding: "8px 14px",
+                  borderRadius: "20px",
+                  fontSize: "12.5px",
+                  fontWeight: "750",
+                  border: "none",
+                  cursor: "pointer",
+                  backgroundColor: materialSubTab === "logs" ? "#ffffff" : "transparent",
+                  color: materialSubTab === "logs" ? "#ea580c" : "#64748b",
+                  boxShadow: materialSubTab === "logs" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+                  transition: "all 0.2s ease"
+                }}
+              >
+                Material Logs ({filteredMaterials.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setMaterialSubTab("transfers")}
+                style={{
+                  flex: 1,
+                  padding: "8px 14px",
+                  borderRadius: "20px",
+                  fontSize: "12.5px",
+                  fontWeight: "750",
+                  border: "none",
+                  cursor: "pointer",
+                  backgroundColor: materialSubTab === "transfers" ? "#ffffff" : "transparent",
+                  color: materialSubTab === "transfers" ? "#ea580c" : "#64748b",
+                  boxShadow: materialSubTab === "transfers" ? "0px 1px 3px rgba(0,0,0,0.12)" : "none",
+                  transition: "all 0.2s ease"
+                }}
+              >
+                Transfers ({siteTransfers.length})
+              </button>
+            </div>
+
+            {/* ── VIEW 1: MATERIAL LOGS TABLE ── */}
+            {materialSubTab === "logs" && (
+              <>
+                {/* Compact Useful Filter Toolbar */}
+                <div style={{
+                  backgroundColor: "#ffffff",
+                  padding: "12px 16px",
+                  borderRadius: "10px",
+                  border: "1px solid var(--border-color)",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "12px",
+                  flexWrap: "wrap"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <Filter size={15} style={{ color: "var(--text-muted)" }} />
+                    <span style={{ fontSize: "12px", fontWeight: "750", color: "#334155" }}>Filters:</span>
+                  </div>
+
+                  {/* Date Filter */}
+                  <div style={{ minWidth: "140px" }}>
+                    <input
+                      type="date"
+                      value={materialDateFilter}
+                      onChange={(e) => setMaterialDateFilter(e.target.value)}
+                      title="Filter by receipt / purchase date"
+                      style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "12px", outline: "none" }}
+                    />
+                  </div>
+
+                  {/* Delivery Status Filter */}
+                  <div style={{ minWidth: "150px" }}>
+                    <select
+                      value={deliveryFilter}
+                      onChange={(e) => setDeliveryFilter(e.target.value)}
+                      style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "12px", backgroundColor: "#fff", outline: "none" }}
+                    >
+                      <option value="all">All Deliveries</option>
+                      <option value="Fully Delivered">Fully Delivered</option>
+                      <option value="Pending Delivery">Pending Delivery</option>
+                      <option value="In Transit">In Transit</option>
+                    </select>
+                  </div>
+
+                  {/* Payment Status Filter */}
+                  <div style={{ minWidth: "150px" }}>
+                    <select
+                      value={paymentFilter}
+                      onChange={(e) => setPaymentFilter(e.target.value)}
+                      style={{ width: "100%", padding: "6px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "12px", backgroundColor: "#fff", outline: "none" }}
+                    >
+                      <option value="all">All Payments</option>
+                      <option value="Paid">Paid</option>
+                      <option value="Partial Payment">Partial Payment</option>
+                      <option value="Pending Payment">Pending Payment</option>
+                    </select>
+                  </div>
+
+                  {/* Clear Filters Button */}
+                  {(materialDateFilter || deliveryFilter !== "all" || paymentFilter !== "all") && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMaterialDateFilter("");
+                        setDeliveryFilter("all");
+                        setPaymentFilter("all");
+                      }}
+                      style={{
+                        background: "none",
+                        border: "none",
+                        color: "var(--danger-600)",
+                        fontSize: "12px",
+                        fontWeight: "750",
+                        cursor: "pointer",
+                        padding: "4px 8px",
+                        textDecoration: "underline"
+                      }}
+                    >
+                      Clear Filters
+                    </button>
+                  )}
                 </div>
 
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="filter-supplier" style={{ fontSize: "11px", fontWeight: "700" }}>Supplier</label>
-                  <select
-                    id="filter-supplier"
-                    value={supplierFilter}
-                    onChange={(e) => setSupplierFilter(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", marginTop: "4px", outline: "none" }}
-                  >
-                    <option value="">All Suppliers</option>
-                    {uniqueSuppliers.map(sup => (
-                      <option key={sup} value={sup}>{sup}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="filter-date" style={{ fontSize: "11px", fontWeight: "700" }}>Receipt Date</label>
-                  <input
-                    type="date"
-                    id="filter-date"
-                    value={materialDateFilter}
-                    onChange={(e) => setMaterialDateFilter(e.target.value)}
-                    style={{ width: "100%", padding: "8px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", marginTop: "4px", outline: "none" }}
-                  />
-                </div>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="filter-delivery" style={{ fontSize: "11px", fontWeight: "700" }}>Delivery Status</label>
-                  <select
-                    id="filter-delivery"
-                    value={deliveryFilter}
-                    onChange={(e) => setDeliveryFilter(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", marginTop: "4px", outline: "none" }}
-                  >
-                    <option value="all">All Deliveries</option>
-                    <option value="Fully Delivered">Fully Delivered</option>
-                    <option value="Pending Delivery">Pending Delivery</option>
-                  </select>
-                </div>
-
-                <div className="form-group" style={{ margin: 0 }}>
-                  <label htmlFor="filter-payment" style={{ fontSize: "11px", fontWeight: "700" }}>Payment Status</label>
-                  <select
-                    id="filter-payment"
-                    value={paymentFilter}
-                    onChange={(e) => setPaymentFilter(e.target.value)}
-                    style={{ width: "100%", padding: "10px 12px", borderRadius: "var(--radius-sm)", border: "1px solid var(--border-color)", backgroundColor: "#fff", marginTop: "4px", outline: "none" }}
-                  >
-                    <option value="all">All Payments</option>
-                    <option value="Paid">Paid</option>
-                    <option value="Partial Payment">Partial Payment</option>
-                    <option value="Pending Payment">Pending Payment</option>
-                  </select>
-                </div>
-              </div>
-              {(materialDateFilter || materialNameFilter || supplierFilter || deliveryFilter !== "all" || paymentFilter !== "all") && (
-                <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
-                  <Button variant="outline" size="sm" onClick={() => {
-                    setMaterialDateFilter("");
-                    setMaterialNameFilter("");
-                    setSupplierFilter("");
-                    setDeliveryFilter("all");
-                    setPaymentFilter("all");
-                  }}>
-                    Clear Filters
-                  </Button>
-                </div>
-              )}
-            </Card>
-
-            {/* List Table */}
-            <Card 
-              variant="table" 
-              title="Material Logs Summary"
-              headerActions={
-                <Badge status="success">{filteredMaterials.length} Shipments Listed</Badge>
-              }
-            >
-              <table className="data-table" style={{ margin: "0" }}>
-                <thead>
-                  <tr>
-                    <th>Material / Spec</th>
-                    <th>Supplier</th>
-                    <th>Approval Status</th>
-                    <th>Requirement vs Delivery</th>
-                    <th>Payment Tracking</th>
-                    <th>Receipt Date</th>
-                    <th>Invoice / Slip</th>
-                    <th className="text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMaterials.length === 0 ? (
+                {/* Main Material Logs Table */}
+                <Card 
+                  variant="table" 
+                  title="Material Log Summary"
+                  subtitle="Showing material inventory entries, transfers, and shipments for this site."
+                  headerActions={
+                    <Badge status="success">{filteredMaterials.length} Records</Badge>
+                  }
+                >
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table" style={{ margin: "0" }}>
+                  <thead>
                     <tr>
-                      <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                        No material logs found matching the selected filters.
-                      </td>
+                      <th>Material</th>
+                      <th style={{ textAlign: "right" }}>Quantity</th>
+                      <th>Unit</th>
+                      <th>Status</th>
+                      <th style={{ textAlign: "right" }}>Amount</th>
+                      <th style={{ textAlign: "center" }}>Actions</th>
                     </tr>
-                  ) : (
-                    filteredMaterials.map(mat => {
-                      const isPendingDel = mat.deliveryStatus === "Pending Delivery";
-                      const isPartialPay = mat.paymentStatus === "Partial Payment";
-                      const isPendingPay = mat.paymentStatus === "Pending Payment";
-                      
-                      let payBadge = "success";
-                      if (isPartialPay) payBadge = "pending";
-                      if (isPendingPay) payBadge = "danger";
+                  </thead>
+                  <tbody>
+                    {filteredMaterials.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "36px 16px" }}>
+                          <Package size={28} style={{ color: "#94a3b8", display: "block", margin: "0 auto 8px auto" }} />
+                          <strong style={{ fontSize: "14px", color: "#475569", display: "block" }}>No material records yet for this site.</strong>
+                          <span style={{ fontSize: "12px", color: "#94a3b8" }}>Recorded materials and transfers will appear here automatically.</span>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredMaterials.map(mat => {
+                        const isTransfer = mat.type === "material_transfer" || mat.isIncomingTransfer;
+                        const isApproved = mat.status === "Approved" || mat.status === "approved" || mat.status === "Received" || mat.status === "received";
+                        const amountNum = Number(mat.totalAmount !== undefined ? mat.totalAmount : (mat.receivedQuantity * (mat.unitPrice || mat.rate || 0)));
 
-                      return (
-                        <tr key={mat.id}>
-                          <td style={{ fontWeight: 700 }}>
-                            <div>
-                              <span style={{ fontSize: "14px", color: "var(--primary-900)" }}>{mat.materialName}</span>
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", display: "block" }}>Cat: {mat.category}</span>
-                              {mat.notes && (
-                                <div style={{ fontSize: "11.5px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "2px" }}>
-                                  Note: {mat.notes}
+                        return (
+                          <tr 
+                            key={mat.id}
+                            onClick={() => handleOpenMaterialDetails(mat)}
+                            style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = ""}
+                          >
+                            <td style={{ fontWeight: 700 }}>
+                              <div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: "14px", color: "var(--primary-900)" }}>{mat.materialName}</span>
+                                  <span style={{ fontSize: "10.5px", color: "#ea580c", backgroundColor: "#fff7ed", padding: "1px 6px", borderRadius: "4px", border: "1px solid #fed7aa", fontWeight: "750" }}>
+                                    {mat.category}
+                                  </span>
+                                  {isTransfer && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }}>
+                                      From {mat.sourceSiteName || "Other Site"}
+                                    </span>
+                                  )}
+                                  {mat.transfersOut && mat.transfersOut.length > 0 && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#c2410c", backgroundColor: "#fff7ed", padding: "1px 6px", borderRadius: "4px", border: "1px solid #fed7aa" }}>
+                                      Transferred Out ({mat.transferredOutQuantity || 0} {mat.unit})
+                                    </span>
+                                  )}
                                 </div>
+                                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", display: "block", marginTop: "2px" }}>
+                                  {mat.purchaseDate || mat.transferDate ? `Date: ${mat.purchaseDate || mat.transferDate}` : ""} {mat.supplierName ? `• Supplier: ${mat.supplierName}` : ""}
+                                </span>
+                              </div>
+                            </td>
+                            <td style={{ textAlign: "right", fontWeight: "700" }}>
+                              <span style={{ fontSize: "14px", color: mat.receivedQuantity > 0 ? "var(--success-700)" : "#475569" }}>
+                                {mat.receivedQuantity || 0}
+                              </span>
+                              {mat.pendingDelivery > 0 && (
+                                <span style={{ display: "block", fontSize: "10.5px", color: "#ea580c", fontWeight: "600" }}>
+                                  ({mat.pendingDelivery} pending)
+                                </span>
                               )}
-                            </div>
-                          </td>
-                          <td>
-                            <strong style={{ fontSize: "13px", color: "#334155" }}>{mat.supplierName || "--"}</strong>
-                          </td>
-                          <td>
-                            <Badge status={mat.status || "approved"}>
-                              {mat.status ? mat.status.toUpperCase() : "APPROVED"}
-                            </Badge>
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "12.5px" }}>
-                              <span>Required: <strong>{mat.requiredQuantity} {mat.unit || "unit"}s</strong></span>
-                              <span>Received: <strong style={{ color: "var(--success-700)" }}>{mat.receivedQuantity} {mat.unit || "unit"}s</strong></span>
-                              <span style={{ color: isPendingDel ? "var(--warning-600)" : "var(--success-600)", fontWeight: "600" }}>
-                                Pending: {mat.pendingDelivery} {mat.unit || "unit"}s
-                              </span>
-                            </div>
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12.5px" }}>
-                              <Badge status={payBadge}>{mat.paymentStatus}</Badge>
-                              <span style={{ fontSize: "11.5px", marginTop: "2px" }}>Paid: <strong>{mat.paidQuantity} {mat.unit || "unit"}s</strong></span>
-                              <span style={{ fontSize: "11.5px", color: isPendingPay ? "var(--danger-600)" : "var(--text-muted)" }}>
-                                Pending: <strong>{mat.pendingPayment} {mat.unit || "unit"}s</strong>
-                              </span>
-                            </div>
-                          </td>
-                          <td className="font-mono">{mat.purchaseDate || "--"}</td>
-                          <td>
-                            {mat.invoiceUrl ? (
-                              <a href={mat.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "var(--accent-600)", fontWeight: "700", textDecoration: "none", fontSize: "13px" }}>
-                                View Slip
-                              </a>
-                            ) : (
-                              <span style={{ color: "var(--text-muted)", fontSize: "12px" }}>No Attachment</span>
-                            )}
-                          </td>
-                          <td>
-                            <div className="table-actions">
-                              <button onClick={() => handleOpenEditMaterial(mat)} className="btn-icon btn-edit-action" title="Edit tracking values">
-                                <Edit3 size={16} />
-                              </button>
-                              <button onClick={() => handleDeleteMaterialLog(mat.id)} className="btn-icon" title="Delete record" style={{ color: "var(--danger-500)" }}>
-                                <Trash2 size={16} />
-                              </button>
-                            </div>
+                            </td>
+                            <td style={{ color: "#475569", fontWeight: "600", fontSize: "13px" }}>
+                              {mat.unit || "Unit"}
+                            </td>
+                            <td>
+                              <Badge status={isApproved ? "success" : mat.status === "Rejected" ? "danger" : "pending"}>
+                                {mat.deliveryStatus || (mat.status ? mat.status.toUpperCase() : "PENDING")}
+                              </Badge>
+                            </td>
+                            <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", fontSize: "13.5px", color: "var(--primary-900)" }}>
+                              ₹{amountNum.toLocaleString("en-IN")}
+                            </td>
+                            <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                              <div className="table-actions" style={{ justifyContent: "center" }}>
+                                <button 
+                                  onClick={() => handleOpenMaterialDetails(mat)} 
+                                  className="btn-icon" 
+                                  title="View complete details"
+                                  style={{ color: "#0284c7" }}
+                                >
+                                  <Eye size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => handleOpenEditMaterial(mat)} 
+                                  className="btn-icon btn-edit-action" 
+                                  title="Edit tracking values"
+                                >
+                                  <Edit3 size={16} />
+                                </button>
+                                <button 
+                                  onClick={() => handleDeleteMaterialLog(mat.id)} 
+                                  className="btn-icon" 
+                                  title="Delete record" 
+                                  style={{ color: "var(--danger-500)" }}
+                                >
+                                  <Trash2 size={16} />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
+          </>
+        )}
+
+        {/* ── VIEW 2: MATERIAL TRANSFERS HISTORY TABLE & LIST ── */}
+        {materialSubTab === "transfers" && (() => {
+          const outgoingCount = siteTransfers.filter(t => t.isOutgoing).length;
+          const incomingCount = siteTransfers.filter(t => t.isIncoming).length;
+          const displayedTransfers = siteTransfers.filter(t => {
+            if (transferFilterMode === "outgoing") return t.isOutgoing;
+            if (transferFilterMode === "incoming") return t.isIncoming;
+            return true;
+          });
+
+          return (
+            <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+              {/* Filter pills */}
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("all")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "all" ? "#ea580c" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "all" ? "#ea580c" : "#ffffff",
+                    color: transferFilterMode === "all" ? "#ffffff" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  All Transfers ({siteTransfers.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("outgoing")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "outgoing" ? "#2563eb" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "outgoing" ? "#eff6ff" : "#ffffff",
+                    color: transferFilterMode === "outgoing" ? "#1d4ed8" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  ↗ Outgoing ({outgoingCount})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTransferFilterMode("incoming")}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: "20px",
+                    fontSize: "12px",
+                    fontWeight: "750",
+                    border: "1px solid",
+                    borderColor: transferFilterMode === "incoming" ? "#16a34a" : "#e2e8f0",
+                    backgroundColor: transferFilterMode === "incoming" ? "#f0fdf4" : "#ffffff",
+                    color: transferFilterMode === "incoming" ? "#15803d" : "#475569",
+                    cursor: "pointer"
+                  }}
+                >
+                  ↙ Incoming ({incomingCount})
+                </button>
+              </div>
+
+              {/* Transfers Table / List Card */}
+              <Card 
+                variant="table" 
+                title="Site Material Transfers History"
+                subtitle="Track outgoing transfers to other sites and incoming transfers received at this site."
+                headerActions={
+                  <Badge status="success">{displayedTransfers.length} Records</Badge>
+                }
+              >
+                <div style={{ overflowX: "auto" }}>
+                  <table className="data-table" style={{ margin: "0" }}>
+                    <thead>
+                      <tr>
+                        <th>Direction / Site</th>
+                        <th>Material</th>
+                        <th style={{ textAlign: "right" }}>Transferred</th>
+                        <th style={{ textAlign: "right" }}>Received</th>
+                        <th style={{ textAlign: "right" }}>Pending</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th style={{ textAlign: "center" }}>Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {displayedTransfers.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "36px 16px" }}>
+                            <ArrowRightLeft size={28} style={{ color: "#94a3b8", display: "block", margin: "0 auto 8px auto" }} />
+                            <strong style={{ fontSize: "14px", color: "#475569", display: "block" }}>
+                              No {transferFilterMode !== "all" ? transferFilterMode : ""} material transfers found for this site.
+                            </strong>
+                            <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                              All transfers originating from or destined for this site will be listed here.
+                            </span>
                           </td>
                         </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </Card>
+                      ) : (
+                        displayedTransfers.map(tx => {
+                          const isOutgoing = tx.isOutgoing;
+                          const totalQty = tx.transferQuantity || 0;
+                          const recQty = tx.receivedQuantity || 0;
+                          const pendingQty = tx.pendingQuantity || 0;
+                          const isCompleted = pendingQty === 0 || tx.status === "Received";
+
+                          return (
+                            <tr 
+                              key={tx.id}
+                              onClick={() => handleOpenMaterialDetails(tx)}
+                              style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
+                              onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                              onMouseLeave={e => e.currentTarget.style.backgroundColor = ""}
+                            >
+                              <td>
+                                <span style={{
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: "4px",
+                                  fontSize: "11px",
+                                  fontWeight: "800",
+                                  color: isOutgoing ? "#1d4ed8" : "#15803d",
+                                  backgroundColor: isOutgoing ? "#eff6ff" : "#f0fdf4",
+                                  padding: "3px 8px",
+                                  borderRadius: "6px",
+                                  border: isOutgoing ? "1px solid #bfdbfe" : "1px solid #bbf7d0",
+                                  textTransform: "uppercase"
+                                }}>
+                                  {isOutgoing ? `↗ OUTGOING TO ${tx.counterpartSiteName}` : `↙ INCOMING FROM ${tx.counterpartSiteName}`}
+                                </span>
+                              </td>
+                              <td style={{ fontWeight: 700 }}>
+                                <span style={{ fontSize: "14px", color: "var(--primary-900)" }}>{tx.materialName}</span>
+                                <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>{tx.category}</span>
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: "700" }}>
+                                {totalQty} {tx.unit}
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: "700", color: "#16a34a" }}>
+                                {recQty} {tx.unit}
+                              </td>
+                              <td style={{ textAlign: "right", fontWeight: "700", color: pendingQty > 0 ? "#ea580c" : "#16a34a" }}>
+                                {pendingQty} {tx.unit}
+                              </td>
+                              <td>
+                                <Badge status={isCompleted ? "success" : tx.status === "Partial Received" ? "pending" : "warning"}>
+                                  {isCompleted ? "COMPLETED" : tx.status === "Partial Received" ? `PARTIAL (${recQty}/${totalQty})` : "IN TRANSIT"}
+                                </Badge>
+                              </td>
+                              <td className="font-mono" style={{ fontSize: "12px" }}>
+                                {tx.transferDate || tx.purchaseDate || "--"}
+                              </td>
+                              <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                                <button
+                                  onClick={() => handleOpenMaterialDetails(tx)}
+                                  className="btn-icon"
+                                  title="View Transfer Details"
+                                  style={{ color: "#0284c7" }}
+                                >
+                                  <Eye size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </Card>
+            </div>
+          );
+        })()}
+
+        {/* Modal: Material Entry Complete Details */}
+        {showMaterialDetailsModal && selectedMaterialForDetails && (() => {
+              const row = selectedMaterialForDetails;
+              const isTransfer = row.type === "material_transfer" || row.isIncomingTransfer;
+              const isApproved = row.status === "Approved" || row.status === "approved" || row.status === "Received" || row.status === "received";
+              const unitLabel = row.unit || "Unit";
+              const rateNum = Number(row.unitPrice || row.rate || 0);
+              const recNum = Number(row.receivedQuantity || row.quantity || 0);
+              const reqNum = Number(row.requiredQuantity || row.transferQuantity || row.quantity || 0);
+              const pendingNum = Number(row.pendingDelivery || 0);
+              const amountNum = Number(row.totalAmount !== undefined ? row.totalAmount : (recNum * rateNum));
+
+              return (
+                <Modal
+                  isOpen={showMaterialDetailsModal}
+                  onClose={() => setShowMaterialDetailsModal(false)}
+                  title="Material Record Details"
+                  maxWidth="500px"
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    {/* Header Card */}
+                    <div style={{
+                      backgroundColor: "#f8fafc",
+                      padding: "14px 16px",
+                      borderRadius: "12px",
+                      border: "1px solid #e2e8f0"
+                    }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+                        <div>
+                          <span style={{ fontSize: "11px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase" }}>
+                            {row.category || "General"}
+                          </span>
+                          <h3 style={{ margin: "2px 0 0 0", fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>
+                            {row.materialName}
+                          </h3>
+                        </div>
+                        <Badge status={isApproved ? "success" : row.status === "Rejected" ? "danger" : "pending"}>
+                          {row.deliveryStatus || (row.status ? row.status.toUpperCase() : "APPROVED")}
+                        </Badge>
+                      </div>
+                    </div>
+
+                    {/* 4-Grid Quantities and Financials */}
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                      <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                          {isTransfer ? "Transferred Quantity" : "Total Required / Ordered"}
+                        </span>
+                        <strong style={{ fontSize: "15px", color: "#0f172a", marginTop: "2px", display: "block" }}>
+                          {reqNum} {unitLabel}
+                        </strong>
+                      </div>
+
+                      <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                          Received Quantity
+                        </span>
+                        <strong style={{ fontSize: "15px", color: "#16a34a", marginTop: "2px", display: "block" }}>
+                          {recNum} {unitLabel}
+                        </strong>
+                      </div>
+
+                      <div style={{ backgroundColor: "#ffffff", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
+                          Rate / Unit
+                        </span>
+                        <strong style={{ fontSize: "14px", color: "#0f172a", marginTop: "2px", display: "block", fontFamily: "monospace" }}>
+                          ₹{rateNum.toLocaleString("en-IN")}
+                        </strong>
+                      </div>
+
+                      <div style={{ backgroundColor: "#fff7ed", padding: "10px 12px", borderRadius: "8px", border: "1px solid #fed7aa" }}>
+                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#c2410c", textTransform: "uppercase", display: "block" }}>
+                          Total Amount
+                        </span>
+                        <strong style={{ fontSize: "16px", color: "#1e3a8a", marginTop: "2px", display: "block", fontFamily: "monospace" }}>
+                          ₹{amountNum.toLocaleString("en-IN")}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {/* Secondary Information Card */}
+                    <div style={{ backgroundColor: "#f8fafc", padding: "12px 14px", borderRadius: "10px", border: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: "6px", fontSize: "12.5px", color: "#334155" }}>
+                      <div><strong>Supplier / Team:</strong> {row.supplierName || row.teamName || "--"}</div>
+                      <div><strong>Record Date:</strong> {row.purchaseDate || row.transferDate || "--"}</div>
+                      <div><strong>Payment Status:</strong> <Badge status={row.paymentStatus === "Paid" ? "success" : row.paymentStatus === "Partial Payment" ? "pending" : "danger"}>{row.paymentStatus || "Pending Payment"}</Badge></div>
+                      {isTransfer && (
+                        <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "6px", marginTop: "4px" }}>
+                          <strong>Transfer Details:</strong> Transferred from <u>{row.sourceSiteName || "Source Site"}</u> by {row.transferredByName || "Site Engineer"}
+                        </div>
+                      )}
+                      {row.invoiceUrl && (
+                        <div style={{ marginTop: "4px" }}>
+                          <a href={row.invoiceUrl} target="_blank" rel="noopener noreferrer" style={{ color: "#0284c7", fontWeight: "750", textDecoration: "underline" }}>
+                            📄 View Attached Invoice / Slip
+                          </a>
+                        </div>
+                      )}
+                      {row.notes && (
+                        <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: "6px", marginTop: "4px", fontStyle: "italic", color: "#64748b" }}>
+                          "{row.notes}"
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Transfers Out History (if any) */}
+                    {row.transfersOut && row.transfersOut.length > 0 && (
+                      <div style={{ backgroundColor: "#fff7ed", padding: "10px 12px", borderRadius: "8px", border: "1px solid #fed7aa", fontSize: "11.5px" }}>
+                        <span style={{ fontWeight: "800", color: "#c2410c", display: "block", marginBottom: "4px" }}>
+                          Transfers Out from this Material:
+                        </span>
+                        {row.transfersOut.map((t, idx) => (
+                          <div key={idx} style={{ color: "#475569", marginBottom: "2px" }}>
+                            • {t.date}: <strong>-{t.quantity} {unitLabel}</strong> to {t.toSiteName || "other site"} ({t.notes || "Transfer"})
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Usage History (if any) */}
+                    {row.usageHistory && row.usageHistory.length > 0 && (
+                      <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "11.5px" }}>
+                        <span style={{ fontWeight: "800", color: "#334155", display: "block", marginBottom: "4px" }}>
+                          Stock Consumption Log:
+                        </span>
+                        {row.usageHistory.map((u, idx) => (
+                          <div key={idx} style={{ color: "#475569", marginBottom: "2px" }}>
+                            • {u.date}: <strong>-{u.quantity} {unitLabel}</strong> ({u.notes})
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          setShowMaterialDetailsModal(false);
+                          handleOpenEditMaterial(row);
+                        }}
+                        style={{ flex: 1 }}
+                      >
+                        <Edit3 size={15} />
+                        <span>Edit Record</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="primary"
+                        onClick={() => setShowMaterialDetailsModal(false)}
+                        style={{ flex: 1 }}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+                </Modal>
+              );
+            })()}
 
             {/* Modal: Admin Edit Material Tracking */}
             <Modal
@@ -1409,122 +1946,308 @@ export default function SiteDetails({ siteId, onBack }) {
         )}
 
         {/* ===================================================================
-            TAB: LABOUR LOG
+            TAB: LABOUR LOG (SITE-SPECIFIC SINGLE SOURCE OF TRUTH)
             =================================================================== */}
         {activeTab === "labour" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-            {/* Filter Section */}
-            <Card title="Filter Logs" subtitle="Filter daily headcount logs by specific date">
-              <div style={{ display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" }}>
-                <div className="form-group" style={{ margin: 0, minWidth: "240px" }}>
-                  <label htmlFor="lab-date">Report Date</label>
-                  <input
-                    type="date"
-                    id="lab-date"
-                    value={labourDateFilter}
-                    onChange={(e) => setLabourDateFilter(e.target.value)}
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }} className="no-print">
+            
+            {/* 1. Clean Single Date Filter */}
+            <div style={{
+              backgroundColor: "#ffffff",
+              padding: "12px 16px",
+              borderRadius: "10px",
+              border: "1px solid var(--border-color)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              flexWrap: "wrap",
+              boxShadow: "0 1px 2px rgba(0,0,0,0.02)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <Calendar size={16} style={{ color: "var(--primary-600)" }} />
+                <span style={{ fontSize: "13px", fontWeight: "750", color: "#1e293b" }}>Attendance Date:</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input
+                  type="date"
+                  value={labourDateFilter}
+                  onChange={(e) => setLabourDateFilter(e.target.value)}
+                  style={{
+                    padding: "7px 12px",
+                    borderRadius: "6px",
+                    border: "1px solid var(--border-color)",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    outline: "none",
+                    backgroundColor: "#f8fafc",
+                    color: "#0f172a"
+                  }}
+                />
+                {labourDateFilter !== new Date().toISOString().split("T")[0] && (
+                  <button
+                    type="button"
+                    onClick={() => setLabourDateFilter(new Date().toISOString().split("T")[0])}
                     style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: "var(--radius-sm)",
-                      border: "1px solid var(--border-color)",
-                      outline: "none",
-                      marginTop: "4px"
+                      padding: "6px 12px",
+                      borderRadius: "6px",
+                      border: "1px solid #fed7aa",
+                      backgroundColor: "#fff7ed",
+                      color: "#ea580c",
+                      fontSize: "12px",
+                      fontWeight: "750",
+                      cursor: "pointer"
                     }}
-                  />
-                </div>
-                {labourDateFilter && (
-                  <Button variant="outline" onClick={() => setLabourDateFilter("")} style={{ marginTop: "20px" }}>
-                    Clear Filter
-                  </Button>
+                  >
+                    Today
+                  </button>
                 )}
+              </div>
+            </div>
+
+            {/* 2. Compact Daily Labour Summary: Workers Today & Total Payment */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "12px" }}>
+              {/* Workers Today */}
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "14px 18px",
+                borderRadius: "10px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px"
+              }}>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>
+                  Workers Today
+                </span>
+                <strong style={{ fontSize: "22px", color: "var(--primary-900)", fontFamily: "monospace" }}>
+                  {dailyTotalWorkers}
+                </strong>
+              </div>
+
+              {/* Total Payment */}
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "14px 18px",
+                borderRadius: "10px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.02)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px"
+              }}>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>
+                  Total Payment
+                </span>
+                <strong style={{ fontSize: "22px", color: "var(--success-700)", fontFamily: "monospace" }}>
+                  ₹{dailyTotalLabourCost.toLocaleString("en-IN")}
+                </strong>
+              </div>
+            </div>
+
+            {/* 3. Labour Records Table */}
+            <Card 
+              variant="table" 
+              title="Daily Labour Records"
+              subtitle={`Showing labour records and payments for ${labourDateFilter || "the selected date"}`}
+              headerActions={
+                <Badge status="success">{filteredLabour.length} Records</Badge>
+              }
+            >
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table" style={{ margin: "0" }}>
+                  <thead>
+                    <tr>
+                      <th>Worker / Labour Name</th>
+                      <th>Work / Activity</th>
+                      <th style={{ textAlign: "right" }}>Rate / Payment</th>
+                      <th>Date</th>
+                      <th style={{ textAlign: "center" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredLabour.length === 0 ? (
+                      <tr>
+                        <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "36px 16px" }}>
+                          <Users size={28} style={{ color: "#94a3b8", display: "block", margin: "0 auto 8px auto" }} />
+                          <strong style={{ fontSize: "14px", color: "#475569", display: "block" }}>
+                            No labour records found for {labourDateFilter || "this site"}.
+                          </strong>
+                          <span style={{ fontSize: "12px", color: "#94a3b8" }}>
+                            Select another date above or record labour attendance from Site Engineer portal.
+                          </span>
+                        </td>
+                      </tr>
+                    ) : (
+                      filteredLabour.map((row, idx) => {
+                        const isMember = row.memberId !== undefined || row.workerCount !== undefined;
+                        const workerName = isMember ? (row.memberName || row.workerName || "Worker") : "Headcount Entry";
+                        const workType = isMember ? (row.categoryName || row.categoryId || "General Labour") : "General Headcount";
+                        const rateNum = Number(row.wage || row.baseWage || 0);
+                        const unitsNum = Number(row.units !== undefined ? row.units : (row.attendanceType === "Full Day" ? 1.0 : row.attendanceType === "Half Day" ? 0.5 : 0));
+                        let earnedPayment = 0;
+                        if (isMember) {
+                          earnedPayment = (Number(row.units) !== undefined && !isNaN(Number(row.units))) 
+                            ? (Number(row.units) * rateNum) 
+                            : (unitsNum * rateNum);
+                        } else {
+                          Object.keys(row).forEach(key => {
+                            if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
+                            const count = Number(row[key]) || 0;
+                            if (count > 0) {
+                              let r = 600;
+                              if (key === "Masons") r = 800;
+                              else if (key === "Helpers") r = 500;
+                              else if (key === "Electricians" || key === "Plumbers" || key === "Painters") r = 700;
+                              earnedPayment += count * r;
+                            }
+                          });
+                        }
+
+                        return (
+                          <tr 
+                            key={row.id || idx}
+                            onClick={() => handleOpenLabourDetails(row)}
+                            style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = ""}
+                          >
+                            <td style={{ fontWeight: 700 }}>
+                              <div>
+                                <span style={{ fontSize: "13.5px", color: "var(--primary-900)" }}>{workerName}</span>
+                                {row.teamName && (
+                                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", fontWeight: "normal" }}>
+                                    Team: {row.teamName}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td>
+                              <span style={{
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                backgroundColor: "#f1f5f9",
+                                color: "#334155",
+                                padding: "2px 8px",
+                                borderRadius: "4px",
+                                border: "1px solid #e2e8f0"
+                              }}>
+                                {workType}
+                              </span>
+                            </td>
+                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                              <div>
+                                <strong style={{ fontSize: "13.5px", color: earnedPayment > 0 ? "var(--success-700)" : "var(--text-muted)" }}>
+                                  ₹{earnedPayment.toLocaleString("en-IN")}
+                                </strong>
+                                {rateNum > 0 && (
+                                  <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>
+                                    Rate: ₹{rateNum}/day
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                            <td className="font-mono" style={{ fontSize: "12px" }}>
+                              {row.date || row.attendanceDate || "--"}
+                            </td>
+                            <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                              <button
+                                onClick={() => handleOpenLabourDetails(row)}
+                                className="btn-icon"
+                                title="View Record Details"
+                                style={{ color: "#0284c7" }}
+                              >
+                                <Eye size={16} />
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </Card>
 
-            {/* List Table */}
-            <Card 
-              variant="table" 
-              title="Daily Labour Headcount History"
-              headerActions={
-                <Badge status="success">{filteredLabour.length} Records Found</Badge>
+            {/* Modal: Labour Record Details */}
+            {showLabourDetailsModal && selectedLabourForDetails && (() => {
+              const rec = selectedLabourForDetails;
+              const isMember = rec.memberId !== undefined || rec.workerCount !== undefined;
+              const workerName = isMember ? (rec.memberName || rec.workerName || "Worker") : "Headcount Entry";
+              const workType = isMember ? (rec.categoryName || rec.categoryId || "General Labour") : "General Headcount";
+              const rateNum = Number(rec.wage || rec.baseWage || 0);
+              const unitsNum = Number(rec.units !== undefined ? rec.units : (rec.attendanceType === "Full Day" ? 1.0 : rec.attendanceType === "Half Day" ? 0.5 : 0));
+              let earnedPayment = 0;
+              if (isMember) {
+                earnedPayment = (Number(rec.units) !== undefined && !isNaN(Number(rec.units))) 
+                  ? (Number(rec.units) * rateNum) 
+                  : (unitsNum * rateNum);
+              } else {
+                Object.keys(rec).forEach(key => {
+                  if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
+                  const count = Number(rec[key]) || 0;
+                  if (count > 0) {
+                    let r = 600;
+                    if (key === "Masons") r = 800;
+                    else if (key === "Helpers") r = 500;
+                    else if (key === "Electricians" || key === "Plumbers" || key === "Painters") r = 700;
+                    earnedPayment += count * r;
+                  }
+                });
               }
-            >
-              <table className="data-table" style={{ margin: "0" }}>
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Type</th>
-                    <th>Details</th>
-                    <th style={{ textAlign: "right" }}>Attendance (Days)</th>
-                    <th style={{ textAlign: "right" }}>Rate / Wage (₹)</th>
-                    <th style={{ textAlign: "right" }}>Accrued Cost (₹)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredLabour.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} style={{ textAlign: "center", color: "var(--text-muted)", padding: "32px" }}>
-                        No labour logs found for the selected filter.
-                      </td>
-                    </tr>
-                  ) : (
-                    filteredLabour.map((row, idx) => {
-                      if (row.memberId !== undefined) {
-                        // New member attendance
-                        const cost = (Number(row.wage) || 0) * (Number(row.units) || 0);
-                        return (
-                          <tr key={row.id || idx}>
-                            <td style={{ fontWeight: 700 }} className="font-mono">{row.date}</td>
-                            <td><Badge status="success">Member Attendance</Badge></td>
-                            <td>
-                              <div style={{ display: "flex", flexDirection: "column" }}>
-                                <span style={{ fontWeight: "700" }}>{row.memberName}</span>
-                                <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                                  ID: {row.memberId} | Team: {row.teamName} | Cat: {row.categoryName}
-                                </span>
-                              </div>
-                            </td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>{row.units} Day</td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>₹{row.wage}</td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>₹{cost}</td>
-                          </tr>
-                        );
-                      } else {
-                        // Legacy headcount row
-                        let dayCost = 0;
-                        const details = [];
-                        Object.keys(row).forEach(key => {
-                          if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
-                          const count = Number(row[key]) || 0;
-                          if (count > 0) {
-                            details.push(`${key}: ${count}`);
-                            let rate = 600;
-                            if (key === "Masons") rate = 800;
-                            else if (key === "Helpers") rate = 500;
-                            else if (key === "Electricians" || key === "Plumbers" || key === "Painters") rate = 700;
-                            dayCost += count * rate;
-                          }
-                        });
-                        return (
-                          <tr key={row.id || idx} style={{ backgroundColor: "#f9fafb" }}>
-                            <td style={{ fontWeight: 700 }} className="font-mono">{row.date}</td>
-                            <td><Badge status="pending">Legacy Headcount</Badge></td>
-                            <td>
-                              <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
-                                {details.join(" · ") || "0 Workers"}
-                              </div>
-                            </td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>{row.total || 0} Workers</td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>--</td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700" }}>₹{dayCost}</td>
-                          </tr>
-                        );
-                      }
-                    })
-                  )}
-                </tbody>
-              </table>
-            </Card>
+
+              return (
+                <Modal
+                  isOpen={showLabourDetailsModal}
+                  onClose={() => setShowLabourDetailsModal(false)}
+                  title="Labour Record Details"
+                >
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid var(--border-color)", paddingBottom: "12px" }}>
+                      <div>
+                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>{workerName}</h3>
+                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{workType} {rec.teamName ? `• Team: ${rec.teamName}` : ""}</span>
+                      </div>
+                      <Badge status={earnedPayment > 0 ? "success" : "pending"}>
+                        {rec.attendanceType || (earnedPayment > 0 ? "Present" : "Logged")}
+                      </Badge>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
+                      <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Date</span>
+                        <strong className="font-mono">{rec.date || rec.attendanceDate || "--"}</strong>
+                      </div>
+                      <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Daily Rate</span>
+                        <strong className="font-mono">{rateNum > 0 ? `₹${rateNum}/day` : "--"}</strong>
+                      </div>
+                      <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Attendance (Days)</span>
+                        <strong className="font-mono">{rec.units !== undefined ? `${rec.units} Day` : (rec.attendanceType || "--")}</strong>
+                      </div>
+                      <div style={{ backgroundColor: "#f0fdf4", padding: "10px 12px", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                        <span style={{ fontSize: "11px", color: "#16a34a", display: "block", fontWeight: "700" }}>Total Payment</span>
+                        <strong style={{ fontSize: "16px", color: "#16a34a", fontFamily: "monospace" }}>₹{earnedPayment.toLocaleString("en-IN")}</strong>
+                      </div>
+                    </div>
+
+                    {rec.markedBy && (
+                      <div style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
+                        Marked by Engineer ID: {rec.markedBy}
+                      </div>
+                    )}
+
+                    <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+                      <Button variant="outline" onClick={() => setShowLabourDetailsModal(false)}>
+                        Close
+                      </Button>
+                    </div>
+                  </div>
+                </Modal>
+              );
+            })()}
           </div>
         )}
 
