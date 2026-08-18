@@ -1977,10 +1977,10 @@ export async function getLabourAttendance(siteId, dateStr) {
 }
 
 // Get attendance summary history (dates & counts) for admin reports
-export async function getLabourAttendanceSummary(siteId) {
+export async function getLabourAttendanceSummary(siteId = null) {
   const db = getDb();
   const attendanceColl = collection(db, "labourAttendance");
-  const q = query(attendanceColl, where("siteId", "==", siteId));
+  const q = siteId ? query(attendanceColl, where("siteId", "==", siteId)) : query(attendanceColl);
   const snap = await getDocs(q);
   
   const summaryMap = {};
@@ -2131,10 +2131,9 @@ export async function getLabourDailyCountsHistory(siteId) {
   });
 
   // 2. Fetch legacy headcount entries
-  const qLegacy = query(
-    collection(db, "siteLabourEntries"),
-    where("siteId", "==", siteId)
-  );
+  const qLegacy = siteId
+    ? query(collection(db, "siteLabourEntries"), where("siteId", "==", siteId))
+    : query(collection(db, "siteLabourEntries"));
   const snapLegacy = await getDocs(qLegacy);
   
   const historyMap = {};
@@ -2163,10 +2162,9 @@ export async function getLabourDailyCountsHistory(siteId) {
   const legacyList = Object.values(historyMap);
 
   // 3. Fetch new member-level attendance records
-  const qNew = query(
-    collection(db, "labourMemberAttendance"),
-    where("siteId", "==", siteId)
-  );
+  const qNew = siteId
+    ? query(collection(db, "labourMemberAttendance"), where("siteId", "==", siteId))
+    : query(collection(db, "labourMemberAttendance"));
   const snapNew = await getDocs(qNew);
   
   // Fetch teams for category and wage lookups
@@ -2595,10 +2593,10 @@ export async function getEngineerAttendanceHistory(engineerId) {
 
 
 // Get all attendance records for a given site
-export async function getAttendanceForSite(siteId) {
+export async function getAttendanceForSite(siteId = null) {
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  const q = query(attendanceColl, where("siteId", "==", siteId));
+  const q = siteId ? query(attendanceColl, where("siteId", "==", siteId)) : query(attendanceColl);
   const snap = await getDocs(q);
   const records = [];
   snap.forEach(docSnap => {
@@ -2608,21 +2606,21 @@ export async function getAttendanceForSite(siteId) {
 }
 
 // Get daily progress updates for a site
-export async function getDailyUpdatesForSite(siteId) {
+export async function getDailyUpdatesForSite(siteId = null) {
   const db = getDb();
   let snap;
   try {
-    const q = query(collection(db, "reports"), where("siteId", "==", siteId));
+    const q = siteId ? query(collection(db, "reports"), where("siteId", "==", siteId)) : query(collection(db, "reports"));
     snap = await getDocs(q);
     if (snap.empty) {
-      const qFallback = query(collection(db, "dailyUpdates"), where("siteId", "==", siteId));
+      const qFallback = siteId ? query(collection(db, "dailyUpdates"), where("siteId", "==", siteId)) : query(collection(db, "dailyUpdates"));
       const snapFallback = await getDocs(qFallback);
       if (!snapFallback.empty) {
         snap = snapFallback;
       }
     }
   } catch (e) {
-    const qFallback = query(collection(db, "dailyUpdates"), where("siteId", "==", siteId));
+    const qFallback = siteId ? query(collection(db, "dailyUpdates"), where("siteId", "==", siteId)) : query(collection(db, "dailyUpdates"));
     snap = await getDocs(qFallback);
   }
   const updates = [];
@@ -2637,10 +2635,10 @@ export async function getDailyUpdatesForSite(siteId) {
 }
 
 // Get all photos captured for a site
-export async function getPhotosForSite(siteId) {
+export async function getPhotosForSite(siteId = null) {
   const db = getDb();
   const photosColl = collection(db, "sitePhotos");
-  const q = query(photosColl, where("siteId", "==", siteId));
+  const q = siteId ? query(photosColl, where("siteId", "==", siteId)) : query(photosColl);
   const snap = await getDocs(q);
   const photos = [];
   snap.forEach(doc => {
@@ -2930,17 +2928,27 @@ export function subscribeLabourCategories(onUpdate) {
 }
 
 // Get admin-scoped labour payments.
-// If adminId is provided, reads from "__labour_payments___{adminId}".
-// Falls back to global for legacy compatibility.
-export async function getLabourPayments(adminId = null, siteId = null) {
+// Supports getLabourPayments(siteId) or getLabourPayments(adminId, siteId).
+// Reads from "__labour_payments__{adminId}" with automatic fallback to global.
+export async function getLabourPayments(adminIdOrSiteId = null, siteId = null) {
   const db = getDb();
   let paymentsList = [];
   
-  let resolvedAdminId = adminId;
-  if (!resolvedAdminId) {
+  let targetSiteId = siteId;
+  let resolvedAdminId = null;
+
+  if (adminIdOrSiteId && !siteId) {
+    targetSiteId = adminIdOrSiteId;
     try {
       resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
     } catch (e) {}
+  } else {
+    resolvedAdminId = adminIdOrSiteId;
+    if (!resolvedAdminId) {
+      try {
+        resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+      } catch (e) {}
+    }
   }
 
   // Try admin-scoped doc first
@@ -2949,6 +2957,13 @@ export async function getLabourPayments(adminId = null, siteId = null) {
     const scopedSnap = await getDoc(scopedRef);
     if (scopedSnap.exists()) {
       paymentsList = scopedSnap.data().payments || [];
+    }
+  }
+  if (paymentsList.length === 0 && adminIdOrSiteId && adminIdOrSiteId !== resolvedAdminId) {
+    const directScopedRef = doc(db, "users", `__labour_payments__${adminIdOrSiteId}`);
+    const directScopedSnap = await getDoc(directScopedRef);
+    if (directScopedSnap.exists()) {
+      paymentsList = directScopedSnap.data().payments || [];
     }
   }
   if (paymentsList.length === 0) {
@@ -2960,8 +2975,8 @@ export async function getLabourPayments(adminId = null, siteId = null) {
     }
   }
 
-  if (siteId) {
-    return paymentsList.filter(p => p.siteId === siteId);
+  if (targetSiteId) {
+    return paymentsList.filter(p => p.siteId === targetSiteId);
   }
   return paymentsList;
 }
@@ -4696,12 +4711,11 @@ export async function getLabourMemberAttendance(siteId, dateStr) {
   return records;
 }
 
-export async function getLabourMemberAttendanceSummary(siteId) {
+export async function getLabourMemberAttendanceSummary(siteId = null) {
   const db = getDb();
-  const q = query(
-    collection(db, "labourMemberAttendance"),
-    where("siteId", "==", siteId)
-  );
+  const q = siteId
+    ? query(collection(db, "labourMemberAttendance"), where("siteId", "==", siteId))
+    : query(collection(db, "labourMemberAttendance"));
   const snap = await getDocs(q);
   const records = [];
   snap.forEach(d => {
@@ -4775,10 +4789,9 @@ export async function getLabourAttendanceRecords(siteId, dateStr, teamId) {
 // Real-time subscription to all labour attendance records for a site
 export function subscribeLabourAttendanceRecords(siteId, onUpdate) {
   const db = getDb();
-  const q = query(
-    collection(db, "labourMemberAttendance"),
-    where("siteId", "==", siteId)
-  );
+  const q = siteId
+    ? query(collection(db, "labourMemberAttendance"), where("siteId", "==", siteId))
+    : query(collection(db, "labourMemberAttendance"));
   return onSnapshot(q, (snapshot) => {
     const list = [];
     snapshot.forEach(docSnap => {
@@ -5341,3 +5354,116 @@ export async function getMaterialTransfersForSite(siteId) {
 
   return list;
 }
+
+/**
+ * Mark a site as Completed in canonical sites collection
+ * Updates site status and metadata without mutating historical operational records
+ */
+export async function markSiteCompleted(siteId, completionData = {}) {
+  const db = getDb();
+  const siteRef = doc(db, "sites", siteId);
+  const payload = {
+    status: "Completed",
+    isCompleted: true,
+    completedAt: serverTimestamp(),
+    completedBy: completionData.completedBy || "admin",
+    completedByName: completionData.completedByName || "Admin",
+    completionNotes: completionData.notes || "",
+    updatedAt: serverTimestamp()
+  };
+  await updateDoc(siteRef, payload);
+  return { id: siteId, ...payload };
+}
+
+/**
+ * Reopen a Completed site back to In Progress status
+ */
+export async function reopenSite(siteId, reopenData = {}) {
+  const db = getDb();
+  const siteRef = doc(db, "sites", siteId);
+  const payload = {
+    status: "In Progress",
+    isCompleted: false,
+    reopenedAt: serverTimestamp(),
+    reopenedBy: reopenData.reopenedBy || "admin",
+    reopenedByName: reopenData.reopenedByName || "Admin",
+    reopenNotes: reopenData.notes || "",
+    updatedAt: serverTimestamp()
+  };
+  await updateDoc(siteRef, payload);
+  return { id: siteId, ...payload };
+}
+
+/**
+ * Fetch all canonical pending records for a site to audit before completion
+ */
+export async function getSitePendingAuditDetails(siteId) {
+  const [
+    materials,
+    transfers,
+    expenses,
+    labourHistory,
+    labourPayments
+  ] = await Promise.all([
+    getMaterialsDetailed(siteId),
+    getMaterialTransfersForSite(siteId),
+    getGeneralExpenses(),
+    getLabourDailyCountsSummary(siteId),
+    getLabourPayments(siteId)
+  ]);
+
+  // 1. Pending material deliveries
+  const siteMaterials = (materials || []).filter(m => m.siteId === siteId && m.type !== "material_transfer");
+  const pendingDeliveries = siteMaterials.filter(m => {
+    const req = Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0);
+    const rec = Number(m.receivedQuantity || m.quantity || 0);
+    return req > rec && m.deliveryStatus !== "Delivered";
+  }).map(m => ({
+    id: m.id,
+    materialName: m.materialName || m.name,
+    required: Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0),
+    received: Number(m.receivedQuantity || m.quantity || 0),
+    pending: Math.max(0, Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0) - Number(m.receivedQuantity || m.quantity || 0)),
+    unit: m.unit || "unit"
+  }));
+
+  // 2. Pending material transfers
+  const pendingTransfers = (transfers || []).filter(t => 
+    t.status === "Pending" || t.status === "In Transit" || t.status === "Partial Received"
+  );
+
+  // 3. Pending expenses
+  const pendingExpenses = (expenses || []).filter(e => 
+    e.siteId === siteId && (e.status === "Pending" || e.status === "pending")
+  );
+
+  // 4. Labour net payable balance
+  let grossLabour = 0;
+  (labourHistory || []).forEach(row => {
+    if (row.totalAmount) {
+      grossLabour += Number(row.totalAmount) || 0;
+    } else if (row.calculatedAmount) {
+      grossLabour += Number(row.calculatedAmount) || 0;
+    } else if (row.workerCount) {
+      const wage = Number(row.dailyWage || row.wage || 500);
+      const units = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1));
+      grossLabour += Number(row.workerCount) * units * wage;
+    }
+  });
+  const advances = (labourPayments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const netPayableLabour = Math.max(0, grossLabour - advances);
+
+  const totalPendingCount = pendingDeliveries.length + pendingTransfers.length + pendingExpenses.length + (netPayableLabour > 0 ? 1 : 0);
+
+  return {
+    pendingDeliveries,
+    pendingTransfers,
+    pendingExpenses,
+    netPayableLabour,
+    grossLabour,
+    advances,
+    totalPendingCount,
+    hasPendingItems: totalPendingCount > 0
+  };
+}
+

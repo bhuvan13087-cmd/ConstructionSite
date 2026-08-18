@@ -2,7 +2,7 @@ import React from "react";
 import { NavLink } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { hasPermission } from "../../services/businessLogic";
-import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History, ChevronLeft, ChevronRight, Menu } from "lucide-react";
+import { LayoutDashboard, Users, MapPin, ClipboardCheck, LogOut, X, Package, Camera, FileText, CheckSquare, DollarSign, TrendingUp, FolderOpen, History, ChevronLeft, ChevronRight, Menu, Archive } from "lucide-react";
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
 import ConfirmationModal from "../common/ConfirmationModal";
@@ -387,7 +387,16 @@ export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse
               onClick={onClose}
             >
               <ClipboardCheck size={18} />
-              <span>Assign Engineers</span>
+              <span>Assigned Engineers</span>
+            </NavLink>
+
+            <NavLink 
+              to="/admin/site-completion" 
+              className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              onClick={onClose}
+            >
+              <Archive size={18} />
+              <span>Completed Sites</span>
             </NavLink>
 
             <NavGroupTitle>Team &amp; Materials</NavGroupTitle>

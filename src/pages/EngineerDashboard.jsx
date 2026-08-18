@@ -3045,6 +3045,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Active site variables
   const currentSite = assignedSites.find(s => s.id === activeSiteId) || assignedSites[0];
+  const isCurrentSiteCompleted = (currentSite?.status || "").toLowerCase() === "completed" || currentSite?.isCompleted === true;
 
   // Helper title mapping
   const pageTitles = {
@@ -3767,9 +3768,42 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const renderHomeView = () => {
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        {/* Completed Site Read-Only Banner */}
+        {isCurrentSiteCompleted && (
+          <div style={{
+            backgroundColor: "#f0fdf4",
+            border: "1.5px solid #bbf7d0",
+            borderRadius: "14px",
+            padding: "14px 16px",
+            display: "flex",
+            alignItems: "center",
+            gap: "10px",
+            boxShadow: "0 1px 3px rgba(0,0,0,0.03)"
+          }}>
+            <Lock size={20} style={{ color: "#166534", flexShrink: 0 }} />
+            <div>
+              <strong style={{ fontSize: "13px", color: "#14532d", display: "block" }}>
+                COMPLETED / READ-ONLY ARCHIVE
+              </strong>
+              <span style={{ fontSize: "11.5px", color: "#15803d" }}>
+                This site has been marked as Completed by Admin. Historical logs remain viewable, but new operational entries are locked.
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* Site Card */}
         <div className="mobile-site-card">
-          <span className="mobile-site-card-badge">Active Assignment</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span className="mobile-site-card-badge">
+              {isCurrentSiteCompleted ? "Completed / Archive" : "Active Assignment"}
+            </span>
+            {isCurrentSiteCompleted && (
+              <span style={{ fontSize: "11px", fontWeight: "800", color: "#166534", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", padding: "2px 8px", borderRadius: "100px", display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                <Lock size={11} /> Read-Only
+              </span>
+            )}
+          </div>
           <h4 className="mobile-site-card-title">{currentSite ? currentSite.siteName : "No Assigned Worksite"}</h4>
           {currentSite && (
             <p className="mobile-site-card-loc">

@@ -6,6 +6,7 @@ import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
+import { useAuth } from "../context/AuthContext";
 import { 
   getSites, 
   getSiteEngineers, 
@@ -22,9 +23,11 @@ import {
   getLabourTeams,
   subscribeMaterialsDetailed,
   subscribeMaterialTransfersForSite,
-  subscribeLabourAttendanceRecords
+  subscribeLabourAttendanceRecords,
+  markSiteCompleted,
+  reopenSite
 } from "../services/firebaseService";
-import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress } from "../services/businessLogic";
+import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress, computeSitePendingItemsSummary } from "../services/businessLogic";
 import { 
   ArrowLeft, 
   Building2, 
@@ -46,14 +49,19 @@ import {
   Info,
   CheckCircle2,
   AlertCircle,
+  AlertTriangle,
   X,
   Eye,
   Truck,
   ArrowRightLeft,
-  Inbox
+  Inbox,
+  Lock,
+  Unlock,
+  Archive
 } from "lucide-react";
 
 export default function SiteDetails({ siteId, onBack }) {
+  const { userProfile } = useAuth();
   const [site, setSite] = useState(null);
   const [engineers, setEngineers] = useState([]);
   const [materials, setMaterials] = useState([]);
@@ -64,12 +72,31 @@ export default function SiteDetails({ siteId, onBack }) {
   const [expenses, setExpenses] = useState([]);
   const [sitePayments, setSitePayments] = useState([]);
   const [teams, setTeams] = useState([]);
+  const [siteTransfers, setSiteTransfers] = useState([]);
   
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("overview");
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   const [showSiteInfoModal, setShowSiteInfoModal] = useState(false);
   const [showPendingActionsModal, setShowPendingActionsModal] = useState(false);
+
+  // Completion Workflow Modal State
+  const [completionModal, setCompletionModal] = useState({
+    isOpen: false,
+    step: 1, // 1: Audit Review, 2: Confirmation 1, 3: Confirmation 2
+    acknowledgedPending: false,
+    completionNotes: "",
+    isSubmitting: false
+  });
+
+  // Reopen Site Modal State
+  const [reopenModal, setReopenModal] = useState({
+    isOpen: false,
+    reopenNotes: "",
+    isSubmitting: false
+  });
+
+  const isSiteCompleted = (site?.status || "").toLowerCase() === "completed" || site?.isCompleted === true;
 
   const siteLabourFinancials = useMemo(() => {
     let grossAmount = 0;
@@ -180,7 +207,6 @@ export default function SiteDetails({ siteId, onBack }) {
   const [showMaterialDetailsModal, setShowMaterialDetailsModal] = useState(false);
 
   // Material Transfers History & SubTab States
-  const [siteTransfers, setSiteTransfers] = useState([]);
   const [materialSubTab, setMaterialSubTab] = useState("logs"); // "logs" | "transfers"
   const [transferFilterMode, setTransferFilterMode] = useState("all"); // "all" | "outgoing" | "incoming"
 
@@ -196,6 +222,64 @@ export default function SiteDetails({ siteId, onBack }) {
   const handleOpenLabourDetails = (record) => {
     setSelectedLabourForDetails(record);
     setShowLabourDetailsModal(true);
+  };
+
+  const pendingAudit = useMemo(() => {
+    return computeSitePendingItemsSummary(
+      siteId,
+      materials,
+      siteTransfers,
+      expenses,
+      labourHistory,
+      sitePayments,
+      progressUpdates
+    );
+  }, [siteId, materials, siteTransfers, expenses, labourHistory, sitePayments, progressUpdates]);
+
+  const handleOpenCompletionModal = () => {
+    setCompletionModal({
+      isOpen: true,
+      step: 1,
+      acknowledgedPending: !pendingAudit.hasPendingItems,
+      completionNotes: "",
+      isSubmitting: false
+    });
+  };
+
+  const handleConfirmCompletion = async () => {
+    setCompletionModal(prev => ({ ...prev, isSubmitting: true }));
+    try {
+      await markSiteCompleted(siteId, {
+        completedBy: userProfile?.uid || "admin",
+        completedByName: userProfile?.fullName || "Admin",
+        notes: completionModal.completionNotes.trim()
+      });
+      showToast(`Site marked as Completed (Read-Only Archive).`, "success");
+      setCompletionModal({ isOpen: false, step: 1, acknowledgedPending: false, completionNotes: "", isSubmitting: false });
+      await loadData();
+    } catch (err) {
+      console.error("Error completing site:", err);
+      showToast(`Failed to complete site: ${err.message}`, "error");
+      setCompletionModal(prev => ({ ...prev, isSubmitting: false }));
+    }
+  };
+
+  const handleConfirmReopen = async () => {
+    setReopenModal(prev => ({ ...prev, isSubmitting: true }));
+    try {
+      await reopenSite(siteId, {
+        reopenedBy: userProfile?.uid || "admin",
+        reopenedByName: userProfile?.fullName || "Admin",
+        notes: reopenModal.reopenNotes.trim()
+      });
+      showToast(`Site reopened successfully and set to In Progress.`, "success");
+      setReopenModal({ isOpen: false, reopenNotes: "", isSubmitting: false });
+      await loadData();
+    } catch (err) {
+      console.error("Error reopening site:", err);
+      showToast(`Failed to reopen site: ${err.message}`, "error");
+      setReopenModal(prev => ({ ...prev, isSubmitting: false }));
+    }
   };
 
   const showToast = (message, type = "info") => {
@@ -700,54 +784,61 @@ export default function SiteDetails({ siteId, onBack }) {
             <Badge status="success">Auto-Resolved</Badge>
           </div>
 
-          {/* Labour Advance Entry Form */}
-          <Card title="Record New Labour Advance" subtitle={`Post an advance payment linked to ${site.siteName}`}>
-            <form onSubmit={handleSaveLabourAdvance} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", alignItems: "flex-end" }}>
-              <div className="form-group" style={{ margin: 0 }}>
-                <label htmlFor="adv-date" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Date</label>
-                <input
-                  id="adv-date"
-                  type="date"
-                  value={advanceDate}
-                  onChange={(e) => setAdvanceDate(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
-                />
+          {/* Labour Advance Entry Form or Read-Only Notice */}
+          <Card title="Labour Advance Payments" subtitle={isSiteCompleted ? `Historical advance records for ${site.siteName} (Read-Only)` : `Post an advance payment linked to ${site.siteName}`}>
+            {isSiteCompleted ? (
+              <div style={{ padding: "14px 16px", backgroundColor: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0", color: "#64748b", fontSize: "13px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}>
+                <Lock size={16} style={{ color: "#166534" }} />
+                <span>This site is marked as Completed. New labour advances cannot be recorded in read-only archive mode.</span>
               </div>
+            ) : (
+              <form onSubmit={handleSaveLabourAdvance} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", alignItems: "flex-end" }}>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="adv-date" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Date</label>
+                  <input
+                    id="adv-date"
+                    type="date"
+                    value={advanceDate}
+                    onChange={(e) => setAdvanceDate(e.target.value)}
+                    required
+                    style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
+                  />
+                </div>
 
-              <div className="form-group" style={{ margin: 0 }}>
-                <label htmlFor="adv-amt" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Amount (₹)</label>
-                <input
-                  id="adv-amt"
-                  type="number"
-                  step="any"
-                  min="1"
-                  placeholder="e.g. 5000"
-                  value={advanceAmount}
-                  onChange={(e) => setAdvanceAmount(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px", fontWeight: "700" }}
-                />
-              </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="adv-amt" style={{ fontSize: "12px", fontWeight: "700" }}>Advance Amount (₹)</label>
+                  <input
+                    id="adv-amt"
+                    type="number"
+                    step="any"
+                    min="1"
+                    placeholder="e.g. 5000"
+                    value={advanceAmount}
+                    onChange={(e) => setAdvanceAmount(e.target.value)}
+                    required
+                    style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px", fontWeight: "700" }}
+                  />
+                </div>
 
-              <div className="form-group" style={{ margin: 0 }}>
-                <label htmlFor="adv-notes" style={{ fontSize: "12px", fontWeight: "700" }}>Notes / Remarks (Optional)</label>
-                <input
-                  id="adv-notes"
-                  type="text"
-                  placeholder="e.g. Weekly advance for Masons"
-                  value={advanceNotes}
-                  onChange={(e) => setAdvanceNotes(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
-                />
-              </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label htmlFor="adv-notes" style={{ fontSize: "12px", fontWeight: "700" }}>Notes / Remarks (Optional)</label>
+                  <input
+                    id="adv-notes"
+                    type="text"
+                    placeholder="e.g. Weekly advance for Masons"
+                    value={advanceNotes}
+                    onChange={(e) => setAdvanceNotes(e.target.value)}
+                    style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid var(--border-color)", marginTop: "4px" }}
+                  />
+                </div>
 
-              <div>
-                <Button type="submit" disabled={savingAdvance} style={{ width: "100%", height: "42px" }}>
-                  {savingAdvance ? "Saving..." : "Save Labour Advance"}
-                </Button>
-              </div>
-            </form>
+                <div>
+                  <Button type="submit" disabled={savingAdvance} style={{ width: "100%", height: "42px" }}>
+                    {savingAdvance ? "Saving..." : "Save Labour Advance"}
+                  </Button>
+                </div>
+              </form>
+            )}
           </Card>
 
           {/* Advances History Table */}
@@ -815,7 +906,9 @@ export default function SiteDetails({ siteId, onBack }) {
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <h2 style={{ margin: 0, fontSize: "20px", fontWeight: "800", color: "#0f172a" }}>{site.siteName}</h2>
-                <Badge status={site.status || "active"} />
+                <Badge status={isSiteCompleted ? "completed" : (site.status || "active")}>
+                  {isSiteCompleted ? "COMPLETED" : (site.status || "ACTIVE")}
+                </Badge>
               </div>
               <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "#64748b", display: "flex", alignItems: "center", gap: "4px" }}>
                 <MapPin size={13} style={{ color: "#ea580c" }} /> {site.location}
@@ -823,7 +916,7 @@ export default function SiteDetails({ siteId, onBack }) {
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "24px", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "18px", flexWrap: "wrap" }}>
             <div style={{ fontSize: "12px" }}>
               <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Client</span>
               <strong style={{ color: "#0f172a", fontWeight: "700" }}>{site.clientName || "Internal Project"}</strong>
@@ -834,11 +927,113 @@ export default function SiteDetails({ siteId, onBack }) {
             </div>
             <div style={{ fontSize: "12px", textAlign: "right" }}>
               <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Progress</span>
-              <strong style={{ color: "#16a34a", fontWeight: "800", fontSize: "16px" }}>{Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%</strong>
+              <strong style={{ color: "#16a34a", fontWeight: "800", fontSize: "16px" }}>{isSiteCompleted ? 100 : Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%</strong>
+            </div>
+
+            {/* Completion / Reopen Action Button */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {!isSiteCompleted ? (
+                <button
+                  type="button"
+                  onClick={handleOpenCompletionModal}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    border: "none",
+                    backgroundColor: "#ea580c",
+                    color: "#ffffff",
+                    fontSize: "12.5px",
+                    fontWeight: "750",
+                    cursor: "pointer",
+                    boxShadow: "0 1px 3px rgba(234,88,12,0.25)",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <CheckCircle2 size={14} />
+                  <span>Mark as Completed</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReopenModal({ isOpen: true, reopenNotes: "", isSubmitting: false })}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#f8fafc",
+                    color: "#334155",
+                    fontSize: "12.5px",
+                    fontWeight: "750",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <Unlock size={14} />
+                  <span>Reopen Site</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
       </div>
+
+      {/* Prominent Read-Only Archive Banner if Site is Completed */}
+      {isSiteCompleted && (
+        <div className="no-print" style={{
+          backgroundColor: "#f0fdf4",
+          border: "1.5px solid #bbf7d0",
+          borderRadius: "12px",
+          padding: "14px 18px",
+          marginBottom: "16px",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "12px",
+          boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            <div style={{
+              width: "36px",
+              height: "36px",
+              borderRadius: "8px",
+              backgroundColor: "#dcfce7",
+              color: "#166534",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0
+            }}>
+              <Lock size={20} />
+            </div>
+            <div>
+              <strong style={{ fontSize: "14px", color: "#14532d", display: "block" }}>
+                COMPLETED / READ-ONLY ARCHIVE
+              </strong>
+              <span style={{ fontSize: "12.5px", color: "#15803d" }}>
+                Completed on {site.completedAt?.seconds ? new Date(site.completedAt.seconds * 1000).toLocaleDateString("en-IN") : "Record Complete"}{site.completedByName ? ` by ${site.completedByName}` : ""}. All historical materials, worker attendance, and reports are preserved in read-only mode.
+              </span>
+            </div>
+          </div>
+          <span style={{
+            fontSize: "11.5px",
+            fontWeight: "800",
+            padding: "4px 10px",
+            borderRadius: "8px",
+            backgroundColor: "#dcfce7",
+            color: "#166534",
+            border: "1px solid #86efac"
+          }}>
+            Historical Ledger
+          </span>
+        </div>
+      )}
 
       {/* Sticky Tabs Switcher */}
       <div className="erp-tabs-list no-print" style={{ position: "sticky", top: "10px", zIndex: 90, backgroundColor: "#ffffff", border: "1px solid #e2e8f0", padding: "8px 12px", borderRadius: "12px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", marginBottom: "20px" }}>
@@ -1417,21 +1612,25 @@ export default function SiteDetails({ siteId, onBack }) {
                                 >
                                   <Eye size={16} />
                                 </button>
-                                <button 
-                                  onClick={() => handleOpenEditMaterial(mat)} 
-                                  className="btn-icon btn-edit-action" 
-                                  title="Edit tracking values"
-                                >
-                                  <Edit3 size={16} />
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteMaterialLog(mat.id)} 
-                                  className="btn-icon" 
-                                  title="Delete record" 
-                                  style={{ color: "var(--danger-500)" }}
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                                {!isSiteCompleted && (
+                                  <>
+                                    <button 
+                                      onClick={() => handleOpenEditMaterial(mat)} 
+                                      className="btn-icon btn-edit-action" 
+                                      title="Edit tracking values"
+                                    >
+                                      <Edit3 size={16} />
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteMaterialLog(mat.id)} 
+                                      className="btn-icon" 
+                                      title="Delete record" 
+                                      style={{ color: "var(--danger-500)" }}
+                                    >
+                                      <Trash2 size={16} />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -2816,6 +3015,306 @@ export default function SiteDetails({ siteId, onBack }) {
           <Button variant="outline" onClick={() => setShowPendingActionsModal(false)}>Close</Button>
         </div>
       </Modal>
+
+      {/* ===================================================================
+          COMPLETION AUDIT REVIEW & DOUBLE CONFIRMATION MODAL
+          =================================================================== */}
+      {completionModal.isOpen && (
+        <Modal
+          isOpen={true}
+          onClose={() => setCompletionModal({ isOpen: false, step: 1, acknowledgedPending: false, completionNotes: "", isSubmitting: false })}
+          title={
+            completionModal.step === 1 
+              ? `Completion Audit Review: ${site.siteName}` 
+              : completionModal.step === 2 
+                ? "Confirmation 1 of 2: Mark Site as Completed" 
+                : "Confirmation 2 of 2: Read-Only Archive Lock"
+          }
+          maxWidth="600px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "18px", padding: "6px 0" }}>
+            
+            {/* STEP 1: PENDING AUDIT REVIEW */}
+            {completionModal.step === 1 && (
+              <>
+                <div style={{
+                  padding: "14px 16px",
+                  borderRadius: "12px",
+                  backgroundColor: pendingAudit.hasPendingItems ? "#fff7ed" : "#f0fdf4",
+                  border: pendingAudit.hasPendingItems ? "1.5px solid #fed7aa" : "1.5px solid #bbf7d0"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    {pendingAudit.hasPendingItems ? (
+                      <AlertTriangle size={18} style={{ color: "#ea580c" }} />
+                    ) : (
+                      <CheckCircle2 size={18} style={{ color: "#166534" }} />
+                    )}
+                    <strong style={{ fontSize: "14px", color: pendingAudit.hasPendingItems ? "#9a3412" : "#166534" }}>
+                      {pendingAudit.hasPendingItems ? "Unresolved Pending Operational Items Found" : "Zero Blockers — Ready for Completion"}
+                    </strong>
+                  </div>
+                  <p style={{ margin: 0, fontSize: "13px", color: pendingAudit.hasPendingItems ? "#c2410c" : "#15803d", lineHeight: "1.4" }}>
+                    {pendingAudit.hasPendingItems 
+                      ? "The canonical database indicates the following items are currently pending for this site. Review them before proceeding." 
+                      : "All materials are fully received, transfers settled, and labour payments reconciled in the canonical database."}
+                  </p>
+                </div>
+
+                {/* Itemized breakdown */}
+                {pendingAudit.hasPendingItems && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    <span style={{ fontSize: "12px", fontWeight: "800", textTransform: "uppercase", color: "#64748b" }}>
+                      Itemized Unresolved Breakdown:
+                    </span>
+
+                    {pendingAudit.pendingDeliveries.length > 0 && (
+                      <div style={{ padding: "10px 14px", borderRadius: "10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                        <strong style={{ fontSize: "13px", color: "#ea580c", display: "block" }}>
+                          📦 Material Deliveries Pending ({pendingAudit.pendingDeliveries.length}):
+                        </strong>
+                        <ul style={{ margin: "4px 0 0 0", paddingLeft: "18px", fontSize: "12.5px", color: "#334155" }}>
+                          {pendingAudit.pendingDeliveries.map(m => (
+                            <li key={m.id}>
+                              {m.materialName}: {m.pending} {m.unit} pending delivery ({m.received}/{m.required} received)
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {pendingAudit.pendingTransfers.length > 0 && (
+                      <div style={{ padding: "10px 14px", borderRadius: "10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                        <strong style={{ fontSize: "13px", color: "#0284c7", display: "block" }}>
+                          🚚 Material Transfers in Transit ({pendingAudit.pendingTransfers.length}):
+                        </strong>
+                        <ul style={{ margin: "4px 0 0 0", paddingLeft: "18px", fontSize: "12.5px", color: "#334155" }}>
+                          {pendingAudit.pendingTransfers.map(t => (
+                            <li key={t.id}>
+                              {t.materialName}: {t.pendingQuantity || t.transferQuantity} {t.unit} ({t.status})
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {pendingAudit.pendingExpenses.length > 0 && (
+                      <div style={{ padding: "10px 14px", borderRadius: "10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                        <strong style={{ fontSize: "13px", color: "#ca8a04", display: "block" }}>
+                          🧾 General Expenses Awaiting Approval ({pendingAudit.pendingExpenses.length}):
+                        </strong>
+                        <ul style={{ margin: "4px 0 0 0", paddingLeft: "18px", fontSize: "12.5px", color: "#334155" }}>
+                          {pendingAudit.pendingExpenses.map(e => (
+                            <li key={e.id}>
+                              {e.category || "Expense"}: ₹{Number(e.amount || 0).toLocaleString("en-IN")} ({e.description || "Pending"})
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {pendingAudit.netPayableLabour > 0 && (
+                      <div style={{ padding: "10px 14px", borderRadius: "10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0" }}>
+                        <strong style={{ fontSize: "13px", color: "#166534", display: "block" }}>
+                          💰 Labour Payout Net Payable:
+                        </strong>
+                        <p style={{ margin: "4px 0 0 0", fontSize: "12.5px", color: "#334155" }}>
+                          Gross wage: ₹{pendingAudit.grossLabour.toLocaleString("en-IN")} | Advances paid: ₹{pendingAudit.advances.toLocaleString("en-IN")} | <strong>Net Balance: ₹{pendingAudit.netPayableLabour.toLocaleString("en-IN")}</strong>
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Acknowledgment Checkbox */}
+                    <label style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: "10px",
+                      padding: "12px 14px",
+                      borderRadius: "10px",
+                      backgroundColor: "#fff7ed",
+                      border: "1px solid #fed7aa",
+                      cursor: "pointer",
+                      marginTop: "6px"
+                    }}>
+                      <input
+                        type="checkbox"
+                        checked={completionModal.acknowledgedPending}
+                        onChange={(e) => setCompletionModal(prev => ({ ...prev, acknowledgedPending: e.target.checked }))}
+                        style={{ marginTop: "3px", width: "16px", height: "16px", accentColor: "#ea580c" }}
+                      />
+                      <span style={{ fontSize: "12.5px", color: "#9a3412", fontWeight: "700", lineHeight: "1.4" }}>
+                        I have reviewed the unresolved items above and consciously confirm proceeding with site completion.
+                      </span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Next Step Action */}
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setCompletionModal({ isOpen: false, step: 1, acknowledgedPending: false, completionNotes: "", isSubmitting: false })}
+                    className="btn btn-outline"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pendingAudit.hasPendingItems && !completionModal.acknowledgedPending}
+                    onClick={() => setCompletionModal(prev => ({ ...prev, step: 2 }))}
+                    style={{
+                      padding: "10px 18px",
+                      borderRadius: "10px",
+                      backgroundColor: (pendingAudit.hasPendingItems && !completionModal.acknowledgedPending) ? "#cbd5e1" : "#ea580c",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "14px",
+                      fontWeight: "750",
+                      cursor: (pendingAudit.hasPendingItems && !completionModal.acknowledgedPending) ? "not-allowed" : "pointer"
+                    }}
+                  >
+                    Proceed to Confirmation →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* STEP 2: CONFIRMATION 1 */}
+            {completionModal.step === 2 && (
+              <>
+                <div style={{
+                  textAlign: "center",
+                  padding: "24px 16px",
+                  backgroundColor: "#f8fafc",
+                  borderRadius: "14px",
+                  border: "1px solid #e2e8f0"
+                }}>
+                  <AlertCircle size={40} style={{ color: "#ea580c", margin: "0 auto 12px auto" }} />
+                  <h3 style={{ margin: "0 0 8px 0", fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>
+                    Are you sure you want to mark this site as completed?
+                  </h3>
+                  <p style={{ margin: 0, fontSize: "13.5px", color: "#64748b", lineHeight: "1.4" }}>
+                    Site: <strong>{site.siteName}</strong> ({site.location})
+                  </p>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setCompletionModal(prev => ({ ...prev, step: 1 }))}
+                    className="btn btn-outline"
+                  >
+                    ← Back to Review
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompletionModal(prev => ({ ...prev, step: 3 }))}
+                    style={{
+                      padding: "10px 20px",
+                      borderRadius: "10px",
+                      backgroundColor: "#ea580c",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "14px",
+                      fontWeight: "750",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Yes, Continue →
+                  </button>
+                </div>
+              </>
+            )}
+
+            {/* STEP 3: CONFIRMATION 2 */}
+            {completionModal.step === 3 && (
+              <>
+                <div style={{
+                  textAlign: "center",
+                  padding: "24px 16px",
+                  backgroundColor: "#f0fdf4",
+                  borderRadius: "14px",
+                  border: "1.5px solid #bbf7d0"
+                }}>
+                  <Lock size={40} style={{ color: "#166534", margin: "0 auto 12px auto" }} />
+                  <h3 style={{ margin: "0 0 8px 0", fontSize: "17px", fontWeight: "800", color: "#14532d" }}>
+                    This will make the site's records read-only. Continue?
+                  </h3>
+                  <p style={{ margin: 0, fontSize: "13px", color: "#15803d", lineHeight: "1.4" }}>
+                    All existing material logs, worker attendance, transfers, and DPRs will remain preserved in the database for historical reporting, but editing and new log entries will be locked.
+                  </p>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: "12px", fontWeight: "750", color: "#475569", display: "block", marginBottom: "4px" }}>
+                    Completion Notes / Handover Remarks (Optional)
+                  </label>
+                  <textarea
+                    placeholder="e.g. Handed over to client on schedule with snag list cleared..."
+                    value={completionModal.completionNotes}
+                    onChange={(e) => setCompletionModal(prev => ({ ...prev, completionNotes: e.target.value }))}
+                    rows={3}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: "10px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      outline: "none",
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "space-between", gap: "10px", marginTop: "10px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setCompletionModal(prev => ({ ...prev, step: 2 }))}
+                    className="btn btn-outline"
+                    disabled={completionModal.isSubmitting}
+                  >
+                    ← Back
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirmCompletion}
+                    disabled={completionModal.isSubmitting}
+                    style={{
+                      padding: "12px 24px",
+                      borderRadius: "10px",
+                      backgroundColor: "#166534",
+                      color: "#ffffff",
+                      border: "none",
+                      fontSize: "14px",
+                      fontWeight: "800",
+                      cursor: completionModal.isSubmitting ? "not-allowed" : "pointer",
+                      boxShadow: "0px 2px 6px rgba(22,101,52,0.25)"
+                    }}
+                  >
+                    {completionModal.isSubmitting ? "Completing Site..." : "Confirm & Mark as Completed"}
+                  </button>
+                </div>
+              </>
+            )}
+
+          </div>
+        </Modal>
+      )}
+
+      {/* ===================================================================
+          REOPEN SITE CONFIRMATION MODAL
+          =================================================================== */}
+      {reopenModal.isOpen && (
+        <ConfirmationModal
+          isOpen={true}
+          title={`Reopen Site: ${site.siteName}?`}
+          message="Reopening will set the site back to 'In Progress' status and allow engineers and administrators to log new attendance, material, and progress records."
+          confirmText={reopenModal.isSubmitting ? "Reopening..." : "Reopen Site"}
+          variant="primary"
+          isLoading={reopenModal.isSubmitting}
+          onConfirm={handleConfirmReopen}
+          onClose={() => setReopenModal({ isOpen: false, reopenNotes: "", isSubmitting: false })}
+        />
+      )}
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
     </Layout>

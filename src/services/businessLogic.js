@@ -1026,3 +1026,71 @@ export function generateMonthlyReportFromDprs(dprs = []) {
   return monthlyReports;
 }
 
+/**
+ * Computes canonical pending items summary across materials, transfers, expenses, labour payouts, and DPRs.
+ */
+export function computeSitePendingItemsSummary(siteId, materials = [], transfers = [], expenses = [], labourHistory = [], labourPayments = [], progressUpdates = []) {
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // 1. Pending material deliveries
+  const siteMaterials = (materials || []).filter(m => m.siteId === siteId && m.type !== "material_transfer");
+  const pendingDeliveries = siteMaterials.filter(m => {
+    const req = Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0);
+    const rec = Number(m.receivedQuantity || m.quantity || 0);
+    return req > rec && m.deliveryStatus !== "Delivered";
+  }).map(m => ({
+    id: m.id,
+    materialName: m.materialName || m.name,
+    required: Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0),
+    received: Number(m.receivedQuantity || m.quantity || 0),
+    pending: Math.max(0, Number(m.requiredQuantity || m.orderedQuantity || m.quantity || 0) - Number(m.receivedQuantity || m.quantity || 0)),
+    unit: m.unit || "unit"
+  }));
+
+  // 2. Pending material transfers
+  const pendingTransfers = (transfers || []).filter(t => 
+    (t.sourceSiteId === siteId || t.destinationSiteId === siteId || t.siteId === siteId) &&
+    (t.status === "Pending" || t.status === "In Transit" || t.status === "Partial Received")
+  );
+
+  // 3. Pending expenses
+  const pendingExpenses = (expenses || []).filter(e => 
+    e.siteId === siteId && (e.status === "Pending" || e.status === "pending")
+  );
+
+  // 4. Labour net payable balance
+  let grossLabour = 0;
+  (labourHistory || []).forEach(row => {
+    if (row.totalAmount) {
+      grossLabour += Number(row.totalAmount) || 0;
+    } else if (row.calculatedAmount) {
+      grossLabour += Number(row.calculatedAmount) || 0;
+    } else if (row.workerCount) {
+      const wage = Number(row.dailyWage || row.wage || 500);
+      const units = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1));
+      grossLabour += Number(row.workerCount) * units * wage;
+    }
+  });
+  const advances = (labourPayments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  const netPayableLabour = Math.max(0, grossLabour - advances);
+
+  // 5. DPR check
+  const siteProgress = (progressUpdates || []).filter(p => p.siteId === siteId);
+  const hasDprToday = siteProgress.some(p => p.date === todayStr);
+
+  const totalPendingCount = pendingDeliveries.length + pendingTransfers.length + pendingExpenses.length + (netPayableLabour > 0 ? 1 : 0);
+
+  return {
+    pendingDeliveries,
+    pendingTransfers,
+    pendingExpenses,
+    netPayableLabour,
+    grossLabour,
+    advances,
+    hasDprToday,
+    totalPendingCount,
+    hasPendingItems: totalPendingCount > 0
+  };
+}
+
+

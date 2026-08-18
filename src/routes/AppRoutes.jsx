@@ -14,6 +14,7 @@ import SuperAdminDashboard from "../pages/SuperAdminDashboard";
 import DocumentsDashboard from "../pages/DocumentsDashboard";
 import ReportsDashboard from "../pages/ReportsDashboard";
 import PayrollSummary from "../pages/PayrollSummary";
+import SiteCompletionDashboard from "../pages/SiteCompletionDashboard";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import ErrorBoundary from "../components/common/ErrorBoundary";
 import Loading from "../components/common/Loading";
@@ -38,6 +39,8 @@ export default function AppRoutes() {
         <Route path="/admin/approvals" element={<ErrorBoundary><ApprovalsDashboard /></ErrorBoundary>} />
         <Route path="/admin/engineers" element={<ErrorBoundary><SiteEngineers /></ErrorBoundary>} />
         <Route path="/admin/sites" element={<ErrorBoundary><Sites /></ErrorBoundary>} />
+        <Route path="/admin/site-completion" element={<ErrorBoundary><SiteCompletionDashboard /></ErrorBoundary>} />
+        <Route path="/admin/completion" element={<ErrorBoundary><SiteCompletionDashboard /></ErrorBoundary>} />
         <Route path="/admin/assignments" element={<ErrorBoundary><SiteAssignments /></ErrorBoundary>} />
         <Route path="/admin/materials" element={<ErrorBoundary><AdminMaterials /></ErrorBoundary>} />
         <Route path="/admin/labour" element={<ErrorBoundary><AdminLabour /></ErrorBoundary>} />
