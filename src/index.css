@@ -6583,6 +6583,428 @@ body:has(.landing-page-container) {
   color: var(--primary-600);
 }
 
+/* ==========================================================================
+   ADMIN ERP DASHBOARD - PRECISION ALIGNMENT & GRID SYSTEM
+   ========================================================================== */
+
+.admin-dashboard-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+/* 1. TOP SUMMARY CARDS GRID (6 Cards) */
+.admin-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-summary-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 78px;
+  height: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+}
+
+.admin-summary-card:hover {
+  border-color: var(--brand-orange-border, #fed7aa);
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.08);
+  transform: translateY(-1px);
+}
+
+.admin-summary-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.admin-summary-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-summary-value {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--primary-950, #0f172a);
+  line-height: 1.2;
+  font-family: var(--font-family-title, inherit);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-summary-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--primary-600, #475569);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* 2. MIDDLE ROW (Status & Expense Overview) */
+.admin-middle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.admin-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  box-sizing: border-box;
+  height: 100%;
+}
+
+.admin-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+  gap: 8px;
+}
+
+.admin-card-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: var(--primary-950, #0f172a);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.admin-card-subtitle {
+  font-size: 11.5px;
+  color: var(--primary-600, #475569);
+  font-weight: 600;
+}
+
+/* Status Cards Grid inside Construction Status */
+.admin-status-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  width: 100%;
+}
+
+.admin-status-box {
+  padding: 12px 8px;
+  border-radius: 8px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  min-height: 64px;
+  box-sizing: border-box;
+}
+
+.admin-status-box.running {
+  background-color: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+.admin-status-box.running .status-num { color: #16a34a; }
+.admin-status-box.running .status-lbl { color: #15803d; }
+
+.admin-status-box.completed {
+  background-color: #fff7ed;
+  border: 1px solid #ffedd5;
+}
+.admin-status-box.completed .status-num { color: #ea580c; }
+.admin-status-box.completed .status-lbl { color: #c2410c; }
+
+.admin-status-box.on-hold {
+  background-color: #fef3c7;
+  border: 1px solid #fde68a;
+}
+.admin-status-box.on-hold .status-num { color: #b45309; }
+.admin-status-box.on-hold .status-lbl { color: #92400e; }
+
+.admin-status-box.delayed {
+  background-color: #fef2f2;
+  border: 1px solid #fecaca;
+}
+.admin-status-box.delayed .status-num { color: #ef4444; }
+.admin-status-box.delayed .status-lbl { color: #991b1b; }
+
+.admin-status-box .status-num {
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.admin-status-box .status-lbl {
+  font-size: 11px;
+  font-weight: 700;
+  margin-top: 3px;
+}
+
+/* Expense Overview List */
+.admin-expense-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.admin-expense-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.admin-expense-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+}
+
+.admin-expense-cat {
+  font-weight: 600;
+  color: var(--primary-800, #1e293b);
+}
+
+.admin-expense-val {
+  font-weight: 700;
+  color: var(--primary-950, #0f172a);
+  font-variant-numeric: tabular-nums;
+}
+
+.admin-progress-track {
+  height: 6px;
+  background-color: #e2e8f0;
+  border-radius: 100px;
+  overflow: hidden;
+  width: 100%;
+}
+
+.admin-progress-fill {
+  height: 100%;
+  border-radius: 100px;
+  transition: width 0.3s ease;
+}
+
+/* 3. BOTTOM ROW (Projects Table + Deadlines) */
+.admin-bottom-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  width: 100%;
+  align-items: stretch;
+  box-sizing: border-box;
+}
+
+.admin-table-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.admin-table-header {
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: #f8fafc;
+  gap: 12px;
+}
+
+.admin-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 13px;
+  text-align: left;
+  table-layout: fixed;
+  min-width: 680px;
+}
+
+.admin-table th {
+  background-color: #f8fafc;
+  color: var(--primary-700, #334155);
+  font-weight: 700;
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.admin-table td {
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--primary-100, #f1f5f9);
+  color: var(--primary-900, #0f172a);
+  vertical-align: middle;
+}
+
+.admin-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.admin-table tbody tr:hover td {
+  background-color: #f8fafc;
+}
+
+/* Explicit Table Column Sizing */
+.col-site { width: 26%; }
+.col-engineer { width: 20%; }
+.col-progress { width: 16%; }
+.col-workers { width: 11%; }
+.col-expense { width: 13%; }
+.col-status { width: 14%; text-align: center; }
+.col-action { width: 64px; text-align: right; }
+
+.admin-table th.col-status,
+.admin-table td.col-status {
+  text-align: center;
+}
+
+.admin-table th.col-action,
+.admin-table td.col-action {
+  text-align: right;
+}
+
+/* Deadlines Card */
+.admin-deadlines-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.admin-deadlines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+
+.admin-deadline-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 12px;
+  background-color: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  gap: 8px;
+}
+
+.admin-deadline-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-deadline-meta {
+  text-align: right;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+/* 4. RESPONSIVE BREAKPOINTS */
+@media (max-width: 1280px) {
+  .admin-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 1024px) {
+  .admin-bottom-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-middle-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 680px) {
+  .admin-summary-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .admin-status-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .admin-summary-card {
+    padding: 10px 12px;
+    gap: 10px;
+    min-height: 70px;
+  }
+  .admin-summary-icon {
+    width: 36px;
+    height: 36px;
+  }
+  .admin-summary-value {
+    font-size: 17px;
+  }
+  .admin-summary-label {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 420px) {
+  .admin-summary-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+
 
 
 

@@ -481,9 +481,9 @@ export default function SiteAssignments() {
       }}>
         {[
           { label: "Total Assignments", value: totalAssignments, sub: "Active records", icon: "🔗", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
-          { label: "Sites Deployed", value: uniqueSitesAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
+          { label: "Sites Assigned", value: uniqueSitesAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
           { label: "Engineers Active", value: activeEngineersList.length, sub: "Ready to deploy", icon: "👷", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
-          { label: "Engineers Deployed", value: uniqueEngineersDeployed, sub: "On active sites", icon: "✅", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
+          { label: "Engineers Assigned", value: uniqueEngineersDeployed, sub: "On active sites", icon: "✅", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
           { label: "Total Sites", value: sites.length, sub: "Registered projects", icon: "📍", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" }
         ].map((kpi, i) => (
           <div key={i} style={{
