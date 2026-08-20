@@ -34,7 +34,8 @@ import {
   calculatePlannedProgress, 
   computeSitePendingItemsSummary,
   formatINR,
-  getSiteBudget
+  getSiteBudget,
+  formatDateDDMonthYYYY
 } from "../services/businessLogic";
 import { 
   ArrowLeft, 
@@ -716,8 +717,7 @@ export default function SiteDetails({ siteId, onBack }) {
     { id: "labour_advance", label: "Labour Advance", icon: DollarSign },
     { id: "attendance", label: "Attendance", icon: ClipboardCheck },
     { id: "progress", label: "Progress", icon: FileText },
-    { id: "photos", label: "Photos", icon: Camera },
-    { id: "reports", label: "Reports", icon: Printer }
+    { id: "photos", label: "Photos", icon: Camera }
   ];
 
   return (
@@ -2507,89 +2507,194 @@ export default function SiteDetails({ siteId, onBack }) {
             TAB: PROGRESS
             =================================================================== */}
         {activeTab === "progress" && (() => {
-          const planned = calculatePlannedProgress(site.startDate, site.expectedEndDate);
-          let actual = 0;
+          const plannedProgressPct = calculatePlannedProgress(site.startDate, site.expectedEndDate);
+          let actualProgressPct = 0;
           if (site.status === "Completed") {
-            actual = 100;
-          } else if (progressUpdates.length > 0) {
+            actualProgressPct = 100;
+          } else if (progressUpdates && progressUpdates.length > 0) {
             const sorted = [...progressUpdates].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-            actual = Number(String(sorted[0].progress).replace(/%/g, '')) || 0;
+            actualProgressPct = Number(String(sorted[0].progress).replace(/%/g, '')) || 0;
+          } else {
+            actualProgressPct = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
           }
           
-          const gap = actual - planned;
-          const statusText = gap >= 0 ? "Ahead of Schedule" : "Delayed";
-          const statusBadge = gap >= 0 ? "success" : "danger";
+          // Calculate dynamic schedule difference
+          const isCompleted = site.status === "Completed";
+          let scheduleStatus = "On Schedule";
+          let scheduleDetail = "";
+          let scheduleBadge = "success";
+          let diffDays = 0;
+
+          if (isCompleted) {
+            scheduleStatus = "Completed";
+            scheduleDetail = "Project completed";
+            scheduleBadge = "success";
+          } else if (site.expectedEndDate) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const endParts = site.expectedEndDate.split("-");
+            const endDate = endParts.length === 3 
+              ? new Date(Number(endParts[0]), Number(endParts[1]) - 1, Number(endParts[2]))
+              : new Date(site.expectedEndDate);
+            endDate.setHours(0, 0, 0, 0);
+            
+            const diffTime = endDate.getTime() - today.getTime();
+            diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+            
+            if (diffDays < 0) {
+              scheduleStatus = "Delayed";
+              scheduleDetail = `${Math.abs(diffDays)} day${Math.abs(diffDays) === 1 ? "" : "s"} overdue`;
+              scheduleBadge = "danger";
+            } else if (diffDays === 0) {
+              scheduleStatus = "Due Today";
+              scheduleDetail = "Target completion date is today";
+              scheduleBadge = "warning";
+            } else {
+              if (plannedProgressPct > 0 && actualProgressPct < plannedProgressPct - 5) {
+                scheduleStatus = "Delayed";
+                scheduleDetail = `${diffDays} day${diffDays === 1 ? "" : "s"} remaining (${plannedProgressPct - actualProgressPct}% behind milestone)`;
+                scheduleBadge = "danger";
+              } else if (actualProgressPct > plannedProgressPct + 5) {
+                scheduleStatus = "Ahead of Schedule";
+                scheduleDetail = `${diffDays} day${diffDays === 1 ? "" : "s"} remaining`;
+                scheduleBadge = "success";
+              } else {
+                scheduleStatus = "On Schedule";
+                scheduleDetail = `${diffDays} day${diffDays === 1 ? "" : "s"} remaining`;
+                scheduleBadge = "success";
+              }
+            }
+          } else {
+            scheduleStatus = "Active";
+            scheduleDetail = "No planned date set";
+            scheduleBadge = "info";
+          }
           
           const weeklyReports = generateWeeklyReportFromDprs(progressUpdates);
+          const sortedProgressUpdates = [...(progressUpdates || [])].sort((a, b) => {
+            const dateA = a.date || (a.createdAt?.seconds ? new Date(a.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+            const dateB = b.date || (b.createdAt?.seconds ? new Date(b.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+            const cmp = dateB.localeCompare(dateA);
+            if (cmp !== 0) return cmp;
+            const tA = a.createdAt?.seconds ? a.createdAt.seconds : 0;
+            const tB = b.createdAt?.seconds ? b.createdAt.seconds : 0;
+            return tB - tA;
+          });
 
           return (
-            <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
               
-              {/* Planned vs Actual summary */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: "20px" }}>
+              {/* 1. PLANNED COMPLETION DATE, 2. MILESTONE PROGRESS COMPARISON, 3. SCHEDULE STATUS */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "16px" }}>
+                
+                {/* 1. Planned Completion Date Card */}
                 <Card>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Planned Completion Date</span>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700", letterSpacing: "0.5px" }}>
+                    Planned Completion Date
+                  </span>
                   <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
-                    <Calendar size={18} style={{ color: "var(--primary-600)" }} />
-                    <span style={{ fontSize: "18px", fontWeight: "800", color: "var(--primary-900)" }} className="font-mono">{site.expectedEndDate || "No date set"}</span>
-                  </div>
-                </Card>
-
-                <Card>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Milestone Progress comparison</span>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "8px" }}>
-                    <div>
-                      <span style={{ fontSize: "22px", fontWeight: "800", color: "var(--primary-900)" }}>{actual}%</span>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", marginLeft: "4px" }}>actual</span>
-                    </div>
-                    <div>
-                      <span style={{ fontSize: "16px", fontWeight: "700", color: "var(--text-muted)" }}>vs {planned}%</span>
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", marginLeft: "2px" }}>target</span>
-                    </div>
-                  </div>
-                </Card>
-
-                <Card>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Schedule standing</span>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: "8px" }}>
-                    <Badge status={statusBadge}>{statusText}</Badge>
-                    <span style={{ fontSize: "13px", fontWeight: "800", color: gap >= 0 ? "var(--success-700)" : "var(--danger-700)" }}>
-                      {gap >= 0 ? `+${gap}%` : `${gap}%`}
+                    <Calendar size={18} style={{ color: "#ea580c", flexShrink: 0 }} />
+                    <span style={{ fontSize: "17px", fontWeight: "800", color: "#0f172a" }}>
+                      {formatDateDDMonthYYYY(site.expectedEndDate || site.endDate || site.completionDate)}
                     </span>
                   </div>
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                    Target project milestone
+                  </span>
+                </Card>
+
+                {/* 2. Milestone Progress Comparison Card */}
+                <Card>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700", letterSpacing: "0.5px" }}>
+                      Milestone Progress Comparison
+                    </span>
+                    <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#0f172a" }}>
+                      Target: 100%
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "4px", marginBottom: "8px" }}>
+                    <div>
+                      <span style={{ fontSize: "22px", fontWeight: "900", color: "#0f172a" }}>{actualProgressPct}%</span>
+                      <span style={{ fontSize: "12px", color: "#64748b", marginLeft: "4px", fontWeight: "600" }}>actual</span>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "14px", fontWeight: "700", color: "#64748b" }}>vs {plannedProgressPct}%</span>
+                      <span style={{ fontSize: "11px", color: "#94a3b8", marginLeft: "3px" }}>planned</span>
+                    </div>
+                  </div>
+                  {/* Compact visual progress bar */}
+                  <div style={{ width: "100%", height: "7px", backgroundColor: "#f1f5f9", borderRadius: "999px", overflow: "hidden" }}>
+                    <div style={{
+                      width: `${actualProgressPct}%`,
+                      height: "100%",
+                      backgroundColor: actualProgressPct >= plannedProgressPct ? "#16a34a" : "#ea580c",
+                      borderRadius: "999px",
+                      transition: "width 0.3s ease"
+                    }} />
+                  </div>
+                </Card>
+
+                {/* 3. Schedule Status Card */}
+                <Card>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700", letterSpacing: "0.5px" }}>
+                    Schedule Status
+                  </span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+                    <Badge status={scheduleBadge}>{scheduleStatus}</Badge>
+                    {scheduleDetail && (
+                      <span style={{
+                        fontSize: "13px",
+                        fontWeight: "750",
+                        color: scheduleBadge === "danger" ? "#dc2626" : (scheduleBadge === "success" ? "#16a34a" : "#475569")
+                      }}>
+                        {scheduleDetail}
+                      </span>
+                    )}
+                  </div>
+                  <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>
+                    {isCompleted ? "Project marked complete" : (diffDays < 0 ? "Timeline is currently delayed" : "Timeline pacing on track")}
+                  </span>
                 </Card>
               </div>
 
-              {/* Weekly Reports checklist card */}
-              <Card title="Auto-Generated Weekly Progress Reports" subtitle="Synthesized from daily site entries without duplication.">
+              {/* 4. Weekly Progress Report */}
+              <Card title="Weekly Progress Report" subtitle="Synthesized from daily site entries without duplication.">
                 {weeklyReports.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", textAlign: "center", padding: "10px" }}>
-                    No weekly reports available.
+                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", textAlign: "center", padding: "16px", margin: 0 }}>
+                    No progress recorded for this period
                   </p>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                     {weeklyReports.map((report, idx) => (
-                      <div key={idx} style={{ border: "1px solid var(--border-color)", borderRadius: "8px", padding: "16px", backgroundColor: "#f8fafc" }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center", borderBottom: "1.5px solid var(--border-color)", paddingBottom: "8px", marginBottom: "10px" }}>
-                          <span style={{ fontSize: "14px", fontWeight: "800", color: "var(--primary-900)" }}>{report.weekLabel}</span>
-                          <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)", backgroundColor: "var(--success-50)", padding: "2px 8px", borderRadius: "6px" }}>
-                            Progress: {report.startProgress}% → {report.endProgress}% (Change: +{report.progressChange}%)
+                      <div key={idx} style={{ border: "1px solid var(--border-color)", borderRadius: "10px", padding: "14px 16px", backgroundColor: "#f8fafc" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", alignItems: "center", borderBottom: "1px solid #e2e8f0", paddingBottom: "8px", marginBottom: "10px", gap: "8px" }}>
+                          <div>
+                            <span style={{ fontSize: "13.5px", fontWeight: "800", color: "#0f172a" }}>{report.weekLabel}</span>
+                            <span style={{ fontSize: "11.5px", color: "#64748b", marginLeft: "8px", fontWeight: "500" }}>
+                              ({formatDateDDMonthYYYY(report.startDate)} – {formatDateDDMonthYYYY(report.endDate)})
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "12px", fontWeight: "750", color: "#16a34a", backgroundColor: "#f0fdf4", border: "1px solid #dcfce7", padding: "2px 8px", borderRadius: "6px" }}>
+                            Progress: {report.startProgress}% → {report.endProgress}% (+{report.progressChange}%)
                           </span>
                         </div>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", fontSize: "12.5px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: "12px", fontSize: "12px" }}>
                           <div>
-                            <strong style={{ display: "block", color: "var(--primary-900)", marginBottom: "4px" }}>Completed Work:</strong>
-                            <p style={{ margin: 0, color: "#334155" }}>{report.completedWork}</p>
+                            <strong style={{ display: "block", color: "#0f172a", marginBottom: "2px", fontWeight: "700" }}>Completed Work:</strong>
+                            <p style={{ margin: 0, color: "#334155", lineHeight: "1.4" }}>{report.completedWork || "Standard daily site execution logged."}</p>
                           </div>
-                          <div>
-                            <strong style={{ display: "block", color: "var(--primary-900)", marginBottom: "4px" }}>Pending Activities:</strong>
-                            <p style={{ margin: 0, color: "#334155" }}>{report.pendingActivities}</p>
-                          </div>
+                          {report.pendingActivities && report.pendingActivities !== "None" && (
+                            <div>
+                              <strong style={{ display: "block", color: "#0f172a", marginBottom: "2px", fontWeight: "700" }}>Pending Activities:</strong>
+                              <p style={{ margin: 0, color: "#334155", lineHeight: "1.4" }}>{report.pendingActivities}</p>
+                            </div>
+                          )}
                         </div>
-                        {report.delayReasons !== "No major issues faced" && (
-                          <div style={{ marginTop: "12px", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "var(--danger-50)", padding: "8px 12px", borderRadius: "6px", fontSize: "12px" }}>
-                            <AlertCircle size={14} style={{ color: "var(--danger-600)", flexShrink: 0 }} />
-                            <span style={{ color: "var(--danger-700)", fontWeight: "600" }}><strong>Delay issues faced:</strong> {report.delayReasons}</span>
+                        {report.delayReasons && report.delayReasons !== "No major issues faced" && (
+                          <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#fef2f2", border: "1px solid #fee2e2", padding: "6px 10px", borderRadius: "6px", fontSize: "11.5px" }}>
+                            <AlertCircle size={13} style={{ color: "#dc2626", flexShrink: 0 }} />
+                            <span style={{ color: "#991b1b", fontWeight: "600" }}><strong>Issues faced:</strong> {report.delayReasons}</span>
                           </div>
                         )}
                       </div>
@@ -2598,79 +2703,86 @@ export default function SiteDetails({ siteId, onBack }) {
                 )}
               </Card>
 
-              {/* Daily timeline logs detailed view */}
-              <Card title="Daily Progress Timeline Logs" subtitle="Thorough inspection of entries registered by site engineer.">
-                {progressUpdates.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "14px", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
+              {/* 5. Daily Progress Timeline */}
+              <Card title="Daily Progress Timeline" subtitle="Chronological site execution reports logged by field engineers.">
+                {sortedProgressUpdates.length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", textAlign: "center", padding: "20px", margin: 0 }}>
                     No daily progress logs submitted yet for this site.
                   </p>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "24px", paddingLeft: "16px", borderLeft: "2.5px solid var(--primary-100)", marginLeft: "12px" }}>
-                    {progressUpdates.map((update, index) => {
-                      const eng = engineers.find(e => e.id === update.engineerId) || { fullName: `Engineer (ID: ${update.engineerId})` };
-                      const formattedDate = update.createdAt?.seconds 
-                        ? new Date(update.createdAt.seconds * 1000).toLocaleString()
-                        : (update.createdAt ? new Date(update.createdAt).toLocaleString() : "--");
+                  <div style={{ display: "flex", flexDirection: "column", gap: "16px", paddingLeft: "16px", borderLeft: "2px solid #e2e8f0", marginLeft: "8px" }}>
+                    {sortedProgressUpdates.map((update, index) => {
+                      const eng = engineers.find(e => e.id === update.engineerId) || { fullName: update.engineerName || `Engineer (${update.engineerId?.slice(0, 6) || "ID"})` };
+                      const displayDate = formatDateDDMonthYYYY(update.date || update.createdAt);
 
                       return (
                         <div key={update.id || index} style={{ position: "relative" }}>
+                          {/* Timeline Dot */}
                           <div style={{
                             position: "absolute",
-                            left: "-25px",
-                            top: "2px",
-                            width: "15px",
-                            height: "15px",
+                            left: "-23px",
+                            top: "4px",
+                            width: "12px",
+                            height: "12px",
                             borderRadius: "50%",
-                            backgroundColor: "var(--primary-600)",
-                            border: "3px solid #ffffff",
-                            boxShadow: "0 0 0 2px var(--primary-100)"
+                            backgroundColor: "#ea580c",
+                            border: "2.5px solid #ffffff",
+                            boxShadow: "0 0 0 2px #ffedd5"
                           }} />
                           
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "12px", color: "var(--text-muted)", fontWeight: "700" }}>{update.date || formattedDate}</span>
-                            <span style={{ fontSize: "12px", fontWeight: "800", color: "var(--primary-750)", backgroundColor: "var(--primary-100)", padding: "2px 8px", borderRadius: "6px" }}>
-                              {update.progress || "0%"} Completed
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "6px" }}>
+                            <span style={{ fontSize: "12.5px", color: "#0f172a", fontWeight: "800" }}>{displayDate}</span>
+                            <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#c2410c", backgroundColor: "#fff7ed", border: "1px solid #ffedd5", padding: "2px 8px", borderRadius: "6px" }}>
+                              {update.progress !== undefined ? `${update.progress}% Completed` : "Progress Update"}
                             </span>
                           </div>
                           
-                          <h4 style={{ margin: "6px 0 4px 0", fontSize: "14px", fontWeight: "700", color: "var(--primary-950)" }}>
+                          <div style={{ fontSize: "12px", color: "#64748b", marginTop: "2px", fontWeight: "600" }}>
                             Reported by {eng.fullName}
-                          </h4>
+                          </div>
 
-                          {/* Expanded detailed notes */}
-                          <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px", padding: "14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}>
-                            <div>
-                              <strong style={{ color: "var(--primary-900)" }}>Work Completed:</strong>
-                              <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.completedToday || update.description}</p>
-                            </div>
+                          {/* Detailed Notes */}
+                          <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px", padding: "12px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px" }}>
+                            {(update.completedToday || update.workDone || update.description) && (
+                              <div>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Work Completed:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.completedToday || update.workDone || update.description}</p>
+                              </div>
+                            )}
                             {update.currentlyRunning && (
                               <div>
-                                <strong style={{ color: "var(--primary-900)" }}>Work Currently Running:</strong>
-                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.currentlyRunning}</p>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Work Currently Running:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.currentlyRunning}</p>
                               </div>
                             )}
                             {update.materialsStatus && (
                               <div>
-                                <strong style={{ color: "var(--primary-900)" }}>Materials/Work Status:</strong>
-                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.materialsStatus}</p>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Materials/Work Status:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.materialsStatus}</p>
                               </div>
                             )}
                             {update.problemsFaced && (
                               <div>
-                                <strong style={{ color: "var(--danger-700)" }}>Problems Faced:</strong>
-                                <p style={{ margin: "2px 0 0 0", color: "var(--danger-800)" }}>{update.problemsFaced}</p>
+                                <strong style={{ color: "#dc2626", fontWeight: "700" }}>Problems Faced:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#991b1b", lineHeight: "1.4" }}>{update.problemsFaced}</p>
                               </div>
                             )}
                             {update.pendingWork && (
                               <div>
-                                <strong style={{ color: "var(--primary-900)" }}>Pending Work:</strong>
-                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.pendingWork}</p>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Pending Work:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.pendingWork}</p>
                               </div>
                             )}
                             {update.nextActivity && (
                               <div>
-                                <strong style={{ color: "var(--primary-900)" }}>Next Planned Activity:</strong>
-                                <p style={{ margin: "2px 0 0 0", color: "#334155" }}>{update.nextActivity}</p>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Next Planned Activity:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.nextActivity}</p>
+                              </div>
+                            )}
+                            {update.remarks && (
+                              <div>
+                                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Remarks:</strong>
+                                <p style={{ margin: "2px 0 0 0", color: "#334155", lineHeight: "1.4" }}>{update.remarks}</p>
                               </div>
                             )}
                           </div>
@@ -2749,173 +2861,7 @@ export default function SiteDetails({ siteId, onBack }) {
           </div>
         )}
 
-        {/* ===================================================================
-            TAB: REPORTS (PRINTABLE AUDIT LEDGER)
-            =================================================================== */}
-        {activeTab === "reports" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-            
-            {/* Header Control for Report (Hidden in print) */}
-            <div style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              backgroundColor: "var(--primary-50)",
-              border: "1px solid var(--primary-200)",
-              padding: "16px 20px",
-              borderRadius: "8px"
-            }} className="no-print">
-              <div>
-                <strong style={{ fontSize: "14px", color: "var(--primary-900)", display: "block" }}>Print Audit Summary</strong>
-                <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>Format this page as a structured paper/PDF layout for reporting purposes.</span>
-              </div>
-              <Button onClick={handlePrint} icon={Printer} style={{ backgroundColor: "var(--primary-800)", color: "#ffffff" }}>
-                Print Report
-              </Button>
-            </div>
 
-            {/* Printable Report Document Card */}
-            <div style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "8px",
-              border: "1px solid var(--border-color)",
-              padding: "32px",
-              boxShadow: "var(--shadow-sm)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "24px"
-            }} className="printable-report">
-              
-              {/* Document Header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "3px solid #1e293b", paddingBottom: "16px" }}>
-                <div>
-                  <h1 style={{ margin: 0, fontSize: "22px", fontWeight: "900", color: "#0f172a" }}>SITE OPERATION AUDIT REPORT</h1>
-                  <span style={{ fontSize: "13px", fontWeight: "600", color: "#475569" }}>Generated on {new Date().toLocaleDateString()}</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#1e293b" }}>{site.siteName}</h2>
-                  <span style={{ fontSize: "12px", color: "#475569" }}>Status: <strong>{site.status || "Planning"}</strong></span>
-                </div>
-              </div>
-
-              {/* Site Specs Grid */}
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px", backgroundColor: "#f8fafc", padding: "16px", borderRadius: "6px" }}>
-                <div>
-                  <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Client Name</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }}>{site.clientName || "--"}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Location Address</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }}>{site.location}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Start Date</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{formatDateDDMMYYYY(site.startDate)}</strong>
-                </div>
-                <div>
-                  <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Expected End Date</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{formatDateDDMMYYYY(site.expectedEndDate)}</strong>
-                </div>
-              </div>
-
-              {/* Section 1: Materials Aggregated Consumption */}
-              <div>
-                <h3 style={{ fontSize: "14px", fontWeight: "800", borderBottom: "1.5px solid #cbd5e1", paddingBottom: "6px", marginBottom: "12px", color: "#0f172a" }}>
-                  1. MATERIAL LEDGER SUMMARY (CONSOLIDATED INPUTS)
-                </h3>
-                {aggregatedMaterials.length === 0 ? (
-                  <p style={{ fontStyle: "italic", fontSize: "12px", color: "#64748b" }}>No materials registered for this site.</p>
-                ) : (
-                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                    <thead>
-                      <tr style={{ borderBottom: "1px solid #94a3b8", textAlign: "left" }}>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569" }}>Material Name</th>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Required</th>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Received</th>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Pending Delivery</th>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Paid</th>
-                        <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Pending Payment</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {aggregatedMaterials.map((item, index) => (
-                        <tr key={index} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                          <td style={{ padding: "8px 4px", fontWeight: "700" }}>{item.name}</td>
-                          <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "600" }}>{item.required} {item.unit}s</td>
-                          <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "600" }}>{item.received} {item.unit}s</td>
-                          <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "600" }}>{item.pendingDel} {item.unit}s</td>
-                          <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "600" }}>{item.paid} {item.unit}s</td>
-                          <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "600" }}>{item.pendingPay} {item.unit}s</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-
-              {/* Section 2: Labour Days / Totals */}
-              <div>
-                <h3 style={{ fontSize: "14px", fontWeight: "800", borderBottom: "1.5px solid #cbd5e1", paddingBottom: "6px", marginBottom: "12px", color: "#0f172a" }}>
-                  2. LABOR AUDIT REPORT (TOTAL WORKER-DAYS RECORDED)
-                </h3>
-                {labourHistory.length === 0 ? (
-                  <p style={{ fontStyle: "italic", fontSize: "12px", color: "#64748b" }}>No labour headcount records found.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    <div style={{ fontSize: "13px" }}>
-                      Total Active Record Days: <strong>{labourSummaryMap.totalDays} Days</strong>
-                    </div>
-                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid #94a3b8", textAlign: "left" }}>
-                          <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569" }}>Trade Category</th>
-                          <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Total Worker-Days logged</th>
-                          <th style={{ padding: "8px 4px", fontWeight: "800", color: "#475569", textAlign: "right" }}>Average Daily Workers</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {[
-                          { key: "Masons", label: "Masons" },
-                          { key: "Helpers", label: "Helpers" },
-                          { key: "Painters", label: "Painters" },
-                          { key: "Plumbers", label: "Plumbers" },
-                          { key: "Electricians", label: "Electricians" },
-                          { key: "Others", label: "Others" }
-                        ].map((cat, idx) => {
-                          const totalDays = labourSummaryMap.totalDays || 1;
-                          const totalValue = labourSummaryMap[cat.key];
-                          const avgValue = (totalValue / totalDays).toFixed(1);
-                          return (
-                            <tr key={idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                              <td style={{ padding: "8px 4px", fontWeight: "700" }}>{cat.label}</td>
-                              <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "700" }}>{totalValue}</td>
-                              <td style={{ padding: "8px 4px", textAlign: "right", fontWeight: "700" }}>{avgValue}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-
-              {/* Signature block */}
-              <div style={{ marginTop: "40px", borderTop: "1.5px dashed #cbd5e1", paddingTop: "24px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" }}>
-                <div>
-                  <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>Audited By (Admin Signature)</span>
-                  <div style={{ height: "40px" }} />
-                  <span style={{ fontSize: "12px", borderTop: "1px solid #64748b", display: "inline-block", minWidth: "180px", paddingTop: "4px" }}>Visvas Administration</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <span style={{ fontSize: "11px", color: "#64748b", display: "block" }}>Site Supervisor Sign-Off</span>
-                  <div style={{ height: "40px" }} />
-                  <span style={{ fontSize: "12px", borderTop: "1px solid #64748b", display: "inline-block", minWidth: "180px", paddingTop: "4px" }}>Project Engineer</span>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        )}
 
       </div>
 

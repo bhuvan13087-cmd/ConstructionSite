@@ -139,6 +139,50 @@ export const formatDDMMYYYY = formatDateDMY;
 export const formatDateDDMMYYYY = formatDateDMY;
 
 /**
+ * Canonical Date Formatter (DD Month YYYY).
+ * Formats YYYY-MM-DD string, ISO string, Date object, or Firestore Timestamp into "DD Month YYYY" (e.g. "18 August 2026").
+ *
+ * @param {string|Date|object} dateVal - Input date value.
+ * @param {string} fallback - String returned if date is missing/invalid. Default: "No date set".
+ * @returns {string} - Formatted string (e.g. "18 August 2026").
+ */
+export function formatDateDDMonthYYYY(dateVal, fallback = "No date set") {
+  if (!dateVal) return fallback;
+  try {
+    let d;
+    if (typeof dateVal === "string") {
+      const trimmed = dateVal.trim();
+      if (!trimmed) return fallback;
+      const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(trimmed);
+      if (isoMatch) {
+        d = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+      } else {
+        d = new Date(trimmed);
+      }
+    } else if (dateVal?.seconds) {
+      d = new Date(dateVal.seconds * 1000);
+    } else if (dateVal instanceof Date) {
+      d = dateVal;
+    } else {
+      d = new Date(dateVal);
+    }
+
+    if (isNaN(d.getTime())) return typeof dateVal === "string" ? dateVal : fallback;
+
+    const months = [
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December"
+    ];
+    const day = String(d.getDate()).padStart(2, "0");
+    const monthName = months[d.getMonth()];
+    const year = d.getFullYear();
+    return `${day} ${monthName} ${year}`;
+  } catch {
+    return typeof dateVal === "string" ? dateVal : fallback;
+  }
+}
+
+/**
  * Calculates total configured workers / categories from canonical Labour Teams.
  * Iterates through every Labour Team and dynamically counts configured worker / category entries.
  *
@@ -172,6 +216,25 @@ export function calculateTotalWorkers(teams = []) {
     }
   });
   return count;
+}
+
+/**
+ * Calculates the number of unique active Site Engineers who currently have at least one valid active site assignment.
+ * Uses the canonical Site Engineer + Site Assignment data structure.
+ *
+ * @param {Array} engineers - Array of Site Engineer records
+ * @returns {number} - Count of unique active engineers with >= 1 active assigned site
+ */
+export function calculateCoveredEngineers(engineers = []) {
+  if (!engineers || !Array.isArray(engineers)) return 0;
+  return engineers.filter(eng => {
+    if (!eng) return false;
+    // Check if engineer is active (status is "active" or not explicitly "inactive")
+    const isActive = eng.status === "active";
+    // Check if engineer has at least one active assigned site
+    const hasActiveAssignments = Array.isArray(eng.assignedSites) && eng.assignedSites.length > 0;
+    return isActive && hasActiveAssignments;
+  }).length;
 }
 
 /**

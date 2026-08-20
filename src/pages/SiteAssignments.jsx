@@ -459,8 +459,8 @@ export default function SiteAssignments() {
 
   // KPI metrics
   const totalAssignments = assignments.length;
-  const uniqueSitesAssigned = [...new Set(assignments.map(a => a.siteId))].length;
-  const uniqueEngineersDeployed = [...new Set(assignments.map(a => a.engineerId))].length;
+  const uniqueEngineersDeployed = [...new Set(assignments.filter(a => a.status === "active" && a.engineerId).map(a => a.engineerId))].length;
+  const siteAssigned = uniqueEngineersDeployed;
 
   return (
     <Layout title="Site Assignments" description="Configure construction site allocations and manage field engineer deployments.">
@@ -481,7 +481,7 @@ export default function SiteAssignments() {
       }}>
         {[
           { label: "Total Assignments", value: totalAssignments, sub: "Active records", icon: "🔗", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
-          { label: "Sites Assigned", value: uniqueSitesAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
+          { label: "Site Assigned", value: siteAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
           { label: "Engineers Active", value: activeEngineersList.length, sub: "Ready to deploy", icon: "👷", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
           { label: "Engineers Assigned", value: uniqueEngineersDeployed, sub: "On active sites", icon: "✅", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
           { label: "Total Sites", value: sites.length, sub: "Registered projects", icon: "📍", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" }

@@ -11,6 +11,7 @@ import {
   updateEngineerPasswordInDb,
   deleteSiteEngineer
 } from "../services/firebaseService";
+import { calculateCoveredEngineers } from "../services/businessLogic";
 import { 
   registerEngineerAuth, 
   sendEngineerPasswordReset, 
@@ -320,7 +321,7 @@ export default function SiteEngineers() {
   const totalEngineers = engineers.length;
   const activeCount = engineers.filter(e => e.status === "active").length;
   const inactiveCount = totalEngineers - activeCount;
-  const sitesCovered = [...new Set(engineers.flatMap(e => e.assignedSites || []))].length;
+  const siteCovered = calculateCoveredEngineers(engineers);
 
   return (
     <Layout title="Site Engineers" description="Manage Site Engineer security credentials and construction site assignments.">
@@ -412,9 +413,9 @@ export default function SiteEngineers() {
             valColor: "var(--text-muted)"
           },
           {
-            label: "Sites Covered",
-            value: sitesCovered,
-            sub: "Assigned locations",
+            label: "Site Covered",
+            value: siteCovered,
+            sub: "Active engineers on site",
             icon: Building2,
             iconBg: "#fff7ed",
             iconColor: "#c2410c",
