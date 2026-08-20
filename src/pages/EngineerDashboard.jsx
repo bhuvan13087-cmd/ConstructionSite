@@ -45,6 +45,7 @@ import {
   getMaterialMaster,
   logMaterialUsage,
   getGeneralExpenses,
+  subscribeGeneralExpenses,
   saveGeneralExpense,
   getLabourPayments,
   getLabourDailyCountsSummary,
@@ -567,11 +568,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [generalExpenses, setGeneralExpenses] = useState([]);
   const [labourPayments, setLabourPayments] = useState([]);
   const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-  const [expenseCategory, setExpenseCategory] = useState("Site Expense");
+  const [expenseCustomer, setExpenseCustomer] = useState("");
   const [expenseAmount, setExpenseAmount] = useState("");
   const [expenseDate, setExpenseDate] = useState(new Date().toISOString().split("T")[0]);
   const [expenseDesc, setExpenseDesc] = useState("");
   const [expenseNotes, setExpenseNotes] = useState("");
+  const [expenseErrors, setExpenseErrors] = useState({});
+  const [expenseSubmitting, setExpenseSubmitting] = useState(false);
 
   // Helper to trigger toast messages
   const showToast = (message, type = "info") => {
@@ -872,6 +875,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     return () => {
       unsubscribeLabour();
       unsubscribeMatTeams();
+    };
+  }, []);
+
+  // Real-time synchronization for general expenses
+  useEffect(() => {
+    const unsubExpenses = subscribeGeneralExpenses((expensesList) => {
+      if (expensesList && Array.isArray(expensesList)) {
+        setGeneralExpenses(expensesList);
+      }
+    });
+    return () => {
+      if (typeof unsubExpenses === "function") unsubExpenses();
     };
   }, []);
 
@@ -7222,30 +7237,58 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     const ledger = getSiteExpenseLedger(currentSiteObj, materials, labourHistory, generalExpenses, labourPayments, labourMaster?.categories || {});
-    const myExpenses = generalExpenses.filter(g => g.siteId === activeSiteId);
+    const myExpenses = (generalExpenses || [])
+      .filter(g => g.siteId === activeSiteId)
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
     const handleSaveExpense = async (e) => {
-      e.preventDefault();
-      if (!expenseAmount || !expenseDesc.trim()) return;
+      if (e) e.preventDefault();
+      
+      const errors = {};
+      if (!expenseCustomer || !expenseCustomer.trim()) {
+        errors.customer = "Customer is required.";
+      }
+      const amt = Number(expenseAmount);
+      if (!expenseAmount || isNaN(amt) || amt <= 0) {
+        errors.amount = "Please enter a valid positive amount.";
+      }
+      if (!expenseDate || !expenseDate.trim()) {
+        errors.date = "Please select an expense date.";
+      }
+
+      setExpenseErrors(errors);
+      if (Object.keys(errors).length > 0) {
+        return;
+      }
+
+      setExpenseSubmitting(true);
       try {
         await saveGeneralExpense({
           siteId: activeSiteId,
-          category: expenseCategory,
-          amount: Number(expenseAmount),
+          category: "Site Expense",
+          customer: expenseCustomer.trim(),
+          amount: amt,
           date: expenseDate,
           description: expenseDesc.trim(),
           notes: expenseNotes.trim(),
-          createdBy: userProfile?.fullName || "Engineer",
-          status: "Pending" // Require Admin approval
+          createdBy: userProfile?.fullName || "Site Engineer",
+          engineerId: userProfile?.uid || userProfile?.id || "",
+          status: "Pending"
         });
-        showToast("Expense requisition submitted to Admin!", "success");
+
+        showToast("Expense submitted successfully!", "success");
         setShowAddExpenseModal(false);
+        setExpenseCustomer("");
         setExpenseAmount("");
+        setExpenseDate(new Date().toISOString().split("T")[0]);
         setExpenseDesc("");
         setExpenseNotes("");
+        setExpenseErrors({});
         await loadDashboardData();
       } catch (err) {
         showToast(`Submission failed: ${err.message}`, "error");
+      } finally {
+        setExpenseSubmitting(false);
       }
     };
 
@@ -7274,45 +7317,101 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           </div>
         </div>
 
-        {/* Expenses List */}
+        {/* Expenses List Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Requisitions Summary</h4>
+          <h4 style={{ margin: 0, fontSize: "14.5px", fontWeight: "800", color: "var(--primary-950)" }}>Requisitions Summary</h4>
           <button
             type="button"
-            onClick={() => setShowAddExpenseModal(true)}
+            onClick={() => {
+              setExpenseCustomer("");
+              setExpenseAmount("");
+              setExpenseDate(new Date().toISOString().split("T")[0]);
+              setExpenseDesc("");
+              setExpenseNotes("");
+              setExpenseErrors({});
+              setShowAddExpenseModal(true);
+            }}
             style={{
-              padding: "6px 12px",
-              backgroundColor: "var(--primary-100)",
-              color: "var(--primary-800)",
+              padding: "7px 14px",
+              backgroundColor: "#ea580c",
+              color: "#ffffff",
               border: "none",
-              borderRadius: "6px",
-              fontSize: "12px",
-              fontWeight: "800",
-              cursor: "pointer"
+              borderRadius: "8px",
+              fontSize: "12.5px",
+              fontWeight: "750",
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "6px"
             }}
           >
-            + Request
+            <Plus size={15} /> Expense
           </button>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           {myExpenses.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "24px 16px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-              <p style={{ margin: 0, fontSize: "12px", color: "var(--text-muted)" }}>No expense requests logged yet.</p>
+            <div style={{ textAlign: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)", display: "flex", flexDirection: "column", alignItems: "center", gap: "10px" }}>
+              <div style={{ width: "42px", height: "42px", borderRadius: "50%", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <DollarSign size={20} />
+              </div>
+              <p style={{ margin: 0, fontSize: "13px", fontWeight: "600", color: "var(--text-muted)" }}>No Expense request logged</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setExpenseCustomer("");
+                  setExpenseAmount("");
+                  setExpenseDate(new Date().toISOString().split("T")[0]);
+                  setExpenseDesc("");
+                  setExpenseNotes("");
+                  setExpenseErrors({});
+                  setShowAddExpenseModal(true);
+                }}
+                style={{
+                  marginTop: "4px",
+                  padding: "7px 16px",
+                  backgroundColor: "#ea580c",
+                  color: "#ffffff",
+                  border: "none",
+                  borderRadius: "8px",
+                  fontSize: "12.5px",
+                  fontWeight: "750",
+                  cursor: "pointer",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "6px"
+                }}
+              >
+                <Plus size={15} /> Expense
+              </button>
             </div>
           ) : (
             myExpenses.map(exp => (
-              <div key={exp.id} className="mobile-material-card" style={{ padding: "12px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
+              <div key={exp.id} className="mobile-material-card" style={{ padding: "14px", display: "flex", flexDirection: "column", gap: "8px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid var(--border-color)", boxShadow: "0 1px 2px rgba(0,0,0,0.03)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-600)" }}>{exp.category}</span>
+                  <span style={{ fontSize: "12.5px", color: "#0f172a", fontWeight: "800" }}>
+                    {exp.customer || "Expense Entry"}
+                  </span>
                   <Badge status={exp.status === "Approved" ? "success" : exp.status === "Rejected" ? "danger" : "pending"}>
                     {exp.status ? exp.status.toUpperCase() : "PENDING"}
                   </Badge>
                 </div>
-                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800" }}>{exp.description}</h4>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--text-muted)", marginTop: "4px" }}>
-                  <span>Requested Amount: <strong>{formatINR(exp.amount)}</strong></span>
-                  <span className="font-mono">{exp.date}</span>
+
+                {exp.description && (
+                  <div style={{ fontSize: "13px", fontWeight: "600", color: "#334155" }}>
+                    {exp.description}
+                  </div>
+                )}
+
+                {exp.notes && (
+                  <div style={{ fontSize: "11.5px", color: "#64748b", fontStyle: "italic" }}>
+                    Note: {exp.notes}
+                  </div>
+                )}
+
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", color: "#64748b", borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "2px" }}>
+                  <span>Amount: <strong style={{ color: "#0f172a", fontSize: "13px" }}>{formatINR(exp.amount)}</strong></span>
+                  <span className="font-mono" style={{ fontWeight: "600", color: "#475569" }}>{exp.date}</span>
                 </div>
               </div>
             ))
@@ -7323,73 +7422,172 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         {showAddExpenseModal && (
           <Modal
             isOpen={showAddExpenseModal}
-            onClose={() => setShowAddExpenseModal(false)}
-            title="Request Site Expense Requisition"
-            maxWidth="380px"
+            onClose={() => {
+              setShowAddExpenseModal(false);
+              setExpenseErrors({});
+            }}
+            title="Request Site Expense"
+            maxWidth="400px"
           >
-            <form onSubmit={handleSaveExpense} style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+            <form onSubmit={handleSaveExpense} style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              
+              {/* 1. Customer (Required) */}
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Expense Category</span>
-                <select
-                  value={expenseCategory}
-                  onChange={(e) => setExpenseCategory(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                >
-                  <option value="Site Expense">Site Expense (fuel, water, transport)</option>
-                  <option value="Other Expense">Other Expense (fees, emergency bills)</option>
-                </select>
-              </div>
-
-              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Description / Particulars</span>
+                <label className="mobile-form-label" style={{ fontWeight: "700", fontSize: "12.5px", color: "#0f172a" }}>
+                  Customer <span style={{ color: "#dc2626" }}>*</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. diesel for backup generator"
-                  value={expenseDesc}
-                  onChange={(e) => setExpenseDesc(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                  placeholder="Enter customer / vendor name"
+                  value={expenseCustomer}
+                  onChange={(e) => {
+                    setExpenseCustomer(e.target.value);
+                    if (expenseErrors.customer) setExpenseErrors(prev => ({ ...prev, customer: "" }));
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: `1px solid ${expenseErrors.customer ? "#dc2626" : "#cbd5e1"}`,
+                    fontSize: "13px",
+                    outline: "none"
+                  }}
                 />
+                {expenseErrors.customer && (
+                  <span style={{ color: "#dc2626", fontSize: "11px", fontWeight: "600" }}>{expenseErrors.customer}</span>
+                )}
               </div>
 
+              {/* 2. Amount (Required) */}
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Amount Required (₹)</span>
+                <label className="mobile-form-label" style={{ fontWeight: "700", fontSize: "12.5px", color: "#0f172a" }}>
+                  Amount (₹) <span style={{ color: "#dc2626" }}>*</span>
+                </label>
                 <input
                   type="number"
                   placeholder="e.g. 1500"
+                  min="1"
+                  step="any"
                   value={expenseAmount}
-                  onChange={(e) => setExpenseAmount(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                  onChange={(e) => {
+                    setExpenseAmount(e.target.value);
+                    if (expenseErrors.amount) setExpenseErrors(prev => ({ ...prev, amount: "" }));
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: `1px solid ${expenseErrors.amount ? "#dc2626" : "#cbd5e1"}`,
+                    fontSize: "13px",
+                    outline: "none"
+                  }}
                 />
+                {expenseErrors.amount && (
+                  <span style={{ color: "#dc2626", fontSize: "11px", fontWeight: "600" }}>{expenseErrors.amount}</span>
+                )}
               </div>
 
+              {/* 3. Date (Required) */}
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Date Needed</span>
+                <label className="mobile-form-label" style={{ fontWeight: "700", fontSize: "12.5px", color: "#0f172a" }}>
+                  Date <span style={{ color: "#dc2626" }}>*</span>
+                </label>
                 <input
                   type="date"
                   value={expenseDate}
-                  onChange={(e) => setExpenseDate(e.target.value)}
-                  required
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                  onChange={(e) => {
+                    setExpenseDate(e.target.value);
+                    if (expenseErrors.date) setExpenseErrors(prev => ({ ...prev, date: "" }));
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: `1px solid ${expenseErrors.date ? "#dc2626" : "#cbd5e1"}`,
+                    fontSize: "13px",
+                    outline: "none"
+                  }}
                 />
+                {expenseErrors.date && (
+                  <span style={{ color: "#dc2626", fontSize: "11px", fontWeight: "600" }}>{expenseErrors.date}</span>
+                )}
               </div>
 
+              {/* 4. Description (Optional) */}
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span className="mobile-form-label">Additional notes</span>
+                <label className="mobile-form-label" style={{ fontWeight: "700", fontSize: "12.5px", color: "#475569" }}>
+                  Description <span style={{ color: "#94a3b8", fontWeight: "400", fontSize: "11.5px" }}>(Optional)</span>
+                </label>
                 <input
                   type="text"
-                  placeholder="e.g. urgent generator backup"
-                  value={expenseNotes}
-                  onChange={(e) => setExpenseNotes(e.target.value)}
-                  style={{ width: "100%", padding: "10px", borderRadius: "8px", border: "1px solid #cbd5e1" }}
+                  placeholder="Enter details or purpose"
+                  value={expenseDesc}
+                  onChange={(e) => setExpenseDesc(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    outline: "none"
+                  }}
                 />
               </div>
 
-              <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
-                <Button type="button" variant="outline" style={{ flex: 1 }} onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
-                <Button type="submit" variant="primary" style={{ flex: 1 }}>Submit Request</Button>
+              {/* 5. Additional Notes (Optional) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                <label className="mobile-form-label" style={{ fontWeight: "700", fontSize: "12.5px", color: "#475569" }}>
+                  Additional Notes <span style={{ color: "#94a3b8", fontWeight: "400", fontSize: "11.5px" }}>(Optional)</span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="Any additional remarks"
+                  value={expenseNotes}
+                  onChange={(e) => setExpenseNotes(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "13px",
+                    outline: "none"
+                  }}
+                />
               </div>
+
+              {/* Action Buttons */}
+              <div style={{ display: "flex", gap: "10px", marginTop: "10px" }}>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  style={{ flex: 1 }} 
+                  onClick={() => {
+                    setShowAddExpenseModal(false);
+                    setExpenseErrors({});
+                  }}
+                >
+                  Cancel
+                </Button>
+                <button 
+                  type="submit" 
+                  disabled={expenseSubmitting}
+                  style={{
+                    flex: 1,
+                    padding: "10px",
+                    backgroundColor: "#ea580c",
+                    color: "#ffffff",
+                    border: "none",
+                    borderRadius: "8px",
+                    fontSize: "13px",
+                    fontWeight: "750",
+                    cursor: "pointer",
+                    opacity: expenseSubmitting ? 0.7 : 1
+                  }}
+                >
+                  {expenseSubmitting ? "Submitting..." : "Submit Expense"}
+                </button>
+              </div>
+
             </form>
           </Modal>
         )}

@@ -13,6 +13,7 @@ import {
   getLabourPayments,
   getLabourMaster,
   getGeneralExpenses,
+  subscribeGeneralExpenses,
   saveGeneralExpense,
   approveGeneralExpense,
   logGeneralExpensePayment,
@@ -129,6 +130,14 @@ export default function AdminPayments() {
 
   useEffect(() => {
     loadData();
+    const unsub = subscribeGeneralExpenses((expensesList) => {
+      if (expensesList && Array.isArray(expensesList)) {
+        setGeneralExpenses(expensesList);
+      }
+    });
+    return () => {
+      if (typeof unsub === "function") unsub();
+    };
   }, []);
 
   useEffect(() => {

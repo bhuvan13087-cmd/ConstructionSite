@@ -3526,6 +3526,7 @@ export async function saveGeneralExpense(expenseData) {
     id: `exp_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
     siteId: expenseData.siteId,
     category: expenseData.category || "Site Expense",
+    customer: expenseData.customer || "",
     amount: Number(expenseData.amount) || 0,
     date: expenseData.date || new Date().toISOString().split("T")[0],
     description: expenseData.description || "",
