@@ -21,7 +21,7 @@ import {
   markSiteCompleted,
   reopenSite
 } from "../services/firebaseService";
-import { computeSitePendingItemsSummary } from "../services/businessLogic";
+import { computeSitePendingItemsSummary, getSiteBudget, formatINR } from "../services/businessLogic";
 import { 
   Building2, 
   MapPin, 
@@ -189,7 +189,7 @@ export default function SiteCompletionDashboard() {
     sites.forEach(site => {
       const isCompleted = (site.status || "").toLowerCase() === "completed" || site.isCompleted === true;
       const summary = siteSummaries[site.id];
-      const budget = Number(site.budget || site.totalBudget || 0);
+      const budget = getSiteBudget(site);
 
       totalBudget += budget;
       if (isCompleted) {
@@ -689,25 +689,34 @@ export default function SiteCompletionDashboard() {
                           )}
                         </td>
                         <td style={{ padding: "14px 16px", textAlign: "right" }}>
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", justifyContent: "flex-end" }}>
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px", justifyContent: "flex-end" }}>
                             <button
                               type="button"
                               onClick={() => setSelectedSiteIdForDetails(site.id)}
                               style={{
-                                padding: "6px 12px",
-                                borderRadius: "8px",
-                                border: "1px solid #cbd5e1",
-                                backgroundColor: "#ffffff",
-                                color: "#334155",
-                                fontSize: "12px",
+                                padding: "4px 8px",
+                                border: "none",
+                                background: "transparent",
+                                color: "#2563eb",
+                                fontSize: "12.5px",
                                 fontWeight: "700",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",
-                                gap: "4px"
+                                gap: "4px",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.color = "#1d4ed8";
+                                e.currentTarget.style.transform = "scale(1.08)";
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.color = "#2563eb";
+                                e.currentTarget.style.transform = "scale(1)";
                               }}
                             >
-                              <Eye size={13} />
+                              <Eye size={14} />
                               <span>{isCompleted ? "Inspect" : "Details"}</span>
                             </button>
                             {!isCompleted ? (
@@ -715,20 +724,29 @@ export default function SiteCompletionDashboard() {
                                 type="button"
                                 onClick={() => handleOpenCompletionModal(site)}
                                 style={{
-                                  padding: "6px 12px",
-                                  borderRadius: "8px",
+                                  padding: "4px 8px",
                                   border: "none",
-                                  backgroundColor: "var(--accent-500, #f97316)",
-                                  color: "#ffffff",
-                                  fontSize: "12px",
+                                  background: "transparent",
+                                  color: "#16a34a",
+                                  fontSize: "12.5px",
                                   fontWeight: "750",
                                   cursor: "pointer",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none"
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = "#15803d";
+                                  e.currentTarget.style.transform = "scale(1.08)";
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = "#16a34a";
+                                  e.currentTarget.style.transform = "scale(1)";
                                 }}
                               >
-                                <CheckCircle2 size={13} />
+                                <CheckCircle2 size={14} />
                                 <span>Complete</span>
                               </button>
                             ) : (
@@ -736,20 +754,29 @@ export default function SiteCompletionDashboard() {
                                 type="button"
                                 onClick={() => setReopenModal({ isOpen: true, site, reopenNotes: "", isSubmitting: false })}
                                 style={{
-                                  padding: "6px 12px",
-                                  borderRadius: "8px",
-                                  border: "1px solid #cbd5e1",
-                                  backgroundColor: "#f8fafc",
-                                  color: "#475569",
-                                  fontSize: "12px",
+                                  padding: "4px 8px",
+                                  border: "none",
+                                  background: "transparent",
+                                  color: "#ea580c",
+                                  fontSize: "12.5px",
                                   fontWeight: "700",
                                   cursor: "pointer",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none"
+                                }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = "#c2410c";
+                                  e.currentTarget.style.transform = "scale(1.08)";
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = "#ea580c";
+                                  e.currentTarget.style.transform = "scale(1)";
                                 }}
                               >
-                                <Unlock size={13} />
+                                <Unlock size={14} />
                                 <span>Reopen</span>
                               </button>
                             )}

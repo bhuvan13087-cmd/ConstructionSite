@@ -2,6 +2,179 @@
 import { calculateDistanceMeters } from "./firebaseService";
 
 /**
+ * Canonical extractor for site budget.
+ * Supports site.budget, site.totalBudget, site.contractValue, with strict type safety.
+ * @param {object} site - Site object
+ * @returns {number} - Budget in INR
+ */
+export function getSiteBudget(site) {
+  if (!site) return 0;
+  if (site.budget !== undefined && site.budget !== null && site.budget !== "") {
+    const val = Number(site.budget);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }
+  if (site.totalBudget !== undefined && site.totalBudget !== null && site.totalBudget !== "") {
+    const val = Number(site.totalBudget);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }
+  if (site.contractValue !== undefined && site.contractValue !== null && site.contractValue !== "") {
+    const val = Number(site.contractValue);
+    return isNaN(val) ? 0 : Math.max(0, val);
+  }
+  return 0;
+}
+
+/**
+ * Aggregates total budget across an array of sites.
+ * @param {Array} sites - Array of site objects
+ * @returns {number} - Total budget across all sites in INR
+ */
+export function calculateTotalSitesBudget(sites = []) {
+  if (!Array.isArray(sites) || sites.length === 0) return 0;
+  return sites.reduce((sum, site) => sum + getSiteBudget(site), 0);
+}
+
+/**
+ * Standard Indian Rupee currency formatter.
+ * Formats full numeric values with standard Indian numbering system (e.g. ₹38,75,00,000).
+ * @param {number|string} val - Numeric value or string
+ * @param {object} [options] - Optional configuration { maximumFractionDigits, minimumFractionDigits }
+ * @returns {string} - Formatted currency string
+ */
+export function formatINR(val, options = {}) {
+  if (val === undefined || val === null || val === "") return "₹0";
+  const num = Number(val);
+  if (isNaN(num)) return "₹0";
+  return new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: options.maximumFractionDigits !== undefined ? options.maximumFractionDigits : 0,
+    minimumFractionDigits: options.minimumFractionDigits !== undefined ? options.minimumFractionDigits : 0
+  }).format(num);
+}
+
+/**
+ * Formats currency in full amount explicitly.
+ * @param {number|string} val - Amount in INR
+ * @returns {string} - Formatted full currency e.g. ₹38,75,00,000
+ */
+export function formatFullINR(val) {
+  return formatINR(val, { maximumFractionDigits: 0, minimumFractionDigits: 0 });
+}
+
+/**
+ * Formats currency in compact Indian notation (Crores / Lakhs) when explicitly requested.
+ * @param {number|string} val - Amount in INR
+ * @returns {string} - Formatted compact currency e.g. ₹38.75 Cr or ₹50.00 L
+ */
+export function formatCompactINR(val) {
+  if (val === undefined || val === null || val === "") return "₹0";
+  const num = Number(val);
+  if (isNaN(num) || num === 0) return "₹0";
+  if (Math.abs(num) >= 10000000) {
+    return `₹${(num / 10000000).toFixed(2)} Cr`;
+  }
+  if (Math.abs(num) >= 100000) {
+    return `₹${(num / 100000).toFixed(2)} L`;
+  }
+  return formatINR(num);
+}
+
+/**
+ * Canonical Date Formatter (DD-MM-YYYY).
+ * Formats YYYY-MM-DD string, ISO string, Date object, or Firestore Timestamp into DD-MM-YYYY format.
+ *
+ * @param {string|Date|object} dateVal - Input date value.
+ * @param {string} fallback - String returned if date is missing/invalid. Default: "—".
+ * @returns {string} - Formatted DD-MM-YYYY string (e.g., "15-08-2024").
+ */
+export function formatDateDMY(dateVal, fallback = "—") {
+  if (!dateVal) return fallback;
+
+  if (typeof dateVal === "string") {
+    const trimmed = dateVal.trim();
+    if (!trimmed) return fallback;
+
+    // Fast-path: ISO standard format YYYY-MM-DD
+    const isoMatch = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(trimmed);
+    if (isoMatch) {
+      const year = isoMatch[1];
+      const month = isoMatch[2].padStart(2, "0");
+      const day = isoMatch[3].padStart(2, "0");
+      return `${day}-${month}-${year}`;
+    }
+
+    // Fast-path: already DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = /^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/.exec(trimmed);
+    if (dmyMatch) {
+      const day = dmyMatch[1].padStart(2, "0");
+      const month = dmyMatch[2].padStart(2, "0");
+      const year = dmyMatch[3];
+      return `${day}-${month}-${year}`;
+    }
+  }
+
+  try {
+    let d;
+    if (dateVal instanceof Date) {
+      d = dateVal;
+    } else if (dateVal?.seconds) {
+      d = new Date(dateVal.seconds * 1000);
+    } else {
+      d = new Date(dateVal);
+    }
+
+    if (isNaN(d.getTime())) return typeof dateVal === "string" ? dateVal : fallback;
+
+    const day = String(d.getDate()).padStart(2, "0");
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const year = d.getFullYear();
+    return `${day}-${month}-${year}`;
+  } catch {
+    return typeof dateVal === "string" ? dateVal : fallback;
+  }
+}
+
+export const formatDDMMYYYY = formatDateDMY;
+export const formatDateDDMMYYYY = formatDateDMY;
+
+/**
+ * Calculates total configured workers / categories from canonical Labour Teams.
+ * Iterates through every Labour Team and dynamically counts configured worker / category entries.
+ *
+ * @param {Array} teams - Array of Labour Team records.
+ * @returns {number} - Total count of configured labour category/worker entries.
+ */
+export function calculateTotalWorkers(teams = []) {
+  if (!teams || !Array.isArray(teams)) return 0;
+  let count = 0;
+  teams.forEach(team => {
+    if (!team) return;
+    if (team.categories) {
+      if (Array.isArray(team.categories)) {
+        count += team.categories.filter(Boolean).length;
+      } else if (typeof team.categories === "object") {
+        Object.values(team.categories).forEach(cat => {
+          if (!cat) return;
+          const membersObj = cat.members && typeof cat.members === "object" ? cat.members : {};
+          const memberKeys = Object.keys(membersObj);
+          if (memberKeys.length > 0) {
+            count += memberKeys.length;
+          } else {
+            count += 1;
+          }
+        });
+      }
+    } else if (Array.isArray(team.labourCategories)) {
+      count += team.labourCategories.length;
+    } else if (Array.isArray(team.workers)) {
+      count += team.workers.length;
+    }
+  });
+  return count;
+}
+
+/**
  * Validates whether a given geocode coordinate is within Tamil Nadu, India.
  * @param {number} lat - Latitude
  * @param {number} lng - Longitude
@@ -674,12 +847,8 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
       percentSpent: 0
     };
   }
-  // 1. Budget retrieve (with fallback to hash for backward compatibility)
-  let budget = site.budget !== undefined && site.budget !== null ? Number(site.budget) : null;
-  if (budget === null || isNaN(budget)) {
-    const siteSeed = site.id.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
-    budget = (50 + (siteSeed % 50)) * 100000;
-  }
+  // 1. Budget retrieve (single source of truth)
+  const budget = getSiteBudget(site);
 
   const expenses = [];
   const payments = [];

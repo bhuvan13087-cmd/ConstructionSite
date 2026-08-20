@@ -26,7 +26,8 @@ import {
   deleteMaterialFromTeam
 } from "../services/firebaseService";
 import {
-  processMaterialPaymentAndDelivery
+  processMaterialPaymentAndDelivery,
+  formatINR
 } from "../services/businessLogic";
 import {
   Package,
@@ -520,14 +521,6 @@ export default function AdminMaterials() {
   const totalPaidVal = paymentsList.reduce((acc, m) => acc + m.paidAmount, 0);
   const totalPendingVal = paymentsList.reduce((acc, m) => acc + m.pendingPayment, 0);
 
-  const formatINR = (val) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0
-    }).format(val);
-  };
-
   return (
     <Layout 
       title="Material Tracking & Corporate stock" 
@@ -879,36 +872,81 @@ export default function AdminMaterials() {
                                 </span>
                               </td>
                               <td style={{ paddingRight: "20px", textAlign: "right" }}>
-                                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
+                                <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                                  <button
+                                    type="button"
                                     onClick={() => handleOpenViewTeamModal(team)}
-                                    style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                                    style={{
+                                      background: "transparent",
+                                      border: "none",
+                                      color: "#2563eb",
+                                      cursor: "pointer",
+                                      padding: "4px 6px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontSize: "12px",
+                                      fontWeight: "700",
+                                      transition: "transform 0.15s ease, color 0.15s ease",
+                                      outline: "none"
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.color = "#1d4ed8"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = "#2563eb"; e.currentTarget.style.transform = "scale(1)"; }}
+                                    title="View Team"
                                   >
-                                    <Eye size={12} />
+                                    <Eye size={14} />
                                     <span>View</span>
-                                  </Button>
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
+                                  </button>
+                                  <button
+                                    type="button"
                                     onClick={() => {
                                       setEditingTeam(team);
                                       setEditTeamName(team.name || "");
                                       setShowEditTeamModal(true);
                                     }}
-                                    style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                                    style={{
+                                      background: "transparent",
+                                      border: "none",
+                                      color: "#ea580c",
+                                      cursor: "pointer",
+                                      padding: "4px 6px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontSize: "12px",
+                                      fontWeight: "700",
+                                      transition: "transform 0.15s ease, color 0.15s ease",
+                                      outline: "none"
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = "#ea580c"; e.currentTarget.style.transform = "scale(1)"; }}
+                                    title="Edit Team"
                                   >
-                                    <Edit2 size={12} />
+                                    <Edit2 size={14} />
                                     <span>Edit</span>
-                                  </Button>
+                                  </button>
                                   <button
                                     type="button"
                                     onClick={() => handleRequestDeleteTeam(team)}
-                                    style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px 6px", display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11.5px", fontWeight: "600" }}
+                                    style={{
+                                      background: "transparent",
+                                      border: "none",
+                                      color: "#dc2626",
+                                      cursor: "pointer",
+                                      padding: "4px 6px",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      gap: "4px",
+                                      fontSize: "12px",
+                                      fontWeight: "700",
+                                      transition: "transform 0.15s ease, color 0.15s ease",
+                                      outline: "none"
+                                    }}
+                                    onMouseEnter={e => { e.currentTarget.style.color = "#b91c1c"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                                    onMouseLeave={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
                                     title="Delete Team"
                                   >
-                                    <Trash2 size={13} />
+                                    <Trash2 size={14} />
                                   </button>
                                 </div>
                               </td>
@@ -1443,54 +1481,81 @@ export default function AdminMaterials() {
                           </td>
                           <td style={{ padding: "10px 14px", textAlign: "right" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px" }}>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setTargetTeamForEditMat(activeViewingTeam);
-                                  setEditingMaterial({
-                                    id: mat.id,
-                                    name: mat.name,
-                                    type: isCustom ? "custom" : "standard",
-                                    unit: mat.unit || "Bag",
-                                    rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
-                                    amount: mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0)),
-                                    status: mat.status || "Active"
-                                  });
-                                  setShowEditMaterialModal(true);
-                                }}
-                                style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
-                                title="Edit Material"
-                                aria-label="Edit Material"
-                              >
-                                <Edit2 size={13} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRequestToggleMaterialStatus(activeViewingTeam.id, activeViewingTeam.name, mat)}
-                                style={{
-                                  background: mat.status === "Active" ? "#fff7ed" : "#f0fdf4",
-                                  border: mat.status === "Active" ? "1px solid #fed7aa" : "1px solid #bbf7d0",
-                                  borderRadius: "6px",
-                                  padding: "5px 7px",
-                                  cursor: "pointer",
-                                  color: mat.status === "Active" ? "#c2410c" : "#15803d",
-                                  fontSize: "11px",
-                                  fontWeight: "700"
-                                }}
-                                title={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
-                                aria-label={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
-                              >
-                                {mat.status === "Active" ? "Deactivate" : "Activate"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleRequestDeleteMaterial(activeViewingTeam.id, activeViewingTeam.name, mat)}
-                                style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "5px 7px", cursor: "pointer", color: "#dc2626", display: "flex", alignItems: "center" }}
-                                title="Delete Material"
-                                aria-label="Delete Material"
-                              >
-                                <Trash2 size={13} />
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setTargetTeamForEditMat(activeViewingTeam);
+                                    setEditingMaterial({
+                                      id: mat.id,
+                                      name: mat.name,
+                                      type: isCustom ? "custom" : "standard",
+                                      unit: mat.unit || "Bag",
+                                      rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
+                                      amount: mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0)),
+                                      status: mat.status || "Active"
+                                    });
+                                    setShowEditMaterialModal(true);
+                                  }}
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    padding: "4px 6px",
+                                    cursor: "pointer",
+                                    color: "#ea580c",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    transition: "transform 0.15s ease, color 0.15s ease",
+                                    outline: "none"
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.transform = "scale(1.15)"; }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = "#ea580c"; e.currentTarget.style.transform = "scale(1)"; }}
+                                  title="Edit Material"
+                                  aria-label="Edit Material"
+                                >
+                                  <Edit2 size={15} />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRequestToggleMaterialStatus(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    padding: "4px 6px",
+                                    cursor: "pointer",
+                                    color: mat.status === "Active" ? "#c2410c" : "#16a34a",
+                                    fontSize: "12px",
+                                    fontWeight: "700",
+                                    transition: "transform 0.15s ease, color 0.15s ease",
+                                    outline: "none"
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.08)"; }}
+                                  onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; }}
+                                  title={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                                  aria-label={mat.status === "Active" ? "Deactivate Material" : "Activate Material"}
+                                >
+                                  {mat.status === "Active" ? "Deactivate" : "Activate"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRequestDeleteMaterial(activeViewingTeam.id, activeViewingTeam.name, mat)}
+                                  style={{
+                                    background: "transparent",
+                                    border: "none",
+                                    padding: "4px 6px",
+                                    cursor: "pointer",
+                                    color: "#dc2626",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    transition: "transform 0.15s ease, color 0.15s ease",
+                                    outline: "none"
+                                  }}
+                                  onMouseEnter={e => { e.currentTarget.style.color = "#b91c1c"; e.currentTarget.style.transform = "scale(1.15)"; }}
+                                  onMouseLeave={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
+                                  title="Delete Material"
+                                  aria-label="Delete Material"
+                                >
+                                  <Trash2 size={15} />
+                                </button>
                             </div>
                           </td>
                         </tr>

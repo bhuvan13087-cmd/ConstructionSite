@@ -34,7 +34,10 @@ import {
   getSiteFinancials,
   calculateOverallFinancials,
   isSiteDelayed,
-  normalizeApprovalRequest
+  normalizeApprovalRequest,
+  formatINR,
+  getSiteBudget,
+  formatDateDMY
 } from "../services/businessLogic";
 import {
   Building2,
@@ -283,15 +286,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   });
 
   const overallMetrics = calculateOverallFinancials(sites, materials, flatLaborHistory, allDprs, labourMaster.categories, generalExpenses, labourPayments);
-  
-  // Format currency helpers
-  const formatINR = (val) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0
-    }).format(val);
-  };
 
   // Helper to map engineers map
   const engineersMap = {};
@@ -759,11 +753,11 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
                   <div>
                     <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Start Date</span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600" }} className="font-mono">{selectedSite.startDate}</p>
+                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600" }} className="font-mono">{formatDateDMY(selectedSite.startDate)}</p>
                   </div>
                   <div>
                     <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Expected End Date</span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600", color: isDelayed ? "var(--danger-600)" : "inherit" }} className="font-mono">{selectedSite.expectedEndDate}</p>
+                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600", color: isDelayed ? "var(--danger-600)" : "inherit" }} className="font-mono">{formatDateDMY(selectedSite.expectedEndDate)}</p>
                   </div>
                 </div>
                 <div style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
@@ -845,7 +839,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", borderTop: "1px solid var(--border-color)", paddingTop: "14px" }}>
                   <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "700", textTransform: "uppercase", color: "var(--primary-600)" }}>Budget &amp; Expense Status</h4>
                   {(() => {
-                    const budget = selectedSite.budget !== undefined && selectedSite.budget !== null ? Number(selectedSite.budget) : 0;
+                    const budget = getSiteBudget(selectedSite);
                     const siteExpenses = generalExpenses.filter(e => e.siteId === selectedSite.id && (e.status === "Approved" || e.status === "approved"));
                     const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
                     const utilization = budget > 0 ? (totalExpense / budget) * 100 : 0;
@@ -1139,21 +1133,62 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                       <td className="font-mono">{req.requestDate}</td>
                       <td>
                         <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
-                          <Button
-                            size="sm"
+                          <button
+                            type="button"
                             onClick={() => handleApproveRequest(req)}
-                            style={{ backgroundColor: "var(--success-600)", color: "#ffffff", padding: "4px 10px" }}
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              color: "#16a34a",
+                              padding: "4px 8px",
+                              fontSize: "12.5px",
+                              fontWeight: "700",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none"
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.color = "#15803d";
+                              e.currentTarget.style.transform = "scale(1.08)";
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.color = "#16a34a";
+                              e.currentTarget.style.transform = "scale(1)";
+                            }}
                           >
                             Approve
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleRejectRequest(req)}
-                            style={{ color: "var(--danger-600)", borderColor: "var(--danger-200)", padding: "4px 10px" }}
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              color: "#dc2626",
+                              padding: "4px 8px",
+                              fontSize: "12.5px",
+                              fontWeight: "700",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none"
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.color = "#b91c1c";
+                              e.currentTarget.style.transform = "scale(1.08)";
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.color = "#dc2626";
+                              e.currentTarget.style.transform = "scale(1)";
+                            }}
                           >
                             Reject
-                          </Button>
+                          </button>
                         </div>
                       </td>
                     </tr>

@@ -20,7 +20,8 @@ import {
   logMaterialPayment
 } from "../services/firebaseService";
 import {
-  getSiteExpenseLedger
+  getSiteExpenseLedger,
+  formatINR
 } from "../services/businessLogic";
 import {
   DollarSign,
@@ -1213,12 +1214,4 @@ export default function AdminPayments() {
 
     </Layout>
   );
-}
-
-function formatINR(val) {
-  return new Intl.NumberFormat("en-IN", {
-    style: "currency",
-    currency: "INR",
-    maximumFractionDigits: 0
-  }).format(val || 0);
 }

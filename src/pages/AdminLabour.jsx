@@ -20,7 +20,9 @@ import {
 } from "../services/firebaseService";
 import {
   getLabourDisplayName,
-  calculateLabourFinancials
+  calculateLabourFinancials,
+  formatINR,
+  calculateTotalWorkers
 } from "../services/businessLogic";
 import {
   Users,
@@ -98,6 +100,7 @@ export default function AdminLabour() {
 
   // New Team Master states
   const [teams, setTeams] = useState([]);
+  const totalWorkersCount = React.useMemo(() => calculateTotalWorkers(teams), [teams]);
   const [selectedTeamId, setSelectedTeamId] = useState("");
   const [selectedCategoryId, setSelectedCategoryId] = useState("");
   const [newTeamName, setNewTeamName] = useState("");
@@ -201,21 +204,36 @@ export default function AdminLabour() {
         if (team.categories) {
           Object.keys(team.categories).forEach(catId => {
             const cat = team.categories[catId];
-            if (cat.members) {
-              Object.keys(cat.members).forEach(memberId => {
-                const mem = cat.members[memberId];
+            const membersObj = cat.members && typeof cat.members === "object" ? cat.members : {};
+            const memberKeys = Object.keys(membersObj);
+            if (memberKeys.length > 0) {
+              memberKeys.forEach(memberId => {
+                const mem = membersObj[memberId];
                 flattenedWorkers.push({
-                  id: mem.memberId,
+                  id: mem.memberId || memberId,
                   workerName: mem.name,
                   category: cat.name,
                   categoryName: cat.name,
-                  phoneNumber: "",
+                  phoneNumber: mem.phoneNumber || "",
                   joiningDate: "--",
                   status: "active",
                   teamId: team.id,
                   teamName: team.teamName,
-                  salary: mem.salary
+                  salary: mem.salary || cat.baseWage
                 });
+              });
+            } else {
+              flattenedWorkers.push({
+                id: cat.id || catId,
+                workerName: cat.name,
+                category: cat.name,
+                categoryName: cat.name,
+                phoneNumber: "",
+                joiningDate: "--",
+                status: "active",
+                teamId: team.id,
+                teamName: team.teamName,
+                salary: cat.baseWage
               });
             }
           });
@@ -282,21 +300,36 @@ export default function AdminLabour() {
         if (team.categories) {
           Object.keys(team.categories).forEach(catId => {
             const cat = team.categories[catId];
-            if (cat.members) {
-              Object.keys(cat.members).forEach(memberId => {
-                const mem = cat.members[memberId];
+            const membersObj = cat.members && typeof cat.members === "object" ? cat.members : {};
+            const memberKeys = Object.keys(membersObj);
+            if (memberKeys.length > 0) {
+              memberKeys.forEach(memberId => {
+                const mem = membersObj[memberId];
                 flattenedWorkers.push({
-                  id: mem.memberId,
+                  id: mem.memberId || memberId,
                   workerName: mem.name,
                   category: cat.name,
                   categoryName: cat.name,
-                  phoneNumber: "",
+                  phoneNumber: mem.phoneNumber || "",
                   joiningDate: "--",
                   status: "active",
                   teamId: team.id,
                   teamName: team.teamName,
-                  salary: mem.salary
+                  salary: mem.salary || cat.baseWage
                 });
+              });
+            } else {
+              flattenedWorkers.push({
+                id: cat.id || catId,
+                workerName: cat.name,
+                category: cat.name,
+                categoryName: cat.name,
+                phoneNumber: "",
+                joiningDate: "--",
+                status: "active",
+                teamId: team.id,
+                teamName: team.teamName,
+                salary: cat.baseWage
               });
             }
           });
@@ -1216,32 +1249,77 @@ export default function AdminLabour() {
                           </span>
                         </td>
                         <td style={{ paddingRight: "20px", textAlign: "right" }}>
-                          <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                          <div style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                              type="button"
                               onClick={() => handleOpenViewModal(team)}
-                              style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#2563eb",
+                                cursor: "pointer",
+                                padding: "4px 6px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                fontSize: "12px",
+                                fontWeight: "700",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.color = "#1d4ed8"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = "#2563eb"; e.currentTarget.style.transform = "scale(1)"; }}
+                              title="View Team"
                             >
-                              <Eye size={12} />
+                              <Eye size={14} />
                               <span>View</span>
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
+                            </button>
+                            <button
+                              type="button"
                               onClick={() => handleOpenEditModal(team)}
-                              style={{ fontSize: "11.5px", padding: "4px 10px", height: "28px" }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#ea580c",
+                                cursor: "pointer",
+                                padding: "4px 6px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                fontSize: "12px",
+                                fontWeight: "700",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = "#ea580c"; e.currentTarget.style.transform = "scale(1)"; }}
+                              title="Edit Team"
                             >
-                              <Edit2 size={12} />
+                              <Edit2 size={14} />
                               <span>Edit</span>
-                            </Button>
+                            </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteTeam(team.id, team.teamName)}
-                              style={{ background: "transparent", border: "none", color: "#dc2626", cursor: "pointer", padding: "4px 6px", display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11.5px", fontWeight: "600" }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                color: "#dc2626",
+                                cursor: "pointer",
+                                padding: "4px 6px",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                fontSize: "12px",
+                                fontWeight: "700",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.color = "#b91c1c"; e.currentTarget.style.transform = "scale(1.08)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
                               title="Delete team"
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={14} />
                             </button>
                           </div>
                         </td>
@@ -1350,7 +1428,7 @@ export default function AdminLabour() {
           <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
             <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Wages Owed</span>
             <div style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a", marginTop: "4px", fontFamily: "monospace" }}>
-              ₹{totalWagesOwed.toLocaleString("en-IN")}
+              {formatINR(totalWagesOwed)}
             </div>
             <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>Cumulative labour cost</span>
           </div>
@@ -1358,7 +1436,7 @@ export default function AdminLabour() {
           <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
             <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Paid Out</span>
             <div style={{ fontSize: "24px", fontWeight: "800", color: "#16a34a", marginTop: "4px", fontFamily: "monospace" }}>
-              ₹{totalPaidOut.toLocaleString("en-IN")}
+              {formatINR(totalPaidOut)}
             </div>
             <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "4px", display: "block" }}>Total disbursements logged</span>
           </div>
@@ -1366,7 +1444,7 @@ export default function AdminLabour() {
           <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "16px 20px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
             <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Pending Balance</span>
             <div style={{ fontSize: "24px", fontWeight: "800", color: "#ef4444", marginTop: "4px", fontFamily: "monospace" }}>
-              ₹{totalPendingBal.toLocaleString("en-IN")}
+              {formatINR(totalPendingBal)}
             </div>
             <span style={{ fontSize: "11px", color: "#ef4444", marginTop: "4px", display: "block" }}>Unsettled labour balance</span>
           </div>
@@ -1690,11 +1768,11 @@ export default function AdminLabour() {
         <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "12px", padding: "14px 16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Workers</span>
-            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyCenter: "center" }}>
+            <div style={{ width: "28px", height: "28px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <UserCheck size={16} style={{ margin: "auto" }} />
             </div>
           </div>
-          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{workers.length}</div>
+          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>{totalWorkersCount}</div>
           <span style={{ fontSize: "10.5px", color: "#16a34a", marginTop: "6px", display: "block", fontWeight: "600" }}>Registered workforce</span>
         </div>
 
@@ -1842,22 +1920,46 @@ export default function AdminLabour() {
                         <td style={{ padding: "10px 14px", textAlign: "right", fontFamily: "monospace", color: "#16a34a", fontWeight: "800" }}>₹{catVal.baseWage || 750}</td>
                         <td style={{ padding: "10px 14px", color: "#475569", fontWeight: "600" }}>{catVal.paymentType || "Daily"}</td>
                         <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "8px" }}>
                             <button
                               type="button"
                               onClick={() => handleOpenEditLabourModal(activeViewingTeam.id, catId, catVal)}
-                              style={{ background: "#f8fafc", border: "1px solid #cbd5e1", borderRadius: "6px", padding: "4px 6px", cursor: "pointer", color: "var(--primary-700)", display: "flex", alignItems: "center" }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                padding: "4px 6px",
+                                cursor: "pointer",
+                                color: "#ea580c",
+                                display: "flex",
+                                alignItems: "center",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.transform = "scale(1.15)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = "#ea580c"; e.currentTarget.style.transform = "scale(1)"; }}
                               title="Edit category entry"
                             >
-                              <Edit2 size={14} />
+                              <Edit2 size={15} />
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteCategoryInViewModal(catId, catVal.name || catId)}
-                              style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "6px", padding: "4px 6px", color: "#dc2626", cursor: "pointer", display: "flex", alignItems: "center" }}
+                              style={{
+                                background: "transparent",
+                                border: "none",
+                                padding: "4px 6px",
+                                color: "#dc2626",
+                                cursor: "pointer",
+                                display: "flex",
+                                alignItems: "center",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.color = "#b91c1c"; e.currentTarget.style.transform = "scale(1.15)"; }}
+                              onMouseLeave={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.transform = "scale(1)"; }}
                               title="Delete category entry"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={15} />
                             </button>
                           </div>
                         </td>

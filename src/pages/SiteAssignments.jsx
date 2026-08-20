@@ -715,30 +715,30 @@ export default function SiteAssignments() {
                         <button
                           onClick={() => handleRemoveAssignment(asg)}
                           style={{
-                            padding: "6px 12px",
-                            borderRadius: "7px",
-                            border: "1px solid var(--danger-100)",
-                            backgroundColor: "var(--danger-50)",
-                            color: "var(--danger-600)",
+                            padding: "4px 8px",
+                            border: "none",
+                            background: "transparent",
+                            color: "#dc2626",
                             cursor: "pointer",
                             display: "inline-flex",
                             alignItems: "center",
                             gap: "5px",
-                            fontSize: "11.5px",
+                            fontSize: "12px",
                             fontWeight: "700",
-                            transition: "all 0.15s ease"
+                            transition: "transform 0.15s ease, color 0.15s ease",
+                            outline: "none"
                           }}
                           onMouseEnter={e => {
-                            e.currentTarget.style.backgroundColor = "var(--danger-100)";
-                            e.currentTarget.style.borderColor = "var(--danger-200)";
+                            e.currentTarget.style.color = "#b91c1c";
+                            e.currentTarget.style.transform = "scale(1.08)";
                           }}
                           onMouseLeave={e => {
-                            e.currentTarget.style.backgroundColor = "var(--danger-50)";
-                            e.currentTarget.style.borderColor = "var(--danger-100)";
+                            e.currentTarget.style.color = "#dc2626";
+                            e.currentTarget.style.transform = "scale(1)";
                           }}
                           title="Remove Allocation"
                         >
-                          <Trash2 size={12} /> Remove
+                          <Trash2 size={13} /> Remove
                         </button>
                       </td>
                     </tr>
@@ -853,30 +853,30 @@ export default function SiteAssignments() {
                     <button
                       onClick={() => handleRemoveAssignment(asg)}
                       style={{
-                        padding: "6px 12px",
-                        borderRadius: "8px",
-                        border: "1px solid var(--danger-100)",
-                        backgroundColor: "var(--danger-50)",
-                        color: "var(--danger-600)",
+                        padding: "4px 8px",
+                        border: "none",
+                        background: "transparent",
+                        color: "#dc2626",
                         cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
                         gap: "5px",
-                        fontSize: "11.5px",
+                        fontSize: "12px",
                         fontWeight: "700",
-                        transition: "all 0.15s ease"
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
                       }}
                       onMouseEnter={e => {
-                        e.currentTarget.style.backgroundColor = "var(--danger-100)";
-                        e.currentTarget.style.borderColor = "var(--danger-200)";
+                        e.currentTarget.style.color = "#b91c1c";
+                        e.currentTarget.style.transform = "scale(1.08)";
                       }}
                       onMouseLeave={e => {
-                        e.currentTarget.style.backgroundColor = "var(--danger-50)";
-                        e.currentTarget.style.borderColor = "var(--danger-100)";
+                        e.currentTarget.style.color = "#dc2626";
+                        e.currentTarget.style.transform = "scale(1)";
                       }}
                       title="Remove Allocation"
                     >
-                      <Trash2 size={12} /> Remove
+                      <Trash2 size={13} /> Remove
                     </button>
                   </div>
                 </div>

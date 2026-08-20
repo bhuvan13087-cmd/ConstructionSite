@@ -655,28 +655,44 @@ export default function SiteEngineers() {
                       onClick={() => handleOpenEditModal(eng)}
                       title="Edit Profile"
                       style={{
-                        width: "30px", height: "30px",
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        borderRadius: "6px", border: "1px solid var(--border-color)",
-                        background: "#fff", color: "var(--primary-600)",
-                        cursor: "pointer"
+                        background: "transparent",
+                        border: "none",
+                        color: "#ea580c",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: "28px",
+                        height: "28px",
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
                     >
-                      <Edit3 size={13} />
+                      <Edit3 size={16} />
                     </button>
                     <button
                       className="btn-icon btn-delete-action"
                       onClick={() => handleDeleteEngineer(eng)}
                       title="Delete Engineer"
                       style={{
-                        width: "30px", height: "30px",
-                        display: "inline-flex", alignItems: "center", justifyContent: "center",
-                        borderRadius: "6px", border: "1px solid var(--border-color)",
-                        background: "#fff", color: "var(--danger-500)",
-                        cursor: "pointer"
+                        background: "transparent",
+                        border: "none",
+                        color: "#dc2626",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: "28px",
+                        height: "28px",
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 </div>
@@ -841,52 +857,73 @@ export default function SiteEngineers() {
                       <td style={{ paddingRight: "20px" }}>
                         <div className="table-actions" style={{ justifyContent: "flex-end" }}>
                           <button
-                            className="btn-icon"
+                            className="btn-icon btn-view-action"
                             onClick={() => setSelectedEngineerId(eng.id)}
                             title="View Activity Dashboard"
                             style={{
-                              width: "30px", height: "30px",
-                              display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              borderRadius: "7px", border: "1px solid var(--border-color)",
-                              background: "#fff", color: "var(--primary-600)",
-                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                              background: "transparent",
+                              border: "none",
+                              color: "#2563eb",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
+                              flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#fff7ed"; e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.borderColor = "#ffedd5"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
                           >
-                            <Eye size={13} />
+                            <Eye size={15} />
                           </button>
                           <button
                             className="btn-icon btn-edit-action"
                             onClick={() => handleOpenEditModal(eng)}
                             title="Edit Profile"
                             style={{
-                              width: "30px", height: "30px",
-                              display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              borderRadius: "7px", border: "1px solid var(--border-color)",
-                              background: "#fff", color: "var(--primary-600)",
-                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                              background: "transparent",
+                              border: "none",
+                              color: "#ea580c",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
+                              flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "var(--brand-orange-light)"; e.currentTarget.style.color = "var(--brand-orange)"; e.currentTarget.style.borderColor = "var(--brand-orange-border)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
                           >
-                            <Edit3 size={13} />
+                            <Edit3 size={15} />
                           </button>
                           <button
-                            className="btn-icon"
+                            className="btn-icon btn-delete-action"
                             onClick={() => handleDeleteEngineer(eng)}
                             title="Delete Engineer"
                             style={{
-                              width: "30px", height: "30px",
-                              display: "inline-flex", alignItems: "center", justifyContent: "center",
-                              borderRadius: "7px", border: "1px solid var(--border-color)",
-                              background: "#fff", color: "var(--primary-600)",
-                              cursor: "pointer", transition: "all 0.15s ease", flexShrink: 0
+                              background: "transparent",
+                              border: "none",
+                              color: "#dc2626",
+                              cursor: "pointer",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
+                              flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "var(--danger-50)"; e.currentTarget.style.color = "var(--danger-600)"; e.currentTarget.style.borderColor = "var(--danger-100)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>

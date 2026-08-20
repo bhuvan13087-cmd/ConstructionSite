@@ -65,7 +65,7 @@ import {
   receiveMaterialTransfer,
   subscribeMaterialTransfersForSite
 } from "../services/firebaseService";
-import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger } from "../services/businessLogic";
+import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -7220,8 +7220,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
       );
     }
-
-    const formatINR = (val) => new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(val);
 
     const ledger = getSiteExpenseLedger(currentSiteObj, materials, labourHistory, generalExpenses, labourPayments, labourMaster?.categories || {});
     const myExpenses = generalExpenses.filter(g => g.siteId === activeSiteId);

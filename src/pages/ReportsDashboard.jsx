@@ -18,7 +18,10 @@ import {
 import {
   calculatePlannedProgress,
   getSiteFinancials,
-  isSiteDelayed
+  isSiteDelayed,
+  formatINR,
+  getSiteBudget,
+  calculateTotalSitesBudget
 } from "../services/businessLogic";
 import { 
   Building2, 
@@ -207,7 +210,7 @@ function BarChartComponent({ data }) {
                   {item.label}
                 </span>
                 <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                  Spent: ₹{(item.expense / 100000).toFixed(1)}L / Budget: ₹{(item.budget / 100000).toFixed(1)}L
+                  Spent: {formatINR(item.expense)} / Budget: {formatINR(item.budget)}
                 </span>
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px", backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px", border: "1px solid var(--border-color)" }}>
@@ -543,15 +546,6 @@ export default function ReportsDashboard() {
     };
   }, []);
 
-  // Format Currency
-  const formatINR = (val) => {
-    return new Intl.NumberFormat("en-IN", {
-      style: "currency",
-      currency: "INR",
-      maximumFractionDigits: 0
-    }).format(val);
-  };
-
   // Map engineers for quick lookups
   const engineersMap = useMemo(() => {
     const map = {};
@@ -736,7 +730,7 @@ export default function ReportsDashboard() {
       }
 
       // Financials
-      const projectValue = Number(site.budget || site.totalBudget || site.contractValue) || 0;
+      const projectValue = getSiteBudget(site);
       
       const siteMats = materials.filter(m => m.siteId === siteId);
       const siteLabour = labourHistoryMap[siteId] || [];
@@ -1120,7 +1114,7 @@ export default function ReportsDashboard() {
     let expenseTotal = 0;
 
     filteredSites.forEach(site => {
-      budgetTotal += Number(site.budget) || 0;
+      budgetTotal += getSiteBudget(site);
       
       const siteExpenses = generalExpenses.filter(e => e.siteId === site.id && (e.status === "Approved" || e.status === "approved"));
       const totalExpense = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);

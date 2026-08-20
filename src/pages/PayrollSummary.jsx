@@ -990,21 +990,30 @@ export default function PayrollSummary() {
                               type="button"
                               onClick={() => setSelectedWorkerDetail(row)}
                               style={{
-                                border: "1px solid #cbd5e1",
-                                backgroundColor: "#ffffff",
-                                borderRadius: "6px",
-                                padding: "5px 9px",
-                                fontSize: "12px",
-                                fontWeight: "600",
-                                color: "#ea580c",
+                                border: "none",
+                                background: "transparent",
+                                padding: "4px 8px",
+                                fontSize: "12.5px",
+                                fontWeight: "700",
+                                color: "#2563eb",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",
-                                gap: "4px"
+                                gap: "4px",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.color = "#1d4ed8";
+                                e.currentTarget.style.transform = "scale(1.08)";
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.color = "#2563eb";
+                                e.currentTarget.style.transform = "scale(1)";
                               }}
                               title="View Details"
                             >
-                              <Eye size={14} />
+                              <Eye size={15} />
                               <span>View</span>
                             </button>
 
@@ -1012,21 +1021,30 @@ export default function PayrollSummary() {
                               type="button"
                               onClick={() => handleOpenPaymentModal(row)}
                               style={{
-                                border: "1px solid #16a34a",
-                                backgroundColor: row.status === "Paid" ? "#f0fdf4" : "#16a34a",
-                                borderRadius: "6px",
-                                padding: "5px 9px",
-                                fontSize: "12px",
-                                fontWeight: "600",
-                                color: row.status === "Paid" ? "#16a34a" : "#ffffff",
+                                border: "none",
+                                background: "transparent",
+                                padding: "4px 8px",
+                                fontSize: "12.5px",
+                                fontWeight: "700",
+                                color: row.status === "Paid" ? "#16a34a" : "#ea580c",
                                 cursor: "pointer",
                                 display: "inline-flex",
                                 alignItems: "center",
-                                gap: "4px"
+                                gap: "4px",
+                                transition: "transform 0.15s ease, color 0.15s ease",
+                                outline: "none"
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.color = row.status === "Paid" ? "#15803d" : "#c2410c";
+                                e.currentTarget.style.transform = "scale(1.08)";
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.color = row.status === "Paid" ? "#16a34a" : "#ea580c";
+                                e.currentTarget.style.transform = "scale(1)";
                               }}
                               title="Record / Change Payment Status"
                             >
-                              <CreditCard size={14} />
+                              <CreditCard size={15} />
                               <span>{row.status === "Paid" ? "Paid" : "Pay"}</span>
                             </button>
                           </div>

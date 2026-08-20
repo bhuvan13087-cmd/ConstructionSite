@@ -10,6 +10,7 @@ import {
   rejectSiteLocation,
   calculateDistanceMeters
 } from "../services/firebaseService";
+import { formatINR, calculateTotalSitesBudget, getSiteBudget, formatDateDMY } from "../services/businessLogic";
 import Loading from "../components/common/Loading";
 import SiteDetails from "./SiteDetails";
 import Card from "../components/common/Card";
@@ -840,7 +841,7 @@ export default function Sites() {
       {sites.length > 0 && (
         <div style={{
           display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+          gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
           gap: "14px",
           marginBottom: "24px"
         }}>
@@ -849,7 +850,7 @@ export default function Sites() {
             { label: "Active Sites", value: sites.filter(s => s.status === "Active").length, sub: "Currently ongoing", icon: "✅", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
             { label: "Planning", value: sites.filter(s => s.status === "Planning").length, sub: "Not yet started", icon: "📋", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" },
             { label: "Completed", value: sites.filter(s => s.status === "Completed").length, sub: "Finished projects", icon: "🏆", bg: "#f0fdf4", border: "#dcfce7", color: "var(--success-600)" },
-            { label: "Total Budget", value: `₹${(sites.reduce((s, x) => s + (Number(x.budget) || 0), 0) / 100000).toFixed(1)}L`, sub: "Across all sites", icon: "💰", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" }
+            { label: "Total Budget", value: formatINR(calculateTotalSitesBudget(sites)), sub: "Across all sites", icon: "💰", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" }
           ].map((kpi, i) => (
             <div key={i} style={{
               background: kpi.bg,
@@ -865,7 +866,7 @@ export default function Sites() {
                 <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.5px" }}>{kpi.label}</span>
                 <span style={{ fontSize: "18px" }}>{kpi.icon}</span>
               </div>
-              <div style={{ fontSize: "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.1" }}>{kpi.value}</div>
+              <div style={{ fontSize: kpi.label === "Total Budget" ? "20px" : "24px", fontWeight: "900", color: kpi.color, lineHeight: "1.2", wordBreak: "break-word" }}>{kpi.value}</div>
               <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "500" }}>{kpi.sub}</div>
             </div>
           ))}
@@ -904,9 +905,8 @@ export default function Sites() {
               };
               const sc = statusColors[site.status] || statusColors["Planning"];
               const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
-              const budgetFormatted = site.budget !== undefined && site.budget !== null && site.budget !== ""
-                ? `₹${Number(site.budget).toLocaleString("en-IN")}`
-                : "—";
+              const budgetVal = getSiteBudget(site);
+              const budgetFormatted = budgetVal > 0 ? formatINR(budgetVal) : "—";
 
               return (
                 <div
@@ -989,7 +989,7 @@ export default function Sites() {
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ color: "#64748b" }}>Dates:</span>
-                        <span>{site.startDate || "—"} to {site.expectedEndDate || "—"}</span>
+                        <span>{formatDateDMY(site.startDate)} to {formatDateDMY(site.expectedEndDate)}</span>
                       </div>
                     </div>
                   </div>
@@ -1004,42 +1004,70 @@ export default function Sites() {
                       View Details
                     </Button>
                     <button
+                      className="btn-icon btn-view-action"
+                      onClick={() => setSelectedSiteId(site.id)}
+                      title="View Site Dashboard"
+                      style={{
+                        background: "transparent",
+                        border: "none",
+                        color: "#2563eb",
+                        cursor: "pointer",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: "28px",
+                        height: "28px",
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
+                    >
+                      <Building2 size={16} />
+                    </button>
+                    <button
                       className="btn-icon btn-edit-action"
                       onClick={() => handleOpenEditModal(site)}
                       title="Edit Site"
                       style={{
-                        width: "30px",
-                        height: "30px",
+                        background: "transparent",
+                        border: "none",
+                        color: "#ea580c",
+                        cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        background: "#fff",
-                        color: "var(--primary-600)",
-                        cursor: "pointer"
+                        width: "28px",
+                        height: "28px",
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
                     >
-                      <Edit3 size={13} />
+                      <Edit3 size={16} />
                     </button>
                     <button
                       className="btn-icon btn-delete-action"
                       onClick={() => handleDeleteSite(site)}
                       title="Delete Site"
                       style={{
-                        width: "30px",
-                        height: "30px",
+                        background: "transparent",
+                        border: "none",
+                        color: "#dc2626",
+                        cursor: "pointer",
                         display: "inline-flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        borderRadius: "6px",
-                        border: "1px solid var(--border-color)",
-                        background: "#fff",
-                        color: "var(--danger-500)",
-                        cursor: "pointer"
+                        width: "28px",
+                        height: "28px",
+                        transition: "transform 0.15s ease, color 0.15s ease",
+                        outline: "none"
                       }}
+                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
                     >
-                      <Trash2 size={13} />
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 </div>
@@ -1070,9 +1098,8 @@ export default function Sites() {
                   };
                   const sc = statusColors[site.status] || statusColors["Planning"];
                   const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
-                  const budgetFormatted = site.budget !== undefined && site.budget !== null && site.budget !== ""
-                    ? `₹${Number(site.budget).toLocaleString("en-IN")}`
-                    : "—";
+                  const budgetVal = getSiteBudget(site);
+                  const budgetFormatted = budgetVal > 0 ? formatINR(budgetVal) : "—";
 
                   return (
                     <tr
@@ -1158,14 +1185,14 @@ export default function Sites() {
                       {/* Start Date column */}
                       <td>
                         <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: 500, whiteSpace: "nowrap" }}>
-                          {site.startDate || "—"}
+                          {formatDateDMY(site.startDate)}
                         </span>
                       </td>
 
                       {/* End Date column */}
                       <td>
                         <span style={{ fontSize: "12px", color: "var(--primary-700)", fontWeight: 500, whiteSpace: "nowrap" }}>
-                          {site.expectedEndDate || "—"}
+                          {formatDateDMY(site.expectedEndDate)}
                         </span>
                       </td>
 
@@ -1201,27 +1228,27 @@ export default function Sites() {
                         <div className="table-actions" style={{ justifyContent: "flex-end" }}>
                           {/* View */}
                           <button
-                            className="btn-icon"
+                            className="btn-icon btn-view-action"
                             onClick={() => setSelectedSiteId(site.id)}
                             title="View Site Dashboard"
                             style={{
-                              width: "30px",
-                              height: "30px",
+                              background: "transparent",
+                              border: "none",
+                              color: "#2563eb",
+                              cursor: "pointer",
                               display: "inline-flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              borderRadius: "7px",
-                              border: "1px solid var(--border-color)",
-                              background: "#fff",
-                              color: "var(--primary-600)",
-                              cursor: "pointer",
-                              transition: "all 0.15s ease",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
                               flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "#fff7ed"; e.currentTarget.style.color = "#c2410c"; e.currentTarget.style.borderColor = "#ffedd5"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
                           >
-                            <Building2 size={13} />
+                            <Building2 size={15} />
                           </button>
 
                           {/* Edit */}
@@ -1230,48 +1257,48 @@ export default function Sites() {
                             onClick={() => handleOpenEditModal(site)}
                             title="Edit Site"
                             style={{
-                              width: "30px",
-                              height: "30px",
+                              background: "transparent",
+                              border: "none",
+                              color: "#ea580c",
+                              cursor: "pointer",
                               display: "inline-flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              borderRadius: "7px",
-                              border: "1px solid var(--border-color)",
-                              background: "#fff",
-                              color: "var(--primary-600)",
-                              cursor: "pointer",
-                              transition: "all 0.15s ease",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
                               flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "var(--brand-orange-light)"; e.currentTarget.style.color = "var(--brand-orange)"; e.currentTarget.style.borderColor = "var(--brand-orange-border)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
                           >
-                            <Edit3 size={13} />
+                            <Edit3 size={15} />
                           </button>
 
                           {/* Delete */}
                           <button
-                            className="btn-icon"
+                            className="btn-icon btn-delete-action"
                             onClick={() => handleDeleteSite(site)}
                             title="Delete Site"
                             style={{
-                              width: "30px",
-                              height: "30px",
+                              background: "transparent",
+                              border: "none",
+                              color: "#dc2626",
+                              cursor: "pointer",
                               display: "inline-flex",
                               alignItems: "center",
                               justifyContent: "center",
-                              borderRadius: "7px",
-                              border: "1px solid var(--border-color)",
-                              background: "#fff",
-                              color: "var(--primary-600)",
-                              cursor: "pointer",
-                              transition: "all 0.15s ease",
+                              width: "28px",
+                              height: "28px",
+                              transition: "transform 0.15s ease, color 0.15s ease",
+                              outline: "none",
                               flexShrink: 0
                             }}
-                            onMouseEnter={e => { e.currentTarget.style.background = "var(--danger-50)"; e.currentTarget.style.color = "var(--danger-600)"; e.currentTarget.style.borderColor = "var(--danger-100)"; }}
-                            onMouseLeave={e => { e.currentTarget.style.background = "#fff"; e.currentTarget.style.color = "var(--primary-600)"; e.currentTarget.style.borderColor = "var(--border-color)"; }}
+                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
                           >
-                            <Trash2 size={13} />
+                            <Trash2 size={15} />
                           </button>
                         </div>
                       </td>

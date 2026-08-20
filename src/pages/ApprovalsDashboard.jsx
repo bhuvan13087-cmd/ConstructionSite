@@ -692,44 +692,64 @@ export default function ApprovalsDashboard() {
                         {/* Actions */}
                         <td style={{ padding: "12px 16px", textAlign: "center" }}>
                           {isPending ? (
-                            <div style={{ display: "flex", justifyContent: "center", gap: "6px" }}>
+                            <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
                               <button 
                                 type="button"
                                 onClick={() => handleApprove(req)}
                                 style={{ 
-                                  border: "1px solid #16a34a",
-                                  backgroundColor: "#16a34a", 
-                                  color: "#ffffff",
-                                  borderRadius: "6px",
-                                  padding: "5px 10px",
-                                  fontSize: "12px",
+                                  border: "none",
+                                  background: "transparent", 
+                                  color: "#16a34a",
+                                  padding: "4px 8px",
+                                  fontSize: "12.5px",
                                   fontWeight: "700",
                                   cursor: "pointer",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none"
                                 }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = "#15803d";
+                                  e.currentTarget.style.transform = "scale(1.08)";
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = "#16a34a";
+                                  e.currentTarget.style.transform = "scale(1)";
+                                }}
+                                title="Approve Request"
                               >
-                                <Check size={13} /> Approve
+                                <Check size={14} /> Approve
                               </button>
                               <button 
                                 type="button"
                                 onClick={() => handleReject(req)}
                                 style={{ 
-                                  border: "1px solid #dc2626", 
-                                  backgroundColor: "#ffffff",
+                                  border: "none", 
+                                  background: "transparent",
                                   color: "#dc2626", 
-                                  borderRadius: "6px",
-                                  padding: "5px 10px",
-                                  fontSize: "12px",
+                                  padding: "4px 8px",
+                                  fontSize: "12.5px",
                                   fontWeight: "700",
                                   cursor: "pointer",
                                   display: "inline-flex",
                                   alignItems: "center",
-                                  gap: "4px"
+                                  gap: "4px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none"
                                 }}
+                                onMouseEnter={e => {
+                                  e.currentTarget.style.color = "#b91c1c";
+                                  e.currentTarget.style.transform = "scale(1.08)";
+                                }}
+                                onMouseLeave={e => {
+                                  e.currentTarget.style.color = "#dc2626";
+                                  e.currentTarget.style.transform = "scale(1)";
+                                }}
+                                title="Reject Request"
                               >
-                                <X size={13} /> Reject
+                                <X size={14} /> Reject
                               </button>
                             </div>
                           ) : (

@@ -27,7 +27,15 @@ import {
   markSiteCompleted,
   reopenSite
 } from "../services/firebaseService";
-import { processMaterialPaymentAndDelivery, formatProgress, generateWeeklyReportFromDprs, calculatePlannedProgress, computeSitePendingItemsSummary } from "../services/businessLogic";
+import { 
+  processMaterialPaymentAndDelivery, 
+  formatProgress, 
+  generateWeeklyReportFromDprs, 
+  calculatePlannedProgress, 
+  computeSitePendingItemsSummary,
+  formatINR,
+  getSiteBudget
+} from "../services/businessLogic";
 import { 
   ArrowLeft, 
   Building2, 
@@ -625,7 +633,7 @@ export default function SiteDetails({ siteId, onBack }) {
   const totalSpent = matSpent + laborSpent;
   
   // Canonical Budget Calculations (Strictly real data with no mock seed values)
-  const actualBudget = site.budget !== undefined && site.budget !== null && site.budget !== "" ? Number(site.budget) : 0;
+  const actualBudget = getSiteBudget(site);
   const approvedExpenses = expenses.filter(e => e.status === "Approved" || e.status === "approved");
   const totalExpense = approvedExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
   const remainingBudget = actualBudget > 0 ? (actualBudget - totalExpense) : 0;
@@ -1262,26 +1270,25 @@ export default function SiteDetails({ siteId, onBack }) {
                   <DollarSign size={16} style={{ color: "#16a34a" }} />
                   <span>Budget Summary</span>
                 </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
-                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Budget</span>
-                    <strong style={{ fontSize: "13.5px", color: "#0f172a", fontFamily: "monospace" }}>
-                      {actualBudget > 0 ? `₹${actualBudget.toLocaleString("en-IN")}` : "Not Allocated"}
-                    </strong>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
-                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Used / Spent</span>
-                    <strong style={{ fontSize: "13.5px", color: "#ea580c", fontFamily: "monospace" }}>
-                      ₹{totalExpense.toLocaleString("en-IN")}
-                    </strong>
-                  </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
-                    <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Remaining Budget</span>
-                    <strong style={{ fontSize: "13.5px", color: actualBudget > 0 ? (remainingBudget < 0 ? "#ef4444" : "#16a34a") : "#64748b", fontFamily: "monospace" }}>
-                      {actualBudget > 0 ? `₹${remainingBudget.toLocaleString("en-IN")}` : "—"}
-                    </strong>
-                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                      <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Budget</span>
+                      <strong style={{ fontSize: "13.5px", color: "#0f172a", fontFamily: "monospace" }}>
+                        {actualBudget > 0 ? formatINR(actualBudget) : "Not Allocated"}
+                      </strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                      <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Total Used / Spent</span>
+                      <strong style={{ fontSize: "13.5px", color: "#ea580c", fontFamily: "monospace" }}>
+                        {formatINR(totalExpense)}
+                      </strong>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+                      <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>Remaining Budget</span>
+                      <strong style={{ fontSize: "13.5px", color: actualBudget > 0 ? (remainingBudget < 0 ? "#ef4444" : "#16a34a") : "#64748b", fontFamily: "monospace" }}>
+                        {actualBudget > 0 ? formatINR(remainingBudget) : "—"}
+                      </strong>
+                    </div>
 
                   {actualBudget > 0 && (
                     <div style={{ marginTop: "2px" }}>
@@ -1606,9 +1613,8 @@ export default function SiteDetails({ siteId, onBack }) {
                               <div className="table-actions" style={{ justifyContent: "center" }}>
                                 <button 
                                   onClick={() => handleOpenMaterialDetails(mat)} 
-                                  className="btn-icon" 
+                                  className="btn-icon btn-view-action" 
                                   title="View complete details"
-                                  style={{ color: "#0284c7" }}
                                 >
                                   <Eye size={16} />
                                 </button>
@@ -1623,9 +1629,8 @@ export default function SiteDetails({ siteId, onBack }) {
                                     </button>
                                     <button 
                                       onClick={() => handleDeleteMaterialLog(mat.id)} 
-                                      className="btn-icon" 
-                                      title="Delete record" 
-                                      style={{ color: "var(--danger-500)" }}
+                                      className="btn-icon btn-delete-action" 
+                                      title="Delete record"
                                     >
                                       <Trash2 size={16} />
                                     </button>
@@ -1804,9 +1809,8 @@ export default function SiteDetails({ siteId, onBack }) {
                               <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
                                 <button
                                   onClick={() => handleOpenMaterialDetails(tx)}
-                                  className="btn-icon"
+                                  className="btn-icon btn-view-action"
                                   title="View Transfer Details"
-                                  style={{ color: "#0284c7" }}
                                 >
                                   <Eye size={16} />
                                 </button>
@@ -2353,9 +2357,8 @@ export default function SiteDetails({ siteId, onBack }) {
                             <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
                               <button
                                 onClick={() => handleOpenLabourDetails(row)}
-                                className="btn-icon"
+                                className="btn-icon btn-view-action"
                                 title="View Record Details"
-                                style={{ color: "#0284c7" }}
                               >
                                 <Eye size={16} />
                               </button>
@@ -2807,11 +2810,11 @@ export default function SiteDetails({ siteId, onBack }) {
                 </div>
                 <div>
                   <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Start Date</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{site.startDate || "--"}</strong>
+                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{formatDateDDMMYYYY(site.startDate)}</strong>
                 </div>
                 <div>
                   <span style={{ fontSize: "10px", color: "#64748b", display: "block", textTransform: "uppercase", fontWeight: "800" }}>Expected End Date</span>
-                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{site.expectedEndDate || "--"}</strong>
+                  <strong style={{ fontSize: "13px", color: "#0f172a" }} className="font-mono">{formatDateDDMMYYYY(site.expectedEndDate)}</strong>
                 </div>
               </div>
 
@@ -2954,7 +2957,7 @@ export default function SiteDetails({ siteId, onBack }) {
           <div style={{ display: "flex", justifyContent: "space-between" }}>
             <span style={{ color: "#64748b", fontWeight: "600" }}>Allocated Budget</span>
             <strong style={{ color: "#0f172a", fontFamily: "monospace" }}>
-              {actualBudget > 0 ? `₹${actualBudget.toLocaleString("en-IN")}` : "Not Allocated"}
+              {actualBudget > 0 ? formatINR(actualBudget) : "Not Allocated"}
             </strong>
           </div>
         </div>
