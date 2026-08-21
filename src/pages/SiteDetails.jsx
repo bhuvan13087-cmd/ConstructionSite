@@ -66,8 +66,10 @@ import {
   Inbox,
   Lock,
   Unlock,
-  Archive
+  Archive,
+  Shield
 } from "lucide-react";
+import AdminAssistedEntryModal from "../components/common/AdminAssistedEntryModal";
 
 export default function SiteDetails({ siteId, onBack }) {
   const { userProfile } = useAuth();
@@ -88,6 +90,7 @@ export default function SiteDetails({ siteId, onBack }) {
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   const [showSiteInfoModal, setShowSiteInfoModal] = useState(false);
   const [showPendingActionsModal, setShowPendingActionsModal] = useState(false);
+  const [showAdminEntryModal, setShowAdminEntryModal] = useState(false);
 
   // Completion Workflow Modal State
   const [completionModal, setCompletionModal] = useState({
@@ -938,8 +941,33 @@ export default function SiteDetails({ siteId, onBack }) {
               <strong style={{ color: "#16a34a", fontWeight: "800", fontSize: "16px" }}>{isSiteCompleted ? 100 : Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%</strong>
             </div>
 
-            {/* Completion / Reopen Action Button */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            {/* Action Buttons */}
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              {!isSiteCompleted && (
+                <button
+                  type="button"
+                  onClick={() => setShowAdminEntryModal(true)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "8px 14px",
+                    borderRadius: "8px",
+                    border: "1.5px solid #bfdbfe",
+                    backgroundColor: "#eff6ff",
+                    color: "#1d4ed8",
+                    fontSize: "12.5px",
+                    fontWeight: "750",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease"
+                  }}
+                  title="Record labour, materials, or progress on behalf of assigned engineer when unavailable"
+                >
+                  <Shield size={14} />
+                  <span>Add Entry for Engineer</span>
+                </button>
+              )}
+
               {!isSiteCompleted ? (
                 <button
                   type="button"
@@ -1582,9 +1610,14 @@ export default function SiteDetails({ siteId, onBack }) {
                                       Transferred Out ({mat.transferredOutQuantity || 0} {mat.unit})
                                     </span>
                                   )}
+                                  {(mat.isAdminEntry || mat.createdVia === "admin_assisted_entry") && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${mat.createdByName || "Admin"}`}>
+                                      🛡️ Admin Entry
+                                    </span>
+                                  )}
                                 </div>
                                 <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", display: "block", marginTop: "2px" }}>
-                                  {mat.purchaseDate || mat.transferDate ? `Date: ${mat.purchaseDate || mat.transferDate}` : ""} {mat.supplierName ? `• Supplier: ${mat.supplierName}` : ""}
+                                  {mat.purchaseDate || mat.transferDate ? `Date: ${mat.purchaseDate || mat.transferDate}` : ""} {mat.supplierName ? `• Supplier: ${mat.supplierName}` : ""}{mat.isAdminEntry ? ` • By Admin: ${mat.createdByName || "Admin"}` : ""}
                                 </span>
                               </div>
                             </td>
@@ -2318,10 +2351,17 @@ export default function SiteDetails({ siteId, onBack }) {
                           >
                             <td style={{ fontWeight: 700 }}>
                               <div>
-                                <span style={{ fontSize: "13.5px", color: "var(--primary-900)" }}>{workerName}</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span style={{ fontSize: "13.5px", color: "var(--primary-900)" }}>{workerName}</span>
+                                  {(row.isAdminEntry || row.createdVia === "admin_assisted_entry") && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${row.createdByName || "Admin"}`}>
+                                      🛡️ Admin Entry
+                                    </span>
+                                  )}
+                                </div>
                                 {row.teamName && (
                                   <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", fontWeight: "normal" }}>
-                                    Team: {row.teamName}
+                                    Team: {row.teamName}{row.isAdminEntry ? ` • By Admin: ${row.createdByName || "Admin"}` : ""}
                                   </span>
                                 )}
                               </div>
@@ -3262,6 +3302,20 @@ export default function SiteDetails({ siteId, onBack }) {
           isLoading={reopenModal.isSubmitting}
           onConfirm={handleConfirmReopen}
           onClose={() => setReopenModal({ isOpen: false, reopenNotes: "", isSubmitting: false })}
+        />
+      )}
+      {/* ===================================================================
+          ADMIN ASSISTED ENTRY MODAL (OVERRIDE WHEN ENGINEER IS UNAVAILABLE)
+          =================================================================== */}
+      {showAdminEntryModal && (
+        <AdminAssistedEntryModal
+          isOpen={showAdminEntryModal}
+          onClose={() => setShowAdminEntryModal(false)}
+          initialSiteId={siteId}
+          onSuccess={() => {
+            loadSiteDetails();
+            showToast("Admin entry saved and synced across system.", "success");
+          }}
         />
       )}
 

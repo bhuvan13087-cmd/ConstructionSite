@@ -53,8 +53,10 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
-  ShieldAlert
+  ShieldAlert,
+  Shield
 } from "lucide-react";
+import AdminAssistedEntryModal from "../components/common/AdminAssistedEntryModal";
 
 export default function AdminMaterials() {
   const { userProfile } = useAuth();
@@ -63,6 +65,7 @@ export default function AdminMaterials() {
   const [loading, setLoading] = useState(true);
   const [sites, setSites] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState("all");
+  const [showAdminEntryModal, setShowAdminEntryModal] = useState(false);
   const [allMaterials, setAllMaterials] = useState([]);
   const [materialTeams, setMaterialTeams] = useState([]);
   const [teamSearch, setTeamSearch] = useState("");
@@ -651,6 +654,15 @@ export default function AdminMaterials() {
                 </div>
                 <ViewToggle viewMode={viewMode} onChange={setViewMode} />
                 <Button
+                  type="button"
+                  onClick={() => setShowAdminEntryModal(true)}
+                  variant="outline"
+                  style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 14px", backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8", fontWeight: "750" }}
+                >
+                  <Shield size={16} />
+                  <span>Add Entry for Engineer</span>
+                </Button>
+                <Button
                   onClick={handleOpenAddTeamModal}
                   variant="primary"
                   style={{ display: "flex", alignItems: "center", gap: "6px", padding: "9px 16px" }}
@@ -1077,9 +1089,16 @@ export default function AdminMaterials() {
                           <tr>
                             <td style={{ fontWeight: "700" }}>
                               <div>
-                                <span>{item.materialName}</span>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                                  <span>{item.materialName}</span>
+                                  {(item.isAdminEntry || item.createdVia === "admin_assisted_entry") && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${item.createdByName || "Admin"}`}>
+                                      🛡️ Admin Entry
+                                    </span>
+                                  )}
+                                </div>
                                 <div style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "normal", marginTop: "2px" }}>
-                                  Site: <u>{item.siteName}</u> • Date: {item.purchaseDate || "--"}
+                                  Site: <u>{item.siteName}</u> • Date: {item.purchaseDate || "--"}{item.isAdminEntry ? ` • By Admin: ${item.createdByName || "Admin"}` : ""}
                                 </div>
                               </div>
                             </td>
@@ -2185,6 +2204,14 @@ export default function AdminMaterials() {
         variant={confirmModalState.variant}
         isLoading={confirmModalState.isLoading}
       />
+
+      {/* Admin Assisted Entry Modal */}
+      {showAdminEntryModal && (
+        <AdminAssistedEntryModal
+          isOpen={showAdminEntryModal}
+          onClose={() => setShowAdminEntryModal(false)}
+        />
+      )}
 
     </Layout>
   );

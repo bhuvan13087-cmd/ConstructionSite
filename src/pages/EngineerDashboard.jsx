@@ -312,14 +312,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [isLabourLocked, setIsLabourLocked] = useState(false);
   const [labourLockInfo, setLabourLockInfo] = useState(null);
 
-  const fetchLabourLockStatus = async () => {
-    if (!activeSiteId || !labourDate) {
+  const fetchLabourLockStatus = async (teamId = selectedLabourTeamId) => {
+    if (!activeSiteId || !labourDate || !teamId) {
       setIsLabourLocked(false);
       setLabourLockInfo(null);
       return { submitted: false };
     }
     try {
-      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate, teamId);
       const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
       setIsLabourLocked(isSubmitted);
       setLabourLockInfo(isSubmitted ? lockStatus : null);
@@ -339,12 +339,20 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
     try {
       const records = await getAttendanceForSite(activeSiteId);
-      const locked = new Set(
-        records
-          .filter(r => r.status === "submitted" && (r.type === "labour_attendance_lock" || r.id?.startsWith("labour_lock_")))
-          .map(r => r.date || r.attendanceDate)
-          .filter(Boolean)
-      );
+      const locked = new Set();
+      records.forEach(r => {
+        if (r.status === "submitted" || r.locked || r.submitted) {
+          const d = r.date || r.attendanceDate;
+          if (d) {
+            if (r.teamId) {
+              locked.add(`${d}_${r.teamId}`);
+            }
+            if (r.id?.startsWith("labour_lock_") && !r.teamId) {
+              locked.add(d);
+            }
+          }
+        }
+      });
       setLockedDates(locked);
     } catch (err) {
       console.error("Failed to load locked dates:", err);
@@ -518,8 +526,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Bulk Material Entry states
   const [bulkMaterialDate, setBulkMaterialDate] = useState(new Date().toISOString().split("T")[0]);
-  const [isBulkMaterialLocked, setIsBulkMaterialLocked] = useState(false);
-  const [bulkMaterialLockInfo, setBulkMaterialLockInfo] = useState(null);
   const [bulkMaterialSubmitting, setBulkMaterialSubmitting] = useState(false);
 
   // Material Pending Tracking States
@@ -898,25 +904,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     };
   }, [activeSiteId]);
 
-  // Check Bulk Material Entry submission status for selected site and date
-  useEffect(() => {
-    const fetchMaterialLockStatus = async () => {
-      if (!activeSiteId || !bulkMaterialDate) {
-        setIsBulkMaterialLocked(false);
-        setBulkMaterialLockInfo(null);
-        return;
-      }
-      try {
-        const lockStatus = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
-        setIsBulkMaterialLocked(lockStatus.submitted);
-        setBulkMaterialLockInfo(lockStatus);
-      } catch (err) {
-        console.error("Error checking material submission status:", err);
-      }
-    };
-    fetchMaterialLockStatus();
-  }, [activeSiteId, bulkMaterialDate]);
-
   // Synchronize material usage rows with latest team master rates in real-time
   useEffect(() => {
     if (!selectedMaterialTeamId || materialTeams.length === 0) return;
@@ -977,15 +964,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     };
   }, [isMaterialTeamDropdownOpen]);
 
-  // Check Labour Attendance submission status for selected site and date
+  // Check Labour Attendance submission status for selected site, date, and team
   useEffect(() => {
     let isCurrent = true;
-    // Always reset state synchronously on date or site change
     setIsLabourLocked(false);
     setLabourLockInfo(null);
 
-    if (activeSiteId && labourDate) {
-      checkLabourSubmissionStatus(activeSiteId, labourDate).then(lockStatus => {
+    if (activeSiteId && labourDate && selectedLabourTeamId) {
+      checkLabourSubmissionStatus(activeSiteId, labourDate, selectedLabourTeamId).then(lockStatus => {
         if (isCurrent) {
           const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
           setIsLabourLocked(isSubmitted);
@@ -1003,7 +989,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     return () => {
       isCurrent = false;
     };
-  }, [activeSiteId, labourDate]);
+  }, [activeSiteId, labourDate, selectedLabourTeamId]);
 
   // Sync labour entries & historical summary whenever active site or select date changes
   useEffect(() => {
@@ -1720,12 +1706,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Count-based worker attendance handlers with custom work units & daily wage
   const handleCountChange = async (categoryId, customUnitsVal, increment) => {
     if (isLabourSubmitted) {
-      showToast("Cannot modify count: Attendance for this date is submitted and locked.", "error");
+      showToast("Cannot modify count: This team's attendance is submitted and locked.", "error");
       return;
     }
 
     const units = Math.max(0.01, Number(customUnitsVal) || 1.0);
     const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+    const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
     const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
     const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
 
@@ -1749,6 +1736,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
           siteId: activeSiteId,
           teamId: selectedLabourTeamId,
+          teamName,
           categoryId,
           categoryName: cat?.name || "",
           attendanceDate: labourDate,
@@ -1781,7 +1769,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const handleWorkUnitsChange = async (categoryId, newUnitsStr) => {
     if (isLabourSubmitted) {
-      showToast("Cannot modify work units: Attendance for this date is submitted and locked.", "error");
+      showToast("Cannot modify work units: This team's attendance is submitted and locked.", "error");
       return;
     }
     const units = Math.max(0.01, Number(newUnitsStr) || 1.0);
@@ -1790,6 +1778,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const record = attendanceRows.find(r => r.categoryId === categoryId);
     if (record && record.workerCount > 0) {
       const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+      const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
       const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
       const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
       const calculatedAmount = record.workerCount * units * dailyWage;
@@ -1798,6 +1787,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         const dbId = await saveLabourAttendanceRecord(record.dbId, {
           siteId: activeSiteId,
           teamId: selectedLabourTeamId,
+          teamName,
           categoryId,
           categoryName: cat?.name || "",
           attendanceDate: labourDate,
@@ -1818,6 +1808,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
+  // Helper to check if a specific team attendance record is locked on a date
+  const isTeamLockedOnDate = (dateStr, teamId) => {
+    if (!dateStr) return false;
+    if (teamId && lockedDates.has(`${dateStr}_${teamId}`)) return true;
+    if (lockedDates.has(dateStr)) return true;
+    return false;
+  };
+
   // Attendance History event handlers
   const handleStartEditHistoryRecord = (record) => {
     setEditingRecordId(record.id);
@@ -1833,11 +1831,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const handleSaveHistoryRecord = async (recordId) => {
     const record = labourHistoryRecords.find(r => r.id === recordId);
     if (!record) return;
-    if (lockedDates.has(record.attendanceDate)) {
-      showToast("Cannot edit: Attendance for this date is submitted and locked.", "error");
+    if (isTeamLockedOnDate(record.attendanceDate, record.teamId)) {
+      showToast("Cannot edit: This team's attendance is submitted and locked.", "error");
       return;
     }
-    if (!record) return;
 
     if (record.workerCount !== undefined) {
       const count = Number(editingCount);
@@ -1850,6 +1847,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           attendanceDate: record.attendanceDate,
           siteId: record.siteId,
           teamId: record.teamId,
+          teamName: record.teamName || "",
           categoryId: record.categoryId,
           workerCount: count,
           attendanceType: editingType,
@@ -1890,6 +1888,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         attendanceDate: record.attendanceDate,
         siteId: record.siteId,
         teamId: record.teamId,
+        teamName: record.teamName || "",
         categoryId: record.categoryId,
         workerName: workerNameClean,
         attendanceValue: Number(editingValue),
@@ -1906,8 +1905,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const handleDeleteHistoryRecord = async (recordId) => {
     const record = labourHistoryRecords.find(r => r.id === recordId);
     if (!record) return;
-    if (lockedDates.has(record.attendanceDate)) {
-      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+    if (isTeamLockedOnDate(record.attendanceDate, record.teamId)) {
+      showToast("Cannot delete: This team's attendance is submitted and locked.", "error");
       return;
     }
     showConfirmModal({
@@ -1930,8 +1929,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleDeleteCategoryHistoryRecords = async (dateStr, teamId, categoryId) => {
-    if (lockedDates.has(dateStr)) {
-      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+    if (isTeamLockedOnDate(dateStr, teamId)) {
+      showToast("Cannot delete: This team's attendance is submitted and locked.", "error");
       return;
     }
     showConfirmModal({
@@ -1965,8 +1964,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const handleDeleteTeamHistoryRecords = async (dateStr, teamId) => {
-    if (lockedDates.has(dateStr)) {
-      showToast("Cannot delete: Attendance for this date is submitted and locked.", "error");
+    if (isTeamLockedOnDate(dateStr, teamId)) {
+      showToast("Cannot delete: This team's attendance is submitted and locked.", "error");
       return;
     }
     showConfirmModal({
@@ -1998,7 +1997,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     });
   };
 
-  // Submit workforce attendance
+  // Submit workforce attendance per Site + Date + Team
   const handleLabourSubmit = async () => {
     if (labourSubmitting) return;
     if (!activeSiteId) {
@@ -2013,20 +2012,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Please add at least one workforce count before submitting.", "error");
       return;
     }
+
+    const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+    const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
     
-    // Duplicate Prevention Check directly against database
-    const freshCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+    // Duplicate Prevention Check directly against database for this Site + Date + Team
+    const freshCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate, selectedLabourTeamId);
     if (freshCheck && freshCheck.submitted) {
       setIsLabourLocked(true);
       setLabourLockInfo(freshCheck);
-      showToast("Attendance for this site and date has already been submitted and locked.", "warning");
+      showToast(`Attendance for "${teamName}" on this date has already been submitted and locked.`, "warning");
       return;
     }
 
     showConfirmModal({
-      title: "Confirm Labour Submission?",
-      message: "You are about to submit today's labour attendance record.",
-      details: "After submission, editing and modifications will be locked for this date and site.",
+      title: `Submit "${teamName}" Attendance?`,
+      message: `You are about to submit ${teamName}'s labour attendance record for ${labourDate}.`,
+      details: "After submission, editing and modifications will be locked for this Team and Date.",
       confirmText: "Submit & Lock",
       cancelText: "Cancel",
       variant: "lock",
@@ -2035,20 +2037,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setLabourSubmitting(true);
         try {
           // Double check database inside modal confirm to prevent race condition duplicates
-          const reCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate);
+          const reCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate, selectedLabourTeamId);
           if (reCheck && reCheck.submitted) {
             setIsLabourLocked(true);
             setLabourLockInfo(reCheck);
-            showToast("Attendance for this site and date was already submitted and locked.", "warning");
+            showToast(`Attendance for "${teamName}" on this date was already submitted and locked.`, "warning");
             closeConfirmModal();
             return;
           }
 
-          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId);
-          showToast("Workforce attendance submitted and locked successfully.", "success");
+          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows);
+          showToast(`"${teamName}" attendance submitted and locked successfully.`, "success");
           setIsLabourLocked(true);
-          await fetchLabourLockStatus();
-          await loadLockedDates(); // Reload locked dates to trigger local locks
+          await fetchLabourLockStatus(selectedLabourTeamId);
+          await loadLockedDates(); // Reload locked dates
+          await loadDashboardData();
         } catch (err) {
           console.error("Failed to submit workforce attendance:", err);
           showToast("Submission failed: " + err.message, "error");
@@ -2286,11 +2289,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
-    if (isBulkMaterialLocked) {
-      showToast("Material entry for this site and date is already submitted and locked.", "error");
-      return;
-    }
-
     if (!selectedMaterialTeamId) {
       showToast("Please select a Material Team.", "error");
       return;
@@ -2352,15 +2350,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     setBulkMaterialSubmitting(true);
     try {
-      // Double check lock status from database to prevent race conditions & duplicate submissions
-      const reCheck = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
-      if (reCheck && reCheck.submitted) {
-        setIsBulkMaterialLocked(true);
-        setBulkMaterialLockInfo(reCheck);
-        showToast("Material entry for this site and date was already submitted and locked.", "warning");
-        return;
-      }
-
       const engineerId = currentEngineerId || userProfile?.uid || userProfile?.id || "";
       await saveBulkMaterialEntry({
         siteId: activeSiteId,
@@ -2371,15 +2360,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         items: itemsToSave
       });
 
-      showToast(`Material entry recorded for "${currentTeam.name}" (${itemsToSave.length} items)!`, "success");
-      setMaterialFlow("list");
-      setIsBulkMaterialLocked(true);
-      const lockStatus = await checkMaterialSubmissionStatus(activeSiteId, bulkMaterialDate);
-      setIsBulkMaterialLocked(lockStatus.submitted);
-      setBulkMaterialLockInfo(lockStatus);
+      showToast(`Material entry submitted & locked for "${currentTeam.name}" (${itemsToSave.length} item${itemsToSave.length !== 1 ? "s" : ""})!`, "success");
 
-      // Clear quantities on current standard rows
-      setMaterialUsageRows(prev => prev.map(r => r.type === "custom" ? r : ({ ...r, quantity: "" })));
+      // Reset form standard quantities and remove custom items that were just submitted so engineer can add more materials
+      setMaterialUsageRows(prev => prev.filter(r => r.type !== "custom").map(r => ({ ...r, quantity: "" })));
 
       await loadDashboardData();
     } catch (err) {
@@ -5123,32 +5107,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </select>
               </div>
             </div>
-
-            {/* 3. Submission Lock Warning */}
-            {isBulkMaterialLocked && (
-              <div style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "10px",
-                padding: "14px 16px",
-                backgroundColor: "#fef2f2",
-                border: "1px solid #fecaca",
-                borderRadius: "14px",
-                color: "var(--danger-700)",
-                fontSize: "13px",
-                fontWeight: "700"
-              }}>
-                <Lock size={18} />
-                <div>
-                  <span>Material entry for this Site and Date is <strong>SUBMITTED & LOCKED</strong>.</span>
-                  <div style={{ fontSize: "11.5px", fontWeight: "normal", color: "#991b1b", marginTop: "2px" }}>
-                    Duplicate submission disabled for this date.
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* 4. Materials Table Section (Only after selecting team) */}
+            {/* 3. Materials Table Section (Only after selecting team) */}
             {!selectedMaterialTeamId ? (
               <div style={{
                 textAlign: "center",
@@ -5333,8 +5292,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                         fontWeight: "750",
                                         color: "#16a34a",
                                         fontFamily: "monospace",
-                                        cursor: isBulkMaterialLocked ? "default" : "pointer",
-                                        textDecoration: isBulkMaterialLocked ? "none" : "underline",
+                                        cursor: "pointer",
+                                        textDecoration: "underline",
                                         textUnderlineOffset: "2px"
                                       }}
                                       title="Tap to edit custom amount"
@@ -5370,7 +5329,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               >
                                 {isCustom ? (
                                   <div 
-                                    onClick={() => !isBulkMaterialLocked && handleOpenCustomMaterialModal(row)}
+                                    onClick={() => handleOpenCustomMaterialModal(row)}
                                     title="Custom fixed rate entry - tap to edit amount"
                                     style={{
                                       width: "100%",
@@ -5386,7 +5345,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       fontSize: "13px",
                                       fontWeight: "750",
                                       color: "#16a34a",
-                                      cursor: isBulkMaterialLocked ? "default" : "pointer"
+                                      cursor: "pointer"
                                     }}
                                   >
                                     1
@@ -5401,7 +5360,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                     value={row.quantity}
                                     onClick={(e) => e.stopPropagation()}
                                     onChange={(e) => handleQuantityRowChange(row.rowId, e.target.value)}
-                                    disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                    disabled={bulkMaterialSubmitting}
                                     style={{
                                       width: "100%",
                                       maxWidth: "60px",
@@ -5413,7 +5372,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       fontSize: "13px",
                                       fontWeight: "750",
                                       textAlign: "center",
-                                      backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : "#ffffff",
+                                      backgroundColor: "#ffffff",
                                       outline: "none"
                                     }}
                                   />
@@ -5449,7 +5408,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                     e.stopPropagation();
                                     handleRemoveMaterialRow(row.rowId);
                                   }}
-                                  disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                                  disabled={bulkMaterialSubmitting}
                                   style={{
                                     background: "#fef2f2",
                                     border: "1px solid #fecaca",
@@ -5457,7 +5416,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                     width: "36px",
                                     height: "36px",
                                     color: "#dc2626",
-                                    cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
+                                    cursor: "pointer",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
@@ -5488,7 +5447,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         <button
                           type="button"
                           onClick={handleAddMaterialRow}
-                          disabled={isBulkMaterialLocked || bulkMaterialSubmitting || allAdded}
+                          disabled={bulkMaterialSubmitting || allAdded}
                           style={{
                             flex: 1,
                             boxSizing: "border-box",
@@ -5516,7 +5475,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         <button
                           type="button"
                           onClick={() => handleOpenCustomMaterialModal()}
-                          disabled={isBulkMaterialLocked || bulkMaterialSubmitting}
+                          disabled={bulkMaterialSubmitting}
                           style={{
                             flex: 1,
                             boxSizing: "border-box",
@@ -5527,7 +5486,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             borderRadius: "10px",
                             fontSize: "13px",
                             fontWeight: "750",
-                            cursor: isBulkMaterialLocked ? "not-allowed" : "pointer",
+                            cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -5639,8 +5598,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                     <Button
                       type="submit"
-                      variant={isBulkMaterialLocked ? "outline" : "primary"}
-                      disabled={isBulkMaterialLocked || itemsWithQtyCount === 0 || bulkMaterialSubmitting}
+                      variant="primary"
+                      disabled={itemsWithQtyCount === 0 || bulkMaterialSubmitting}
                       style={{
                         width: "100%",
                         height: "48px",
@@ -5649,18 +5608,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                        gap: "8px",
-                        backgroundColor: isBulkMaterialLocked ? "#f1f5f9" : undefined,
-                        color: isBulkMaterialLocked ? "#64748b" : undefined,
-                        borderColor: isBulkMaterialLocked ? "#cbd5e1" : undefined
+                        gap: "8px"
                       }}
                     >
-                      {isBulkMaterialLocked ? <Lock size={18} /> : <Save size={18} />}
+                      <Save size={18} />
                       <span>
                         {bulkMaterialSubmitting
                           ? "Submitting..."
-                          : isBulkMaterialLocked
-                          ? `Locked for ${bulkMaterialDate} (Submitted)`
+                          : itemsWithQtyCount === 0
+                          ? "Enter Quantities to Submit"
                           : `Submit Material Usage (₹${grandTotalAmount.toLocaleString("en-IN")})`}
                       </span>
                     </Button>
@@ -6906,7 +6862,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                 {/* Action button inside details */}
                 <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
-                  {isCustom && !isBulkMaterialLocked && (
+                  {isCustom && (
                     <Button
                       type="button"
                       variant="outline"
@@ -8156,9 +8112,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     flexDirection: "column",
                     gap: "6px"
                   }}>
-                    <div>🔒 Attendance submitted successfully. This record is locked and can no longer be modified.</div>
+                    <div>🔒 Attendance for "{labourTeams.find(t => t.id === selectedLabourTeamId)?.name || labourTeams.find(t => t.id === selectedLabourTeamId)?.teamName || "Selected Team"}" is submitted and locked.</div>
+                    <div style={{ fontSize: "12px", color: "#15803d", fontWeight: "600" }}>
+                      To record attendance for another team on this date, select a different team from the dropdown above.
+                    </div>
                     {labourLockInfo && (
-                      <div style={{ fontSize: "12.5px", fontWeight: "600", color: "#15803d" }}>
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#15803d", marginTop: "2px" }}>
                         {labourLockInfo.submittedAt && (
                           <span>
                             Submitted: {
@@ -8830,7 +8789,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           ) : (
             sortedDates.map(dateStr => {
               const records = groupedByDate[dateStr];
-              const isLocked = lockedDates.has(dateStr);
+              const isLocked = records.some(r => r.status === "submitted" || r.locked || isTeamLockedOnDate(dateStr, r.teamId));
 
               let dateWorkers = 0;
               let dateCost = 0;
@@ -8882,7 +8841,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         color: isLocked ? "#b91c1c" : "#166534",
                         border: isLocked ? "1px solid #fca5a5" : "1px solid #bbf7d0"
                       }}>
-                        {isLocked ? "🔒 Locked" : "🟢 Open"}
+                        {isLocked ? "🔒 Team Locked" : "🟢 Open"}
                       </span>
                     </div>
 
@@ -8902,10 +8861,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       const count = Number(record.workerCount) || 1;
                       const units = Number(record.customWorkUnits !== undefined ? record.customWorkUnits : (record.units !== undefined ? record.units : 1.0)) || 1.0;
                       const teamObj = labourTeams.find(t => t.id === record.teamId);
+                      const teamName = teamObj ? (teamObj.name || teamObj.teamName) : (record.teamName || "Labour Team");
                       const catObj = teamObj?.categories?.[record.categoryId] || categories.find(c => c.id === record.categoryId);
                       const catName = catObj ? catObj.name : (record.categoryName || record.category || "Labour Category");
                       const wage = Number(record.dailyWage || record.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
                       const cost = record.calculatedAmount !== undefined && record.calculatedAmount !== null ? Number(record.calculatedAmount) : (count * units * wage);
+                      const recordLocked = record.status === "submitted" || record.locked || isTeamLockedOnDate(record.attendanceDate, record.teamId);
 
                       return (
                         <div key={record.id || `${record.categoryId}_${record.attendanceDate}`} style={{
@@ -8918,8 +8879,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           border: "1px solid #e2e8f0"
                         }}>
                           <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                               <span style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a" }}>{catName}</span>
+                              <span style={{
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                padding: "2px 8px",
+                                borderRadius: "6px",
+                                backgroundColor: "#f0fdf4",
+                                color: "#166534",
+                                border: "1px solid #bbf7d0"
+                              }}>
+                                {teamName}
+                              </span>
                               <span style={{
                                 fontSize: "11px",
                                 fontWeight: "750",
@@ -8931,12 +8903,38 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               }}>
                                 {units} Work Unit(s)
                               </span>
+                              {recordLocked && (
+                                <span style={{
+                                  fontSize: "10.5px",
+                                  fontWeight: "700",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  backgroundColor: "#fef2f2",
+                                  color: "#b91c1c",
+                                  border: "1px solid #fca5a5"
+                                }}>
+                                  🔒 Locked
+                                </span>
+                              )}
+                              {(record.isAdminEntry || record.createdVia === "admin_assisted_entry") && (
+                                <span style={{
+                                  fontSize: "10.5px",
+                                  fontWeight: "750",
+                                  padding: "2px 6px",
+                                  borderRadius: "4px",
+                                  backgroundColor: "#eff6ff",
+                                  color: "#1d4ed8",
+                                  border: "1px solid #bfdbfe"
+                                }} title={`Entered by Admin (${record.createdByName || "Admin"}) on your behalf`}>
+                                  🛡️ Admin Entry
+                                </span>
+                              )}
                             </div>
                             <span style={{ fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
                               {count} Worker(s) @ ₹{wage.toLocaleString("en-IN")} / Day
                             </span>
                             <span style={{ fontSize: "11px", color: "#94a3b8" }}>
-                              Submitted at {getEntryTimeStr(record)} by {record.createdBy || "Engineer"}
+                              Submitted at {getEntryTimeStr(record)} by {record.isAdminEntry ? `Admin (${record.createdByName || "Admin"}) on your behalf` : (record.createdBy || "Engineer")}
                             </span>
                           </div>
 

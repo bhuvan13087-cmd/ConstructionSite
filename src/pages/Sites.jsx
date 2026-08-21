@@ -32,8 +32,10 @@ import {
   Calendar,
   Check,
   X,
-  AlertCircle
+  AlertCircle,
+  Shield
 } from "lucide-react";
+import AdminAssistedEntryModal from "../components/common/AdminAssistedEntryModal";
 
 const addressGeocodeCache = new Map();
 
@@ -320,6 +322,7 @@ export default function Sites() {
   const [progressFilter, setProgressFilter] = useState("all");
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
+  const [showAdminEntryModal, setShowAdminEntryModal] = useState(false);
   const [confirmModal, setConfirmModal] = useState({
     show: false,
     title: "Confirm Action",
@@ -852,6 +855,15 @@ export default function Sites() {
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
           <ViewToggle viewMode={viewMode} onChange={setViewMode} />
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setShowAdminEntryModal(true)}
+            style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8", fontWeight: "750" }}
+          >
+            <Shield size={16} />
+            <span>Add Entry for Engineer</span>
+          </Button>
           <Button onClick={handleOpenAddModal} icon={Plus} className="btn-add">
             Add Site
           </Button>
@@ -1563,6 +1575,18 @@ export default function Sites() {
         variant={confirmModal.variant || "danger"}
         onConfirm={confirmModal.onConfirm}
       />
+
+      {/* ADMIN ASSISTED ENTRY MODAL */}
+      {showAdminEntryModal && (
+        <AdminAssistedEntryModal
+          isOpen={showAdminEntryModal}
+          onClose={() => setShowAdminEntryModal(false)}
+          onSuccess={() => {
+            loadData();
+            showToast("Admin entry saved and synced.", "success");
+          }}
+        />
+      )}
 
       <Loading show={loading} text="Processing Request..." />
     </Layout>

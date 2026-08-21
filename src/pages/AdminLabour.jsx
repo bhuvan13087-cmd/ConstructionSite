@@ -39,7 +39,8 @@ import {
   Save,
   X,
   Search,
-  Eye
+  Eye,
+  Shield
 } from "lucide-react";
 import Button from "../components/common/Button";
 import Loading from "../components/common/Loading";
@@ -48,10 +49,12 @@ import Badge from "../components/common/Badge";
 import { Modal } from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
 import ViewToggle from "../components/common/ViewToggle";
+import AdminAssistedEntryModal from "../components/common/AdminAssistedEntryModal";
 import { useAuth } from "../context/AuthContext";
 
 export default function AdminLabour() {
   const { userProfile } = useAuth();
+  const [showAdminEntryModal, setShowAdminEntryModal] = useState(false);
   
   // Custom Confirmation Modal state
   const [confirmModalState, setConfirmModalState] = useState({
@@ -1690,7 +1693,19 @@ export default function AdminLabour() {
 
         {/* Detailed Attendance Logs Grid */}
         <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-          <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Detailed Attendance Logs</h3>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+            <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>Detailed Attendance Logs</h3>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setShowAdminEntryModal(true)}
+              style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8", fontWeight: "750" }}
+            >
+              <Shield size={14} />
+              <span>Add Entry for Engineer</span>
+            </Button>
+          </div>
           
           {filteredAttendance.length === 0 ? (
             <div style={{ textAlign: "center", padding: "32px", backgroundColor: "#ffffff", borderRadius: "12px", border: "1px dashed #cbd5e1", color: "#64748b", fontSize: "12.5px" }}>
@@ -1706,7 +1721,14 @@ export default function AdminLabour() {
                 return (
                   <div key={record.id || index} style={{ backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", padding: "14px", display: "flex", flexDirection: "column", gap: "8px", boxShadow: "0 2px 6px rgba(0,0,0,0.03)" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <strong style={{ fontSize: "13.5px", color: "#0f172a" }}>{site.siteName}</strong>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: "13.5px", color: "#0f172a" }}>{site.siteName}</strong>
+                        {(record.isAdminEntry || record.createdVia === "admin_assisted_entry") && (
+                          <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${record.createdByName || "Admin"}`}>
+                            🛡️ Admin Entry
+                          </span>
+                        )}
+                      </div>
                       <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "100px" }}>
                         Present
                       </span>
@@ -2366,6 +2388,13 @@ export default function AdminLabour() {
       </Modal>
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
+
+      {showAdminEntryModal && (
+        <AdminAssistedEntryModal
+          isOpen={showAdminEntryModal}
+          onClose={() => setShowAdminEntryModal(false)}
+        />
+      )}
 
     </Layout>
   );

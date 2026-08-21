@@ -1735,15 +1735,16 @@ export async function reconcileSiteAssignments() {
 export async function addMaterial(materialData) {
   const db = getDb();
   const matName = (materialData.materialName || "").trim();
-  const matSlug = matName.toLowerCase().replace(/[^a-z0-9]/g, "_");
   const purchaseDate = materialData.purchaseDate || new Date().toISOString().split("T")[0];
   
-  // Use deterministic ID if available, or custom id, or fallback
-  const docId = materialData.id || `mat_log_${materialData.siteId}_${matSlug}_${purchaseDate}`;
-  const newMaterialRef = doc(db, "materials", docId);
+  // Use unique ID if not explicitly specified
+  const newMaterialRef = materialData.id 
+    ? doc(db, "materials", materialData.id) 
+    : doc(collection(db, "materials"));
   const matId = newMaterialRef.id;
   
   await setDoc(newMaterialRef, {
+    id: matId,
     siteId: materialData.siteId,
     engineerId: materialData.engineerId,
     teamId: materialData.teamId || null,
@@ -1760,6 +1761,9 @@ export async function addMaterial(materialData) {
     notes: materialData.notes || "",
     invoiceUrl: materialData.invoiceUrl || "",
     status: materialData.status || "Approved",
+    locked: true,
+    submitted: true,
+    submittedAt: serverTimestamp(),
     type: "material_log",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
@@ -4744,17 +4748,29 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
   const docId = recordId || `${recordData.siteId}_${recordData.teamId}_${recordData.categoryId}_${safeType}_${recordData.attendanceDate}`;
   const docRef = doc(db, "labourMemberAttendance", docId);
   
+  // Guard against modifying already submitted/locked records
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    const existing = docSnap.data();
+    if (existing.locked || existing.status === "submitted" || existing.submitted) {
+      throw new Error("Cannot modify: This team's attendance is submitted and locked.");
+    }
+  }
+
   const workerCount = Number(recordData.workerCount) || 0;
   const customWorkUnits = Number(recordData.customWorkUnits !== undefined ? recordData.customWorkUnits : (recordData.units !== undefined ? recordData.units : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
   const dailyWage = Number(recordData.dailyWage !== undefined ? recordData.dailyWage : (recordData.wage || 0)) || 0;
   const calculatedAmount = Number(recordData.calculatedAmount) || (workerCount * customWorkUnits * dailyWage);
 
   const payload = {
+    id: docId,
     siteId: recordData.siteId,
     teamId: recordData.teamId,
+    teamName: recordData.teamName || "",
     categoryId: recordData.categoryId,
     categoryName: recordData.categoryName || "",
     attendanceDate: recordData.attendanceDate,
+    date: recordData.attendanceDate,
     workerCount,
     customWorkUnits,
     units: customWorkUnits,
@@ -4779,6 +4795,13 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
 export async function deleteLabourAttendanceRecord(recordId) {
   const db = getDb();
   const docRef = doc(db, "labourMemberAttendance", recordId);
+  const docSnap = await getDoc(docRef);
+  if (docSnap.exists()) {
+    const existing = docSnap.data();
+    if (existing.locked || existing.status === "submitted" || existing.submitted) {
+      throw new Error("Cannot delete: This team's attendance is submitted and locked.");
+    }
+  }
   await deleteDoc(docRef);
 }
 
@@ -4919,15 +4942,62 @@ export function subscribeGeneralExpenses(onUpdate) {
   });
 }
 
-// Check daily labor attendance submission status
-export async function checkLabourSubmissionStatus(siteId, dateStr) {
+// Check daily labour attendance submission status per Site + Date + Team
+export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null) {
   if (!siteId || !dateStr) return { submitted: false };
   const cleanSiteId = String(siteId).trim();
   const cleanDateStr = String(dateStr).trim();
+  const cleanTeamId = teamId ? String(teamId).trim() : null;
 
   try {
     const db = getDb();
-    // 1. Direct doc lookup by document ID format: labour_lock_${siteId}_${dateStr}
+    
+    // 1. If teamId is specified, check team-level lock in attendance collection: labour_lock_${siteId}_${teamId}_${dateStr}
+    if (cleanTeamId) {
+      const teamDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`);
+      const teamDocSnap = await getDoc(teamDocRef);
+      if (teamDocSnap.exists()) {
+        const data = teamDocSnap.data();
+        if (data.status === "submitted" || data.locked || data.submitted) {
+          return {
+            submitted: true,
+            locked: true,
+            submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
+            submittedBy: data.submittedBy || data.engineerId || data.userId || null,
+            teamId: cleanTeamId
+          };
+        }
+      }
+
+      // Also check labourMemberAttendance for any submitted/locked record for this specific team
+      const qTeam = query(
+        collection(db, "labourMemberAttendance"),
+        where("siteId", "==", cleanSiteId),
+        where("attendanceDate", "==", cleanDateStr),
+        where("teamId", "==", cleanTeamId)
+      );
+      const qSnap = await getDocs(qTeam);
+      if (!qSnap.empty) {
+        const submittedDoc = qSnap.docs.find(d => {
+          const dt = d.data();
+          return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
+        });
+        if (submittedDoc) {
+          const dt = submittedDoc.data();
+          return {
+            submitted: true,
+            locked: true,
+            submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
+            submittedBy: dt.submittedBy || dt.createdBy || null,
+            teamId: cleanTeamId
+          };
+        }
+      }
+
+      return { submitted: false };
+    }
+
+    // 2. Legacy fallback if no teamId provided: check generic site-date lock
     const docRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
@@ -4935,28 +5005,11 @@ export async function checkLabourSubmissionStatus(siteId, dateStr) {
       if (data.status === "submitted" && (!data.siteId || String(data.siteId).trim() === cleanSiteId) && (!data.date || String(data.date).trim() === cleanDateStr)) {
         return {
           submitted: true,
+          locked: true,
           submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
           submittedBy: data.submittedBy || data.engineerId || data.userId || null
         };
       }
-    }
-
-    // 2. Query search in attendance collection for any lock record matching siteId, dateStr, and status === "submitted"
-    const q = query(
-      collection(db, "attendance"),
-      where("siteId", "==", cleanSiteId),
-      where("date", "==", cleanDateStr),
-      where("status", "==", "submitted"),
-      where("type", "==", "labour_attendance_lock")
-    );
-    const querySnap = await getDocs(q);
-    if (!querySnap.empty) {
-      const data = querySnap.docs[0].data();
-      return {
-        submitted: true,
-        submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
-        submittedBy: data.submittedBy || data.engineerId || data.userId || null
-      };
     }
   } catch (err) {
     console.error("Error checking labour submission status:", err);
@@ -4964,42 +5017,71 @@ export async function checkLabourSubmissionStatus(siteId, dateStr) {
   return { submitted: false };
 }
 
-
-// Submit workforce attendance for site and date
-export async function submitLabourAttendance(siteId, dateStr, engineerId) {
+// Submit workforce attendance for site, date, and specific team
+export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId = null, attendanceItems = []) {
   if (!siteId || !dateStr) throw new Error("Site ID and Date are required to submit attendance.");
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const cleanTeamId = teamId ? String(teamId).trim() : null;
+
+  // Duplicate Prevention Check directly against database
+  const statusCheck = await checkLabourSubmissionStatus(cleanSiteId, cleanDateStr, cleanTeamId);
+  if (statusCheck && statusCheck.submitted) {
+    throw new Error("Labour attendance for this team on this date has already been submitted and locked.");
+  }
+
   const db = getDb();
-  const docId = `labour_lock_${siteId}_${dateStr}`;
-  const docRef = doc(db, "attendance", docId);
+  const batch = writeBatch(db);
+
+  // 1. Create team-specific lock document in attendance collection
+  const lockDocId = cleanTeamId 
+    ? `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`
+    : `labour_lock_${cleanSiteId}_${cleanDateStr}`;
+  const lockDocRef = doc(db, "attendance", lockDocId);
   
-  await setDoc(docRef, {
+  batch.set(lockDocRef, {
     type: "labour_attendance_lock",
     userId: engineerId || "",
     engineerId: engineerId || "",
-    siteId,
-    date: dateStr,
+    siteId: cleanSiteId,
+    date: cleanDateStr,
+    attendanceDate: cleanDateStr,
+    teamId: cleanTeamId || "",
     status: "submitted",
+    locked: true,
+    submitted: true,
     submittedAt: serverTimestamp(),
     submittedBy: engineerId || "",
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
+
+  // 2. Mark all labourMemberAttendance records for this site, date, and team as submitted & locked
+  if (cleanTeamId) {
+    const qTeam = query(
+      collection(db, "labourMemberAttendance"),
+      where("siteId", "==", cleanSiteId),
+      where("attendanceDate", "==", cleanDateStr),
+      where("teamId", "==", cleanTeamId)
+    );
+    const qSnap = await getDocs(qTeam);
+    qSnap.forEach(d => {
+      batch.update(d.ref, {
+        status: "submitted",
+        locked: true,
+        submitted: true,
+        submittedAt: serverTimestamp(),
+        submittedBy: engineerId || "",
+        updatedAt: serverTimestamp()
+      });
+    });
+  }
+
+  await batch.commit();
 }
 
-// Check bulk material submission status for site and date
+// Check bulk material submission status for site and date (per-record locking replaces day-wide locking)
 export async function checkMaterialSubmissionStatus(siteId, dateStr) {
-  if (!siteId || !dateStr) return { submitted: false };
-  const db = getDb();
-  const docRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
-  const docSnap = await getDoc(docRef);
-  if (docSnap.exists()) {
-    const data = docSnap.data();
-    return {
-      submitted: data.status === "submitted",
-      submittedAt: data.submittedAt || null,
-      submittedBy: data.submittedBy || null
-    };
-  }
   return { submitted: false };
 }
 
@@ -5010,11 +5092,6 @@ export async function saveBulkMaterialEntry(bulkData) {
   if (!dateStr) throw new Error("Entry date is required.");
   if (!engineerId) throw new Error("Engineer ID is required.");
 
-  const statusCheck = await checkMaterialSubmissionStatus(siteId, dateStr);
-  if (statusCheck.submitted) {
-    throw new Error("Material entry for this site and date is already submitted and locked.");
-  }
-
   const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
     throw new Error("Please enter at least one material for submission.");
@@ -5023,7 +5100,7 @@ export async function saveBulkMaterialEntry(bulkData) {
   const db = getDb();
   const batch = writeBatch(db);
 
-  // Save each material item to materials collection in single atomic batch
+  // Save each material item as a unique permanent record to materials collection in single atomic batch
   for (const item of validItems) {
     const isCustom = item.type === "custom";
     const qty = isCustom ? 1 : Number(item.quantity);
@@ -5032,11 +5109,12 @@ export async function saveBulkMaterialEntry(bulkData) {
       ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
       : (qty * uPrice);
     const matName = (item.materialName || item.name || "").trim();
-    const matSlug = matName.toLowerCase().replace(/[^a-z0-9]/g, "_");
-    const docId = `bulk_log_${siteId}_${matSlug}_${dateStr}`;
-    const docRef = doc(db, "materials", docId);
+    
+    // Generate unique record ID for each submitted material record
+    const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
 
-    batch.set(docRef, {
+    batch.set(newDocRef, {
+      id: newDocRef.id,
       siteId,
       engineerId,
       teamId: item.teamId || bulkData.teamId || null,
@@ -5055,26 +5133,15 @@ export async function saveBulkMaterialEntry(bulkData) {
       purchaseDate: dateStr,
       notes: item.notes?.trim() || `${isCustom ? "Custom Material" : "Material"} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
-      status: "Approved", // Automatically approved bulk log
+      status: "Approved", // Automatically approved material log
+      locked: true,
+      submitted: true,
+      submittedAt: serverTimestamp(),
       type: "material_log",
+      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
-    }, { merge: true });
+    });
   }
-
-  // Create submission lock document in the same batch
-  const lockRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
-  batch.set(lockRef, {
-    type: "material_lock",
-    engineerId: engineerId,
-    siteId: siteId,
-    date: dateStr,
-    status: "submitted",
-    submittedAt: serverTimestamp(),
-    submittedBy: engineerId,
-    itemsCount: validItems.length,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }, { merge: true });
 
   await batch.commit();
 
@@ -5481,5 +5548,270 @@ export async function getSitePendingAuditDetails(siteId) {
     totalPendingCount,
     hasPendingItems: totalPendingCount > 0
   };
+}
+
+// ============================================================================
+// ADMIN ASSISTED ENTRY (OVERRIDE WHEN SITE ENGINEER IS UNAVAILABLE)
+// ============================================================================
+
+// Submit Admin Assisted Labour Attendance for a Site, Date, Team & Assigned Engineer
+export async function submitAdminAssistedLabourAttendance({
+  siteId,
+  dateStr,
+  assignedEngineerId,
+  teamId,
+  teamName,
+  attendanceRows = [],
+  adminUser = {},
+  reason = "Site Engineer Unavailable"
+}) {
+  if (!siteId || !dateStr || !teamId) {
+    throw new Error("Site, Date, and Labour Team are required.");
+  }
+  if (!assignedEngineerId) {
+    throw new Error("Assigned Site Engineer ID is required.");
+  }
+  if (!attendanceRows || attendanceRows.length === 0) {
+    throw new Error("Please provide at least one workforce category with count.");
+  }
+
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const cleanTeamId = String(teamId).trim();
+  const cleanAssignedEngId = String(assignedEngineerId).trim();
+  const adminId = adminUser.uid || adminUser.id || "admin";
+  const adminName = adminUser.fullName || adminUser.name || "Admin";
+
+  // Duplicate Prevention Check directly against database
+  const lockStatus = await checkLabourSubmissionStatus(cleanSiteId, cleanDateStr, cleanTeamId);
+  if (lockStatus && lockStatus.submitted) {
+    throw new Error(`Attendance for this team on ${cleanDateStr} has already been submitted and locked.`);
+  }
+
+  const db = getDb();
+  const batch = writeBatch(db);
+
+  // 1. Save each category attendance record
+  for (const row of attendanceRows) {
+    const workerCount = Number(row.workerCount) || 0;
+    if (workerCount <= 0) continue;
+
+    const units = Math.max(0.01, Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1.0)));
+    const dailyWage = Number(row.dailyWage || row.wage || 0);
+    const calculatedAmount = Number(row.calculatedAmount) || (workerCount * units * dailyWage);
+    const safeType = `${units}_Units`.replace(/\s+/g, "_");
+    const docId = row.id || `${cleanSiteId}_${cleanTeamId}_${row.categoryId}_${safeType}_${cleanDateStr}`;
+    const docRef = doc(db, "labourMemberAttendance", docId);
+
+    batch.set(docRef, {
+      id: docId,
+      siteId: cleanSiteId,
+      teamId: cleanTeamId,
+      teamName: teamName || row.teamName || "Labour Team",
+      categoryId: row.categoryId,
+      categoryName: row.categoryName || row.name || "",
+      attendanceDate: cleanDateStr,
+      date: cleanDateStr,
+      workerCount,
+      customWorkUnits: units,
+      units: units,
+      dailyWage,
+      wage: dailyWage,
+      calculatedAmount,
+      totalAmount: calculatedAmount,
+      attendanceType: `${units} Units`,
+      
+      // Audit information
+      assignedEngineerId: cleanAssignedEngId,
+      engineerId: cleanAssignedEngId, // Preserves original assigned engineer for all dashboards/reports
+      createdBy: adminId,
+      createdByName: adminName,
+      createdByRole: "admin",
+      createdVia: "admin_assisted_entry",
+      isAdminEntry: true,
+      adminReason: reason,
+      
+      status: "submitted",
+      locked: true,
+      submitted: true,
+      submittedAt: serverTimestamp(),
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+
+  // 2. Create team-specific lock record in attendance collection
+  const lockDocId = `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`;
+  const lockDocRef = doc(db, "attendance", lockDocId);
+  batch.set(lockDocRef, {
+    type: "labour_attendance_lock",
+    userId: adminId,
+    engineerId: cleanAssignedEngId,
+    assignedEngineerId: cleanAssignedEngId,
+    siteId: cleanSiteId,
+    date: cleanDateStr,
+    attendanceDate: cleanDateStr,
+    teamId: cleanTeamId,
+    status: "submitted",
+    locked: true,
+    submitted: true,
+    submittedAt: serverTimestamp(),
+    submittedBy: adminId,
+    createdByName: adminName,
+    createdByRole: "admin",
+    createdVia: "admin_assisted_entry",
+    isAdminEntry: true,
+    adminReason: reason,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  }, { merge: true });
+
+  await batch.commit();
+  return { success: true };
+}
+
+// Submit Admin Assisted Material Entry for a Site, Date & Assigned Engineer
+export async function submitAdminAssistedMaterialEntry({
+  siteId,
+  dateStr,
+  assignedEngineerId,
+  items = [],
+  adminUser = {},
+  reason = "Site Engineer Unavailable"
+}) {
+  if (!siteId || !dateStr) {
+    throw new Error("Site and Date are required.");
+  }
+  if (!assignedEngineerId) {
+    throw new Error("Assigned Site Engineer ID is required.");
+  }
+  const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
+  if (validItems.length === 0) {
+    throw new Error("Please enter at least one material for submission.");
+  }
+
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const cleanAssignedEngId = String(assignedEngineerId).trim();
+  const adminId = adminUser.uid || adminUser.id || "admin";
+  const adminName = adminUser.fullName || adminUser.name || "Admin";
+
+  const db = getDb();
+  const batch = writeBatch(db);
+
+  for (const item of validItems) {
+    const isCustom = item.type === "custom";
+    const qty = isCustom ? 1 : Number(item.quantity);
+    const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
+    const totAmount = isCustom 
+      ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
+      : (qty * uPrice);
+    const matName = (item.materialName || item.name || "").trim();
+
+    const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
+
+    batch.set(newDocRef, {
+      id: newDocRef.id,
+      siteId: cleanSiteId,
+      assignedEngineerId: cleanAssignedEngId,
+      engineerId: cleanAssignedEngId, // Preserves original assigned engineer
+      teamId: item.teamId || null,
+      teamName: item.teamName || item.category || "General",
+      materialName: matName,
+      materialType: isCustom ? "custom" : "standard",
+      category: item.category || item.teamName || "General",
+      quantity: qty,
+      requiredQuantity: qty,
+      unit: isCustom ? "" : (item.unit || "Unit"),
+      unitPrice: uPrice,
+      rate: uPrice,
+      amount: totAmount,
+      totalAmount: totAmount,
+      supplierName: item.supplierName?.trim() || item.teamName || "Material Supplier",
+      purchaseDate: cleanDateStr,
+      notes: item.notes?.trim() || `Admin Entry on behalf of assigned engineer on ${cleanDateStr}`,
+      invoiceUrl: item.invoiceUrl || "",
+      status: "Approved",
+      locked: true,
+      submitted: true,
+      submittedAt: serverTimestamp(),
+      type: "material_log",
+      
+      // Audit Information
+      createdBy: adminId,
+      createdByName: adminName,
+      createdByRole: "admin",
+      createdVia: "admin_assisted_entry",
+      isAdminEntry: true,
+      adminReason: reason,
+
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+  }
+
+  await batch.commit();
+  return { success: true, count: validItems.length };
+}
+
+// Submit Admin Assisted Progress Report (DPR)
+export async function submitAdminAssistedProgressReport({
+  siteId,
+  dateStr,
+  assignedEngineerId,
+  description = "",
+  progress = 0,
+  additionalNotes = {},
+  adminUser = {},
+  reason = "Site Engineer Unavailable"
+}) {
+  if (!siteId || !dateStr || !assignedEngineerId) {
+    throw new Error("Site, Date, and Assigned Engineer are required.");
+  }
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const cleanAssignedEngId = String(assignedEngineerId).trim();
+  const adminId = adminUser.uid || adminUser.id || "admin";
+  const adminName = adminUser.fullName || adminUser.name || "Admin";
+
+  const db = getDb();
+  const newReportRef = doc(collection(db, "reports"));
+
+  const reportPayload = {
+    id: newReportRef.id,
+    siteId: cleanSiteId,
+    date: cleanDateStr,
+    assignedEngineerId: cleanAssignedEngId,
+    engineerId: cleanAssignedEngId, // Preserves assigned engineer
+    description: description || "Daily progress report logged by Admin.",
+    progress: Number(progress) || 0,
+    photoIds: additionalNotes.photoIds || [],
+    completedToday: additionalNotes.completedToday || "",
+    currentlyRunning: additionalNotes.currentlyRunning || "",
+    materialsStatus: additionalNotes.materialsStatus || "",
+    problemsFaced: additionalNotes.problemsFaced || "",
+    pendingWork: additionalNotes.pendingWork || "",
+    nextActivity: additionalNotes.nextActivity || "",
+    
+    // Audit information
+    createdBy: adminId,
+    createdByName: adminName,
+    createdByRole: "admin",
+    createdVia: "admin_assisted_entry",
+    isAdminEntry: true,
+    adminReason: reason,
+
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp()
+  };
+
+  await setDoc(newReportRef, reportPayload);
+
+  try {
+    const legacyRef = doc(db, "dailyUpdates", newReportRef.id);
+    await setDoc(legacyRef, reportPayload);
+  } catch (e) {}
+
+  return { success: true, id: newReportRef.id };
 }
 

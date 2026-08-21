@@ -1172,30 +1172,38 @@ export default function ReportsDashboard() {
       // Resolve team
       const teamObj = teams.find(t => t.id === r.teamId);
       const teamId = r.teamId || "default_team";
-      const teamName = teamObj?.teamName || r.teamName || "General Labour";
-
-      // Resolve engineer
+      // Resolve assigned engineer and admin creator
       let engineerName = "";
-      const creatorId = r.createdBy || r.markedBy;
-      if (creatorId && engineersMap[creatorId]) {
-        engineerName = engineersMap[creatorId];
+      const assignedId = r.assignedEngineerId || r.engineerId;
+      if (assignedId && engineersMap[assignedId]) {
+        engineerName = engineersMap[assignedId];
       } else {
-        const siteObj = sites.find(s => s.id === r.siteId);
-        const assignedIds = siteObj?.assignedEngineers || [];
-        const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
-        if (assignedNames.length > 0) {
-          engineerName = assignedNames.join(", ");
+        const creatorId = r.createdBy || r.markedBy;
+        if (creatorId && engineersMap[creatorId]) {
+          engineerName = engineersMap[creatorId];
         } else {
-          const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(r.siteId)).map(e => e.fullName).filter(Boolean);
-          engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+          const siteObj = sites.find(s => s.id === r.siteId);
+          const assignedIds = siteObj?.assignedEngineers || [];
+          const assignedNames = assignedIds.map(id => engineersMap[id]).filter(Boolean);
+          if (assignedNames.length > 0) {
+            engineerName = assignedNames.join(", ");
+          } else {
+            const matchingEngs = engineers.filter(e => e.assignedSites && e.assignedSites.includes(r.siteId)).map(e => e.fullName).filter(Boolean);
+            engineerName = matchingEngs.length > 0 ? matchingEngs.join(", ") : "Site Engineer";
+          }
         }
       }
+
+      const isAdminEntry = Boolean(r.isAdminEntry || r.createdVia === "admin_assisted_entry");
+      const adminCreatorName = r.createdByName || "Admin";
 
       if (!dateMap[rDate].teamMap[teamId]) {
         dateMap[rDate].teamMap[teamId] = {
           teamId,
           teamName,
           engineerName,
+          isAdminEntry,
+          adminCreatorName,
           categories: []
         };
       }
@@ -3044,11 +3052,24 @@ export default function ReportsDashboard() {
                           {formatDDMMYYYY(day.dateStr)}
                         </span>
                       </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                         <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>SITE ENGINEER:</span>
                         <span style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>
                           {team.engineerName || labourDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}
                         </span>
+                        {team.isAdminEntry && (
+                          <span style={{
+                            fontSize: "10.5px",
+                            fontWeight: "800",
+                            color: "#1d4ed8",
+                            backgroundColor: "#eff6ff",
+                            padding: "2px 6px",
+                            borderRadius: "4px",
+                            border: "1px solid #bfdbfe"
+                          }} title={`Admin Override Entry by ${team.adminCreatorName || "Admin"}`}>
+                            🛡️ Admin Entry (by {team.adminCreatorName || "Admin"})
+                          </span>
+                        )}
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                         <span style={{ fontSize: "11px", fontWeight: "800", color: "#64748b", textTransform: "uppercase" }}>LABOUR TEAM:</span>
@@ -4295,7 +4316,7 @@ export default function ReportsDashboard() {
                         borderBottom: "1px solid #cbd5e1"
                       }}>
                         <span>DATE: {formatDDMMYYYY(day.dateStr)}</span>
-                        <span>SITE ENGINEER: {team.engineerName || labourDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}</span>
+                        <span>SITE ENGINEER: {team.engineerName || labourDateRangeReportData.assignedEngineersDisplay || "Site Engineer"}{team.isAdminEntry ? ` (Admin Entry: by ${team.adminCreatorName || "Admin"})` : ""}</span>
                         <span>LABOUR TEAM: {team.teamName}</span>
                       </div>
                       <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
