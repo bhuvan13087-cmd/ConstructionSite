@@ -99,14 +99,6 @@ export function subscribeToUserProfile(uid, callback) {
       }
       callback(null);
     }
-  }, (err) => {
-    console.error("subscribeToUserProfile snapshot error, falling back to getUserProfile:", err);
-    getUserProfile(uid).then(profile => {
-      callback(profile);
-    }).catch(e => {
-      console.error("getUserProfile fallback failed:", e);
-      callback(null);
-    });
   });
 }
 
@@ -1476,34 +1468,15 @@ export async function getAssignedSitesForEngineer(engineerId) {
   const db = getDb();
   
   // 1. Fetch active assignments directly from canonical siteAssignments collection
-  let assignedSiteIds = [];
-  try {
-    const assignmentsColl = collection(db, "siteAssignments");
-    const q = query(
-      assignmentsColl,
-      where("engineerId", "==", engineerId),
-      where("status", "==", "active")
-    );
-    const snap = await getDocs(q);
-    assignedSiteIds = [...new Set(snap.docs.map(d => d.data().siteId))];
-  } catch (err) {
-    console.warn("Could not query canonical siteAssignments directly, checking profile fallback:", err);
-  }
+  const assignmentsColl = collection(db, "siteAssignments");
+  const q = query(
+    assignmentsColl,
+    where("engineerId", "==", engineerId),
+    where("status", "==", "active")
+  );
+  const snap = await getDocs(q);
+  const assignedSiteIds = [...new Set(snap.docs.map(d => d.data().siteId))];
   
-  if (assignedSiteIds.length === 0) {
-    // Fallback: check profile assignedSites in case direct query is empty
-    try {
-      const [engDoc, userDoc] = await Promise.all([
-        getDoc(doc(db, "siteEngineers", engineerId)).catch(() => null),
-        getDoc(doc(db, "users", engineerId)).catch(() => null)
-      ]);
-      const fallbackIds = engDoc?.data()?.assignedSites || userDoc?.data()?.assignedSites || [];
-      if (fallbackIds.length > 0) {
-        assignedSiteIds = fallbackIds;
-      }
-    } catch (e) {}
-  }
-
   if (assignedSiteIds.length === 0) {
     return [];
   }

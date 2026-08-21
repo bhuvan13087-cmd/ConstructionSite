@@ -210,7 +210,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const currentEngineerId = userProfile?.uid || userProfile?.id || "";
   
   // Loader & Toast states
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   
   // Database datasets
@@ -266,31 +266,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (!allSitesAttendance || allSitesAttendance.length === 0) {
       return "No attendance recorded";
     }
-    const siteAtt = allSitesAttendance.filter(record => record && record.siteId === siteId);
+    const siteAtt = allSitesAttendance.filter(record => record.siteId === siteId);
     if (siteAtt.length === 0) {
       return "No attendance recorded";
     }
-    // Sort by date descending safely
-    siteAtt.sort((a, b) => {
-      const dateA = String(a?.date || a?.createdAt || "");
-      const dateB = String(b?.date || b?.createdAt || "");
-      return dateB.localeCompare(dateA);
-    });
+    // Sort by date (YYYY-MM-DD) descending
+    siteAtt.sort((a, b) => b.date.localeCompare(a.date));
     const last = siteAtt[0];
-    if (!last) {
-      return "No attendance recorded";
-    }
     try {
-      const dateVal = last.date || (last.createdAt?.seconds ? new Date(last.createdAt.seconds * 1000).toISOString().split("T")[0] : null);
-      if (!dateVal) return "No attendance recorded";
-      const dateObj = new Date(dateVal);
-      if (isNaN(dateObj.getTime())) {
-        return `Last checked in: ${dateVal}`;
-      }
+      const dateObj = new Date(last.date);
       const formattedDate = dateObj.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
       return `Last checked in: ${formattedDate}`;
     } catch (e) {
-      return `Last checked in: ${last.date || "--"}`;
+      return `Last checked in: ${last.date}`;
     }
   };
 
@@ -2931,15 +2919,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
-  // Full Screen Loader while loading initial site assignments
-  if (loading && assignedSites.length === 0) {
-    return (
-      <div className="mobile-app-container">
-        <Loading show={true} text="Synchronizing Worksite Database..." />
-      </div>
-    );
-  }
-
   // Full Screen Alert if no sites assigned
   if (assignedSites.length === 0 && !loading) {
     return (
@@ -3930,7 +3909,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             )}
           </div>
           <h4 className="mobile-site-card-title">{currentSite ? currentSite.siteName : "No Assigned Worksite"}</h4>
-          {currentSite?.location && (
+          {currentSite && (
             <p className="mobile-site-card-loc">
               <MapPin size={14} /> {currentSite.location}
             </p>
