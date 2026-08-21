@@ -3935,9 +3935,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 style={{
                   background: "none",
                   border: "none",
-                  color: "var(--accent-700)",
+                  color: "#ffffff",
                   fontSize: "12px",
-                  fontWeight: "700",
+                  fontWeight: "750",
                   cursor: "pointer",
                   padding: 0,
                   display: "flex",
@@ -3957,7 +3957,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <div className="mobile-attendance-left">
             <span className="mobile-attendance-status-label">Your Attendance Status</span>
             <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
-              {todayAttendance ? '✓ Checked In Present' : '✗ Not Checked In Yet'}
+              {todayAttendance ? '✓ Checked In Present' : '✗ Not Marked Today'}
             </div>
             {todayAttendance && (
               <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
