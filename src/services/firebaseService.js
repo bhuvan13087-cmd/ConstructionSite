@@ -1087,6 +1087,95 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
   return R * c;
 }
 
+// ==========================================================================
+// PRODUCTION ATTENDANCE VERIFICATION GATE SERVICE
+// ==========================================================================
+
+/**
+ * Production Attendance Verification Gate:
+ * Verifies that the authenticated engineer has a valid, verified attendance record
+ * for the specified Site + Date combination from the canonical "attendance" collection.
+ * 
+ * @param {string} engineerId - Authenticated Engineer UID
+ * @param {string} siteId - Target Site ID
+ * @param {string} dateStr - Target Date (YYYY-MM-DD)
+ * @returns {Promise<boolean>} - True if valid verified attendance exists, false otherwise
+ */
+export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) {
+  if (!engineerId || !siteId || !dateStr) return false;
+
+  const cleanEngineerId = String(engineerId).trim();
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+
+  try {
+    const db = getDb();
+    const attendanceColl = collection(db, "attendance");
+
+    const isValidRecord = (data, id) => {
+      // 1. Exclude labour submission lock records
+      if (data.type === "labour_attendance_lock" || (id && id.startsWith("labour_lock_"))) {
+        return false;
+      }
+      // 2. Ensure date matches
+      const recDate = data.date || data.attendanceDate;
+      if (recDate !== cleanDateStr) return false;
+      // 3. Ensure site matches
+      if (data.siteId !== cleanSiteId) return false;
+      // 4. Ensure engineer/user matches
+      const recUser = data.engineerId || data.userId;
+      if (recUser && recUser !== cleanEngineerId) return false;
+      // 5. Ensure valid presence/verification status and not rejected/absent/failed
+      const isPresent = data.status === "present" || data.status === "checked_out" || data.status === "verified";
+      const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent;
+      const isNotRejected = data.status !== "absent" && data.status !== "rejected" && data.status !== "cancelled" && data.status !== "failed";
+      return isVerified && isNotRejected;
+    };
+
+    // Query 1: by engineerId, siteId, date
+    const q1 = query(
+      attendanceColl,
+      where("engineerId", "==", cleanEngineerId),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr)
+    );
+    const snap1 = await getDocs(q1);
+    for (const docSnap of snap1.docs) {
+      if (isValidRecord(docSnap.data(), docSnap.id)) {
+        return true;
+      }
+    }
+
+    // Query 2: by userId, siteId, date (backward compatibility)
+    const q2 = query(
+      attendanceColl,
+      where("userId", "==", cleanEngineerId),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr)
+    );
+    const snap2 = await getDocs(q2);
+    for (const docSnap of snap2.docs) {
+      if (isValidRecord(docSnap.data(), docSnap.id)) {
+        return true;
+      }
+    }
+
+    // Query 3: check doc by deterministic docId `${cleanSiteId}_${cleanDateStr}`
+    const directDocRef = doc(db, "attendance", `${cleanSiteId}_${cleanDateStr}`);
+    const directSnap = await getDoc(directDocRef);
+    if (directSnap.exists()) {
+      const data = directSnap.data();
+      if (isValidRecord(data, directSnap.id)) {
+        return true;
+      }
+    }
+  } catch (err) {
+    console.error("Attendance Gate verification check failed:", err);
+  }
+
+  return false;
+}
+
 // Get the engineer's attendance record for a specific date
 export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
   const db = getDb();
@@ -1737,6 +1826,14 @@ export async function addMaterial(materialData) {
   const matName = (materialData.materialName || "").trim();
   const purchaseDate = materialData.purchaseDate || new Date().toISOString().split("T")[0];
   
+  // Attendance Verification Gate: Verify engineer attendance if write is created by engineer
+  if (materialData.engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(materialData.engineerId, materialData.siteId, purchaseDate);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${purchaseDate}) before recording material logs.`);
+    }
+  }
+
   // Use unique ID if not explicitly specified
   const newMaterialRef = materialData.id 
     ? doc(db, "materials", materialData.id) 
@@ -1948,6 +2045,14 @@ export async function getWorkers(siteId = null, adminId = null) {
 
 // Save/Mark daily workers attendance batch (idempotent setDoc writes)
 export async function saveLabourAttendance(siteId, engineerId, dateStr, attendanceList) {
+  // Attendance Verification Gate: Verify engineer attendance if write is created by engineer
+  if (engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, siteId, dateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before recording labour attendance.`);
+    }
+  }
+
   const db = getDb();
   const batch = writeBatch(db);
   
@@ -2042,6 +2147,14 @@ export async function getLabourDailyEntries(siteId, dateStr) {
 
 // Save daily site labour entries for a specific site, date, and engineer (idempotent writes using clear-and-set)
 export async function saveLabourDailyEntries(siteId, engineerId, dateStr, entries) {
+  // Attendance Verification Gate: Verify engineer attendance if write is created by engineer
+  if (engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, siteId, dateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before saving daily labour entries.`);
+    }
+  }
+
   const db = getDb();
   
   // 1. Delete existing entries for this site and date
@@ -4676,6 +4789,14 @@ export async function deleteLabourMemberFromCategory(teamId, categoryId, memberI
 }
 
 export async function saveLabourMemberAttendance(siteId, engineerId, dateStr, attendanceList) {
+  // Attendance Verification Gate: Verify engineer attendance if write is created by engineer
+  if (engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, siteId, dateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before saving labour member attendance.`);
+    }
+  }
+
   const db = getDb();
   const batch = writeBatch(db);
   
@@ -4754,6 +4875,16 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
     const existing = docSnap.data();
     if (existing.locked || existing.status === "submitted" || existing.submitted) {
       throw new Error("Cannot modify: This team's attendance is submitted and locked.");
+    }
+  }
+
+  // Attendance Verification Gate: Verify engineer attendance if write is created by engineer
+  const engId = recordData.createdBy || recordData.engineerId;
+  const attDate = recordData.attendanceDate || recordData.date;
+  if (engId && recordData.siteId && attDate) {
+    const isVerified = await verifyEngineerAttendanceGate(engId, recordData.siteId, attDate);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${attDate}) before saving labour attendance records.`);
     }
   }
 
@@ -5024,6 +5155,14 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
   const cleanDateStr = String(dateStr).trim();
   const cleanTeamId = teamId ? String(teamId).trim() : null;
 
+  // Attendance Verification Gate: Verify engineer attendance
+  if (engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, cleanSiteId, cleanDateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${cleanDateStr}) before submitting labour attendance.`);
+    }
+  }
+
   // Duplicate Prevention Check directly against database
   const statusCheck = await checkLabourSubmissionStatus(cleanSiteId, cleanDateStr, cleanTeamId);
   if (statusCheck && statusCheck.submitted) {
@@ -5091,6 +5230,12 @@ export async function saveBulkMaterialEntry(bulkData) {
   if (!siteId) throw new Error("Construction site is required.");
   if (!dateStr) throw new Error("Entry date is required.");
   if (!engineerId) throw new Error("Engineer ID is required.");
+
+  // Attendance Verification Gate: Verify engineer attendance
+  const isVerified = await verifyEngineerAttendanceGate(engineerId, siteId, dateStr);
+  if (!isVerified) {
+    throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before submitting material entries.`);
+  }
 
   const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
@@ -5166,6 +5311,16 @@ export async function transferMaterialBetweenSites({
   if (sourceSiteId === destinationSiteId) throw new Error("Cannot transfer material to the same site.");
   const transferQty = Number(transferQuantity);
   if (!transferQty || isNaN(transferQty) || transferQty <= 0) throw new Error("Transfer quantity must be greater than 0.");
+
+  const txDate = transferDate || new Date().toISOString().split("T")[0];
+
+  // Attendance Verification Gate: Verify engineer attendance at source site
+  if (engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, sourceSiteId, txDate);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Verified site attendance is required at the source site for date (${txDate}) before transferring materials.`);
+    }
+  }
 
   const sourceDocRef = doc(db, "materials", sourceMaterialId);
 
@@ -5277,6 +5432,8 @@ export async function receiveMaterialTransfer({
     throw new Error("Received quantity must be greater than 0.");
   }
 
+  const rxDate = receiveDate || new Date().toISOString().split("T")[0];
+
   const transferDocRef = doc(db, "materials", transferId);
 
   return await runTransaction(db, async (transaction) => {
@@ -5284,6 +5441,15 @@ export async function receiveMaterialTransfer({
     if (!transferSnap.exists()) throw new Error("Material transfer record not found.");
 
     const data = transferSnap.data();
+
+    // Attendance Verification Gate: Verify engineer attendance at destination site
+    if (engineerId) {
+      const destSiteId = data.destinationSiteId || data.siteId;
+      const isVerified = await verifyEngineerAttendanceGate(engineerId, destSiteId, rxDate);
+      if (!isVerified) {
+        throw new Error(`Attendance Verification Gate: Verified site attendance is required at the destination site for date (${rxDate}) before confirming material receipts.`);
+      }
+    }
     const totalTransferred = Number(data.transferQuantity || data.requiredQuantity || data.orderedQuantity) || 0;
     const previouslyReceived = Number(data.quantity) || 0;
     const currentPending = Math.max(0, totalTransferred - previouslyReceived);
