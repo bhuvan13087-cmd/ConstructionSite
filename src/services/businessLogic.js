@@ -219,22 +219,20 @@ export function calculateTotalWorkers(teams = []) {
 }
 
 /**
- * Calculates the number of unique active Site Engineers who currently have at least one valid active site assignment.
+ * Calculates the total number of site assignments across engineers.
+ * Every valid engineer -> site assignment is counted separately (an engineer assigned to multiple sites contributes multiple assignments).
+ * Reconciles directly with the individual engineer list (e.g. 2 + 1 + 1 + ... = 15).
  * Uses the canonical Site Engineer + Site Assignment data structure.
  *
  * @param {Array} engineers - Array of Site Engineer records
- * @returns {number} - Count of unique active engineers with >= 1 active assigned site
+ * @returns {number} - Total count of site assignments across engineers
  */
 export function calculateCoveredEngineers(engineers = []) {
   if (!engineers || !Array.isArray(engineers)) return 0;
-  return engineers.filter(eng => {
-    if (!eng) return false;
-    // Check if engineer is active (status is "active" or not explicitly "inactive")
-    const isActive = eng.status === "active";
-    // Check if engineer has at least one active assigned site
-    const hasActiveAssignments = Array.isArray(eng.assignedSites) && eng.assignedSites.length > 0;
-    return isActive && hasActiveAssignments;
-  }).length;
+  return engineers.reduce((total, eng) => {
+    if (!eng || !Array.isArray(eng.assignedSites)) return total;
+    return total + eng.assignedSites.filter(Boolean).length;
+  }, 0);
 }
 
 /**

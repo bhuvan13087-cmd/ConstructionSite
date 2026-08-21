@@ -318,7 +318,7 @@ export default function SiteAssignments() {
       const [fetchedSites, fetchedEngineers, fetchedAssignments] = await Promise.all([
         getSites(adminId),
         getSiteEngineers(adminId),
-        getSiteAssignmentsDetailed()
+        getSiteAssignmentsDetailed(adminId)
       ]);
       setSites(fetchedSites);
       setEngineers(fetchedEngineers);
@@ -458,9 +458,10 @@ export default function SiteAssignments() {
   });
 
   // KPI metrics
-  const totalAssignments = assignments.length;
-  const uniqueEngineersDeployed = [...new Set(assignments.filter(a => a.status === "active" && a.engineerId).map(a => a.engineerId))].length;
-  const siteAssigned = uniqueEngineersDeployed;
+  const activeAssignments = assignments.filter(a => a.status === "active");
+  const totalAssignments = activeAssignments.length;
+  const uniqueEngineersDeployed = [...new Set(activeAssignments.map(a => a.engineerId).filter(Boolean))].length;
+  const siteAssigned = [...new Set(activeAssignments.map(a => a.siteId).filter(Boolean))].length;
 
   return (
     <Layout title="Site Assignments" description="Configure construction site allocations and manage field engineer deployments.">

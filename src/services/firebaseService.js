@@ -1487,7 +1487,7 @@ export async function getAssignedSitesForEngineer(engineerId) {
 }
 
 // Get all site assignments (detailed list with site and engineer profiles)
-export async function getSiteAssignmentsDetailed() {
+export async function getSiteAssignmentsDetailed(adminId = null) {
   const db = getDb();
   const assignmentsColl = collection(db, "siteAssignments");
   
@@ -1501,7 +1501,7 @@ export async function getSiteAssignmentsDetailed() {
 
   const [snapshot, sites, usersSnapshot] = await Promise.all([
     getDocs(assignmentsColl),
-    getSites(),
+    getSites(adminId),
     fetchUsersSnap()
   ]);
   
@@ -1529,6 +1529,7 @@ export async function getSiteAssignmentsDetailed() {
     seenPairs.add(pairKey);
 
     const site = sites.find(s => s.id === data.siteId);
+    if (adminId && !site) return;
     const engineer = usersMap[data.engineerId];
 
     detailedAssignments.push({

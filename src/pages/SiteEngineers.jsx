@@ -320,8 +320,8 @@ export default function SiteEngineers() {
 
   // Derived counts for KPI strip
   const totalEngineers = engineers.length;
-  const activeCount = engineers.filter(e => e.status === "active").length;
-  const inactiveCount = totalEngineers - activeCount;
+  const activeCount = engineers.filter(e => (e.status || "active").toLowerCase() === "active").length;
+  const inactiveCount = engineers.filter(e => (e.status || "").toLowerCase() === "inactive").length;
   const siteCovered = calculateCoveredEngineers(engineers);
 
   return (
@@ -416,7 +416,7 @@ export default function SiteEngineers() {
           {
             label: "Site Covered",
             value: siteCovered,
-            sub: "Active engineers on site",
+            sub: "Total site assignments",
             icon: Building2,
             iconBg: "#fff7ed",
             iconColor: "#c2410c",
