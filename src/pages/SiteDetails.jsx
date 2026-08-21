@@ -397,8 +397,27 @@ export default function SiteDetails({ siteId, onBack }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      // Fetch site details
-      const fetchedSites = await getSites();
+      // Fetch all site details and related logs concurrently
+      const [
+        fetchedSites,
+        fetchedEngineers,
+        mats,
+        labour,
+        attend,
+        progress,
+        payments,
+        fetchedTeams
+      ] = await Promise.all([
+        getSites(),
+        getSiteEngineers(),
+        getMaterialsDetailed(siteId),
+        getLabourDailyCountsSummary(siteId),
+        getAttendanceForSite(siteId),
+        getDailyUpdatesForSite(siteId),
+        getLabourPayments(siteId),
+        getLabourTeams()
+      ]);
+
       const currentSite = fetchedSites.find(s => s.id === siteId);
       if (!currentSite) {
         showToast("Site not found.", "error");
@@ -407,29 +426,10 @@ export default function SiteDetails({ siteId, onBack }) {
       }
       setSite(currentSite);
 
-      // Fetch all engineers
-      const fetchedEngineers = await getSiteEngineers();
       const assigned = fetchedEngineers.filter(eng => 
         currentSite.assignedEngineers && currentSite.assignedEngineers.includes(eng.id)
       );
       setEngineers(assigned);
-
-      // Fetch other site-specific logs in parallel
-      const [
-        mats,
-        labour,
-        attend,
-        progress,
-        payments,
-        fetchedTeams
-      ] = await Promise.all([
-        getMaterialsDetailed(siteId),
-        getLabourDailyCountsSummary(siteId),
-        getAttendanceForSite(siteId),
-        getDailyUpdatesForSite(siteId),
-        getLabourPayments(siteId),
-        getLabourTeams()
-      ]);
 
       setMaterials(mats);
       setLabourHistory(labour);

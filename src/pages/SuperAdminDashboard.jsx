@@ -163,11 +163,13 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     // 2. Engineers Listener
+    let unsubFallbackEngineers = null;
     const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
       if (snapshot.empty) {
         // fallback
+        if (unsubFallbackEngineers) unsubFallbackEngineers();
         const q = query(collection(db, "users"), where("role", "==", "site_engineer"));
-        onSnapshot(q, (snap) => {
+        unsubFallbackEngineers = onSnapshot(q, (snap) => {
           const list = [];
           snap.forEach(d => {
             list.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", ...d.data() });
@@ -176,6 +178,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         });
         return;
       }
+      if (unsubFallbackEngineers) {
+        unsubFallbackEngineers();
+        unsubFallbackEngineers = null;
+      }
       const list = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, uid: docSnap.id, fullName: docSnap.data().name || docSnap.data().fullName || "", ...docSnap.data() });
@@ -183,8 +189,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       setEngineers(list);
     }, (err) => {
       // fallback
+      if (unsubFallbackEngineers) unsubFallbackEngineers();
       const q = query(collection(db, "users"), where("role", "==", "site_engineer"));
-      onSnapshot(q, (snap) => {
+      unsubFallbackEngineers = onSnapshot(q, (snap) => {
         const list = [];
         snap.forEach(d => {
           list.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", ...d.data() });
@@ -260,6 +267,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     return () => {
       unsubSites();
       unsubEngineers();
+      if (unsubFallbackEngineers) unsubFallbackEngineers();
       unsubMaterials();
       unsubReports();
       unsubLabour();

@@ -314,14 +314,14 @@ export default function SiteAssignments() {
       setLoading(true);
       const adminId = userProfile?.uid || userProfile?.id || null;
       
-      // Fetch sites, engineers, and detailed assignments list
-      const fetchedSites = await getSites(adminId);
+      // Fetch sites, engineers, and detailed assignments list in parallel
+      const [fetchedSites, fetchedEngineers, fetchedAssignments] = await Promise.all([
+        getSites(adminId),
+        getSiteEngineers(adminId),
+        getSiteAssignmentsDetailed()
+      ]);
       setSites(fetchedSites);
-
-      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
-
-      const fetchedAssignments = await getSiteAssignmentsDetailed();
       setAssignments(fetchedAssignments);
 
     } catch (err) {

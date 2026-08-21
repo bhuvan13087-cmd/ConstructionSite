@@ -35,6 +35,8 @@ import {
   AlertCircle
 } from "lucide-react";
 
+const addressGeocodeCache = new Map();
+
 const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   const [distance, setDistance] = useState(null);
   const [loadingDistance, setLoadingDistance] = useState(false);
@@ -43,34 +45,51 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   const [zoomLevel, setZoomLevel] = useState(19); // default 19 for street-level detail
 
   useEffect(() => {
+    let isMounted = true;
     const fetchDistance = async () => {
       const targetAddress = site.assignedAddress || site.location;
       if (!targetAddress || !site.proposedLatitude || !site.proposedLongitude) return;
+
+      const cacheKey = targetAddress.trim().toLowerCase();
+      if (addressGeocodeCache.has(cacheKey)) {
+        const cached = addressGeocodeCache.get(cacheKey);
+        if (cached && isMounted) {
+          const dist = calculateDistanceMeters(cached.lat, cached.lon, site.proposedLatitude, site.proposedLongitude);
+          setDistance(dist);
+          return;
+        }
+      }
+
       setLoadingDistance(true);
       setErrorDistance(null);
       try {
-        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(targetAddress)}&limit=1&cb=${Date.now()}`);
+        const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(targetAddress)}&limit=1`);
+        if (!isMounted) return;
         if (res.ok) {
           const data = await res.json();
           if (data && data.length > 0) {
             const lat = Number(data[0].lat);
             const lon = Number(data[0].lon);
+            addressGeocodeCache.set(cacheKey, { lat, lon });
             const dist = calculateDistanceMeters(lat, lon, site.proposedLatitude, site.proposedLongitude);
-            setDistance(dist);
+            if (isMounted) setDistance(dist);
           } else {
-            setErrorDistance("Could not geocode assigned address");
+            if (isMounted) setErrorDistance("Could not geocode assigned address");
           }
         } else {
-          setErrorDistance("API lookup failed");
+          if (isMounted) setErrorDistance("API lookup failed");
         }
       } catch (err) {
         console.warn("Error geocoding target address:", err);
-        setErrorDistance("Lookup exception");
+        if (isMounted) setErrorDistance("Lookup exception");
       } finally {
-        setLoadingDistance(false);
+        if (isMounted) setLoadingDistance(false);
       }
     };
     fetchDistance();
+    return () => {
+      isMounted = false;
+    };
   }, [site]);
 
   const engineer = engineers.find(e => e.id === site.proposedLocationCapturedBy) || { fullName: "Unknown Engineer" };
@@ -473,9 +492,11 @@ export default function Sites() {
     try {
       setLoading(true);
       const adminId = userProfile?.uid || userProfile?.id || null;
-      const fetchedSites = await getSites(adminId);
+      const [fetchedSites, fetchedEngineers] = await Promise.all([
+        getSites(adminId),
+        getSiteEngineers(adminId)
+      ]);
       setSites(fetchedSites);
-      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading sites page data:", err);

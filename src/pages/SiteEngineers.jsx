@@ -123,10 +123,11 @@ export default function SiteEngineers() {
     try {
       setLoading(true);
       const adminId = userProfile?.uid || userProfile?.id || null;
-      const fetchedSites = await getSites(adminId);
+      const [fetchedSites, fetchedEngineers] = await Promise.all([
+        getSites(adminId),
+        getSiteEngineers(adminId)
+      ]);
       setSites(fetchedSites);
-
-      const fetchedEngineers = await getSiteEngineers(adminId);
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error loading engineers page data:", err);

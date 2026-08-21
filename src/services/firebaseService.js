@@ -34,36 +34,29 @@ function getDb() {
 // Get a user profile by UID
 export async function getUserProfile(uid) {
   const db = getDb();
-  // 1. Check superAdmins
   try {
-    const superAdminDoc = await getDoc(doc(db, "superAdmins", uid));
-    if (superAdminDoc.exists()) {
-      return { uid, id: uid, ...superAdminDoc.data() };
-    }
-  } catch (e) {}
+    const [superAdminSnap, adminSnap, engSnap, userSnap] = await Promise.all([
+      getDoc(doc(db, "superAdmins", uid)).catch(() => null),
+      getDoc(doc(db, "admins", uid)).catch(() => null),
+      getDoc(doc(db, "siteEngineers", uid)).catch(() => null),
+      getDoc(doc(db, "users", uid)).catch(() => null)
+    ]);
 
-  // 2. Check admins
-  try {
-    const adminDoc = await getDoc(doc(db, "admins", uid));
-    if (adminDoc.exists()) {
-      return { uid, id: uid, ...adminDoc.data() };
+    if (superAdminSnap && superAdminSnap.exists()) {
+      return { uid, id: uid, ...superAdminSnap.data() };
     }
-  } catch (e) {}
-
-  // 3. Check siteEngineers
-  try {
-    const engineerDoc = await getDoc(doc(db, "siteEngineers", uid));
-    if (engineerDoc.exists()) {
-      const data = engineerDoc.data();
+    if (adminSnap && adminSnap.exists()) {
+      return { uid, id: uid, ...adminSnap.data() };
+    }
+    if (engSnap && engSnap.exists()) {
+      const data = engSnap.data();
       return { uid, id: uid, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
     }
-  } catch (e) {}
-
-  // 4. Fallback to legacy users
-  const userDocRef = doc(db, "users", uid);
-  const userDoc = await getDoc(userDocRef);
-  if (userDoc.exists()) {
-    return { uid, id: uid, ...userDoc.data() };
+    if (userSnap && userSnap.exists()) {
+      return { uid, id: uid, ...userSnap.data() };
+    }
+  } catch (e) {
+    console.error("Error fetching user profile:", e);
   }
   return null;
 }
@@ -211,21 +204,23 @@ export async function updateUserProfile(uid, updateData) {
 export async function getSiteEngineers(adminId = null) {
   const db = getDb();
   const siteEngineersCollection = collection(db, "siteEngineers");
-  let querySnapshot;
-  try {
-    querySnapshot = await getDocs(siteEngineersCollection);
-  } catch (e) {
-    // If permission denied or other error, fallback to legacy query
-    const usersCollection = collection(db, "users");
-    const q = query(usersCollection, where("role", "==", "site_engineer"));
-    querySnapshot = await getDocs(q);
-  }
+  const assignmentsColl = collection(db, "siteAssignments");
+
+  const [querySnapshotRes, asgSnapshot] = await Promise.all([
+    getDocs(siteEngineersCollection).catch(async () => {
+      const usersCollection = collection(db, "users");
+      const q = query(usersCollection, where("role", "==", "site_engineer"));
+      return await getDocs(q);
+    }),
+    getDocs(assignmentsColl).catch(e => {
+      console.warn("Could not fetch canonical siteAssignments for engineers:", e);
+      return null;
+    })
+  ]);
 
   // Authoritative: Fetch active site assignments directly from canonical siteAssignments collection
   const activeAssignmentsMap = {};
-  try {
-    const assignmentsColl = collection(db, "siteAssignments");
-    const asgSnapshot = await getDocs(assignmentsColl);
+  if (asgSnapshot) {
     asgSnapshot.forEach(docSnap => {
       const data = docSnap.data();
       if (data.status === "active" && data.engineerId && data.siteId) {
@@ -235,11 +230,10 @@ export async function getSiteEngineers(adminId = null) {
         activeAssignmentsMap[data.engineerId].add(data.siteId);
       }
     });
-  } catch (e) {
-    console.warn("Could not fetch canonical siteAssignments for engineers:", e);
   }
   
   const engineers = [];
+  const querySnapshot = querySnapshotRes || [];
   querySnapshot.forEach(doc => {
     const data = doc.data();
     // Soft adminId filter: skip engineers from a different admin if createdByAdmin is set
@@ -397,30 +391,36 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
 
   // 1. Remove deleted site assignments from siteAssignments collection
   if (sitesToRemove.length > 0) {
-    for (const siteId of sitesToRemove) {
+    const removePromises = sitesToRemove.map(siteId => {
       const q = query(
         assignmentsColl,
         where("engineerId", "==", id),
         where("siteId", "==", siteId)
       );
-      const snap = await getDocs(q);
+      return getDocs(q);
+    });
+    const removeSnaps = await Promise.all(removePromises);
+    removeSnaps.forEach(snap => {
       snap.forEach(docSnap => {
         batch.delete(docSnap.ref);
       });
-    }
+    });
   }
 
   // 2. Add new site assignments to siteAssignments collection
   const targetAddSites = isEditMode ? sitesToAdd : selectedSites;
   if (targetAddSites.length > 0) {
-    for (const siteId of targetAddSites) {
+    const addPromises = targetAddSites.map(siteId => {
       const q = query(
         assignmentsColl,
         where("engineerId", "==", id),
         where("siteId", "==", siteId),
         where("status", "==", "active")
       );
-      const snap = await getDocs(q);
+      return getDocs(q).then(snap => ({ siteId, snap }));
+    });
+    const addResults = await Promise.all(addPromises);
+    addResults.forEach(({ siteId, snap }) => {
       if (snap.empty) {
         const newAssignmentRef = doc(collection(db, "siteAssignments"));
         batch.set(newAssignmentRef, {
@@ -431,7 +431,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
           status: "active"
         });
       }
-    }
+    });
   }
   
   await batch.commit();
@@ -507,45 +507,32 @@ export async function getUserByEmail(email) {
   const db = getDb();
   const trimmed = email.trim();
   
-  // Try superAdmins
   try {
-    const q = query(collection(db, "superAdmins"), where("email", "==", trimmed));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const doc = snap.docs[0];
+    const [superSnap, adminSnap, engSnap, userSnap] = await Promise.all([
+      getDocs(query(collection(db, "superAdmins"), where("email", "==", trimmed))).catch(() => null),
+      getDocs(query(collection(db, "admins"), where("email", "==", trimmed))).catch(() => null),
+      getDocs(query(collection(db, "siteEngineers"), where("email", "==", trimmed))).catch(() => null),
+      getDocs(query(collection(db, "users"), where("email", "==", trimmed))).catch(() => null)
+    ]);
+
+    if (superSnap && !superSnap.empty) {
+      const doc = superSnap.docs[0];
       return { id: doc.id, uid: doc.id, ...doc.data() };
     }
-  } catch (e) {}
-
-  // Try admins
-  try {
-    const q = query(collection(db, "admins"), where("email", "==", trimmed));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const doc = snap.docs[0];
+    if (adminSnap && !adminSnap.empty) {
+      const doc = adminSnap.docs[0];
       return { id: doc.id, uid: doc.id, ...doc.data() };
     }
-  } catch (e) {}
-
-  // Try siteEngineers
-  try {
-    const q = query(collection(db, "siteEngineers"), where("email", "==", trimmed));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const doc = snap.docs[0];
+    if (engSnap && !engSnap.empty) {
+      const doc = engSnap.docs[0];
       const data = doc.data();
       return { id: doc.id, uid: doc.id, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
     }
+    if (userSnap && !userSnap.empty) {
+      const doc = userSnap.docs[0];
+      return { id: doc.id, uid: doc.id, ...doc.data() };
+    }
   } catch (e) {}
-
-  // Fallback to legacy users
-  const usersCollection = collection(db, "users");
-  const q = query(usersCollection, where("email", "==", trimmed));
-  const querySnapshot = await getDocs(q);
-  if (!querySnapshot.empty) {
-    const doc = querySnapshot.docs[0];
-    return { id: doc.id, uid: doc.id, ...doc.data() };
-  }
   return null;
 }
 
@@ -554,25 +541,22 @@ export async function getUserByPhone(phone) {
   const db = getDb();
   const trimmed = phone.trim();
   
-  // Try siteEngineers
   try {
-    const q = query(collection(db, "siteEngineers"), where("phone", "==", trimmed));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const doc = snap.docs[0];
+    const [engSnap, userSnap] = await Promise.all([
+      getDocs(query(collection(db, "siteEngineers"), where("phone", "==", trimmed))).catch(() => null),
+      getDocs(query(collection(db, "users"), where("phoneNumber", "==", trimmed))).catch(() => null)
+    ]);
+
+    if (engSnap && !engSnap.empty) {
+      const doc = engSnap.docs[0];
       const data = doc.data();
       return { id: doc.id, uid: doc.id, role: "site_engineer", fullName: data.name, phoneNumber: data.phone, ...data };
     }
+    if (userSnap && !userSnap.empty) {
+      const doc = userSnap.docs[0];
+      return { id: doc.id, uid: doc.id, ...doc.data() };
+    }
   } catch (e) {}
-
-  // Try legacy users
-  const usersCollection = collection(db, "users");
-  const q = query(usersCollection, where("phoneNumber", "==", trimmed));
-  const querySnapshot = await getDocs(q);
-  if (!querySnapshot.empty) {
-    const doc = querySnapshot.docs[0];
-    return { id: doc.id, uid: doc.id, ...doc.data() };
-  }
   return null;
 }
 
@@ -605,13 +589,19 @@ export async function seedDefaultSites() {
 export async function getSites(adminId = null) {
   const db = getDb();
   const sitesCollection = collection(db, "sites");
-  const sitesSnapshot = await getDocs(sitesCollection);
+  const assignmentsColl = collection(db, "siteAssignments");
+
+  const [sitesSnapshot, asgSnapshot] = await Promise.all([
+    getDocs(sitesCollection),
+    getDocs(assignmentsColl).catch(e => {
+      console.warn("Could not fetch canonical siteAssignments for sites:", e);
+      return null;
+    })
+  ]);
   
   // Authoritative: Fetch active site assignments from canonical collection to populate assignedEngineers accurately
   const activeSiteEngineersMap = {};
-  try {
-    const assignmentsColl = collection(db, "siteAssignments");
-    const asgSnapshot = await getDocs(assignmentsColl);
+  if (asgSnapshot) {
     asgSnapshot.forEach(docSnap => {
       const data = docSnap.data();
       if (data.status === "active" && data.siteId && data.engineerId) {
@@ -621,8 +611,6 @@ export async function getSites(adminId = null) {
         activeSiteEngineersMap[data.siteId].add(data.engineerId);
       }
     });
-  } catch (e) {
-    console.warn("Could not fetch canonical siteAssignments for sites:", e);
   }
 
   const sites = [];
@@ -847,10 +835,33 @@ function getAddressAccuracyScore(address) {
   return score;
 }
 
+// In-memory cache for reverse geocoding coordinates (approx. 11m precision)
+const geocodeCache = new Map();
+const MAX_GEOCODE_CACHE_SIZE = 400;
+
 // Reverse geocode helper via Nominatim OSM API
 export async function reverseGeocodeLatLng(lat, lng) {
+  const numLat = Number(lat);
+  const numLng = Number(lng);
+  if (isNaN(numLat) || isNaN(numLng)) {
+    return {
+      fullAddress: `Lat: ${lat}, Lng: ${lng}`,
+      district: "",
+      state: "",
+      country: "",
+      area: "",
+      street: "",
+      colony: ""
+    };
+  }
+
+  const cacheKey = `${numLat.toFixed(4)}_${numLng.toFixed(4)}`;
+  if (geocodeCache.has(cacheKey)) {
+    return geocodeCache.get(cacheKey);
+  }
+
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1&cb=${Date.now()}`, {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${numLat}&lon=${numLng}&zoom=18&addressdetails=1`, {
       headers: {
         'Accept-Language': 'en',
         'User-Agent': 'VisvasBuilders-ConstructionSite-Verification/1.0 (contact@visvasbuilders.com)'
@@ -871,7 +882,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
           const resLat = Number(result.lat);
           const resLng = Number(result.lon);
           const dist = (!isNaN(resLat) && !isNaN(resLng)) 
-            ? getGeocodeDistance(Number(lat), Number(lng), resLat, resLng) 
+            ? getGeocodeDistance(numLat, numLng, resLat, resLng) 
             : Infinity;
 
           if (score > bestScore) {
@@ -916,7 +927,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
           const resLat = Number(bestResult.lat);
           const resLng = Number(bestResult.lon);
           const dist = (!isNaN(resLat) && !isNaN(resLng)) 
-            ? getGeocodeDistance(Number(lat), Number(lng), resLat, resLng) 
+            ? getGeocodeDistance(numLat, numLng, resLat, resLng) 
             : 0;
           if (dist > 300) {
             customFullAddress += ` (within ${Math.round(dist)}m of resolved geocode)`;
@@ -928,7 +939,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
           if (town && town !== colony && town !== suburb) areaParts.push(town);
           const area = areaParts.join(", ") || "";
 
-          return {
+          const formattedResult = {
             fullAddress: customFullAddress,
             district: district || address.city || "",
             state: state,
@@ -937,14 +948,23 @@ export async function reverseGeocodeLatLng(lat, lng) {
             street: street,
             colony: colony
           };
+
+          if (geocodeCache.size >= MAX_GEOCODE_CACHE_SIZE) {
+            const firstKey = geocodeCache.keys().next().value;
+            geocodeCache.delete(firstKey);
+          }
+          geocodeCache.set(cacheKey, formattedResult);
+
+          return formattedResult;
         }
       }
     }
   } catch (e) {
     console.warn("Reverse geocode request failed:", e);
   }
-  return {
-    fullAddress: `Lat: ${Number(lat).toFixed(6)}, Lng: ${Number(lng).toFixed(6)}`,
+
+  const fallbackResult = {
+    fullAddress: `Lat: ${numLat.toFixed(6)}, Lng: ${numLng.toFixed(6)}`,
     district: "",
     state: "",
     country: "",
@@ -952,6 +972,7 @@ export async function reverseGeocodeLatLng(lat, lng) {
     street: "",
     colony: ""
   };
+  return fallbackResult;
 }
 
 // Delete site document
@@ -1011,51 +1032,31 @@ export async function getDashboardMetrics() {
   let activeWorkersCount = 0;
 
   try {
-    const sitesSnap = await getDocs(collection(db, "sites"));
-    totalSitesCount = sitesSnap.size;
-
-    let engineersSnap;
-    try {
-      const engineersQuery = query(
-        collection(db, "siteEngineers"), 
-        where("status", "==", "active")
-      );
-      engineersSnap = await getDocs(engineersQuery);
-      if (engineersSnap.empty) {
-        const legacyQuery = query(
-          collection(db, "users"),
-          where("role", "==", "site_engineer"),
-          where("status", "==", "active")
-        );
-        engineersSnap = await getDocs(legacyQuery);
-      }
-    } catch (e) {
-      const legacyQuery = query(
-        collection(db, "users"),
-        where("role", "==", "site_engineer"),
-        where("status", "==", "active")
-      );
-      engineersSnap = await getDocs(legacyQuery);
-    }
-    activeEngineersCount = engineersSnap.size;
-
     const todayStr = new Date().toISOString().split("T")[0];
-    const attendanceQuery = query(
-      collection(db, "attendance"),
-      where("date", "==", todayStr)
-    );
-    const attendanceSnap = await getDocs(attendanceQuery);
-    attendanceTodayCount = attendanceSnap.size;
+    const fetchEngineers = async () => {
+      try {
+        const engineersQuery = query(collection(db, "siteEngineers"), where("status", "==", "active"));
+        const snap = await getDocs(engineersQuery);
+        if (!snap.empty) return snap.size;
+      } catch (e) {}
+      const legacyQuery = query(collection(db, "users"), where("role", "==", "site_engineer"), where("status", "==", "active"));
+      const legacySnap = await getDocs(legacyQuery);
+      return legacySnap.size;
+    };
 
-    const materialsSnap = await getDocs(collection(db, "materials"));
-    totalMaterialsCount = materialsSnap.size;
+    const [sitesSnap, engineersCount, attendanceSnap, materialsSnap, workersSnap] = await Promise.all([
+      getDocs(collection(db, "sites")).catch(() => ({ size: 0 })),
+      fetchEngineers().catch(() => 0),
+      getDocs(query(collection(db, "attendance"), where("date", "==", todayStr))).catch(() => ({ size: 0 })),
+      getDocs(collection(db, "materials")).catch(() => ({ size: 0 })),
+      getDocs(query(collection(db, "workers"), where("status", "==", "active"))).catch(() => ({ size: 0 }))
+    ]);
 
-    const workersQuery = query(
-      collection(db, "workers"),
-      where("status", "==", "active")
-    );
-    const workersSnap = await getDocs(workersQuery);
-    activeWorkersCount = workersSnap.size;
+    totalSitesCount = sitesSnap.size || 0;
+    activeEngineersCount = engineersCount || 0;
+    attendanceTodayCount = attendanceSnap.size || 0;
+    totalMaterialsCount = materialsSnap.size || 0;
+    activeWorkersCount = workersSnap.size || 0;
   } catch (err) {
     console.warn("Metrics Query Warning (could be empty collections):", err);
   }
@@ -1489,19 +1490,20 @@ export async function getAssignedSitesForEngineer(engineerId) {
 export async function getSiteAssignmentsDetailed() {
   const db = getDb();
   const assignmentsColl = collection(db, "siteAssignments");
-  const snapshot = await getDocs(assignmentsColl);
   
-  // Fetch sites and users collections to resolve names
-  const sites = await getSites();
-  let usersSnapshot;
-  try {
-    usersSnapshot = await getDocs(collection(db, "siteEngineers"));
-    if (usersSnapshot.empty) {
-      usersSnapshot = await getDocs(collection(db, "users"));
-    }
-  } catch (e) {
-    usersSnapshot = await getDocs(collection(db, "users"));
-  }
+  const fetchUsersSnap = async () => {
+    try {
+      const snap = await getDocs(collection(db, "siteEngineers"));
+      if (!snap.empty) return snap;
+    } catch (e) {}
+    return await getDocs(collection(db, "users"));
+  };
+
+  const [snapshot, sites, usersSnapshot] = await Promise.all([
+    getDocs(assignmentsColl),
+    getSites(),
+    fetchUsersSnap()
+  ]);
   
   const usersMap = {};
   usersSnapshot.forEach(doc => {
@@ -1659,7 +1661,13 @@ export async function removeEngineerFromSite(assignmentId) {
 export async function reconcileSiteAssignments() {
   const db = getDb();
   const assignmentsColl = collection(db, "siteAssignments");
-  const snap = await getDocs(assignmentsColl);
+  
+  const [snap, engSnap, usersSnap, sitesSnap] = await Promise.all([
+    getDocs(assignmentsColl),
+    getDocs(collection(db, "siteEngineers")),
+    getDocs(collection(db, "users")),
+    getDocs(collection(db, "sites"))
+  ]);
 
   const activeEngineerSitesMap = {}; // engineerId -> Set(siteIds)
   const activeSiteEngineersMap = {}; // siteId -> Set(engineerIds)
@@ -1683,7 +1691,6 @@ export async function reconcileSiteAssignments() {
   let batchCount = 0;
 
   // Sync siteEngineers & users
-  const engSnap = await getDocs(collection(db, "siteEngineers"));
   engSnap.forEach(d => {
     const canonicalSites = Array.from(activeEngineerSitesMap[d.id] || []);
     const currentSites = d.data().assignedSites || [];
@@ -1693,7 +1700,6 @@ export async function reconcileSiteAssignments() {
     }
   });
 
-  const usersSnap = await getDocs(collection(db, "users"));
   usersSnap.forEach(d => {
     if (d.data().role === "site_engineer" || d.data().assignedSites) {
       const canonicalSites = Array.from(activeEngineerSitesMap[d.id] || []);
@@ -1706,7 +1712,6 @@ export async function reconcileSiteAssignments() {
   });
 
   // Sync sites
-  const sitesSnap = await getDocs(collection(db, "sites"));
   sitesSnap.forEach(d => {
     const canonicalEngineers = Array.from(activeSiteEngineersMap[d.id] || []);
     const currentEngineers = d.data().assignedEngineers || [];
@@ -1827,26 +1832,26 @@ export async function getMaterialsDetailed(siteId = null) {
     q = query(materialsColl);
   }
   
-  const snap = await getDocs(q);
+  const fetchUsersSnap = async () => {
+    try {
+      const snap = await getDocs(collection(db, "siteEngineers"));
+      if (!snap.empty) return snap;
+    } catch (e) {}
+    return await getDocs(collection(db, "users"));
+  };
+
+  const [snap, usersSnap, sites] = await Promise.all([
+    getDocs(q),
+    fetchUsersSnap(),
+    getSites()
+  ]);
   
-  // Fetch siteEngineers collection to resolve engineer names (fallback to users)
-  let usersSnap;
-  try {
-    usersSnap = await getDocs(collection(db, "siteEngineers"));
-    if (usersSnap.empty) {
-      usersSnap = await getDocs(collection(db, "users"));
-    }
-  } catch (e) {
-    usersSnap = await getDocs(collection(db, "users"));
-  }
   const usersMap = {};
   usersSnap.forEach(d => {
     const data = d.data();
     usersMap[d.id] = { fullName: data.name || data.fullName || "", ...data };
   });
   
-  // Fetch sites list to resolve site names
-  const sites = await getSites();
   const sitesMap = {};
   sites.forEach(s => {
     sitesMap[s.id] = s;
@@ -2123,18 +2128,26 @@ export async function getLabourDailyCounts(siteId, dateStr) {
 export async function getLabourDailyCountsHistory(siteId) {
   const db = getDb();
   
-  // 1. Fetch legacy category map for backward compatibility
-  const catsSnap = await getDocs(collection(db, "labourCategories"));
+  const qLegacy = siteId
+    ? query(collection(db, "siteLabourEntries"), where("siteId", "==", siteId))
+    : query(collection(db, "siteLabourEntries"));
+
+  const qNew = siteId
+    ? query(collection(db, "labourMemberAttendance"), where("siteId", "==", siteId))
+    : query(collection(db, "labourMemberAttendance"));
+
+  // 1. Fetch all datasets in parallel
+  const [catsSnap, snapLegacy, snapNew, teamsSnap] = await Promise.all([
+    getDocs(collection(db, "labourCategories")),
+    getDocs(qLegacy),
+    getDocs(qNew),
+    getDocs(collection(db, "labourTeams"))
+  ]);
+
   const catMap = {};
   catsSnap.forEach(d => {
     catMap[d.id] = d.data().name;
   });
-
-  // 2. Fetch legacy headcount entries
-  const qLegacy = siteId
-    ? query(collection(db, "siteLabourEntries"), where("siteId", "==", siteId))
-    : query(collection(db, "siteLabourEntries"));
-  const snapLegacy = await getDocs(qLegacy);
   
   const historyMap = {};
   snapLegacy.forEach(d => {
@@ -2161,14 +2174,7 @@ export async function getLabourDailyCountsHistory(siteId) {
   
   const legacyList = Object.values(historyMap);
 
-  // 3. Fetch new member-level attendance records
-  const qNew = siteId
-    ? query(collection(db, "labourMemberAttendance"), where("siteId", "==", siteId))
-    : query(collection(db, "labourMemberAttendance"));
-  const snapNew = await getDocs(qNew);
-  
-  // Fetch teams for category and wage lookups
-  const teamsSnap = await getDocs(collection(db, "labourTeams"));
+  // 2. Process member-level attendance records
   const teamCatWageMap = {};
   const teamCatNameMap = {};
   const teamNameMap = {};
@@ -2234,16 +2240,34 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
   const currentMonthStr = currentMonth < 10 ? `0${currentMonth}` : `${currentMonth}`;
   const yearMonthPrefix = `${currentYear}-${currentMonthStr}`; // "YYYY-MM"
   
-  // 1. Fetch all attendance for this engineer
   const attendanceColl = collection(db, "attendance");
   const attendanceQuery = query(
     attendanceColl,
     where("engineerId", "==", engineerId)
   );
-  
+
+  const leavesColl = collection(db, "leaves");
+  const leavesQuery = query(
+    leavesColl,
+    where("engineerId", "==", engineerId)
+  );
+
   let weekdaysWorkedThisMonth = 0;
-  try {
-    const attendanceSnap = await getDocs(attendanceQuery);
+  let leavesThisMonth = 0;
+  let leavesThisYear = 0;
+
+  const [attendanceSnap, leavesSnap] = await Promise.all([
+    getDocs(attendanceQuery).catch(err => {
+      console.warn("Attendance stats fetch error:", err);
+      return null;
+    }),
+    getDocs(leavesQuery).catch(err => {
+      console.warn("Leaves stats fetch error:", err);
+      return null;
+    })
+  ]);
+
+  if (attendanceSnap) {
     attendanceSnap.forEach(docSnap => {
       const data = docSnap.data();
       if (data.date && data.date.startsWith(yearMonthPrefix)) {
@@ -2258,21 +2282,9 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
         }
       }
     });
-  } catch (err) {
-    console.warn("Attendance stats fetch error:", err);
   }
-  
-  // 2. Fetch all leaves for this engineer
-  const leavesColl = collection(db, "leaves");
-  const leavesQuery = query(
-    leavesColl,
-    where("engineerId", "==", engineerId)
-  );
-  let leavesThisMonth = 0;
-  let leavesThisYear = 0;
-  
-  try {
-    const leavesSnap = await getDocs(leavesQuery);
+
+  if (leavesSnap) {
     leavesSnap.forEach(docSnap => {
       const data = docSnap.data();
       if (data.date) {
@@ -2288,10 +2300,8 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
         }
       }
     });
-  } catch (err) {
-    console.warn("Leaves query error:", err);
   }
-  
+
   const remainingHolidays = Math.max(0, Number(holidayAllowance) - leavesThisYear);
   
   return {
@@ -2452,52 +2462,45 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
   const engineerDocRef = doc(db, "siteEngineers", engineerId);
   batch.delete(engineerDocRef);
 
-  // 3. Query and delete all site assignments for this engineer
-  const assignmentsColl = collection(db, "siteAssignments");
-  const qAssignments = query(assignmentsColl, where("engineerId", "==", engineerId));
-  const assignmentsSnap = await getDocs(qAssignments);
+  // 3-8. Query related documents in parallel before batch commit
+  const [
+    assignmentsSnap,
+    sitesSnap,
+    attendanceSnap,
+    leavesSnap,
+    photosSnap,
+    locationsSnap
+  ] = await Promise.all([
+    getDocs(query(collection(db, "siteAssignments"), where("engineerId", "==", engineerId))),
+    getDocs(query(collection(db, "sites"), where("assignedEngineers", "array-contains", engineerId))),
+    getDocs(query(collection(db, "attendance"), where("engineerId", "==", engineerId))),
+    getDocs(query(collection(db, "leaves"), where("engineerId", "==", engineerId))),
+    getDocs(query(collection(db, "sitePhotos"), where("engineerId", "==", engineerId))),
+    getDocs(query(collection(db, "engineerLocations"), where("engineerId", "==", engineerId)))
+  ]);
+
   assignmentsSnap.forEach(docSnap => {
     batch.delete(docSnap.ref);
   });
 
-  // 4. Update sites to remove this engineer from assignedEngineers array
-  const sitesColl = collection(db, "sites");
-  const qSites = query(sitesColl, where("assignedEngineers", "array-contains", engineerId));
-  const sitesSnap = await getDocs(qSites);
   sitesSnap.forEach(docSnap => {
     batch.update(docSnap.ref, {
       assignedEngineers: arrayRemove(engineerId)
     });
   });
 
-  // 5. Delete engineer's personal attendance records
-  const attendanceColl = collection(db, "attendance");
-  const qAttendance = query(attendanceColl, where("engineerId", "==", engineerId));
-  const attendanceSnap = await getDocs(qAttendance);
   attendanceSnap.forEach(docSnap => {
     batch.delete(docSnap.ref);
   });
 
-  // 6. Delete engineer's leaves records
-  const leavesColl = collection(db, "leaves");
-  const qLeaves = query(leavesColl, where("engineerId", "==", engineerId));
-  const leavesSnap = await getDocs(qLeaves);
   leavesSnap.forEach(docSnap => {
     batch.delete(docSnap.ref);
   });
 
-  // 7. Delete engineer's site photos
-  const sitePhotosColl = collection(db, "sitePhotos");
-  const qPhotos = query(sitePhotosColl, where("engineerId", "==", engineerId));
-  const photosSnap = await getDocs(qPhotos);
   photosSnap.forEach(docSnap => {
     batch.delete(docSnap.ref);
   });
 
-  // 8. Delete engineer's custom site location records
-  const engineerLocationsColl = collection(db, "engineerLocations");
-  const qLocations = query(engineerLocationsColl, where("engineerId", "==", engineerId));
-  const locationsSnap = await getDocs(qLocations);
   locationsSnap.forEach(docSnap => {
     batch.delete(docSnap.ref);
   });
@@ -2744,13 +2747,27 @@ export async function getLabourMaster(adminId = null) {
   const db = getDb();
   
   const collRef = collection(db, "labourCategories");
-  let snap;
-  try {
-    snap = await getDocs(query(collRef, orderBy("createdTime", "asc")));
-  } catch (e) {
-    // Falls back to unordered if indexing is not complete yet
-    snap = await getDocs(collRef);
+  let resolvedAdminId = adminId;
+  if (!resolvedAdminId) {
+    try {
+      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
+    } catch (e) {}
   }
+  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
+  const historyRef = doc(db, "users", docKey);
+
+  const fetchCategories = async () => {
+    try {
+      return await getDocs(query(collRef, orderBy("createdTime", "asc")));
+    } catch (e) {
+      return await getDocs(collRef);
+    }
+  };
+
+  const [snap, historySnap] = await Promise.all([
+    fetchCategories(),
+    getDoc(historyRef).catch(() => null)
+  ]);
 
   const categories = {};
   snap.forEach(d => {
@@ -2765,16 +2782,7 @@ export async function getLabourMaster(adminId = null) {
     };
   });
 
-  let resolvedAdminId = adminId;
-  if (!resolvedAdminId) {
-    try {
-      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-  }
-  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
-  const historyRef = doc(db, "users", docKey);
-  const historySnap = await getDoc(historyRef);
-  const history = historySnap.exists() ? (historySnap.data().history || []) : [];
+  const history = (historySnap && historySnap.exists()) ? (historySnap.data().history || []) : [];
 
   return {
     categories,
@@ -4045,12 +4053,21 @@ export async function resolveApprovalRequest(approvalId, status, resolverId, res
 export async function syncApprovalsFromLegacy() {
   const db = getDb();
   
-  const leavesSnap = await getDocs(collection(db, "leaves"));
-  const usersSnap = await getDocs(collection(db, "users"));
+  const [leavesSnap, usersSnap, sitesSnap, existingApprovalsSnap, expensesDocRes] = await Promise.all([
+    getDocs(collection(db, "leaves")),
+    getDocs(collection(db, "users")),
+    getDocs(collection(db, "sites")),
+    getDocs(collection(db, "approvals")),
+    getDoc(doc(db, "expenses", "general")).catch(async () => {
+      return await getDoc(doc(db, "users", "__site_expenses__")).catch(() => null);
+    })
+  ]);
+
+  const existingApprovalIds = new Set(existingApprovalsSnap.docs.map(d => d.id));
+
   const usersMap = {};
   usersSnap.forEach(d => { usersMap[d.id] = d.data().fullName; });
 
-  const sitesSnap = await getDocs(collection(db, "sites"));
   const sitesMap = {};
   sitesSnap.forEach(d => { sitesMap[d.id] = d.data().siteName; });
 
@@ -4058,10 +4075,9 @@ export async function syncApprovalsFromLegacy() {
   let writeCount = 0;
 
   for (const d of leavesSnap.docs) {
-    const data = d.data();
-    const appRef = doc(db, "approvals", d.id);
-    const appSnap = await getDoc(appRef);
-    if (!appSnap.exists()) {
+    if (!existingApprovalIds.has(d.id)) {
+      const data = d.data();
+      const appRef = doc(db, "approvals", d.id);
       batch.set(appRef, {
         id: d.id,
         type: "Leave",
@@ -4076,16 +4092,16 @@ export async function syncApprovalsFromLegacy() {
         createdAt: data.createdAt || serverTimestamp(),
         raw: { id: d.id }
       });
+      existingApprovalIds.add(d.id);
       writeCount++;
     }
   }
 
   const materialsSnap = await getDocs(collection(db, "materials"));
   for (const d of materialsSnap.docs) {
-    const data = d.data();
-    const appRef = doc(db, "approvals", d.id);
-    const appSnap = await getDoc(appRef);
-    if (!appSnap.exists()) {
+    if (!existingApprovalIds.has(d.id)) {
+      const data = d.data();
+      const appRef = doc(db, "approvals", d.id);
       batch.set(appRef, {
         id: d.id,
         type: "Material",
@@ -4100,6 +4116,7 @@ export async function syncApprovalsFromLegacy() {
         createdAt: data.createdAt || serverTimestamp(),
         raw: { id: d.id }
       });
+      existingApprovalIds.add(d.id);
       writeCount++;
     }
   }
@@ -4107,11 +4124,11 @@ export async function syncApprovalsFromLegacy() {
   for (const d of sitesSnap.docs) {
     const data = d.data();
     if (data.locationStatus === "Pending Approval") {
-      const appRef = doc(db, "approvals", `loc_${d.id}`);
-      const appSnap = await getDoc(appRef);
-      if (!appSnap.exists()) {
+      const locId = `loc_${d.id}`;
+      if (!existingApprovalIds.has(locId)) {
+        const appRef = doc(db, "approvals", locId);
         batch.set(appRef, {
-          id: `loc_${d.id}`,
+          id: locId,
           type: "Location",
           requestedBy: usersMap[data.proposedLocationCapturedBy] || "Site Engineer",
           engineerId: data.proposedLocationCapturedBy || "",
@@ -4131,17 +4148,13 @@ export async function syncApprovalsFromLegacy() {
             proposedLocationCreatedDate: data.proposedLocationCreatedDate
           }
         });
+        existingApprovalIds.add(locId);
         writeCount++;
       }
     }
   }
 
-  let expensesDoc = null;
-  try {
-    expensesDoc = await getDoc(doc(db, "expenses", "general"));
-  } catch (e) {
-    console.warn("Error getting general expenses:", e);
-  }
+  let expensesDoc = expensesDocRes;
   if (!expensesDoc || !expensesDoc.exists()) {
     try {
       expensesDoc = await getDoc(doc(db, "users", "__site_expenses__"));
@@ -4152,26 +4165,24 @@ export async function syncApprovalsFromLegacy() {
   if (expensesDoc && expensesDoc.exists()) {
     const expenses = expensesDoc.data().expenses || [];
     for (const exp of expenses) {
-      if (exp.status === "Pending" || exp.status === "pending") {
+      if ((exp.status === "Pending" || exp.status === "pending") && !existingApprovalIds.has(exp.id)) {
         const appRef = doc(db, "approvals", exp.id);
-        const appSnap = await getDoc(appRef);
-        if (!appSnap.exists()) {
-          batch.set(appRef, {
-            id: exp.id,
-            type: "Payment",
-            requestedBy: exp.createdBy || "Engineer",
-            engineerId: exp.engineerId || "",
-            siteId: exp.siteId,
-            siteName: sitesMap[exp.siteId] || "Unknown Site",
-            details: `${exp.category} - ${exp.description} (₹${exp.amount})`,
-            amount: Number(exp.amount) || 0,
-            requestDate: exp.date,
-            status: "pending",
-            createdAt: serverTimestamp(),
-            raw: { id: exp.id }
-          });
-          writeCount++;
-        }
+        batch.set(appRef, {
+          id: exp.id,
+          type: "Payment",
+          requestedBy: exp.createdBy || "Engineer",
+          engineerId: exp.engineerId || "",
+          siteId: exp.siteId,
+          siteName: sitesMap[exp.siteId] || "Unknown Site",
+          details: `${exp.category} - ${exp.description} (₹${exp.amount})`,
+          amount: Number(exp.amount) || 0,
+          requestDate: exp.date,
+          status: "pending",
+          createdAt: serverTimestamp(),
+          raw: { id: exp.id }
+        });
+        existingApprovalIds.add(exp.id);
+        writeCount++;
       }
     }
   }
@@ -5009,8 +5020,9 @@ export async function saveBulkMaterialEntry(bulkData) {
   }
 
   const db = getDb();
+  const batch = writeBatch(db);
 
-  // Save each material item to materials collection using deterministic document ID
+  // Save each material item to materials collection in single atomic batch
   for (const item of validItems) {
     const isCustom = item.type === "custom";
     const qty = isCustom ? 1 : Number(item.quantity);
@@ -5023,7 +5035,7 @@ export async function saveBulkMaterialEntry(bulkData) {
     const docId = `bulk_log_${siteId}_${matSlug}_${dateStr}`;
     const docRef = doc(db, "materials", docId);
 
-    await setDoc(docRef, {
+    batch.set(docRef, {
       siteId,
       engineerId,
       teamId: item.teamId || bulkData.teamId || null,
@@ -5048,9 +5060,9 @@ export async function saveBulkMaterialEntry(bulkData) {
     }, { merge: true });
   }
 
-  // Create submission lock document
+  // Create submission lock document in the same batch
   const lockRef = doc(db, "materials", `lock_${siteId}_${dateStr}`);
-  await setDoc(lockRef, {
+  batch.set(lockRef, {
     type: "material_lock",
     engineerId: engineerId,
     siteId: siteId,
@@ -5062,6 +5074,8 @@ export async function saveBulkMaterialEntry(bulkData) {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp()
   }, { merge: true });
+
+  await batch.commit();
 
   return { success: true, count: validItems.length };
 }

@@ -162,34 +162,37 @@ export default function AdminMaterials() {
   };
 
   useEffect(() => {
-    let unsubTeams;
-    let unsubMaterials;
+    let isMounted = true;
+    let unsubTeams = null;
+    let unsubMaterials = null;
     
     const initSubscriptions = async () => {
       try {
         setLoading(true);
         const adminId = userProfile?.uid || userProfile?.id || null;
         const fetchedSites = await getSites(adminId);
+        if (!isMounted) return;
         setSites(fetchedSites);
         
         unsubTeams = subscribeMaterialTeams((teamsList) => {
-          setMaterialTeams(teamsList || []);
+          if (isMounted) setMaterialTeams(teamsList || []);
         });
         
         unsubMaterials = subscribeMaterialsDetailed(null, (mats) => {
-          setAllMaterials(mats);
+          if (isMounted) setAllMaterials(mats);
         });
       } catch (err) {
         console.error("Failed to load materials data:", err);
-        showToast(`Error syncing logs: ${err.message}`, "error");
+        if (isMounted) showToast(`Error syncing logs: ${err.message}`, "error");
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     initSubscriptions();
 
     return () => {
+      isMounted = false;
       if (unsubTeams) unsubTeams();
       if (unsubMaterials) unsubMaterials();
     };

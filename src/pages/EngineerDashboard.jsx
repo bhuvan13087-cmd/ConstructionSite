@@ -593,29 +593,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const todayStr = new Date().toISOString().split("T")[0];
       const engineerId = userProfile.uid || userProfile.id || "";
       
-      // Load assigned construction sites
-      const filteredSites = await getAssignedSitesForEngineer(engineerId);
+      // Load assigned sites, all sites, and personal engineer records in parallel
+      const [
+        filteredSites,
+        sites,
+        stats,
+        leaves,
+        history
+      ] = await Promise.all([
+        getAssignedSitesForEngineer(engineerId).catch(err => { console.error("Failed to load assigned sites:", err); return []; }),
+        getSites().catch(err => { console.error("Failed to load all sites:", err); return []; }),
+        getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24).catch(err => { console.error("Failed to load personal stats:", err); return null; }),
+        getEngineerLeaves(engineerId).catch(err => { console.error("Failed to load leaves:", err); return []; }),
+        getEngineerAttendanceHistory(engineerId).catch(err => { console.error("Failed to load attendance history:", err); return []; })
+      ]);
+
       setAssignedSites(filteredSites);
-
-      // Load all sites for lookup
-      try {
-        const sites = await getSites();
-        setAllSites(sites);
-      } catch (err) {
-        console.error("Failed to load all sites:", err);
-      }
-
-      // Fetch personal stats, leaves, and attendance history
-      try {
-        const stats = await getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24);
-        setPersonalStats(stats);
-        const leaves = await getEngineerLeaves(engineerId);
-        setLoggedLeaves(leaves);
-        const history = await getEngineerAttendanceHistory(engineerId);
-        setAllSitesAttendance(history);
-      } catch (err) {
-        console.error("Failed to load personal stats/leaves/history:", err);
-      }
+      setAllSites(sites);
+      if (stats) setPersonalStats(stats);
+      setLoggedLeaves(leaves);
+      setAllSitesAttendance(history);
 
       if (filteredSites.length > 0) {
         let currentActiveId = activeSiteId;
@@ -640,51 +637,40 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }
         }
 
-        // Fetch today's check-in attendance across all sites
-        const attendance = await getTodayAttendance(engineerId, todayStr);
+        const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
+
+        // Fetch all site-specific records concurrently in parallel
+        const [
+          attendance,
+          updates,
+          siteMats,
+          ge,
+          lp,
+          lh,
+          lm,
+          userNotifications
+        ] = await Promise.all([
+          getTodayAttendance(engineerId, todayStr).catch(() => null),
+          getDailyUpdatesForEngineer(engineerId, currentActiveId).catch(() => []),
+          getMaterialsDetailed(currentActiveId).catch(() => []),
+          getGeneralExpenses(currentActiveId).catch(() => []),
+          getLabourPayments(adminId, currentActiveId).catch(() => []),
+          getLabourDailyCountsSummary(currentActiveId).catch(() => []),
+          getLabourMaster(adminId).catch(() => null),
+          getNotifications(engineerId).catch(() => [])
+        ]);
+
         setTodayAttendance(attendance);
-        
-
-        
-        // Fetch daily updates (site-segregated)
-        const updates = await getDailyUpdatesForEngineer(engineerId, currentActiveId);
         setDailyUpdates(updates);
-
-        // Fetch material receipts (site-segregated)
-        const siteMats = await getMaterialsDetailed(currentActiveId);
         setMaterials(siteMats);
-
-        // Fetch general expenses, labour history, and payments
-        // Derive adminId from the assigned site's createdByAdmin for payment scoping
-        try {
-          const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
-          const [ge, lp, lh, lm] = await Promise.all([
-            getGeneralExpenses(currentActiveId),
-            getLabourPayments(adminId, currentActiveId),
-            getLabourDailyCountsSummary(currentActiveId),
-            getLabourMaster(adminId)
-          ]);
-          setGeneralExpenses(ge);
-          setLabourPayments(lp);
-          setLabourHistory(lh);
-          if (lm) setLabourMaster(lm);
-        } catch (e) {
-          console.error("Failed to load financials:", e);
-        }
-
-
-
-        // Fetch notifications for the engineer
-        try {
-          const userNotifications = await getNotifications(engineerId);
-          setNotifications(userNotifications || []);
-        } catch (e) {
-          console.error("Failed to load notifications:", e);
-        }
+        setGeneralExpenses(ge);
+        setLabourPayments(lp);
+        setLabourHistory(lh);
+        if (lm) setLabourMaster(lm);
+        setNotifications(userNotifications || []);
       }
     } catch (err) {
       console.error("Dashboard data load error:", err);
-      // Suppressed background database check warning to prevent false synchronization notifications.
     } finally {
       setLoading(false);
     }
@@ -1428,6 +1414,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const handleMarkAttendance = async (e) => {
     if (e) e.preventDefault();
+    if (attendanceSubmitting) return;
     if (!activeSiteId) {
       showToast("Please select your active site.", "error");
       return;
@@ -2006,6 +1993,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Submit workforce attendance
   const handleLabourSubmit = async () => {
+    if (labourSubmitting) return;
     if (!activeSiteId) {
       showToast("Please choose active project.", "error");
       return;
@@ -2036,6 +2024,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       cancelText: "Cancel",
       variant: "lock",
       onConfirm: async () => {
+        if (labourSubmitting) return;
         setLabourSubmitting(true);
         try {
           // Double check database inside modal confirm to prevent race condition duplicates
@@ -2706,6 +2695,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // 5. Upload Geotagged Progress Photo
   const handlePhotoUpload = async (e) => {
     e.preventDefault();
+    if (photoSubmitting) return;
     if (!activeSiteId) {
       showToast("Please select construction site.", "error");
       return;
@@ -2759,6 +2749,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // 6. Submit Daily Progress updates
   const handleProgressSubmit = async (e) => {
     e.preventDefault();
+    if (progressSubmitting) return;
     if (!activeSiteId) {
       showToast("Please choose target project.", "error");
       return;

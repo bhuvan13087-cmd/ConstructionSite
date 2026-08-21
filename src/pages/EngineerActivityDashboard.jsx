@@ -57,8 +57,22 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
   const loadData = async () => {
     try {
       setLoading(true);
-      // Fetch engineer details
-      const fetchedEngineers = await getSiteEngineers();
+      const [
+        fetchedEngineers,
+        fetchedSites,
+        progress,
+        pts,
+        attend,
+        engLeaves
+      ] = await Promise.all([
+        getSiteEngineers(),
+        getSites(),
+        getDailyUpdatesForEngineer(engineerId),
+        getSitePhotos(engineerId),
+        getEngineerAttendanceHistory(engineerId),
+        getEngineerLeaves(engineerId)
+      ]);
+
       const currentEng = fetchedEngineers.find(e => e.id === engineerId);
       if (!currentEng) {
         showToast("Engineer not found.", "error");
@@ -66,31 +80,14 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
         return;
       }
       setEngineer(currentEng);
-
-      // Fetch all sites
-      const fetchedSites = await getSites();
       setSites(fetchedSites);
-
-      // Fetch other engineer logs in parallel
-      const [
-        progress,
-        pts,
-        attend,
-        engStats,
-        engLeaves
-      ] = await Promise.all([
-        getDailyUpdatesForEngineer(engineerId),
-        getSitePhotos(engineerId),
-        getEngineerAttendanceHistory(engineerId),
-        getEngineerAttendanceAndLeaveStats(engineerId, currentEng.holidayAllowance || 24),
-        getEngineerLeaves(engineerId)
-      ]);
-
       setProgressUpdates(progress);
       setPhotos(pts);
       setAttendance(attend);
-      setStats(engStats);
       setLeaves(engLeaves);
+
+      const engStats = await getEngineerAttendanceAndLeaveStats(engineerId, currentEng.holidayAllowance || 24);
+      setStats(engStats);
 
     } catch (err) {
       console.error("Error loading engineer activity data:", err);

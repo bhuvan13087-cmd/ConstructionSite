@@ -707,6 +707,50 @@ export function calculateOverallFinancials(sites = [], allMaterials = [], allLab
   let totalExpenses = 0;
   let pendingPayments = 0;
   let progressSum = 0;
+
+  // Pre-index collections by siteId for O(1) lookups during multi-site aggregation
+  const materialsBySite = new Map();
+  (allMaterials || []).forEach(m => {
+    if (m && m.siteId) {
+      if (!materialsBySite.has(m.siteId)) materialsBySite.set(m.siteId, []);
+      materialsBySite.get(m.siteId).push(m);
+    }
+  });
+
+  const progressBySite = new Map();
+  (allProgressUpdates || []).forEach(p => {
+    if (p && p.siteId) {
+      if (!progressBySite.has(p.siteId)) progressBySite.set(p.siteId, []);
+      progressBySite.get(p.siteId).push(p);
+    }
+  });
+
+  const expensesBySite = new Map();
+  (generalExpenses || []).forEach(e => {
+    if (e && e.siteId) {
+      if (!expensesBySite.has(e.siteId)) expensesBySite.set(e.siteId, []);
+      expensesBySite.get(e.siteId).push(e);
+    }
+  });
+
+  const labourPaymentsBySite = new Map();
+  (labourPayments || []).forEach(lp => {
+    if (lp && lp.siteId) {
+      if (!labourPaymentsBySite.has(lp.siteId)) labourPaymentsBySite.set(lp.siteId, []);
+      labourPaymentsBySite.get(lp.siteId).push(lp);
+    }
+  });
+
+  const isLabourHistoryArray = Array.isArray(allLabourHistory);
+  const labourHistoryBySite = new Map();
+  if (isLabourHistoryArray) {
+    allLabourHistory.forEach(lh => {
+      if (lh && lh.siteId) {
+        if (!labourHistoryBySite.has(lh.siteId)) labourHistoryBySite.set(lh.siteId, []);
+        labourHistoryBySite.get(lh.siteId).push(lh);
+      }
+    });
+  }
   
   sites.forEach(site => {
     if (site.status === "Completed") {
@@ -718,8 +762,16 @@ export function calculateOverallFinancials(sites = [], allMaterials = [], allLab
     if (isSiteDelayed(site)) {
       delayedSites++;
     }
+
+    const siteMats = materialsBySite.get(site.id) || [];
+    const siteProgress = progressBySite.get(site.id) || [];
+    const siteExpenses = expensesBySite.get(site.id) || [];
+    const sitePayments = labourPaymentsBySite.get(site.id) || [];
+    const siteLabour = isLabourHistoryArray 
+      ? (labourHistoryBySite.get(site.id) || [])
+      : ((allLabourHistory && allLabourHistory[site.id]) || []);
     
-    const financials = getSiteFinancials(site, allMaterials, allLabourHistory, allProgressUpdates, labourMaster, generalExpenses, labourPayments);
+    const financials = getSiteFinancials(site, siteMats, siteLabour, siteProgress, labourMaster, siteExpenses, sitePayments);
     totalProjectValue += financials.budget;
     totalPaymentsReceived += financials.paymentsReceived;
     totalExpenses += financials.totalSpent;

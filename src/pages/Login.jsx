@@ -285,6 +285,7 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     setError("");
 
@@ -328,9 +329,10 @@ export default function Login() {
       } else if (err.code === "auth/network-request-failed") {
         userFriendlyMsg = "Connection failed";
       } else {
-        userFriendlyMsg = err.message;
+        userFriendlyMsg = err.message || "Login failed.";
       }
       setError(userFriendlyMsg);
+    } finally {
       setLoading(false);
     }
   };
@@ -338,6 +340,7 @@ export default function Login() {
   // Forgot Password Flow Handlers
   const handleForgotPasswordSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setError("");
     setLoading(true);
 
@@ -395,6 +398,7 @@ export default function Login() {
 
   const handleResetPasswordSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setError("");
     setResetSuccess("");
 

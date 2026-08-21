@@ -101,24 +101,20 @@ export default function AdminPayments() {
     try {
       setLoading(true);
       const adminId = userProfile?.uid || userProfile?.id || null;
-      const [fetchedSites, fetchedLabourPayments, fetchedLabourMaster, fetchedGeneralExpenses, fetchedAllMaterials] = await Promise.all([
+      const [fetchedSites, fetchedLabourPayments, fetchedLabourMaster, fetchedAllMaterials] = await Promise.all([
         getSites(adminId),
         getLabourPayments(adminId),
         getLabourMaster(adminId),
-        getGeneralExpenses(),
         getMaterialsDetailed(null)
       ]);
 
       setSites(fetchedSites);
       setLabourPayments(fetchedLabourPayments);
       setLabourMaster(fetchedLabourMaster);
-      setGeneralExpenses(fetchedGeneralExpenses);
       setMaterials(fetchedAllMaterials);
 
       if (fetchedSites.length > 0) {
-        setSelectedSiteId(fetchedSites[0].id);
-        const lh = await getLabourDailyCountsSummary(fetchedSites[0].id);
-        setLabourHistory(lh);
+        setSelectedSiteId(prev => prev || fetchedSites[0].id);
       }
     } catch (err) {
       console.error("Failed to load payments ledger data:", err);
