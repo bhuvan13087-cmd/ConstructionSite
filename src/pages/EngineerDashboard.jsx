@@ -65,8 +65,9 @@ import {
   transferMaterialBetweenSites,
   receiveMaterialTransfer,
   subscribeMaterialTransfersForSite,
+  hasVerifiedAttendanceForDate,
   verifyEngineerAttendanceGate
-} from "../services/firebaseService";
+} from "../services/firebaseService.js";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
@@ -267,14 +268,42 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // State to track pending return tab after completing attendance
   const [pendingUnlockTab, setPendingUnlockTab] = useState(null);
 
+  // Memory Cache for unlocked Site + Engineer + Date combinations (Prevents re-locking within working session)
+  const [unlockedGates, setUnlockedGates] = useState({});
+
   // Production Attendance Verification Gate Check for Site + Date + Engineer
   const isAttendanceVerifiedForSiteAndDate = (siteId, dateStr) => {
     if (!siteId || !dateStr || !currentEngineerId) return false;
     const cleanSiteId = String(siteId).trim();
     const cleanDateStr = String(dateStr).trim();
     const cleanEngineerId = String(currentEngineerId).trim();
+    const gateKey = `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`;
 
-    // 1. Check allSitesAttendance (populated from canonical attendance collection)
+    // 1. Check in-memory unlocked cache
+    if (unlockedGates[gateKey]) {
+      return true;
+    }
+
+    // 2. Check todayAttendance if date matches and site matches
+    if (todayAttendance) {
+      const todayDate = todayAttendance.date || todayAttendance.attendanceDate;
+      const todaySite = todayAttendance.siteId;
+      if (String(todaySite).trim() === cleanSiteId && String(todayDate).trim() === cleanDateStr) {
+        if (todayAttendance.type !== "labour_attendance_lock" && !todayAttendance.id?.startsWith("labour_lock_")) {
+          const isPresent = todayAttendance.status === "present" || todayAttendance.status === "checked_out" || todayAttendance.status === "verified";
+          const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent || !!todayAttendance.time;
+          const isNotRejected = todayAttendance.status !== "absent" && todayAttendance.status !== "rejected" && todayAttendance.status !== "cancelled" && todayAttendance.status !== "failed";
+          if (isVerified && isNotRejected) {
+            if (!unlockedGates[gateKey]) {
+              setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
+            }
+            return true;
+          }
+        }
+      }
+    }
+
+    // 3. Check allSitesAttendance (populated from canonical attendance collection)
     const match = (allSitesAttendance || []).find(r => {
       // Exclude labour submission locks
       if (r.type === "labour_attendance_lock" || (r.id && r.id.startsWith("labour_lock_"))) {
@@ -288,22 +317,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const isSameDate = String(recDate).trim() === cleanDateStr;
       const isSameEng = !recUser || String(recUser).trim() === cleanEngineerId;
       const isPresent = r.status === "present" || r.status === "checked_out" || r.status === "verified";
-      const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent;
+      const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent || !!r.time;
       const isNotRejected = r.status !== "absent" && r.status !== "rejected" && r.status !== "cancelled" && r.status !== "failed";
       return isSameSite && isSameDate && isSameEng && isVerified && isNotRejected;
     });
 
-    if (match) return true;
-
-    // 2. Check todayAttendance if date is today and site matches
-    const todayStr = new Date().toISOString().split("T")[0];
-    if (cleanDateStr === todayStr && todayAttendance && String(todayAttendance.siteId).trim() === cleanSiteId) {
-      if (todayAttendance.type !== "labour_attendance_lock" && !todayAttendance.id?.startsWith("labour_lock_")) {
-        const isPresent = todayAttendance.status === "present" || todayAttendance.status === "checked_out" || todayAttendance.status === "verified";
-        const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent;
-        const isNotRejected = todayAttendance.status !== "absent" && todayAttendance.status !== "rejected" && todayAttendance.status !== "cancelled" && todayAttendance.status !== "failed";
-        if (isVerified && isNotRejected) return true;
+    if (match) {
+      if (!unlockedGates[gateKey]) {
+        setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
       }
+      return true;
     }
 
     return false;
@@ -1506,6 +1529,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         distance
       );
       showToast(`Checked in present at ${site.siteName}!`, "success");
+
+      const unlockedKey = `${activeSiteId}_${engineerId}_${todayStr}`;
+      setUnlockedGates(prev => ({ ...prev, [unlockedKey]: true }));
 
       handleResetVerification();
 
@@ -4644,7 +4670,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const renderMaterialView = () => {
     // Production Attendance Verification Gate Check
-    const effectiveMaterialDate = materialDateFilter || bulkMaterialDate || new Date().toISOString().split("T")[0];
+    const effectiveMaterialDate = bulkMaterialDate || new Date().toISOString().split("T")[0];
     const isVerified = isAttendanceVerifiedForSiteAndDate(activeSiteId, effectiveMaterialDate);
     if (!isVerified) {
       const siteObj = assignedSites.find(s => s.id === activeSiteId) || currentSite;
@@ -8010,16 +8036,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const renderLabourView = () => {
     // Production Attendance Verification Gate Check
-    const isVerified = isAttendanceVerifiedForSiteAndDate(activeSiteId, labourDate);
+    const effectiveLabourDate = labourDate || new Date().toISOString().split("T")[0];
+    const isVerified = isAttendanceVerifiedForSiteAndDate(activeSiteId, effectiveLabourDate);
     if (!isVerified) {
       const siteObj = assignedSites.find(s => s.id === activeSiteId) || currentSite;
       return (
         <AttendanceGateBlockedCard
           siteName={siteObj?.siteName || "Current Worksite"}
-          dateStr={labourDate}
+          dateStr={effectiveLabourDate}
           sectionTitle="Workforce & Labour Log"
           onMarkAttendance={() => handleOpenAttendanceGate("labour")}
-          isToday={labourDate === new Date().toISOString().split("T")[0]}
+          isToday={effectiveLabourDate === new Date().toISOString().split("T")[0]}
         />
       );
     }

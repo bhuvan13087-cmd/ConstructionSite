@@ -1227,19 +1227,21 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 
 /**
  * Production Attendance Verification Gate:
- * Verifies that the authenticated engineer has a valid, verified attendance record
- * for the specified Site + Date combination from the canonical "attendance" collection.
+/**
+ * Canonical Attendance Gate Helper:
+ * Determines if the engineer has completed verified attendance for a Site + Calendar Date.
+ * Reusable single source of truth consumed by Materials, Labour, Progress, and Transfers.
  * 
- * @param {string} engineerId - Authenticated Engineer UID
  * @param {string} siteId - Target Site ID
+ * @param {string} engineerId - Authenticated Engineer UID
  * @param {string} dateStr - Target Date (YYYY-MM-DD)
- * @returns {Promise<boolean>} - True if valid verified attendance exists, false otherwise
+ * @returns {Promise<boolean>} - True if valid verified attendance exists for that day, false otherwise
  */
-export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) {
-  if (!engineerId || !siteId || !dateStr) return false;
+export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) {
+  if (!siteId || !engineerId || !dateStr) return false;
 
-  const cleanEngineerId = String(engineerId).trim();
   const cleanSiteId = String(siteId).trim();
+  const cleanEngineerId = String(engineerId).trim();
   const cleanDateStr = String(dateStr).trim();
 
   try {
@@ -1261,7 +1263,7 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
       if (recUser && recUser !== cleanEngineerId) return false;
       // 5. Ensure valid presence/verification status and not rejected/absent/failed
       const isPresent = data.status === "present" || data.status === "checked_out" || data.status === "verified";
-      const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent;
+      const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent || !!data.time;
       const isNotRejected = data.status !== "absent" && data.status !== "rejected" && data.status !== "cancelled" && data.status !== "failed";
       return isVerified && isNotRejected;
     };
@@ -1325,6 +1327,13 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
   }
 
   return false;
+}
+
+/**
+ * Backward compatible alias for Attendance Gate verification
+ */
+export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) {
+  return hasVerifiedAttendanceForDate(siteId, engineerId, dateStr);
 }
 
 // Get the engineer's attendance record for a specific date
