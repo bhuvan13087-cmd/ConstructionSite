@@ -64,6 +64,7 @@ export default function AdminDashboard() {
   const [attendanceSiteFilter, setAttendanceSiteFilter] = useState("");
   const [attendanceStatusFilter, setAttendanceStatusFilter] = useState("all"); // 'all' | 'onsite' | 'checkout'
   const [selectedInspectRecord, setSelectedInspectRecord] = useState(null);
+  const [showTodayAttendanceModal, setShowTodayAttendanceModal] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -558,33 +559,54 @@ export default function AdminDashboard() {
               <div className="admin-summary-label">Completed Projects</div>
             </div>
           </div>
-
         </div>
 
-        {/* ── 2. DEDICATED SECTION: TODAY'S ATTENDANCE ACTIVITY (LIVE WORKFORCE FEED) ── */}
-        <div className="admin-attendance-card" id="today-attendance-activity-section">
-          
-          {/* Attendance Section Header */}
-          <div className="admin-attendance-header">
-            <div className="admin-attendance-title-group">
-              <h3 className="admin-attendance-title">
-                <ClipboardCheck size={18} style={{ color: "var(--brand-orange)" }} />
-                Today's Attendance Activity
-              </h3>
-              <div className="admin-attendance-live-badge">
-                <span className="admin-attendance-live-dot" />
-                Live Sync
+        {/* ── 2. COMPACT ATTENDANCE VIEW CARD (ZERO VERTICAL EXPANSION) ── */}
+        <div className="admin-attendance-card" id="today-attendance-activity-section" style={{ padding: "16px 20px" }}>
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "16px"
+          }}>
+            {/* Left: Title, Live Sync, and Today's Date */}
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{
+                width: "42px",
+                height: "42px",
+                borderRadius: "10px",
+                backgroundColor: "#ffedd5",
+                color: "var(--brand-orange)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0
+              }}>
+                <ClipboardCheck size={22} />
               </div>
-              <span style={{ fontSize: "12px", color: "var(--primary-600)", fontWeight: "600" }}>
-                • {formattedTodayDate}
-              </span>
+
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <h3 style={{ margin: 0, fontSize: "15px", fontWeight: "800", color: "var(--primary-950)" }}>
+                    Today's Attendance
+                  </h3>
+                  <div className="admin-attendance-live-badge">
+                    <span className="admin-attendance-live-dot" />
+                    Live Sync
+                  </div>
+                </div>
+                <span style={{ fontSize: "12px", color: "var(--primary-600)", fontWeight: "600" }}>
+                  {formattedTodayDate} • {todayAttendanceList.length} engineer{todayAttendanceList.length === 1 ? "" : "s"} recorded today
+                </span>
+              </div>
             </div>
 
-            {/* Live Metrics Summary Strip */}
-            <div className="admin-attendance-metrics">
+            {/* Center / Summary Pills */}
+            <div className="admin-attendance-metrics" style={{ flexWrap: "wrap" }}>
               <div className="admin-attendance-metric-pill present">
                 <UserCheck size={14} />
-                <span>Present: {presentCount}/{activeEngineersCount}</span>
+                <span>Today: {todayAttendanceList.length} Engineer{todayAttendanceList.length === 1 ? "" : "s"} ({presentCount}/{activeEngineersCount})</span>
               </div>
               <div className="admin-attendance-metric-pill onsite">
                 <Clock size={14} />
@@ -598,285 +620,50 @@ export default function AdminDashboard() {
                 <ShieldCheck size={14} />
                 <span>GPS Verified: {verifiedCount}</span>
               </div>
+            </div>
+
+            {/* Right: Primary Action Button to Open Full Modal */}
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={() => setShowTodayAttendanceModal(true)}
+                className="erp-btn-primary"
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                  padding: "9px 18px",
+                  fontSize: "13px",
+                  fontWeight: "750",
+                  borderRadius: "8px",
+                  backgroundColor: "#ea580c",
+                  color: "#ffffff",
+                  border: "none",
+                  cursor: "pointer",
+                  boxShadow: "0 2px 4px rgba(234, 88, 12, 0.2)",
+                  transition: "all 0.15s ease"
+                }}
+              >
+                <ClipboardCheck size={16} />
+                Attendance View
+                <span style={{
+                  backgroundColor: "rgba(255, 255, 255, 0.25)",
+                  padding: "1px 6px",
+                  borderRadius: "100px",
+                  fontSize: "11px"
+                }}>
+                  {todayAttendanceList.length}
+                </span>
+              </button>
+
               <Link 
                 to="/admin/engineers" 
                 className="admin-attendance-link-pill"
+                style={{ padding: "8px 12px", textDecoration: "none" }}
               >
                 All Engineers →
               </Link>
             </div>
-          </div>
-
-          {/* Interactive Toolbar: Search, Site Filter & Status Tabs */}
-          <div className="admin-attendance-controls-bar">
-            <div className="admin-attendance-search-group">
-              <div className="admin-attendance-search-input-wrap">
-                <Search size={14} className="admin-attendance-search-icon" />
-                <input 
-                  type="text"
-                  placeholder="Search engineer name, email or site..."
-                  value={attendanceSearchQuery}
-                  onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                  className="admin-attendance-search-input"
-                />
-              </div>
-
-              <select
-                value={attendanceSiteFilter}
-                onChange={(e) => setAttendanceSiteFilter(e.target.value)}
-                className="admin-attendance-select"
-              >
-                <option value="">All Sites ({sites.length})</option>
-                {sites.map(s => (
-                  <option key={s.id} value={s.id}>{s.siteName}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="admin-attendance-tabs">
-              <button 
-                type="button"
-                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "all" ? "active" : ""}`}
-                onClick={() => setAttendanceStatusFilter("all")}
-              >
-                All Checked-In ({todayAttendanceList.length})
-              </button>
-              <button 
-                type="button"
-                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "onsite" ? "active" : ""}`}
-                onClick={() => setAttendanceStatusFilter("onsite")}
-              >
-                On-Site Now ({onSiteCount})
-              </button>
-              <button 
-                type="button"
-                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "checkout" ? "active" : ""}`}
-                onClick={() => setAttendanceStatusFilter("checkout")}
-              >
-                Checked Out ({checkedOutCount})
-              </button>
-            </div>
-          </div>
-
-          {/* Attendance Activity Table / List */}
-          <div className="admin-attendance-table-wrap">
-            {filteredTodayAttendance.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "40px 20px", background: "#f8fafc" }}>
-                <div style={{ width: "44px", height: "44px", borderRadius: "100px", backgroundColor: "#ffedd5", color: "#ea580c", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
-                  <ClipboardCheck size={22} />
-                </div>
-                <h4 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
-                  {todayAttendanceList.length === 0 ? "No Attendance Marked Yet Today" : "No Attendance Matching Selected Filters"}
-                </h4>
-                <p style={{ margin: 0, fontSize: "12px", color: "#64748b", maxWidth: "420px", marginInline: "auto" }}>
-                  {todayAttendanceList.length === 0 
-                    ? "When site engineers check in via the mobile or web portal with GPS verification and photo proof, their records will sync here in real-time."
-                    : "Try clearing search keywords or site filters to view all recorded attendance for today."}
-                </p>
-                {todayAttendanceList.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAttendanceSearchQuery("");
-                      setAttendanceSiteFilter("");
-                      setAttendanceStatusFilter("all");
-                    }}
-                    className="erp-btn-secondary"
-                    style={{ marginTop: "12px", fontSize: "11.5px", padding: "5px 12px" }}
-                  >
-                    Reset Filters
-                  </button>
-                )}
-              </div>
-            ) : (
-              <table className="admin-attendance-table">
-                <colgroup>
-                  <col style={{ width: "22%" }} />
-                  <col style={{ width: "18%" }} />
-                  <col style={{ width: "12%" }} />
-                  <col style={{ width: "14%" }} />
-                  <col style={{ width: "20%" }} />
-                  <col style={{ width: "70px" }} />
-                  <col style={{ width: "70px" }} />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th>Engineer</th>
-                    <th>Assigned Site</th>
-                    <th>Check-In Time</th>
-                    <th>Check-Out / Status</th>
-                    <th>Location & Geofence</th>
-                    <th style={{ textAlign: "center" }}>Photo Proof</th>
-                    <th style={{ textAlign: "right" }}>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTodayAttendance.map((rec) => {
-                    const hasDistance = rec.distance !== null && rec.distance !== undefined;
-                    const isOnSiteGeofence = hasDistance && rec.distance <= 150;
-
-                    return (
-                      <tr key={rec.id}>
-                        {/* Engineer Info */}
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                            {rec.engineerAvatar ? (
-                              <img 
-                                src={rec.engineerAvatar} 
-                                alt={rec.engineerName} 
-                                className="admin-attendance-avatar"
-                              />
-                            ) : (
-                              <div className="admin-attendance-avatar">
-                                {(rec.engineerName || "E").charAt(0).toUpperCase()}
-                              </div>
-                            )}
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {rec.engineerName}
-                              </strong>
-                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {rec.engineerPhone || rec.engineerEmail || "Site Engineer"}
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Assigned Site */}
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <Building2 size={14} style={{ color: "var(--brand-orange)", flexShrink: 0 }} />
-                            <div style={{ minWidth: 0, flex: 1 }}>
-                              <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                {rec.siteName}
-                              </strong>
-                              {rec.clientName && (
-                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                  Client: {rec.clientName}
-                                </span>
-                              )}
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Check-In Time */}
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <Clock size={14} style={{ color: "#16a34a", flexShrink: 0 }} />
-                            <div>
-                              <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#15803d", display: "block" }}>
-                                {rec.checkInTimeFormatted}
-                              </span>
-                              <span style={{ fontSize: "10.5px", color: "#64748b" }}>
-                                Checked In
-                              </span>
-                            </div>
-                          </div>
-                        </td>
-
-                        {/* Check-Out / Active Status */}
-                        <td>
-                          {rec.isCheckedOut ? (
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                              <CheckCircle2 size={14} style={{ color: "#2563eb", flexShrink: 0 }} />
-                              <div>
-                                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#1d4ed8", display: "block" }}>
-                                  {rec.checkOutTimeFormatted || "Completed"}
-                                </span>
-                                <span style={{ fontSize: "10.5px", color: "#64748b" }}>
-                                  Checked Out
-                                </span>
-                              </div>
-                            </div>
-                          ) : (
-                            <span style={{ 
-                              display: "inline-flex", 
-                              alignItems: "center", 
-                              gap: "5px",
-                              backgroundColor: "#f0fdf4", 
-                              color: "#16a34a", 
-                              border: "1px solid #bbf7d0", 
-                              padding: "3px 8px", 
-                              borderRadius: "6px",
-                              fontSize: "11px",
-                              fontWeight: "700",
-                              whiteSpace: "nowrap"
-                            }}>
-                              <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }} />
-                              Active On-Site
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Location & Geofence Details (Structured 2-Line Layout) */}
-                        <td>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "nowrap", overflow: "hidden" }}>
-                              <span className="admin-attendance-gps-badge">
-                                <MapPin size={11} />
-                                {rec.latitude && rec.longitude 
-                                  ? `${Number(rec.latitude).toFixed(4)}, ${Number(rec.longitude).toFixed(4)}`
-                                  : "GPS Logged"}
-                              </span>
-
-                              {hasDistance && (
-                                <span className={`admin-attendance-distance-badge ${isOnSiteGeofence ? "on-site" : "off-site"}`}>
-                                  <Navigation size={10} />
-                                  {rec.distance < 1000 
-                                    ? `${Math.round(rec.distance)}m` 
-                                    : `${(rec.distance / 1000).toFixed(1)}km`}
-                                </span>
-                              )}
-                            </div>
-                            <span style={{ fontSize: "11px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }} title={rec.addressDisplay}>
-                              {rec.addressDisplay}
-                            </span>
-                          </div>
-                        </td>
-
-                        {/* Photo Proof */}
-                        <td style={{ textAlign: "center" }}>
-                          {rec.photoUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedInspectRecord(rec)}
-                              className="admin-attendance-thumb-btn"
-                              title="Click to view full photo verification"
-                            >
-                              <img 
-                                src={rec.photoUrl} 
-                                alt="Check-in Selfie" 
-                                className="admin-attendance-thumb-img"
-                              />
-                              <div className="admin-attendance-thumb-overlay">
-                                <Eye size={12} />
-                              </div>
-                            </button>
-                          ) : (
-                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>
-                              No Photo
-                            </span>
-                          )}
-                        </td>
-
-                        {/* Action: Inspect */}
-                        <td style={{ textAlign: "right" }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedInspectRecord(rec)}
-                            className="erp-btn-secondary"
-                            style={{ padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                          >
-                            <Eye size={12} />
-                            Details
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
           </div>
         </div>
 
@@ -1115,6 +902,359 @@ export default function AdminDashboard() {
         </div>
 
       </div>
+
+      {/* ── EXPANDED ATTENDANCE VIEW MODAL (TODAY'S ATTENDANCE FULL VIEW) ── */}
+      <Modal
+        isOpen={showTodayAttendanceModal}
+        onClose={() => setShowTodayAttendanceModal(false)}
+        title={`Today's Attendance Activity — Full View (${formattedTodayDate})`}
+        maxWidth="1100px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Header / Summary Bar */}
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+            padding: "12px 16px",
+            backgroundColor: "#f8fafc",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0"
+          }}>
+            <div className="admin-attendance-metrics" style={{ flexWrap: "wrap" }}>
+              <div className="admin-attendance-metric-pill present">
+                <UserCheck size={14} />
+                <span>Present: {presentCount}/{activeEngineersCount} ({attendanceRate}%)</span>
+              </div>
+              <div className="admin-attendance-metric-pill onsite">
+                <Clock size={14} />
+                <span>On-Site: {onSiteCount}</span>
+              </div>
+              <div className="admin-attendance-metric-pill checkout">
+                <CheckCircle2 size={14} />
+                <span>Checked Out: {checkedOutCount}</span>
+              </div>
+              <div className="admin-attendance-metric-pill verified">
+                <ShieldCheck size={14} />
+                <span>GPS Verified: {verifiedCount}</span>
+              </div>
+            </div>
+
+            <div className="admin-attendance-live-badge">
+              <span className="admin-attendance-live-dot" />
+              Live Real-Time Sync
+            </div>
+          </div>
+
+          {/* Interactive Toolbar: Search, Site Filter & Status Tabs */}
+          <div className="admin-attendance-controls-bar" style={{ margin: 0 }}>
+            <div className="admin-attendance-search-group">
+              <div className="admin-attendance-search-input-wrap">
+                <Search size={14} className="admin-attendance-search-icon" />
+                <input 
+                  type="text"
+                  placeholder="Search engineer name, email or site..."
+                  value={attendanceSearchQuery}
+                  onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                  className="admin-attendance-search-input"
+                />
+              </div>
+
+              <select
+                value={attendanceSiteFilter}
+                onChange={(e) => setAttendanceSiteFilter(e.target.value)}
+                className="admin-attendance-select"
+              >
+                <option value="">All Sites ({sites.length})</option>
+                {sites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="admin-attendance-tabs">
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "all" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("all")}
+              >
+                All Checked-In ({todayAttendanceList.length})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "onsite" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("onsite")}
+              >
+                On-Site Now ({onSiteCount})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "checkout" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("checkout")}
+              >
+                Checked Out ({checkedOutCount})
+              </button>
+            </div>
+          </div>
+
+          {/* Attendance Activity Table in Modal */}
+          <div className="admin-attendance-table-wrap" style={{ maxHeight: "60vh", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+            {filteredTodayAttendance.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px", background: "#f8fafc" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "100px", backgroundColor: "#ffedd5", color: "#ea580c", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
+                  <ClipboardCheck size={22} />
+                </div>
+                <h4 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                  {todayAttendanceList.length === 0 ? "No Attendance Marked Yet Today" : "No Attendance Matching Selected Filters"}
+                </h4>
+                <p style={{ margin: 0, fontSize: "12px", color: "#64748b", maxWidth: "420px", marginInline: "auto" }}>
+                  {todayAttendanceList.length === 0 
+                    ? "When site engineers check in via the mobile or web portal with GPS verification and photo proof, their records will sync here in real-time."
+                    : "Try clearing search keywords or site filters to view all recorded attendance for today."}
+                </p>
+                {todayAttendanceList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceSearchQuery("");
+                      setAttendanceSiteFilter("");
+                      setAttendanceStatusFilter("all");
+                    }}
+                    className="erp-btn-secondary"
+                    style={{ marginTop: "12px", fontSize: "11.5px", padding: "5px 12px" }}
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <table className="admin-attendance-table">
+                <colgroup>
+                  <col style={{ width: "24%" }} />
+                  <col style={{ width: "36px" }} />
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "13%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "21%" }} />
+                  <col style={{ width: "70px" }} />
+                </colgroup>
+                <thead>
+                  <tr>
+                    <th>Engineer</th>
+                    <th style={{ width: "36px", padding: 0 }}></th>
+                    <th>Assigned Site</th>
+                    <th>Check-In Time</th>
+                    <th>Check-Out / Status</th>
+                    <th>Location & Geofence</th>
+                    <th style={{ textAlign: "center" }}>Photo Proof</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTodayAttendance.map((rec) => {
+                    const hasDistance = rec.distance !== null && rec.distance !== undefined;
+                    const isOnSiteGeofence = hasDistance && rec.distance <= 150;
+
+                    return (
+                      <tr key={rec.id}>
+                        {/* Engineer Info */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            {rec.engineerAvatar ? (
+                              <img 
+                                src={rec.engineerAvatar} 
+                                alt={rec.engineerName} 
+                                className="admin-attendance-avatar"
+                              />
+                            ) : (
+                              <div className="admin-attendance-avatar">
+                                {(rec.engineerName || "E").charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {rec.engineerName}
+                              </strong>
+                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {rec.engineerPhone || rec.engineerEmail || "Site Engineer"}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Compact Eye / View Details Icon between Engineer & Site */}
+                        <td style={{ textAlign: "center", padding: "8px 4px", width: "36px" }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInspectRecord(rec)}
+                            title="View Attendance Details"
+                            style={{
+                              width: "28px",
+                              height: "28px",
+                              borderRadius: "6px",
+                              border: "1px solid #e2e8f0",
+                              backgroundColor: "#f8fafc",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              color: "#64748b",
+                              cursor: "pointer",
+                              padding: 0,
+                              transition: "all 0.15s ease"
+                            }}
+                            onMouseEnter={e => {
+                              e.currentTarget.style.backgroundColor = "#fff7ed";
+                              e.currentTarget.style.borderColor = "#fdba74";
+                              e.currentTarget.style.color = "#ea580c";
+                            }}
+                            onMouseLeave={e => {
+                              e.currentTarget.style.backgroundColor = "#f8fafc";
+                              e.currentTarget.style.borderColor = "#e2e8f0";
+                              e.currentTarget.style.color = "#64748b";
+                            }}
+                          >
+                            <Eye size={14} />
+                          </button>
+                        </td>
+
+                        {/* Assigned Site */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Building2 size={14} style={{ color: "var(--brand-orange)", flexShrink: 0 }} />
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                {rec.siteName}
+                              </strong>
+                              {rec.clientName && (
+                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  Client: {rec.clientName}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Check-In Time */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Clock size={14} style={{ color: "#16a34a", flexShrink: 0 }} />
+                            <div>
+                              <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#15803d", display: "block" }}>
+                                {rec.checkInTimeFormatted}
+                              </span>
+                              <span style={{ fontSize: "10.5px", color: "#64748b" }}>
+                                Checked In
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Check-Out / Active Status */}
+                        <td>
+                          {rec.isCheckedOut ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <CheckCircle2 size={14} style={{ color: "#2563eb", flexShrink: 0 }} />
+                              <div>
+                                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#1d4ed8", display: "block" }}>
+                                  {rec.checkOutTimeFormatted || "Completed"}
+                                </span>
+                                <span style={{ fontSize: "10.5px", color: "#64748b" }}>
+                                  Checked Out
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span style={{ 
+                              display: "inline-flex", 
+                              alignItems: "center", 
+                              gap: "5px",
+                              backgroundColor: "#f0fdf4", 
+                              color: "#16a34a", 
+                              border: "1px solid #bbf7d0", 
+                              padding: "3px 8px", 
+                              borderRadius: "6px", 
+                              fontSize: "11px", 
+                              fontWeight: "700", 
+                              whiteSpace: "nowrap"
+                            }}>
+                              <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }} />
+                              Active On-Site
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Location & Geofence Details */}
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "nowrap", overflow: "hidden" }}>
+                              <span className="admin-attendance-gps-badge">
+                                <MapPin size={11} />
+                                {rec.latitude && rec.longitude 
+                                  ? `${Number(rec.latitude).toFixed(4)}, ${Number(rec.longitude).toFixed(4)}`
+                                  : "GPS Logged"}
+                              </span>
+
+                              {hasDistance && (
+                                <span className={`admin-attendance-distance-badge ${isOnSiteGeofence ? "on-site" : "off-site"}`}>
+                                  <Navigation size={10} />
+                                  {rec.distance < 1000 
+                                    ? `${Math.round(rec.distance)}m` 
+                                    : `${(rec.distance / 1000).toFixed(1)}km`}
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "11px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }} title={rec.addressDisplay}>
+                              {rec.addressDisplay}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Photo Proof */}
+                        <td style={{ textAlign: "center" }}>
+                          {rec.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInspectRecord(rec)}
+                              className="admin-attendance-thumb-btn"
+                              title="Click to view full photo verification"
+                            >
+                              <img 
+                                src={rec.photoUrl} 
+                                alt="Check-in Selfie" 
+                                className="admin-attendance-thumb-img"
+                              />
+                              <div className="admin-attendance-thumb-overlay">
+                                <Eye size={12} />
+                              </div>
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>
+                              No Photo
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+
+          {/* Close button in modal */}
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+            <button
+              type="button"
+              onClick={() => setShowTodayAttendanceModal(false)}
+              className="erp-btn-primary"
+              style={{ padding: "8px 18px", fontSize: "13px" }}
+            >
+              Close View
+            </button>
+          </div>
+        </div>
+      </Modal>
 
       {/* ── ATTENDANCE VERIFICATION & PHOTO INSPECTION MODAL ── */}
       <Modal
