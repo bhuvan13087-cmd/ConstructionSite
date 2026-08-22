@@ -2867,7 +2867,7 @@ export default function ReportsDashboard() {
                         if (!allowedSiteIds.has(a.siteId)) return;
                         if (!matchesDateFilters(normDate)) return;
                         records.push({
-                          id: `att_${eng.id}_${normDate}`,
+                          id: a.id || `att_${a.siteId || ""}_${eng.id}_${normDate}`,
                           date: normDate,
                           name: eng.fullName,
                           time: a.checkInTime || "--",

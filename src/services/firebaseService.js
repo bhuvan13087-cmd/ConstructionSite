@@ -1097,7 +1097,7 @@ function scoreAttendanceRecord(rec) {
 
 /**
  * Single source of truth deduplication:
- * Groups records by (engineerId) + "_" + (date) and returns exactly ONE canonical valid daily record.
+ * Groups records by siteId + engineerId + date and returns exactly ONE canonical valid daily record per site.
  */
 export function deduplicateDailyAttendance(records = []) {
   if (!Array.isArray(records) || records.length === 0) return [];
@@ -1105,15 +1105,18 @@ export function deduplicateDailyAttendance(records = []) {
   // 1. Filter to genuine engineer attendance records only
   const validOnly = records.filter(r => isEngineerAttendanceRecord(r, r.id));
 
-  // 2. Group by engineerId + date
+  // 2. Group by siteId + engineerId + date (Canonical Attendance Identity)
   const groups = new Map();
 
   for (const rec of validOnly) {
     const engId = String(rec.engineerId || rec.userId || "").trim();
     const dateStr = String(rec.date || rec.attendanceDate || "").trim();
+    const siteId = String(rec.siteId || "").trim();
     if (!engId || !dateStr) continue;
 
-    const key = `${engId}_${dateStr}`;
+    // Site-scoped key ensures independent site records for the same engineer and date
+    const sitePrefix = siteId || "_nosite";
+    const key = `${sitePrefix}_${engId}_${dateStr}`;
     if (!groups.has(key)) {
       groups.set(key, []);
     }
@@ -1140,11 +1143,15 @@ export function deduplicateDailyAttendance(records = []) {
     }
   }
 
-  // 4. Sort results descending by date
+  // 4. Sort results descending by date, then by checkInTime
   return result.sort((a, b) => {
     const dateA = a.date || a.attendanceDate || "";
     const dateB = b.date || b.attendanceDate || "";
-    return dateB.localeCompare(dateA);
+    const cmp = dateB.localeCompare(dateA);
+    if (cmp !== 0) return cmp;
+    const timeA = a.checkInTime?.seconds || a.timestamp?.seconds || 0;
+    const timeB = b.checkInTime?.seconds || b.timestamp?.seconds || 0;
+    return timeB - timeA;
   });
 }
 
@@ -1226,8 +1233,6 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
 // ==========================================================================
 
 /**
- * Production Attendance Verification Gate:
-/**
  * Canonical Attendance Gate Helper:
  * Determines if the engineer has completed verified attendance for a Site + Calendar Date.
  * Reusable single source of truth consumed by Materials, Labour, Progress, and Transfers.
@@ -1235,78 +1240,126 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
  * @param {string} siteId - Target Site ID
  * @param {string} engineerId - Authenticated Engineer UID
  * @param {string} dateStr - Target Date (YYYY-MM-DD)
- * @returns {Promise<boolean>} - True if valid verified attendance exists for that day, false otherwise
+ * @returns {Promise<boolean>} - True if valid verified attendance exists for that exact Site + Engineer + Day, false otherwise
  */
 export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) {
-  if (!engineerId || !dateStr) return false;
+  if (!siteId || !engineerId || !dateStr) return false;
 
-  const cleanSiteId = siteId ? String(siteId).trim() : null;
+  const cleanSiteId = String(siteId).trim();
   const cleanEngineerId = String(engineerId).trim();
   const cleanDateStr = String(dateStr).trim();
+
+  if (!cleanSiteId || !cleanEngineerId || !cleanDateStr) return false;
 
   try {
     const db = getDb();
     const attendanceColl = collection(db, "attendance");
 
-    const isValidRecord = (data, id) => {
-      // 1. Exclude labour submission lock records
+    const isValidRecordForSite = (data, id) => {
+      // 1. Exclude labour submission locks or non-engineer records
       if (!isEngineerAttendanceRecord(data, id)) {
         return false;
       }
       // 2. Ensure date matches
-      const recDate = data.date || data.attendanceDate;
+      const recDate = String(data.date || data.attendanceDate || "").trim();
       if (recDate !== cleanDateStr) return false;
+
       // 3. Ensure engineer/user matches
-      const recUser = data.engineerId || data.userId;
+      const recUser = String(data.engineerId || data.userId || "").trim();
       if (recUser && recUser !== cleanEngineerId) return false;
-      // 4. Ensure valid presence/verification status and not rejected/absent/failed
+
+      // 4. Canonical Site Match: Must strictly match the requested siteId
+      const recSite = String(data.siteId || "").trim();
+      if (recSite !== cleanSiteId) return false;
+
+      // 5. Ensure valid presence/verification status and not rejected/absent/failed
       const isPresent = data.status === "present" || data.status === "checked_out" || data.status === "verified";
-      const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent || !!data.time;
+      const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent || Boolean(data.time && data.time !== "--");
       const isNotRejected = data.status !== "absent" && data.status !== "rejected" && data.status !== "cancelled" && data.status !== "failed";
       return isVerified && isNotRejected;
     };
 
-    // Query 1: deterministic doc lookups
+    // Query 1: Deterministic and legacy doc lookups
     const docIds = [
+      `att_${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`,
+      `att_${cleanEngineerId}_${cleanSiteId}_${cleanDateStr}`,
+      `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`,
       `att_${cleanEngineerId}_${cleanDateStr}`,
       `${cleanEngineerId}_${cleanDateStr}`,
-      cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
-    ].filter(Boolean);
+      `${cleanSiteId}_${cleanDateStr}`
+    ];
 
     for (const dId of docIds) {
       try {
         const snap = await getDoc(doc(db, "attendance", dId));
-        if (snap.exists() && isValidRecord(snap.data(), snap.id)) {
+        if (snap.exists() && isValidRecordForSite(snap.data(), snap.id)) {
           return true;
         }
       } catch (e) {}
     }
 
-    // Query 2: by engineerId, date
-    const q1 = query(
-      attendanceColl,
-      where("engineerId", "==", cleanEngineerId),
-      where("date", "==", cleanDateStr)
-    );
-    const snap1 = await getDocs(q1);
-    for (const docSnap of snap1.docs) {
-      if (isValidRecord(docSnap.data(), docSnap.id)) {
-        return true;
+    // Query 2: by siteId, engineerId, date
+    try {
+      const q1 = query(
+        attendanceColl,
+        where("siteId", "==", cleanSiteId),
+        where("engineerId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snap1 = await getDocs(q1);
+      for (const docSnap of snap1.docs) {
+        if (isValidRecordForSite(docSnap.data(), docSnap.id)) {
+          return true;
+        }
       }
-    }
+    } catch (e) {}
 
-    // Query 3: by userId, date (backward compatibility)
-    const q2 = query(
-      attendanceColl,
-      where("userId", "==", cleanEngineerId),
-      where("date", "==", cleanDateStr)
-    );
-    const snap2 = await getDocs(q2);
-    for (const docSnap of snap2.docs) {
-      if (isValidRecord(docSnap.data(), docSnap.id)) {
-        return true;
+    // Query 3: by siteId, userId, date (legacy field compatibility)
+    try {
+      const q2 = query(
+        attendanceColl,
+        where("siteId", "==", cleanSiteId),
+        where("userId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snap2 = await getDocs(q2);
+      for (const docSnap of snap2.docs) {
+        if (isValidRecordForSite(docSnap.data(), docSnap.id)) {
+          return true;
+        }
       }
-    }
+    } catch (e) {}
+
+    // Query 4: fallback by engineerId + date (evaluated through isValidRecordForSite)
+    try {
+      const q3 = query(
+        attendanceColl,
+        where("engineerId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snap3 = await getDocs(q3);
+      for (const docSnap of snap3.docs) {
+        if (isValidRecordForSite(docSnap.data(), docSnap.id)) {
+          return true;
+        }
+      }
+    } catch (e) {}
+
+    // Query 5: fallback by userId + date
+    try {
+      const q4 = query(
+        attendanceColl,
+        where("userId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snap4 = await getDocs(q4);
+      for (const docSnap of snap4.docs) {
+        if (isValidRecordForSite(docSnap.data(), docSnap.id)) {
+          return true;
+        }
+      }
+    } catch (e) {}
+
   } catch (err) {
     console.error("Attendance Gate verification check failed:", err);
   }
@@ -1321,7 +1374,7 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
   return hasVerifiedAttendanceForDate(siteId, engineerId, dateStr);
 }
 
-// Get the engineer's attendance record for a specific date
+// Get the engineer's attendance record for a specific site and date
 export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
   if (!engineerId || !dateStr) return null;
   const cleanEngineerId = String(engineerId).trim();
@@ -1332,6 +1385,58 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
   const attendanceColl = collection(db, "attendance");
 
   const candidates = [];
+  const seenIds = new Set();
+
+  const addDoc = (id, data) => {
+    if (!seenIds.has(id)) {
+      seenIds.add(id);
+      candidates.push({ id, ...data });
+    }
+  };
+
+  // Direct deterministic lookups
+  const directDocIds = [
+    cleanSiteId ? `att_${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}` : null,
+    cleanSiteId ? `att_${cleanEngineerId}_${cleanSiteId}_${cleanDateStr}` : null,
+    cleanSiteId ? `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}` : null,
+    `att_${cleanEngineerId}_${cleanDateStr}`,
+    `${cleanEngineerId}_${cleanDateStr}`,
+    cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
+  ].filter(Boolean);
+
+  for (const docId of directDocIds) {
+    try {
+      const directSnap = await getDoc(doc(db, "attendance", docId));
+      if (directSnap.exists()) {
+        addDoc(directSnap.id, directSnap.data());
+      }
+    } catch (e) {}
+  }
+
+  // Query by siteId + engineerId + date if siteId is present
+  if (cleanSiteId) {
+    try {
+      const qSite = query(
+        attendanceColl,
+        where("siteId", "==", cleanSiteId),
+        where("engineerId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snapSite = await getDocs(qSite);
+      snapSite.forEach(docSnap => addDoc(docSnap.id, docSnap.data()));
+    } catch (e) {}
+
+    try {
+      const qSiteUser = query(
+        attendanceColl,
+        where("siteId", "==", cleanSiteId),
+        where("userId", "==", cleanEngineerId),
+        where("date", "==", cleanDateStr)
+      );
+      const snapSiteUser = await getDocs(qSiteUser);
+      snapSiteUser.forEach(docSnap => addDoc(docSnap.id, docSnap.data()));
+    } catch (e) {}
+  }
 
   // Query 1: engineerId + date
   try {
@@ -1341,9 +1446,7 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
       where("date", "==", cleanDateStr)
     );
     const snap1 = await getDocs(q1);
-    snap1.forEach(docSnap => {
-      candidates.push({ id: docSnap.id, ...docSnap.data() });
-    });
+    snap1.forEach(docSnap => addDoc(docSnap.id, docSnap.data()));
   } catch (e) {}
 
   // Query 2: userId + date (compatibility)
@@ -1354,37 +1457,15 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
       where("date", "==", cleanDateStr)
     );
     const snap2 = await getDocs(q2);
-    snap2.forEach(docSnap => {
-      if (!candidates.some(c => c.id === docSnap.id)) {
-        candidates.push({ id: docSnap.id, ...docSnap.data() });
-      }
-    });
+    snap2.forEach(docSnap => addDoc(docSnap.id, docSnap.data()));
   } catch (e) {}
-
-  // Query 3: direct doc lookups (deterministic keys)
-  const directDocIds = [
-    `att_${cleanEngineerId}_${cleanDateStr}`,
-    `${cleanEngineerId}_${cleanDateStr}`,
-    cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
-  ].filter(Boolean);
-
-  for (const docId of directDocIds) {
-    if (!candidates.some(c => c.id === docId)) {
-      try {
-        const directSnap = await getDoc(doc(db, "attendance", docId));
-        if (directSnap.exists()) {
-          candidates.push({ id: directSnap.id, ...directSnap.data() });
-        }
-      } catch (e) {}
-    }
-  }
 
   // Deduplicate and filter out labour locks
   const deduplicated = deduplicateDailyAttendance(candidates);
   if (deduplicated.length === 0) return null;
 
   if (cleanSiteId) {
-    const siteMatch = deduplicated.find(r => String(r.siteId).trim() === cleanSiteId);
+    const siteMatch = deduplicated.find(r => String(r.siteId || "").trim() === cleanSiteId);
     return siteMatch || null;
   }
 
@@ -1396,14 +1477,16 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
  * @param {string} engineerId 
  * @param {string} dateStr 
  * @param {function} callback 
+ * @param {string|null} siteId 
  * @returns {function} unsubscribe
  */
-export function subscribeTodayAttendance(engineerId, dateStr, callback) {
+export function subscribeTodayAttendance(engineerId, dateStr, callback, siteId = null) {
   if (!engineerId || !dateStr || typeof callback !== "function") {
     return () => {};
   }
   const cleanEngineerId = String(engineerId).trim();
   const cleanDateStr = String(dateStr).trim();
+  const cleanSiteId = siteId ? String(siteId).trim() : null;
 
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
@@ -1420,7 +1503,12 @@ export function subscribeTodayAttendance(engineerId, dateStr, callback) {
       list.push({ id: docSnap.id, ...docSnap.data() });
     });
     const deduplicated = deduplicateDailyAttendance(list);
-    callback(deduplicated.length > 0 ? deduplicated[0] : null);
+    if (cleanSiteId) {
+      const siteMatch = deduplicated.find(r => String(r.siteId || "").trim() === cleanSiteId);
+      callback(siteMatch || null);
+    } else {
+      callback(deduplicated.length > 0 ? deduplicated[0] : null);
+    }
   }, (err) => {
     console.error("subscribeTodayAttendance error:", err);
   });
@@ -1437,15 +1525,12 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
 
   const db = getDb();
   
-  // 1. Idempotent check: if valid attendance already recorded for this engineer on this date
-  const existing = await getTodayAttendance(cleanEngineerId, cleanDateStr);
+  // 1. Idempotent check for THIS SPECIFIC SITE: if valid attendance already recorded for this engineer on this site & date
+  const existing = await getTodayAttendance(cleanEngineerId, cleanDateStr, cleanSiteId);
   if (existing) {
-    // If already marked present with valid GPS / time, preserve it idempotently
+    // If already marked present for this site with valid GPS / time, preserve it idempotently
     if (existing.status === "present" || existing.status === "checked_out" || existing.status === "verified") {
-      if (String(existing.siteId).trim() === cleanSiteId) {
-        return existing;
-      }
-      throw new Error("Attendance already recorded for today.");
+      return existing;
     }
   }
   
@@ -1459,8 +1544,8 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
   const minStr = minutes < 10 ? '0' + minutes : minutes;
   const timeStr = `${hours}:${minStr} ${ampm}`;
 
-  // Deterministic, idempotent document ID per engineer and date
-  const deterministicDocId = `att_${cleanEngineerId}_${cleanDateStr}`;
+  // Deterministic, idempotent document ID per Site + Engineer + Date
+  const deterministicDocId = `att_${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`;
   const docRef = doc(db, "attendance", deterministicDocId);
 
   const payload = {

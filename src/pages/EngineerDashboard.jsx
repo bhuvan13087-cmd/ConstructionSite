@@ -274,29 +274,31 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Production Attendance Verification Gate Check for Site + Date + Engineer
   const isAttendanceVerifiedForSiteAndDate = (siteId, dateStr) => {
-    if (!currentEngineerId || !dateStr) return false;
-    const cleanSiteId = siteId ? String(siteId).trim() : "";
+    if (!currentEngineerId || !dateStr || !siteId) return false;
+    const cleanSiteId = String(siteId).trim();
     const cleanDateStr = String(dateStr).trim();
     const cleanEngineerId = String(currentEngineerId).trim();
+    if (!cleanSiteId || !cleanEngineerId || !cleanDateStr) return false;
     const gateKey = `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`;
-    const dailyKey = `daily_${cleanEngineerId}_${cleanDateStr}`;
 
-    // 1. Check in-memory unlocked cache
-    if (unlockedGates[gateKey] || unlockedGates[dailyKey]) {
+    // 1. Check in-memory unlocked cache for this exact Site + Engineer + Date
+    if (unlockedGates[gateKey]) {
       return true;
     }
 
-    // 2. Check todayAttendance if date matches and status is valid
+    // 2. Check todayAttendance if site, date, and engineer match and status is valid
     if (todayAttendance) {
-      const todayDate = todayAttendance.date || todayAttendance.attendanceDate;
-      if (String(todayDate).trim() === cleanDateStr) {
+      const todayDate = String(todayAttendance.date || todayAttendance.attendanceDate || "").trim();
+      const todaySite = String(todayAttendance.siteId || "").trim();
+      const todayEng = String(todayAttendance.engineerId || todayAttendance.userId || "").trim();
+      if (todayDate === cleanDateStr && todaySite === cleanSiteId && (!todayEng || todayEng === cleanEngineerId)) {
         if (todayAttendance.type !== "labour_attendance_lock" && !todayAttendance.id?.startsWith("labour_lock_")) {
           const isPresent = todayAttendance.status === "present" || todayAttendance.status === "checked_out" || todayAttendance.status === "verified";
-          const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent || !!todayAttendance.time;
+          const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent || Boolean(todayAttendance.time && todayAttendance.time !== "--");
           const isNotRejected = todayAttendance.status !== "absent" && todayAttendance.status !== "rejected" && todayAttendance.status !== "cancelled" && todayAttendance.status !== "failed";
           if (isVerified && isNotRejected) {
-            if (!unlockedGates[gateKey] || !unlockedGates[dailyKey]) {
-              setUnlockedGates(prev => ({ ...prev, [gateKey]: true, [dailyKey]: true }));
+            if (!unlockedGates[gateKey]) {
+              setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
             }
             return true;
           }
@@ -310,20 +312,22 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       if (r.type === "labour_attendance_lock" || (r.id && r.id.startsWith("labour_lock_"))) {
         return false;
       }
-      const recDate = r.date || r.attendanceDate;
-      const recUser = r.engineerId || r.userId;
+      const recDate = String(r.date || r.attendanceDate || "").trim();
+      const recUser = String(r.engineerId || r.userId || "").trim();
+      const recSite = String(r.siteId || "").trim();
       
-      const isSameDate = String(recDate).trim() === cleanDateStr;
-      const isSameEng = !recUser || String(recUser).trim() === cleanEngineerId;
+      const isSameSite = recSite === cleanSiteId;
+      const isSameDate = recDate === cleanDateStr;
+      const isSameEng = !recUser || recUser === cleanEngineerId;
       const isPresent = r.status === "present" || r.status === "checked_out" || r.status === "verified";
-      const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent || !!r.time;
+      const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent || Boolean(r.time && r.time !== "--");
       const isNotRejected = r.status !== "absent" && r.status !== "rejected" && r.status !== "cancelled" && r.status !== "failed";
-      return isSameDate && isSameEng && isVerified && isNotRejected;
+      return isSameSite && isSameDate && isSameEng && isVerified && isNotRejected;
     });
 
     if (match) {
-      if (!unlockedGates[gateKey] || !unlockedGates[dailyKey]) {
-        setUnlockedGates(prev => ({ ...prev, [gateKey]: true, [dailyKey]: true }));
+      if (!unlockedGates[gateKey]) {
+        setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
       }
       return true;
     }
@@ -682,21 +686,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const todayStr = new Date().toISOString().split("T")[0];
       const engineerId = userProfile.uid || userProfile.id || "";
       
-      // Load assigned sites, all sites, personal engineer records, and today's attendance in parallel
+      // Load assigned sites, all sites, personal engineer records, and attendance history in parallel
       const [
         filteredSites,
         sites,
         stats,
         leaves,
-        history,
-        todayAtt
+        history
       ] = await Promise.all([
         getAssignedSitesForEngineer(engineerId).catch(err => { console.error("Failed to load assigned sites:", err); return []; }),
         getSites().catch(err => { console.error("Failed to load all sites:", err); return []; }),
         getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24).catch(err => { console.error("Failed to load personal stats:", err); return null; }),
         getEngineerLeaves(engineerId).catch(err => { console.error("Failed to load leaves:", err); return []; }),
-        getEngineerAttendanceHistory(engineerId).catch(err => { console.error("Failed to load attendance history:", err); return []; }),
-        getTodayAttendance(engineerId, todayStr).catch(err => { console.error("Failed to load today attendance:", err); return null; })
+        getEngineerAttendanceHistory(engineerId).catch(err => { console.error("Failed to load attendance history:", err); return []; })
       ]);
 
       setAssignedSites(filteredSites);
@@ -704,24 +706,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       if (stats) setPersonalStats(stats);
       setLoggedLeaves(leaves);
       setAllSitesAttendance(history);
-      if (todayAtt) {
-        setTodayAttendance(todayAtt);
-        const unlockedKey = `${todayAtt.siteId}_${engineerId}_${todayStr}`;
-        setUnlockedGates(prev => ({
-          ...prev,
-          [unlockedKey]: true,
-          [`daily_${engineerId}_${todayStr}`]: true
-        }));
-      }
 
       if (filteredSites.length > 0) {
         let currentActiveId = activeSiteId;
         if (filteredSites.length === 1) {
           currentActiveId = filteredSites[0].id;
-          setActiveSiteId(currentActiveId);
+          if (activeSiteId !== currentActiveId) setActiveSiteId(currentActiveId);
         } else if (!activeSiteId) {
-          // If multiple sites and none selected yet, default to today's checked-in site if assigned, else first assigned site
-          currentActiveId = (todayAtt && filteredSites.some(s => s.id === todayAtt.siteId)) ? todayAtt.siteId : filteredSites[0].id;
+          currentActiveId = filteredSites[0].id;
           setActiveSiteId(currentActiveId);
         } else {
           const isAssigned = filteredSites.some(s => s.id === activeSiteId);
@@ -734,7 +726,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
         const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
 
-        // Fetch all site-specific records concurrently in parallel
+        // Fetch site-specific attendance and records concurrently in parallel for currentActiveId
         const [
           attendance,
           updates,
@@ -745,7 +737,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           lm,
           userNotifications
         ] = await Promise.all([
-          todayAtt ? Promise.resolve(todayAtt) : getTodayAttendance(engineerId, todayStr).catch(() => null),
+          getTodayAttendance(engineerId, todayStr, currentActiveId).catch(() => null),
           getDailyUpdatesForEngineer(engineerId, currentActiveId).catch(() => []),
           getMaterialsDetailed(currentActiveId).catch(() => []),
           getGeneralExpenses(currentActiveId).catch(() => []),
@@ -755,9 +747,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           getNotifications(engineerId).catch(() => [])
         ]);
 
-        if (attendance) {
-          setTodayAttendance(attendance);
+        setTodayAttendance(attendance || null);
+        if (attendance && String(attendance.siteId || "").trim() === String(currentActiveId).trim()) {
+          const unlockedKey = `${currentActiveId}_${engineerId}_${todayStr}`;
+          setUnlockedGates(prev => ({
+            ...prev,
+            [unlockedKey]: true
+          }));
         }
+
         setDailyUpdates(updates);
         setMaterials(siteMats);
         setGeneralExpenses(ge);
@@ -889,7 +887,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Automatic Location Request when Attendance is opened
   useEffect(() => {
-    if (tab === "attendance" && activeSiteId && savedSiteLocation && !todayAttendance && !hasAutoChecked) {
+    const isMarkedForActiveSite = todayAttendance && String(todayAttendance.siteId || "").trim() === String(activeSiteId || "").trim();
+    if (tab === "attendance" && activeSiteId && savedSiteLocation && !isMarkedForActiveSite && !hasAutoChecked) {
       setHasAutoChecked(true);
       handlePreCaptureCheck();
     }
@@ -961,28 +960,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     };
   }, []);
 
-  // Real-time synchronization for engineer's daily attendance
+  // Real-time synchronization for engineer's daily attendance scoped by active site
   useEffect(() => {
     const engineerId = userProfile?.uid || userProfile?.id;
-    if (!engineerId) return;
+    if (!engineerId || !activeSiteId) return;
     const todayStr = new Date().toISOString().split("T")[0];
 
     const unsubscribe = subscribeTodayAttendance(engineerId, todayStr, (topRecord) => {
-      if (topRecord) {
+      if (topRecord && String(topRecord.siteId || "").trim() === String(activeSiteId).trim()) {
         setTodayAttendance(topRecord);
-        const unlockedKey = `${topRecord.siteId}_${engineerId}_${todayStr}`;
+        const unlockedKey = `${activeSiteId}_${engineerId}_${todayStr}`;
         setUnlockedGates(prev => ({
           ...prev,
-          [unlockedKey]: true,
-          [`daily_${engineerId}_${todayStr}`]: true
+          [unlockedKey]: true
         }));
+      } else {
+        setTodayAttendance(null);
       }
-    });
+    }, activeSiteId);
 
     return () => {
       if (typeof unsubscribe === "function") unsubscribe();
     };
-  }, [userProfile]);
+  }, [userProfile, activeSiteId]);
 
   // Real-time synchronization for general expenses
   useEffect(() => {
@@ -4074,50 +4074,55 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* Attendance checklist widget */}
-        <div className={`mobile-attendance-card ${todayAttendance ? 'checked' : 'unchecked'}`} style={{ height: "auto", padding: "16px" }}>
-          <div className="mobile-attendance-left">
-            <span className="mobile-attendance-status-label">Your Attendance Status</span>
-            <div className={`mobile-attendance-status-val ${todayAttendance ? 'checked' : 'unchecked'}`}>
-              {todayAttendance ? '✓ Checked In Present' : '✗ Not Marked Today'}
+        {(() => {
+          const isMarkedForActiveSite = todayAttendance && String(todayAttendance.siteId || "").trim() === String(activeSiteId || "").trim();
+          return (
+            <div className={`mobile-attendance-card ${isMarkedForActiveSite ? 'checked' : 'unchecked'}`} style={{ height: "auto", padding: "16px" }}>
+              <div className="mobile-attendance-left">
+                <span className="mobile-attendance-status-label">Your Attendance Status</span>
+                <div className={`mobile-attendance-status-val ${isMarkedForActiveSite ? 'checked' : 'unchecked'}`}>
+                  {isMarkedForActiveSite ? '✓ Checked In Present' : '✗ Not Marked Today'}
+                </div>
+                {isMarkedForActiveSite && (
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+                    Check-In: {todayAttendance.time || "Today"}
+                  </span>
+                )}
+                <button
+                  type="button"
+                  onClick={() => navigate("/engineer/attendance-history")}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "var(--primary-700)",
+                    fontSize: "11.5px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    padding: 0,
+                    marginTop: "8px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "4px"
+                  }}
+                >
+                  <History size={12} /> View Attendance History →
+                </button>
+              </div>
+              {!isMarkedForActiveSite && savedSiteLocation && (
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setAttendanceMode("checkin");
+                    navigate("/engineer/attendance");
+                  }} 
+                  className="mobile-attendance-btn"
+                >
+                  Check In
+                </button>
+              )}
             </div>
-            {todayAttendance && (
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
-                Check-In: {todayAttendance.time || "Today"}
-              </span>
-            )}
-            <button
-              type="button"
-              onClick={() => navigate("/engineer/attendance-history")}
-              style={{
-                background: "none",
-                border: "none",
-                color: "var(--primary-700)",
-                fontSize: "11.5px",
-                fontWeight: "700",
-                cursor: "pointer",
-                padding: 0,
-                marginTop: "8px",
-                display: "flex",
-                alignItems: "center",
-                gap: "4px"
-              }}
-            >
-              <History size={12} /> View Attendance History →
-            </button>
-          </div>
-          {!todayAttendance && savedSiteLocation && (
-            <button 
-              type="button" 
-              onClick={() => {
-                setAttendanceMode("checkin");
-                navigate("/engineer/attendance");
-              }} 
-              className="mobile-attendance-btn"
-            >
-              Check In
-            </button>
-          )}
-        </div>
+          );
+        })()}
 
         {!savedSiteLocation && (
           <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
@@ -4142,21 +4147,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <div className="mobile-quick-action-grid">
             
             {/* Check In Action */}
-            <button 
-              type="button"
-              className="mobile-action-card attendance"
-              onClick={() => {
-                setAttendanceMode("checkin");
-                navigate("/engineer/attendance");
-              }}
-              disabled={!!todayAttendance}
-              style={{ opacity: todayAttendance ? 0.5 : 1, border: "none", cursor: todayAttendance ? "not-allowed" : "pointer" }}
-            >
-              <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--success-50)", color: "var(--success-700)" }}>
-                <ClipboardCheck size={20} />
-              </div>
-              <span className="mobile-action-title">Check In</span>
-            </button>
+            {(() => {
+              const isMarkedForActiveSite = todayAttendance && String(todayAttendance.siteId || "").trim() === String(activeSiteId || "").trim();
+              return (
+                <button 
+                  type="button"
+                  className="mobile-action-card attendance"
+                  onClick={() => {
+                    setAttendanceMode("checkin");
+                    navigate("/engineer/attendance");
+                  }}
+                  disabled={!!isMarkedForActiveSite}
+                  style={{ opacity: isMarkedForActiveSite ? 0.5 : 1, border: "none", cursor: isMarkedForActiveSite ? "not-allowed" : "pointer" }}
+                >
+                  <div className="mobile-action-icon-wrapper" style={{ backgroundColor: "var(--success-50)", color: "var(--success-700)" }}>
+                    <ClipboardCheck size={20} />
+                  </div>
+                  <span className="mobile-action-title">Check In</span>
+                </button>
+              );
+            })()}
 
 
             {/* Add Progress */}
@@ -4259,8 +4269,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderAttendanceView = () => {
-    // 1. If today's attendance is already marked / completed, ALWAYS render the confirmed card
-    if (todayAttendance) {
+    // 1. If today's attendance for active site is already marked / completed, ALWAYS render the confirmed card
+    const isMarkedForActiveSite = todayAttendance && String(todayAttendance.siteId || "").trim() === String(activeSiteId || "").trim();
+    if (isMarkedForActiveSite) {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
