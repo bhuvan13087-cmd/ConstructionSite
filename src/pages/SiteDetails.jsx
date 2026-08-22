@@ -1583,7 +1583,12 @@ export default function SiteDetails({ siteId, onBack }) {
                       filteredMaterials.map(mat => {
                         const isTransfer = mat.type === "material_transfer" || mat.isIncomingTransfer;
                         const isApproved = mat.status === "Approved" || mat.status === "approved" || mat.status === "Received" || mat.status === "received";
-                        const amountNum = Number(mat.totalAmount !== undefined ? mat.totalAmount : (mat.receivedQuantity * (mat.unitPrice || mat.rate || 0)));
+                        const isCustomerAmountOnly = mat.materialType === "customer_amount_only" || mat.type === "customer_amount_only";
+                        const isCustom = mat.materialType === "custom" || mat.type === "custom";
+                        const isRateOnly = mat.materialType === "rate_only" || mat.type === "rate_only";
+                        const isCustomerType = isCustom || isCustomerAmountOnly;
+                        const amountNum = Number(mat.totalAmount !== undefined ? mat.totalAmount : (mat.amount !== undefined ? mat.amount : (mat.receivedQuantity * (mat.unitPrice || mat.rate || 0))));
+                        const displayName = (mat.materialName || mat.title || "").trim() || (isCustomerAmountOnly ? "Customer Amount" : (isRateOnly ? "Rate Item" : "Material"));
 
                         return (
                           <tr 
@@ -1596,7 +1601,17 @@ export default function SiteDetails({ siteId, onBack }) {
                             <td style={{ fontWeight: 700 }}>
                               <div>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: "14px", color: "var(--primary-900)" }}>{mat.materialName}</span>
+                                  <span style={{ fontSize: "14px", color: "var(--primary-900)" }}>{displayName}</span>
+                                  {isCustomerType && (
+                                    <span style={{ fontSize: "10.5px", color: "#16a34a", backgroundColor: "#f0fdf4", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bbf7d0", fontWeight: "750" }}>
+                                      {isCustomerAmountOnly ? "Customer Amount" : "Customer"}
+                                    </span>
+                                  )}
+                                  {isRateOnly && (
+                                    <span style={{ fontSize: "10.5px", color: "#7c3aed", backgroundColor: "#f5f3ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #ddd6fe", fontWeight: "750" }}>
+                                      Rate Only
+                                    </span>
+                                  )}
                                   <span style={{ fontSize: "10.5px", color: "#ea580c", backgroundColor: "#fff7ed", padding: "1px 6px", borderRadius: "4px", border: "1px solid #fed7aa", fontWeight: "750" }}>
                                     {mat.category}
                                   </span>

@@ -393,7 +393,7 @@ export default function AdminAssistedEntryModal({
       return;
     }
 
-    const validItems = materialRows.filter(r => ((r.materialName || r.title || "").trim() || r.type === "rate_only") && (r.type === "custom" || r.type === "rate_only" || Number(r.quantity) > 0));
+    const validItems = materialRows.filter(r => ((r.materialName || r.title || "").trim() || r.type === "rate_only" || r.type === "customer_amount_only") && (r.type === "custom" || r.type === "customer_amount_only" || r.type === "rate_only" || Number(r.quantity) > 0));
     if (validItems.length === 0) {
       showToast("Please enter at least one valid material with quantity/amount.", "error");
       return;

@@ -1,5 +1,5 @@
 // Unified business logic layer for calculations, validations, permissions, etc.
-import { calculateDistanceMeters } from "./firebaseService";
+import { calculateDistanceMeters } from "./firebaseService.js";
 
 /**
  * Canonical extractor for site budget.
@@ -312,15 +312,16 @@ export function processMaterialPaymentAndDelivery(mat) {
   const isPending = normalizedStatus === "pending" || normalizedStatus === "in transit" || normalizedStatus === "awaiting receipt" || !mat.status;
   const isRejected = normalizedStatus === "rejected";
 
-  const reqQty = mat.requiredQuantity !== undefined && mat.requiredQuantity !== null ? Number(mat.requiredQuantity) : (Number(mat.transferQuantity) || Number(mat.quantity) || 0);
+  const isFixedType = mat.materialType === "customer_amount_only" || mat.materialType === "custom" || mat.materialType === "rate_only" || mat.type === "customer_amount_only" || mat.type === "custom" || mat.type === "rate_only";
+  const reqQty = mat.requiredQuantity !== undefined && mat.requiredQuantity !== null ? Number(mat.requiredQuantity) : (Number(mat.transferQuantity) || Number(mat.quantity) || (isFixedType ? 1 : 0));
   const ordQty = mat.orderedQuantity !== undefined && mat.orderedQuantity !== null ? Number(mat.orderedQuantity) : reqQty;
-  const recQty = isApproved ? (Number(mat.quantity) || 0) : 0;
+  const recQty = isApproved ? (Number(mat.quantity) || (isFixedType ? 1 : 0)) : 0;
   const consumedQty = Number(mat.consumedQuantity) || 0;
   const remainingStock = Math.max(0, recQty - consumedQty);
   
   // Standard prices with precedence to canonical unitPrice / rate
-  let unitCost = Number(mat.unitPrice || mat.rate) || 0;
-  if (!unitCost) {
+  let unitCost = Number(mat.unitPrice || mat.rate || mat.amount) || 0;
+  if (!unitCost && !isFixedType) {
     if (mat.category === "Steel") unitCost = 5000;
     else if (mat.category === "Sand") unitCost = 2500;
     else if (mat.category === "Bricks") unitCost = 10;
@@ -329,10 +330,17 @@ export function processMaterialPaymentAndDelivery(mat) {
     else unitCost = 500;
   }
 
-  const totalAmount = mat.totalAmount !== undefined && mat.totalAmount !== null ? Number(mat.totalAmount) : (recQty * unitCost);
+  const totalAmount = mat.totalAmount !== undefined && mat.totalAmount !== null 
+    ? Number(mat.totalAmount) 
+    : (mat.amount !== undefined && mat.amount !== null 
+        ? Number(mat.amount) 
+        : (isFixedType ? unitCost : recQty * unitCost));
+
   const paidAmount = Number(mat.paidAmount) || 0;
   const pendingPay = Math.max(0, totalAmount - paidAmount);
   const pendingDel = Math.max(0, reqQty - recQty);
+
+  const cleanName = (mat.materialName || mat.title || "").trim() || (mat.materialType === "customer_amount_only" || mat.type === "customer_amount_only" ? "Customer Amount" : (mat.materialType === "rate_only" || mat.type === "rate_only" ? "Rate Item" : "Material"));
   
   let delStatus = "Fully Delivered";
   if (isRejected) {
@@ -362,12 +370,14 @@ export function processMaterialPaymentAndDelivery(mat) {
 
   return {
     ...mat,
+    materialName: cleanName,
     requiredQuantity: reqQty,
     orderedQuantity: ordQty,
     receivedQuantity: recQty,
     consumedQuantity: consumedQty,
     remainingStock,
     totalAmount,
+    amount: totalAmount,
     paidAmount,
     pendingDelivery: pendingDel,
     pendingPayment: pendingPay,

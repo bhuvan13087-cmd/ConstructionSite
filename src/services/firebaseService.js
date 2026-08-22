@@ -3833,10 +3833,12 @@ export function subscribeMaterialsDetailed(siteId, onUpdate) {
       list.push({
         id: d.id,
         ...data,
-        receivedQuantity: Number(data.receivedQuantity) || Number(data.quantity) || 0,
+        receivedQuantity: Number(data.receivedQuantity) || Number(data.quantity) || (data.materialType === "customer_amount_only" || data.type === "customer_amount_only" ? 1 : 0),
         consumedQuantity: Number(data.consumedQuantity) || 0,
-        unitCost: Number(data.unitCost) || Number(data.unitPrice) || 0,
-        totalCost: Number(data.totalCost) || Number(data.totalAmount) || 0
+        unitCost: Number(data.unitCost) || Number(data.unitPrice) || Number(data.rate) || 0,
+        totalCost: Number(data.totalCost) || Number(data.totalAmount) || Number(data.amount) || 0,
+        totalAmount: Number(data.totalAmount) || Number(data.amount) || Number(data.totalCost) || 0,
+        amount: Number(data.amount) || Number(data.totalAmount) || Number(data.totalCost) || 0
       });
     });
     
@@ -5518,7 +5520,7 @@ export async function saveBulkMaterialEntry(bulkData) {
     throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before submitting material entries.`);
   }
 
-  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "rate_only" || Number(item.quantity) > 0);
+  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "customer_amount_only" || item.type === "rate_only" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
     throw new Error("Please enter at least one material for submission.");
   }
@@ -5529,13 +5531,16 @@ export async function saveBulkMaterialEntry(bulkData) {
   // Save each material item as a unique permanent record to materials collection in single atomic batch
   for (const item of validItems) {
     const isCustom = item.type === "custom";
+    const isCustomerAmountOnly = item.type === "customer_amount_only";
     const isRateOnly = item.type === "rate_only";
-    const qty = (isCustom || isRateOnly) ? 1 : Number(item.quantity);
+    const isFixed = isCustom || isCustomerAmountOnly || isRateOnly;
+    const qty = isFixed ? 1 : Number(item.quantity);
     const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
-    const totAmount = (isCustom || isRateOnly) 
+    const totAmount = isFixed 
       ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
       : (qty * uPrice);
-    const matName = (item.title || item.materialName || item.name || "").trim() || (isRateOnly ? "Rate Item" : "");
+    const cleanTitle = (item.title || "").trim();
+    const matName = cleanTitle || (item.materialName || item.name || "").trim() || (isCustomerAmountOnly ? "Customer Amount" : (isRateOnly ? "Rate Item" : "Customer Entry"));
     
     // Generate unique record ID for each submitted material record
     const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
@@ -5547,18 +5552,20 @@ export async function saveBulkMaterialEntry(bulkData) {
       teamId: item.teamId || bulkData.teamId || null,
       teamName: item.teamName || bulkData.teamName || item.category || "General",
       materialName: matName,
-      materialType: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+      title: cleanTitle,
+      materialType: isCustomerAmountOnly ? "customer_amount_only" : (isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard")),
       category: item.category || item.teamName || bulkData.teamName || "General",
       quantity: qty,
+      receivedQuantity: qty,
       requiredQuantity: qty,
-      unit: (isCustom || isRateOnly) ? "" : (item.unit || "Unit"),
+      unit: isFixed ? "" : (item.unit || "Unit"),
       unitPrice: uPrice,
       rate: uPrice,
       amount: totAmount,
       totalAmount: totAmount,
       supplierName: item.supplierName?.trim() || item.teamName || bulkData.teamName || "Material Supplier",
       purchaseDate: dateStr,
-      notes: item.notes?.trim() || `${isRateOnly ? "Rate Only" : (isCustom ? "Custom Material" : "Material")} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
+      notes: item.notes?.trim() || `${isCustomerAmountOnly ? "Customer Amount" : (isRateOnly ? "Rate Only" : (isCustom ? "Custom Material" : "Material"))} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
       status: "Approved", // Automatically approved material log
       locked: true,
@@ -6133,7 +6140,7 @@ export async function submitAdminAssistedMaterialEntry({
   if (!assignedEngineerId) {
     throw new Error("Assigned Site Engineer ID is required.");
   }
-  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "rate_only" || Number(item.quantity) > 0);
+  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "customer_amount_only" || item.type === "rate_only" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
     throw new Error("Please enter at least one material for submission.");
   }
@@ -6149,13 +6156,16 @@ export async function submitAdminAssistedMaterialEntry({
 
   for (const item of validItems) {
     const isCustom = item.type === "custom";
+    const isCustomerAmountOnly = item.type === "customer_amount_only";
     const isRateOnly = item.type === "rate_only";
-    const qty = (isCustom || isRateOnly) ? 1 : Number(item.quantity);
+    const isFixed = isCustom || isCustomerAmountOnly || isRateOnly;
+    const qty = isFixed ? 1 : Number(item.quantity);
     const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
-    const totAmount = (isCustom || isRateOnly) 
+    const totAmount = isFixed 
       ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
       : (qty * uPrice);
-    const matName = (item.title || item.materialName || item.name || "").trim() || (isRateOnly ? "Rate Item" : "");
+    const cleanTitle = (item.title || "").trim();
+    const matName = cleanTitle || (item.materialName || item.name || "").trim() || (isCustomerAmountOnly ? "Customer Amount" : (isRateOnly ? "Rate Item" : "Customer Entry"));
 
     const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
 
@@ -6167,11 +6177,13 @@ export async function submitAdminAssistedMaterialEntry({
       teamId: item.teamId || null,
       teamName: item.teamName || item.category || "General",
       materialName: matName,
-      materialType: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+      title: cleanTitle,
+      materialType: isCustomerAmountOnly ? "customer_amount_only" : (isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard")),
       category: item.category || item.teamName || "General",
       quantity: qty,
+      receivedQuantity: qty,
       requiredQuantity: qty,
-      unit: (isCustom || isRateOnly) ? "" : (item.unit || "Unit"),
+      unit: isFixed ? "" : (item.unit || "Unit"),
       unitPrice: uPrice,
       rate: uPrice,
       amount: totAmount,
