@@ -56,6 +56,7 @@ import {
   deleteLabourAttendanceRecord,
   getLabourAttendanceRecords,
   subscribeLabourAttendanceRecords,
+  getLabourLocksForSite,
   getAttendanceForSite,
   checkLabourSubmissionStatus,
   submitLabourAttendance,
@@ -418,16 +419,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
     try {
-      const records = await getAttendanceForSite(activeSiteId);
+      const records = await getLabourLocksForSite(activeSiteId);
       const locked = new Set();
-      records.forEach(r => {
+      (records || []).forEach(r => {
         if (r.status === "submitted" || r.locked || r.submitted) {
           const d = r.date || r.attendanceDate;
           if (d) {
             if (r.teamId) {
               locked.add(`${d}_${r.teamId}`);
-            }
-            if (r.id?.startsWith("labour_lock_") && !r.teamId) {
+            } else {
               locked.add(d);
             }
           }
@@ -471,6 +471,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [categories, setCategories] = useState([]);
   const [labourEntries, setLabourEntries] = useState([]);
   const [newCategoryName, setNewCategoryName] = useState("");
+
+  // Synchronous submission refs to prevent rapid-click / 0ms double submissions
+  const isMountedRef = useRef(true);
+  const attendanceSubmittingRef = useRef(false);
+  const bulkMaterialSubmittingRef = useRef(false);
+  const labourSubmittingRef = useRef(false);
+  const materialSubmittingRef = useRef(false);
+  const photoSubmittingRef = useRef(false);
+  const progressSubmittingRef = useRef(false);
+  const expenseSubmittingRef = useRef(false);
+  const savingResolvePendingRef = useRef(false);
+  const savingTransferRef = useRef(false);
+  const savingReceiveTransferRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Form inputs states
   // 1. Today's Attendance Check-in
@@ -784,6 +804,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       try {
         setLabourHistoryLoading(true);
         const records = await getLabourAttendanceRecords(activeSiteId, labourDate, selectedLabourTeamId);
+        const isSubmitted = (records || []).some(r => r.locked === true || r.status === "submitted" || r.submitted === true);
+        if (isSubmitted && isMountedRef.current) {
+          setIsLabourLocked(true);
+        }
         const loadedRows = records.map(r => ({
           id: r.id,
           categoryId: r.categoryId,
@@ -798,12 +822,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           isSaving: false,
           isSaved: true
         }));
-        setAttendanceRows(loadedRows);
+        if (isMountedRef.current) {
+          setAttendanceRows(loadedRows);
+        }
       } catch (err) {
         console.error("Failed to load existing labour attendance records:", err);
         showToast("Error loading attendance: " + err.message, "error");
       } finally {
-        setLabourHistoryLoading(false);
+        if (isMountedRef.current) {
+          setLabourHistoryLoading(false);
+        }
       }
     };
     fetchExistingRecords();
@@ -815,10 +843,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
     const unsubscribe = subscribeLabourAttendanceRecords(activeSiteId, (records) => {
-      setLabourHistoryRecords(records);
+      if (isMountedRef.current) {
+        setLabourHistoryRecords(records || []);
+        if (labourDate && selectedLabourTeamId) {
+          const teamRecords = (records || []).filter(r => 
+            (r.attendanceDate === labourDate || r.date === labourDate) && 
+            r.teamId === selectedLabourTeamId
+          );
+          if (teamRecords.some(r => r.locked === true || r.status === "submitted" || r.submitted === true)) {
+            setIsLabourLocked(true);
+          }
+        }
+      }
     });
     return () => unsubscribe();
-  }, [activeSiteId]);
+  }, [activeSiteId, labourDate, selectedLabourTeamId]);
 
   useEffect(() => {
     if (!activeSiteId) {
@@ -1514,7 +1553,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const handleMarkAttendance = async (e) => {
     if (e) e.preventDefault();
-    if (attendanceSubmitting) return;
+    if (attendanceSubmitting || attendanceSubmittingRef.current) return;
     if (!activeSiteId) {
       showToast("Please select your active site.", "error");
       return;
@@ -1531,12 +1570,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     const todayStr = new Date().toISOString().split("T")[0];
+    attendanceSubmittingRef.current = true;
     setAttendanceSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
       if (!deviceCoords || deviceCoords.latitude === undefined || deviceCoords.latitude === null) {
         showToast("Please enable location access", "error");
-        setAttendanceSubmitting(false);
+        if (isMountedRef.current) setAttendanceSubmitting(false);
+        attendanceSubmittingRef.current = false;
         return;
       }
       const lat = deviceCoords.latitude;
@@ -1546,7 +1587,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       await saveSitePhoto(engineerId, activeSiteId, attendancePhotoPreview, lat, lng, "Attendance");
 
-      await markAttendance(
+      const res = await markAttendance(
         engineerId, 
         activeSiteId, 
         todayStr, 
@@ -1561,22 +1602,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast(`Checked in present at ${site.siteName}!`, "success");
 
       const unlockedKey = `${activeSiteId}_${engineerId}_${todayStr}`;
-      setUnlockedGates(prev => ({ ...prev, [unlockedKey]: true }));
-
-      handleResetVerification();
+      if (isMountedRef.current) {
+        setUnlockedGates(prev => ({ ...prev, [unlockedKey]: true }));
+        if (res) setTodayAttendance(res);
+        handleResetVerification();
+      }
 
       await loadDashboardData();
 
       if (pendingUnlockTab) {
         const destTab = pendingUnlockTab;
-        setPendingUnlockTab(null);
+        if (isMountedRef.current) setPendingUnlockTab(null);
         navigate(`/engineer/${destTab}`);
       }
     } catch (err) {
       console.error("Mark attendance error:", err);
       showToast(err.message || "Failed to complete attendance transaction.", "error");
     } finally {
-      setAttendanceSubmitting(false);
+      attendanceSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setAttendanceSubmitting(false);
+      }
     }
   };
 
@@ -1826,6 +1872,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
+    const key = `${categoryId}`;
+    if (savingRecordKeys[key]) return; // Synchronous guard per category
+
     const units = Math.max(0.01, Number(customUnitsVal) || 1.0);
     const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
     const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
@@ -1838,7 +1887,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     if (newCount === currentCount) return;
 
-    const key = `${categoryId}`;
     setSavingRecordKeys(prev => ({ ...prev, [key]: true }));
 
     try {
@@ -1846,7 +1894,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         if (record && record.dbId) {
           await deleteLabourAttendanceRecord(record.dbId);
         }
-        setAttendanceRows(prev => prev.filter(r => r.categoryId !== categoryId));
+        if (isMountedRef.current) {
+          setAttendanceRows(prev => prev.filter(r => r.categoryId !== categoryId));
+        }
       } else {
         const calculatedAmount = newCount * units * dailyWage;
         const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
@@ -1866,20 +1916,24 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           createdBy: currentEngineerId
         });
 
-        setAttendanceRows(prev => {
-          const exists = prev.some(r => r.categoryId === categoryId);
-          if (exists) {
-            return prev.map(r => r.categoryId === categoryId ? { ...r, workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true } : r);
-          } else {
-            return [...prev, { id: dbId, categoryId, categoryName: cat?.name || "", workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true }];
-          }
-        });
+        if (isMountedRef.current) {
+          setAttendanceRows(prev => {
+            const exists = prev.some(r => r.categoryId === categoryId);
+            if (exists) {
+              return prev.map(r => r.categoryId === categoryId ? { ...r, workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true } : r);
+            } else {
+              return [...prev, { id: dbId, categoryId, categoryName: cat?.name || "", workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true }];
+            }
+          });
+        }
       }
     } catch (err) {
       console.error("Failed to sync attendance count:", err);
       showToast("Sync failed: " + err.message, "error");
     } finally {
-      setSavingRecordKeys(prev => ({ ...prev, [key]: false }));
+      if (isMountedRef.current) {
+        setSavingRecordKeys(prev => ({ ...prev, [key]: false }));
+      }
     }
   };
 
@@ -2115,7 +2169,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Submit workforce attendance per Site + Date + Team
   const handleLabourSubmit = async () => {
-    if (labourSubmitting) return;
+    if (labourSubmitting || labourSubmittingRef.current) return;
     if (!activeSiteId) {
       showToast("Please choose active project.", "error");
       return;
@@ -2135,8 +2189,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     // Duplicate Prevention Check directly against database for this Site + Date + Team
     const freshCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate, selectedLabourTeamId);
     if (freshCheck && freshCheck.submitted) {
-      setIsLabourLocked(true);
-      setLabourLockInfo(freshCheck);
+      if (isMountedRef.current) {
+        setIsLabourLocked(true);
+        setLabourLockInfo(freshCheck);
+      }
       showToast(`Attendance for "${teamName}" on this date has already been submitted and locked.`, "warning");
       return;
     }
@@ -2149,14 +2205,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       cancelText: "Cancel",
       variant: "lock",
       onConfirm: async () => {
-        if (labourSubmitting) return;
+        if (labourSubmitting || labourSubmittingRef.current) return;
+        labourSubmittingRef.current = true;
         setLabourSubmitting(true);
         try {
           // Double check database inside modal confirm to prevent race condition duplicates
           const reCheck = await checkLabourSubmissionStatus(activeSiteId, labourDate, selectedLabourTeamId);
           if (reCheck && reCheck.submitted) {
-            setIsLabourLocked(true);
-            setLabourLockInfo(reCheck);
+            if (isMountedRef.current) {
+              setIsLabourLocked(true);
+              setLabourLockInfo(reCheck);
+            }
             showToast(`Attendance for "${teamName}" on this date was already submitted and locked.`, "warning");
             closeConfirmModal();
             return;
@@ -2164,7 +2223,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
           await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows);
           showToast(`"${teamName}" attendance submitted and locked successfully.`, "success");
-          setIsLabourLocked(true);
+          if (isMountedRef.current) {
+            setIsLabourLocked(true);
+          }
           await fetchLabourLockStatus(selectedLabourTeamId);
           await loadLockedDates(); // Reload locked dates
           await loadDashboardData();
@@ -2172,7 +2233,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           console.error("Failed to submit workforce attendance:", err);
           showToast("Submission failed: " + err.message, "error");
         } finally {
-          setLabourSubmitting(false);
+          labourSubmittingRef.current = false;
+          if (isMountedRef.current) {
+            setLabourSubmitting(false);
+          }
           closeConfirmModal();
         }
       }
@@ -2409,7 +2473,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Save Material Usage
   const handleBulkMaterialSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (bulkMaterialSubmitting) return;
+    if (bulkMaterialSubmitting || bulkMaterialSubmittingRef.current) return;
 
     if (!bulkMaterialDate || !bulkMaterialDate.trim()) {
       showToast("Please select a date before submitting.", "error");
@@ -2485,6 +2549,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
+    bulkMaterialSubmittingRef.current = true;
     setBulkMaterialSubmitting(true);
     try {
       const engineerId = currentEngineerId || userProfile?.uid || userProfile?.id || "";
@@ -2500,14 +2565,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast(`Material entry submitted & locked for "${currentTeam.name}" (${itemsToSave.length} item${itemsToSave.length !== 1 ? "s" : ""})!`, "success");
 
       // Reset form standard quantities and remove custom / customer_amount_only / rate_only items that were just submitted so engineer can add more materials
-      setMaterialUsageRows(prev => prev.filter(r => r.type !== "custom" && r.type !== "customer_amount_only" && r.type !== "rate_only").map(r => ({ ...r, quantity: "" })));
+      if (isMountedRef.current) {
+        setMaterialUsageRows(prev => prev.filter(r => r.type !== "custom" && r.type !== "customer_amount_only" && r.type !== "rate_only").map(r => ({ ...r, quantity: "" })));
+      }
 
       await loadDashboardData();
     } catch (err) {
       console.error("Bulk material submit error:", err);
       showToast(`Submission failed: ${err.message}`, "error");
     } finally {
-      setBulkMaterialSubmitting(false);
+      bulkMaterialSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setBulkMaterialSubmitting(false);
+      }
     }
   };
 
@@ -2628,7 +2698,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Submit Resolve Pending Delivery
   const handleResolvePendingSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (savingResolvePending || !selectedPendingRecord) return;
+    if (savingResolvePending || savingResolvePendingRef.current || !selectedPendingRecord) return;
 
     const newlyRec = Number(newlyReceivedQty);
     if (!newlyReceivedQty || isNaN(newlyRec) || newlyRec <= 0) {
@@ -2647,6 +2717,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     const updatedPending = Math.max(0, totalReq - updatedRec);
 
+    savingResolvePendingRef.current = true;
     setSavingResolvePending(true);
     try {
       const todayIso = new Date().toISOString().split("T")[0];
@@ -2669,13 +2740,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           : `Updated delivery for ${selectedPendingRecord.materialName}. Remaining pending: ${updatedPending} ${selectedPendingRecord.unit || ""}.`,
         "success"
       );
-      setShowResolvePendingModal(false);
+      if (isMountedRef.current) setShowResolvePendingModal(false);
       await loadDashboardData();
     } catch (err) {
       console.error("Resolve pending error:", err);
       showToast(`Failed to update delivery: ${err.message}`, "error");
     } finally {
-      setSavingResolvePending(false);
+      savingResolvePendingRef.current = false;
+      if (isMountedRef.current) {
+        setSavingResolvePending(false);
+      }
     }
   };
 
@@ -2693,7 +2767,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     const availableSiteMats = materials
-      .filter(m => m.siteId === activeSiteId)
+      .filter(m => m && m.siteId === activeSiteId)
       .map(m => processMaterialPaymentAndDelivery(m))
       .filter(m => m.remainingStock > 0);
 
@@ -2723,7 +2797,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Submit Material Transfer
   const handleTransferSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (savingTransfer) return;
+    if (savingTransfer || savingTransferRef.current) return;
 
     if (!activeSiteId) {
       showToast("Please select source construction site.", "error");
@@ -2768,6 +2842,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const engineerId = currentEngineerId || userProfile?.uid || "";
     const engineerName = userProfile?.fullName || userProfile?.name || "Site Engineer";
 
+    savingTransferRef.current = true;
     setSavingTransfer(true);
     try {
       await transferMaterialBetweenSites({
@@ -2784,13 +2859,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       });
 
       showToast(`Successfully transferred ${transferQtyNum} ${processedMat.unit || ""} to ${destSiteObj?.siteName || "Destination Site"}!`, "success");
-      setShowTransferModal(false);
+      if (isMountedRef.current) setShowTransferModal(false);
       await loadDashboardData();
     } catch (err) {
       console.error("Transfer error:", err);
       showToast(`Transfer failed: ${err.message}`, "error");
     } finally {
-      setSavingTransfer(false);
+      savingTransferRef.current = false;
+      if (isMountedRef.current) {
+        setSavingTransfer(false);
+      }
     }
   };
 
@@ -2809,7 +2887,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Submit Material Transfer Receipt
   const handleReceiveTransferSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (savingReceiveTransfer || !selectedTransferForReceive) return;
+    if (savingReceiveTransfer || savingReceiveTransferRef.current || !selectedTransferForReceive) return;
 
     const rxQtyNum = Number(receiveQuantity);
     if (!receiveQuantity || isNaN(rxQtyNum) || rxQtyNum <= 0) {
@@ -2829,6 +2907,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const engineerId = currentEngineerId || userProfile?.uid || "";
     const engineerName = userProfile?.fullName || userProfile?.name || "Site Engineer";
 
+    savingReceiveTransferRef.current = true;
     setSavingReceiveTransfer(true);
     try {
       const res = await receiveMaterialTransfer({
@@ -2846,19 +2925,22 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           : `Partial receipt recorded (+${rxQtyNum} ${selectedTransferForReceive.unit || ""}). Remaining pending: ${res.pendingQuantity} ${selectedTransferForReceive.unit || ""}.`,
         "success"
       );
-      setShowReceiveTransferModal(false);
+      if (isMountedRef.current) setShowReceiveTransferModal(false);
       await loadDashboardData();
     } catch (err) {
       console.error("Receive transfer error:", err);
-      showToast(`Failed to record receipt: ${err.message}`, "error");
+      showToast(`Receive failed: ${err.message}`, "error");
     } finally {
-      setSavingReceiveTransfer(false);
+      savingReceiveTransferRef.current = false;
+      if (isMountedRef.current) {
+        setSavingReceiveTransfer(false);
+      }
     }
   };
 
   const handleMaterialSubmit = async (e) => {
     if (e && e.preventDefault) e.preventDefault();
-    if (materialSubmitting) return;
+    if (materialSubmitting || materialSubmittingRef.current) return;
     if (!activeSiteId) {
       showToast("Please choose active project.", "error");
       return;
@@ -2880,6 +2962,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
     
+    materialSubmittingRef.current = true;
     setMaterialSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
@@ -2907,14 +2990,17 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       console.error("Material submit error:", err);
       showToast(`Material submit failed: ${err.message}`, "error");
     } finally {
-      setMaterialSubmitting(false);
+      materialSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setMaterialSubmitting(false);
+      }
     }
   };
 
   // 5. Upload Geotagged Progress Photo
   const handlePhotoUpload = async (e) => {
     e.preventDefault();
-    if (photoSubmitting) return;
+    if (photoSubmitting || photoSubmittingRef.current) return;
     if (!activeSiteId) {
       showToast("Please select construction site.", "error");
       return;
@@ -2934,6 +3020,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const siteLng = Number(site.longitude || 77.3910);
     const siteRadius = Number(site.radius || 500);
 
+    photoSubmittingRef.current = true;
     setPhotoSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
@@ -2954,21 +3041,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       await saveSitePhoto(engineerId, activeSiteId, sitePhotoPreview, userLat, userLng, "Site Photo");
       showToast("Geotagged site photo uploaded to feed!", "success");
 
-      setSitePhotoFile(null);
-      setSitePhotoPreview(null);
+      if (isMountedRef.current) {
+        setSitePhotoFile(null);
+        setSitePhotoPreview(null);
+      }
       await loadDashboardData();
     } catch (err) {
       console.error("Progress photo upload error:", err);
       showToast(err.message || "Failed to save photo.", "error");
     } finally {
-      setPhotoSubmitting(false);
+      photoSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setPhotoSubmitting(false);
+      }
     }
   };
 
   // 6. Submit Daily Progress updates
   const handleProgressSubmit = async (e) => {
     e.preventDefault();
-    if (progressSubmitting) return;
+    if (progressSubmitting || progressSubmittingRef.current) return;
     if (!activeSiteId) {
       showToast("Please choose target project.", "error");
       return;
@@ -2978,6 +3070,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
+    progressSubmittingRef.current = true;
     setProgressSubmitting(true);
     try {
       const engineerId = userProfile.uid || userProfile.id || "";
@@ -3020,23 +3113,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       );
 
       showToast("Daily progress updates logged successfully!", "success");
-      setWorkDescription("");
-      setProgressPercent(50);
-      setIssuesText("");
-      setNotesText("");
-      setCurrentlyRunning("");
-      setMaterialsStatus("");
-      setPendingWork("");
-      setNextActivity("");
-      setProgressPhotoFile(null);
-      setProgressPhotoPreview(null);
+      if (isMountedRef.current) {
+        setWorkDescription("");
+        setProgressPercent(50);
+        setIssuesText("");
+        setNotesText("");
+        setCurrentlyRunning("");
+        setMaterialsStatus("");
+        setPendingWork("");
+        setNextActivity("");
+        setProgressPhotoFile(null);
+        setProgressPhotoPreview(null);
+      }
 
       await loadDashboardData();
     } catch (err) {
       console.error("Progress report log failed:", err);
       showToast(`Sync failed: ${err.message}`, "error");
     } finally {
-      setProgressSubmitting(false);
+      progressSubmittingRef.current = false;
+      if (isMountedRef.current) {
+        setProgressSubmitting(false);
+      }
     }
   };
 
@@ -4738,19 +4836,22 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
 
     const sitePendingMaterials = materials
-      .filter(m => m.siteId === activeSiteId)
+      .filter(m => m && m.siteId === activeSiteId)
       .map(m => processMaterialPaymentAndDelivery(m))
       .filter(m => m.pendingDelivery > 0);
 
     const activeMaterials = materials
-      .filter(m => m.siteId === activeSiteId)
+      .filter(m => m && m.siteId === activeSiteId)
       .filter(m => {
-        const query = materialSearch.toLowerCase().trim();
+        const query = (materialSearch || "").toLowerCase().trim();
         if (!query) return true;
+        const mName = String(m.materialName || m.title || "").toLowerCase();
+        const mCat = String(m.category || m.teamName || "").toLowerCase();
+        const mSup = String(m.supplierName || "").toLowerCase();
         return (
-          m.materialName.toLowerCase().includes(query) ||
-          m.category.toLowerCase().includes(query) ||
-          m.supplierName.toLowerCase().includes(query)
+          mName.includes(query) ||
+          mCat.includes(query) ||
+          mSup.includes(query)
         );
       })
       .filter(m => {
@@ -7750,6 +7851,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         return;
       }
 
+      if (expenseSubmitting || expenseSubmittingRef.current) return;
+      expenseSubmittingRef.current = true;
       setExpenseSubmitting(true);
       try {
         await saveGeneralExpense({
@@ -7766,18 +7869,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         });
 
         showToast("Expense submitted successfully!", "success");
-        setShowAddExpenseModal(false);
-        setExpenseCustomer("");
-        setExpenseAmount("");
-        setExpenseDate(new Date().toISOString().split("T")[0]);
-        setExpenseDesc("");
-        setExpenseNotes("");
-        setExpenseErrors({});
+        if (isMountedRef.current) {
+          setShowAddExpenseModal(false);
+          setExpenseCustomer("");
+          setExpenseAmount("");
+          setExpenseDate(new Date().toISOString().split("T")[0]);
+          setExpenseDesc("");
+          setExpenseNotes("");
+          setExpenseErrors({});
+        }
         await loadDashboardData();
       } catch (err) {
         showToast(`Submission failed: ${err.message}`, "error");
       } finally {
-        setExpenseSubmitting(false);
+        expenseSubmittingRef.current = false;
+        if (isMountedRef.current) {
+          setExpenseSubmitting(false);
+        }
       }
     };
 

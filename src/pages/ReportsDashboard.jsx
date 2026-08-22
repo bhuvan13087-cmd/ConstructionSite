@@ -841,14 +841,14 @@ export default function ReportsDashboard() {
 
         const teamObj = teams.find(t => t.id === l.teamId);
         const categoryObj = teamObj?.categories?.[l.categoryId];
-        const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+        const dailyWage = Number(l.dailyWage !== undefined ? l.dailyWage : (l.wage !== undefined ? l.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
         const count = Number(l.workerCount) || 1;
-        const factor = l.attendanceType === "Half Day" ? 0.5 : 1.0;
-        const wages = count * factor * dailyWage;
+        const factor = Number(l.customWorkUnits !== undefined ? l.customWorkUnits : (l.units !== undefined ? l.units : (l.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+        const wages = Number(l.calculatedAmount !== undefined ? l.calculatedAmount : (l.totalAmount !== undefined ? l.totalAmount : (count * factor * dailyWage))) || 0;
 
         labourCost += wages;
-        const mKey = l.attendanceDate.substring(0, 7);
-        monthlyMap[mKey] = (monthlyMap[mKey] || 0) + wages;
+        const mKey = l.attendanceDate ? l.attendanceDate.substring(0, 7) : "";
+        if (mKey) monthlyMap[mKey] = (monthlyMap[mKey] || 0) + wages;
       });
 
       // General Expenses aggregation
@@ -929,10 +929,10 @@ export default function ReportsDashboard() {
 
       const teamObj = teams.find(t => t.id === r.teamId);
       const categoryObj = teamObj?.categories?.[r.categoryId];
-      const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
       const count = Number(r.workerCount) || 1;
-      const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
-      const wages = count * factor * dailyWage;
+      const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
 
       labourSalaryTotal += wages;
     });
@@ -977,10 +977,11 @@ export default function ReportsDashboard() {
             if (!allowedSiteIds.has(r.siteId)) return;
             const teamObj = teams.find(team => team.id === r.teamId);
             const categoryObj = teamObj?.categories?.[r.categoryId];
-            const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+            const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
             const count = Number(r.workerCount) || 1;
-            const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
-            amount += count * factor * dailyWage;
+            const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+            const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
+            amount += wages;
           }
         });
 
@@ -1075,11 +1076,12 @@ export default function ReportsDashboard() {
 
       const teamObj = teams.find(t => t.id === r.teamId);
       const categoryObj = teamObj?.categories?.[r.categoryId];
-      const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
       const count = Number(r.workerCount) || 1;
-      const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+      const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
       
-      labourExpense += count * factor * dailyWage;
+      labourExpense += wages;
     });
 
     generalExpenses.forEach(g => {
@@ -1250,6 +1252,9 @@ export default function ReportsDashboard() {
       ) || 1.0;
 
       const categoryTotal = Number(r.calculatedAmount) || Number(r.totalAmount) || (workerCount * customWorkUnits * dailyWage);
+      const calculationStr = customWorkUnits !== 1.0
+        ? `${workerCount} × ${customWorkUnits} × ₹${dailyWage.toLocaleString("en-IN")}`
+        : `${workerCount} × ₹${dailyWage.toLocaleString("en-IN")}`;
 
       dateMap[rDate].teamMap[teamId].categories.push({
         recordId: r.id,
@@ -1258,6 +1263,7 @@ export default function ReportsDashboard() {
         workerCount,
         customWorkUnits,
         dailyWage,
+        calculationStr,
         categoryTotal
       });
 
@@ -3087,8 +3093,10 @@ export default function ReportsDashboard() {
                           <tr style={{ backgroundColor: "#ffffff", borderBottom: "1px solid var(--border-color)" }}>
                             <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category</th>
                             <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Workers</th>
-                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Daily Wage</th>
-                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category Total</th>
+                            <th style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Unit / Duration</th>
+                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Rate</th>
+                            <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Calculation</th>
+                            <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Amount</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -3096,8 +3104,16 @@ export default function ReportsDashboard() {
                             <tr key={cIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
                               <td style={{ fontWeight: "700", padding: "10px 16px", color: "#0f172a", fontSize: "13px" }}>{cat.categoryName}</td>
                               <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "600", fontSize: "13px" }}>{cat.workerCount}</td>
+                              <td style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>
+                                <span style={{ backgroundColor: "#f8fafc", padding: "2px 8px", borderRadius: "4px", border: "1px solid #e2e8f0", fontWeight: "700" }}>
+                                  {cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Unit" : "Units"}
+                                </span>
+                              </td>
                               <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontSize: "13px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
-                              <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a", fontSize: "13px" }}>
+                              <td style={{ textAlign: "left", padding: "10px 16px", fontFamily: "monospace", fontSize: "12.5px", color: "#334155" }}>
+                                {cat.calculationStr}
+                              </td>
+                              <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "800", color: "#16a34a", fontSize: "13.5px" }}>
                                 ₹{cat.categoryTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>
                             </tr>
@@ -4201,13 +4217,14 @@ export default function ReportsDashboard() {
                     }
                     
                     const count = Number(r.workerCount) || 1;
-                    const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+                    const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
                     const teamObj = teams.find(t => t.id === r.teamId);
                     const categoryObj = teamObj?.categories?.[r.categoryId];
-                    const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+                    const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
+                    const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
                     
                     weeklySummary[weekKey].totalWorkers += count;
-                    weeklySummary[weekKey].totalWages += count * factor * dailyWage;
+                    weeklySummary[weekKey].totalWages += wages;
                   });
                   
                   const rows = Object.values(weeklySummary);
@@ -4263,14 +4280,15 @@ export default function ReportsDashboard() {
                     }
                     
                     const count = Number(r.workerCount) || 1;
-                    const factor = r.attendanceType === "Half Day" ? 0.5 : 1.0;
+                    const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
                     const teamObj = teams.find(t => t.id === r.teamId);
                     const categoryObj = teamObj?.categories?.[r.categoryId];
-                    const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+                    const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
+                    const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
                     
                     monthlySummary[monthKey].days.add(r.attendanceDate);
                     monthlySummary[monthKey].totalWorkers += count;
-                    monthlySummary[monthKey].totalWages += count * factor * dailyWage;
+                    monthlySummary[monthKey].totalWages += wages;
                   });
                   
                   const rows = Object.values(monthlySummary);
@@ -4323,10 +4341,12 @@ export default function ReportsDashboard() {
                       <table className="printable-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
                         <thead>
                           <tr>
-                            <th style={{ padding: "5px 8px", textAlign: "left", width: "40%", fontSize: "10px" }}>Category</th>
-                            <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Workers</th>
-                            <th style={{ padding: "5px 8px", textAlign: "right", width: "20%", fontSize: "10px" }}>Daily Wage</th>
-                            <th style={{ padding: "5px 8px", textAlign: "right", width: "22%", fontSize: "10px" }}>Category Total</th>
+                            <th style={{ padding: "5px 8px", textAlign: "left", width: "25%", fontSize: "10px" }}>Category</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "10%", fontSize: "10px" }}>Workers</th>
+                            <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Duration</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "15%", fontSize: "10px" }}>Rate</th>
+                            <th style={{ padding: "5px 8px", textAlign: "left", width: "20%", fontSize: "10px" }}>Calculation</th>
+                            <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Amount</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -4334,7 +4354,9 @@ export default function ReportsDashboard() {
                             <tr key={cIdx}>
                               <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{cat.categoryName}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>{cat.workerCount}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Unit" : "Units"}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "left", fontSize: "9.5px", fontFamily: "monospace" }}>{cat.calculationStr}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>
                                 ₹{cat.categoryTotal.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               </td>

@@ -2639,18 +2639,47 @@ export async function getLabourDailyCountsHistory(siteId) {
   snapNew.forEach(d => {
     const data = d.data();
     if (data.workerCount !== undefined) {
-      const units = Number(data.workerCount) * (data.attendanceType === "Full Day" ? 1.0 : 0.5);
-      const wage = teamCatWageMap[`${data.teamId}_${data.categoryId}`] || 500;
-      const catName = teamCatNameMap[`${data.teamId}_${data.categoryId}`] || "Workers";
-      const tName = teamNameMap[data.teamId] || "Team";
+      const workerCount = Number(data.workerCount !== undefined ? data.workerCount : 1) || 1;
+      const customWorkUnits = Number(
+        data.customWorkUnits !== undefined 
+          ? data.customWorkUnits 
+          : (data.units !== undefined 
+              ? data.units 
+              : (data.attendanceType === "Half Day" ? 0.5 : 1.0))
+      ) || 1.0;
+      const catWage = teamCatWageMap[`${data.teamId}_${data.categoryId}`];
+      const dailyWage = Number(
+        data.dailyWage !== undefined 
+          ? data.dailyWage 
+          : (data.wage !== undefined 
+              ? data.wage 
+              : (catWage !== undefined ? catWage : 500))
+      ) || 0;
+      const calculatedAmount = Number(
+        data.calculatedAmount !== undefined 
+          ? data.calculatedAmount 
+          : (data.totalAmount !== undefined 
+              ? data.totalAmount 
+              : (workerCount * customWorkUnits * dailyWage))
+      ) || 0;
+      const totalAmount = Number(data.totalAmount !== undefined ? data.totalAmount : calculatedAmount);
+
+      const catName = data.categoryName || teamCatNameMap[`${data.teamId}_${data.categoryId}`] || "Workers";
+      const tName = data.teamName || teamNameMap[data.teamId] || "Team";
       newList.push({
         id: d.id,
         ...data,
-        date: data.attendanceDate,
-        memberId: `${data.categoryId}_${data.attendanceType}`,
-        memberName: `${data.workerCount} x ${catName} (${data.attendanceType})`,
-        units,
-        wage,
+        date: data.attendanceDate || data.date,
+        attendanceDate: data.attendanceDate || data.date,
+        memberId: `${data.categoryId}_${data.attendanceType || `${customWorkUnits} Units`}`,
+        memberName: `${workerCount} x ${catName} (${data.attendanceType || `${customWorkUnits} Units`})`,
+        workerCount,
+        customWorkUnits,
+        units: customWorkUnits,
+        wage: dailyWage,
+        dailyWage,
+        calculatedAmount,
+        totalAmount,
         categoryName: catName,
         teamName: tName
       });
@@ -5522,6 +5551,31 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
         }
       }
 
+      // Fallback query checking "date" field in labourMemberAttendance
+      const qTeamDate = query(
+        collection(db, "labourMemberAttendance"),
+        where("siteId", "==", cleanSiteId),
+        where("date", "==", cleanDateStr),
+        where("teamId", "==", cleanTeamId)
+      );
+      const qSnapDate = await getDocs(qTeamDate);
+      if (!qSnapDate.empty) {
+        const submittedDoc = qSnapDate.docs.find(d => {
+          const dt = d.data();
+          return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
+        });
+        if (submittedDoc) {
+          const dt = submittedDoc.data();
+          return {
+            submitted: true,
+            locked: true,
+            submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
+            submittedBy: dt.submittedBy || dt.createdBy || null,
+            teamId: cleanTeamId
+          };
+        }
+      }
+
       return { submitted: false };
     }
 
@@ -5543,6 +5597,29 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
     console.error("Error checking labour submission status:", err);
   }
   return { submitted: false };
+}
+
+// Get all labour locks for a specific site (without running through engineer personal attendance deduplication)
+export async function getLabourLocksForSite(siteId) {
+  if (!siteId) return [];
+  const cleanSiteId = String(siteId).trim();
+  const db = getDb();
+  try {
+    const q = query(
+      collection(db, "attendance"),
+      where("siteId", "==", cleanSiteId),
+      where("type", "==", "labour_attendance_lock")
+    );
+    const snap = await getDocs(q);
+    const locks = [];
+    snap.forEach(docSnap => {
+      locks.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    return locks;
+  } catch (err) {
+    console.error("Error fetching labour locks for site:", err);
+    return [];
+  }
 }
 
 // Submit workforce attendance for site, date, and specific team
@@ -5601,7 +5678,9 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
       where("teamId", "==", cleanTeamId)
     );
     const qSnap = await getDocs(qTeam);
+    const updatedIds = new Set();
     qSnap.forEach(d => {
+      updatedIds.add(d.id);
       batch.update(d.ref, {
         status: "submitted",
         locked: true,
@@ -5610,6 +5689,27 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
         submittedBy: engineerId || "",
         updatedAt: serverTimestamp()
       });
+    });
+
+    // Also update any records using "date" field
+    const qTeamDate = query(
+      collection(db, "labourMemberAttendance"),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr),
+      where("teamId", "==", cleanTeamId)
+    );
+    const qSnapDate = await getDocs(qTeamDate);
+    qSnapDate.forEach(d => {
+      if (!updatedIds.has(d.id)) {
+        batch.update(d.ref, {
+          status: "submitted",
+          locked: true,
+          submitted: true,
+          submittedAt: serverTimestamp(),
+          submittedBy: engineerId || "",
+          updatedAt: serverTimestamp()
+        });
+      }
     });
   }
 

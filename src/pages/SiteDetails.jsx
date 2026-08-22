@@ -539,21 +539,19 @@ export default function SiteDetails({ siteId, onBack }) {
   let dailyTotalLabourCost = 0;
 
   filteredLabour.forEach(row => {
-    if (row.memberId !== undefined || row.workerCount !== undefined) {
+    if (row.memberId !== undefined || row.workerCount !== undefined || row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
       const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
-      const units = Number(row.units !== undefined ? row.units : (row.attendanceType === "Full Day" ? 1.0 : row.attendanceType === "Half Day" ? 0.5 : 0));
-      const wage = Number(row.wage || row.baseWage || 0);
-      const earnedCost = (Number(row.units) !== undefined && !isNaN(Number(row.units))) 
-        ? (Number(row.units) * wage) 
-        : (units * wage);
+      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
+      const earnedCost = Number(row.calculatedAmount !== undefined ? row.calculatedAmount : (row.totalAmount !== undefined ? row.totalAmount : (count * customUnits * wage))) || 0;
 
       dailyTotalWorkers += count;
-      if (units > 0) {
+      if (customUnits > 0) {
         dailyPresent += count;
       } else {
         dailyAbsent += count;
       }
-      dailyTotalWage += (count * wage);
+      dailyTotalWage += (count * customUnits * wage);
       dailyTotalLabourCost += earnedCost;
     } else {
       // Legacy headcount row
@@ -602,15 +600,20 @@ export default function SiteDetails({ siteId, onBack }) {
   const labourSummaryMap = { Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, totalDays: 0 };
   let laborSpent = 0;
   labourHistory.forEach(row => {
-    if (row.memberId !== undefined) {
-      laborSpent += (Number(row.wage) || 0) * (Number(row.units) || 0);
+    if (row.memberId !== undefined || row.workerCount !== undefined || row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
+      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
+      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
+      const cost = Number(row.calculatedAmount !== undefined ? row.calculatedAmount : (row.totalAmount !== undefined ? row.totalAmount : (count * customUnits * wage))) || 0;
+      laborSpent += cost;
       const cat = row.categoryName || "";
-      if (cat.includes("Mason")) labourSummaryMap.Masons += row.units;
-      else if (cat.includes("Helper")) labourSummaryMap.Helpers += row.units;
-      else if (cat.includes("Painter")) labourSummaryMap.Painters += row.units;
-      else if (cat.includes("Plumber")) labourSummaryMap.Plumbers += row.units;
-      else if (cat.includes("Electrician")) labourSummaryMap.Electricians += row.units;
-      else labourSummaryMap.Others += row.units;
+      const totalRowUnits = count * customUnits;
+      if (cat.includes("Mason")) labourSummaryMap.Masons += totalRowUnits;
+      else if (cat.includes("Helper")) labourSummaryMap.Helpers += totalRowUnits;
+      else if (cat.includes("Painter")) labourSummaryMap.Painters += totalRowUnits;
+      else if (cat.includes("Plumber")) labourSummaryMap.Plumbers += totalRowUnits;
+      else if (cat.includes("Electrician")) labourSummaryMap.Electricians += totalRowUnits;
+      else labourSummaryMap.Others += totalRowUnits;
     } else {
       labourSummaryMap.Masons += row.Masons || 0;
       labourSummaryMap.Helpers += row.Helpers || 0;
@@ -2297,30 +2300,47 @@ export default function SiteDetails({ siteId, onBack }) {
               </div>
             </div>
 
-            {/* 3. Labour Records Table */}
+            {/* 3. Labour Records Table Section */}
             <Card 
-              variant="table" 
-              title="Daily Labour Records"
-              subtitle={`Showing labour records and payments for ${labourDateFilter || "the selected date"}`}
+              variant="table"
+              title={`Labour Records — ${(() => {
+                if (!labourDateFilter) return "Selected Date";
+                try {
+                  const [y, m, d] = labourDateFilter.split("-");
+                  if (y && m && d) return `${d}-${m}-${y}`;
+                } catch (e) {}
+                return labourDateFilter;
+              })()}`}
+              subtitle={`Showing verified workforce attendance and calculations for ${(() => {
+                if (!labourDateFilter) return "the selected date";
+                try {
+                  const [y, m, d] = labourDateFilter.split("-");
+                  if (y && m && d) return `${d}-${m}-${y}`;
+                } catch (e) {}
+                return labourDateFilter;
+              })()}`}
               headerActions={
                 <Badge status="success">{filteredLabour.length} Records</Badge>
               }
             >
               <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: "0" }}>
+                <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
                   <thead>
-                    <tr>
-                      <th>Worker / Labour Name</th>
-                      <th>Work / Activity</th>
-                      <th style={{ textAlign: "right" }}>Rate / Payment</th>
-                      <th>Date</th>
-                      <th style={{ textAlign: "center" }}>Action</th>
+                    <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
+                      <th style={{ textAlign: "left", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Labour / Worker</th>
+                      <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Quantity</th>
+                      <th style={{ textAlign: "center", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Unit / Duration</th>
+                      <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Rate</th>
+                      <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Effective Rate</th>
+                      <th style={{ textAlign: "left", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Calculation</th>
+                      <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Total Amount</th>
+                      <th style={{ textAlign: "center", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569", width: "60px" }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filteredLabour.length === 0 ? (
                       <tr>
-                        <td colSpan={5} style={{ textAlign: "center", color: "var(--text-muted)", padding: "36px 16px" }}>
+                        <td colSpan={8} style={{ textAlign: "center", color: "var(--text-muted)", padding: "36px 16px" }}>
                           <Users size={28} style={{ color: "#94a3b8", display: "block", margin: "0 auto 8px auto" }} />
                           <strong style={{ fontSize: "14px", color: "#475569", display: "block" }}>
                             No labour records found for {labourDateFilter || "this site"}.
@@ -2332,90 +2352,115 @@ export default function SiteDetails({ siteId, onBack }) {
                       </tr>
                     ) : (
                       filteredLabour.map((row, idx) => {
-                        const isMember = row.memberId !== undefined || row.workerCount !== undefined;
-                        const workerName = isMember ? (row.memberName || row.workerName || "Worker") : "Headcount Entry";
-                        const workType = isMember ? (row.categoryName || row.categoryId || "General Labour") : "General Headcount";
-                        const rateNum = Number(row.wage || row.baseWage || 0);
-                        const unitsNum = Number(row.units !== undefined ? row.units : (row.attendanceType === "Full Day" ? 1.0 : row.attendanceType === "Half Day" ? 0.5 : 0));
-                        let earnedPayment = 0;
-                        if (isMember) {
-                          earnedPayment = (Number(row.units) !== undefined && !isNaN(Number(row.units))) 
-                            ? (Number(row.units) * rateNum) 
-                            : (unitsNum * rateNum);
-                        } else {
-                          Object.keys(row).forEach(key => {
-                            if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
-                            const count = Number(row[key]) || 0;
-                            if (count > 0) {
-                              let r = 600;
-                              if (key === "Masons") r = 800;
-                              else if (key === "Helpers") r = 500;
-                              else if (key === "Electricians" || key === "Plumbers" || key === "Painters") r = 700;
-                              earnedPayment += count * r;
-                            }
-                          });
-                        }
+                        const isMember = row.memberId !== undefined || row.workerCount !== undefined || row.categoryId !== undefined;
+                        const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
+                        const customUnits = Number(
+                          row.customWorkUnits !== undefined 
+                            ? row.customWorkUnits 
+                            : (row.units !== undefined 
+                                ? row.units 
+                                : (row.attendanceType === "Half Day" ? 0.5 : 1.0))
+                        ) || 1.0;
+                        const baseRate = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
+                        const effectiveRate = baseRate * customUnits;
+                        const earnedPayment = Number(
+                          row.calculatedAmount !== undefined 
+                            ? row.calculatedAmount 
+                            : (row.totalAmount !== undefined 
+                                ? row.totalAmount 
+                                : (count * effectiveRate))
+                        ) || 0;
+
+                        const workType = row.categoryName || row.name || (row.categoryId ? String(row.categoryId).replace(/^cat_/, '') : (isMember ? "Labour" : "General Headcount"));
+                        const teamName = row.teamName || (row.teamId ? "Labour Team" : "");
+                        const unitLabel = customUnits !== 1.0 
+                          ? `${customUnits} days` 
+                          : (row.attendanceType ? `${customUnits} unit` : "1 day");
+                        const rateLabel = customUnits !== 1.0 
+                          ? `₹${baseRate.toLocaleString("en-IN")}/day` 
+                          : (baseRate > 0 ? `₹${baseRate.toLocaleString("en-IN")}` : "--");
+                        const calculationText = `${count} × ₹${effectiveRate.toLocaleString("en-IN")} = ₹${earnedPayment.toLocaleString("en-IN")}`;
 
                         return (
                           <tr 
                             key={row.id || idx}
                             onClick={() => handleOpenLabourDetails(row)}
-                            style={{ cursor: "pointer", transition: "background-color 0.15s ease" }}
+                            style={{ cursor: "pointer", transition: "background-color 0.15s ease", borderBottom: "1px solid #f1f5f9" }}
                             onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
                             onMouseLeave={e => e.currentTarget.style.backgroundColor = ""}
                           >
-                            <td style={{ fontWeight: 700 }}>
-                              <div>
+                            {/* Labour / Worker */}
+                            <td style={{ padding: "12px 16px" }}>
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: "13.5px", color: "var(--primary-900)" }}>{workerName}</span>
+                                  <span style={{ fontSize: "13.5px", fontWeight: "750", color: "#0f172a" }}>{workType}</span>
                                   {(row.isAdminEntry || row.createdVia === "admin_assisted_entry") && (
                                     <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${row.createdByName || "Admin"}`}>
                                       🛡️ Admin Entry
                                     </span>
                                   )}
                                 </div>
-                                {row.teamName && (
-                                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", fontWeight: "normal" }}>
-                                    Team: {row.teamName}{row.isAdminEntry ? ` • By Admin: ${row.createdByName || "Admin"}` : ""}
+                                {teamName && (
+                                  <span style={{ fontSize: "11px", color: "#64748b" }}>
+                                    {teamName}
                                   </span>
                                 )}
                               </div>
                             </td>
-                            <td>
-                              <span style={{
-                                fontSize: "11px",
-                                fontWeight: "750",
-                                backgroundColor: "#f1f5f9",
-                                color: "#334155",
-                                padding: "2px 8px",
-                                borderRadius: "4px",
-                                border: "1px solid #e2e8f0"
-                              }}>
-                                {workType}
+
+                            {/* Quantity */}
+                            <td style={{ textAlign: "right", padding: "12px 16px", fontFamily: "monospace", fontSize: "13.5px", fontWeight: "700", color: "#0f172a" }}>
+                              {count}
+                            </td>
+
+                            {/* Unit / Duration */}
+                            <td style={{ textAlign: "center", padding: "12px 16px", fontSize: "12px" }}>
+                              <span style={{ backgroundColor: "#f1f5f9", color: "#334155", padding: "2px 8px", borderRadius: "6px", border: "1px solid #e2e8f0", fontWeight: "700" }}>
+                                {unitLabel}
                               </span>
                             </td>
-                            <td style={{ textAlign: "right", fontFamily: "monospace" }}>
-                              <div>
-                                <strong style={{ fontSize: "13.5px", color: earnedPayment > 0 ? "var(--success-700)" : "var(--text-muted)" }}>
-                                  ₹{earnedPayment.toLocaleString("en-IN")}
-                                </strong>
-                                {rateNum > 0 && (
-                                  <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>
-                                    Rate: ₹{rateNum}/day
-                                  </span>
-                                )}
-                              </div>
+
+                            {/* Rate */}
+                            <td style={{ textAlign: "right", padding: "12px 16px", fontFamily: "monospace", fontSize: "13px", color: "#475569" }}>
+                              {rateLabel}
                             </td>
-                            <td className="font-mono" style={{ fontSize: "12px" }}>
-                              {row.date || row.attendanceDate || "--"}
+
+                            {/* Effective Rate */}
+                            <td style={{ textAlign: "right", padding: "12px 16px", fontFamily: "monospace", fontSize: "13.5px", fontWeight: "700", color: "#0f172a" }}>
+                              ₹{effectiveRate.toLocaleString("en-IN")}
                             </td>
-                            <td style={{ textAlign: "center" }} onClick={e => e.stopPropagation()}>
+
+                            {/* Calculation */}
+                            <td style={{ textAlign: "left", padding: "12px 16px", fontFamily: "monospace", fontSize: "12.5px", color: "#334155" }}>
+                              {calculationText}
+                            </td>
+
+                            {/* Total Amount */}
+                            <td style={{ textAlign: "right", padding: "12px 16px", fontFamily: "monospace", fontSize: "14px", fontWeight: "800", color: "#16a34a" }}>
+                              ₹{earnedPayment.toLocaleString("en-IN")}
+                            </td>
+
+                            {/* Action */}
+                            <td style={{ textAlign: "center", padding: "12px 16px" }} onClick={e => e.stopPropagation()}>
                               <button
                                 onClick={() => handleOpenLabourDetails(row)}
                                 className="btn-icon btn-view-action"
                                 title="View Record Details"
+                                style={{
+                                  width: "32px",
+                                  height: "32px",
+                                  borderRadius: "6px",
+                                  border: "1px solid #e2e8f0",
+                                  backgroundColor: "#ffffff",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  color: "#64748b",
+                                  margin: "auto",
+                                  cursor: "pointer"
+                                }}
                               >
-                                <Eye size={16} />
+                                <Eye size={15} />
                               </button>
                             </td>
                           </tr>
@@ -2425,34 +2470,75 @@ export default function SiteDetails({ siteId, onBack }) {
                   </tbody>
                 </table>
               </div>
+
+              {/* Final Total Labour Amount Footer */}
+              {filteredLabour.length > 0 && (
+                <div style={{
+                  padding: "16px 20px",
+                  backgroundColor: "#f8fafc",
+                  borderTop: "2px solid #e2e8f0",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                  gap: "12px"
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                    <span style={{
+                      fontSize: "12px",
+                      fontWeight: "800",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.5px",
+                      color: "#334155"
+                    }}>
+                      FINAL TOTAL LABOUR AMOUNT
+                    </span>
+                    <span style={{
+                      fontSize: "11px",
+                      fontWeight: "750",
+                      backgroundColor: "#e2e8f0",
+                      color: "#475569",
+                      padding: "2px 8px",
+                      borderRadius: "6px"
+                    }}>
+                      {filteredLabour.length} Entries • {dailyTotalWorkers} Total Workers
+                    </span>
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <span style={{ fontSize: "20px", fontWeight: "900", color: "#16a34a", fontFamily: "monospace" }}>
+                      ₹{dailyTotalLabourCost.toLocaleString("en-IN")}
+                    </span>
+                  </div>
+                </div>
+              )}
             </Card>
 
             {/* Modal: Labour Record Details */}
             {showLabourDetailsModal && selectedLabourForDetails && (() => {
               const rec = selectedLabourForDetails;
-              const isMember = rec.memberId !== undefined || rec.workerCount !== undefined;
-              const workerName = isMember ? (rec.memberName || rec.workerName || "Worker") : "Headcount Entry";
-              const workType = isMember ? (rec.categoryName || rec.categoryId || "General Labour") : "General Headcount";
-              const rateNum = Number(rec.wage || rec.baseWage || 0);
-              const unitsNum = Number(rec.units !== undefined ? rec.units : (rec.attendanceType === "Full Day" ? 1.0 : rec.attendanceType === "Half Day" ? 0.5 : 0));
-              let earnedPayment = 0;
-              if (isMember) {
-                earnedPayment = (Number(rec.units) !== undefined && !isNaN(Number(rec.units))) 
-                  ? (Number(rec.units) * rateNum) 
-                  : (unitsNum * rateNum);
-              } else {
-                Object.keys(rec).forEach(key => {
-                  if (key === "date" || key === "total" || key === "engineerId" || key === "id" || key === "siteId") return;
-                  const count = Number(rec[key]) || 0;
-                  if (count > 0) {
-                    let r = 600;
-                    if (key === "Masons") r = 800;
-                    else if (key === "Helpers") r = 500;
-                    else if (key === "Electricians" || key === "Plumbers" || key === "Painters") r = 700;
-                    earnedPayment += count * r;
-                  }
-                });
-              }
+              const isMember = rec.memberId !== undefined || rec.workerCount !== undefined || rec.categoryId !== undefined;
+              const count = Number(rec.workerCount !== undefined ? rec.workerCount : 1) || 1;
+              const customUnits = Number(
+                rec.customWorkUnits !== undefined 
+                  ? rec.customWorkUnits 
+                  : (rec.units !== undefined 
+                      ? rec.units 
+                      : (rec.attendanceType === "Half Day" ? 0.5 : 1.0))
+              ) || 1.0;
+              const baseRate = Number(rec.dailyWage !== undefined ? rec.dailyWage : (rec.wage || rec.baseWage || 0));
+              const effectiveRate = baseRate * customUnits;
+              const earnedPayment = Number(
+                rec.calculatedAmount !== undefined 
+                  ? rec.calculatedAmount 
+                  : (rec.totalAmount !== undefined 
+                      ? rec.totalAmount 
+                      : (count * effectiveRate))
+              ) || 0;
+
+              const workType = rec.categoryName || rec.name || (rec.categoryId ? String(rec.categoryId).replace(/^cat_/, '') : (isMember ? "Labour" : "General Headcount"));
+              const teamName = rec.teamName || (rec.teamId ? "Labour Team" : "");
+              const recordDate = rec.date || rec.attendanceDate || "--";
 
               return (
                 <Modal
@@ -2463,8 +2549,8 @@ export default function SiteDetails({ siteId, onBack }) {
                   <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid var(--border-color)", paddingBottom: "12px" }}>
                       <div>
-                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>{workerName}</h3>
-                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{workType} {rec.teamName ? `• Team: ${rec.teamName}` : ""}</span>
+                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>{workType}</h3>
+                        <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>{teamName ? `Team: ${teamName}` : "Labour Entry"}</span>
                       </div>
                       <Badge status={earnedPayment > 0 ? "success" : "pending"}>
                         {rec.attendanceType || (earnedPayment > 0 ? "Present" : "Logged")}
@@ -2474,19 +2560,31 @@ export default function SiteDetails({ siteId, onBack }) {
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", fontSize: "13px" }}>
                       <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Date</span>
-                        <strong className="font-mono">{rec.date || rec.attendanceDate || "--"}</strong>
+                        <strong className="font-mono">{recordDate}</strong>
                       </div>
                       <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Daily Rate</span>
-                        <strong className="font-mono">{rateNum > 0 ? `₹${rateNum}/day` : "--"}</strong>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Base Rate</span>
+                        <strong className="font-mono">{baseRate > 0 ? `₹${baseRate.toLocaleString("en-IN")} / day` : "--"}</strong>
                       </div>
                       <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
-                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Attendance (Days)</span>
-                        <strong className="font-mono">{rec.units !== undefined ? `${rec.units} Day` : (rec.attendanceType || "--")}</strong>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Workers & Duration</span>
+                        <strong className="font-mono">{count} worker(s) × {customUnits} day(s)</strong>
                       </div>
-                      <div style={{ backgroundColor: "#f0fdf4", padding: "10px 12px", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
-                        <span style={{ fontSize: "11px", color: "#16a34a", display: "block", fontWeight: "700" }}>Total Payment</span>
-                        <strong style={{ fontSize: "16px", color: "#16a34a", fontFamily: "monospace" }}>₹{earnedPayment.toLocaleString("en-IN")}</strong>
+                      <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                        <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Effective Rate</span>
+                        <strong className="font-mono">₹{effectiveRate.toLocaleString("en-IN")} / worker</strong>
+                      </div>
+                      <div style={{ gridColumn: "1 / -1", backgroundColor: "#f0fdf4", padding: "12px 14px", borderRadius: "8px", border: "1px solid #bbf7d0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                        <div>
+                          <span style={{ fontSize: "11px", color: "#16a34a", display: "block", fontWeight: "700", textTransform: "uppercase" }}>Calculation</span>
+                          <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", fontFamily: "monospace" }}>
+                            ₹{effectiveRate.toLocaleString("en-IN")} × {count} workers = ₹{earnedPayment.toLocaleString("en-IN")}
+                          </span>
+                        </div>
+                        <div style={{ textAlign: "right" }}>
+                          <span style={{ fontSize: "11px", color: "#16a34a", display: "block", fontWeight: "700", textTransform: "uppercase" }}>Total Amount</span>
+                          <strong style={{ fontSize: "18px", color: "#16a34a", fontFamily: "monospace" }}>₹{earnedPayment.toLocaleString("en-IN")}</strong>
+                        </div>
                       </div>
                     </div>
 

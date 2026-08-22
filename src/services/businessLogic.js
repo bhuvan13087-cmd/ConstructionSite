@@ -827,9 +827,14 @@ export function calculateLabourFinancials(siteId, labourHistory = [], labourMast
   let totalCost = 0;
   
   labourHistory.forEach(row => {
-    if (row.memberId !== undefined) {
-      // New member-level attendance record
-      totalCost += (Number(row.wage) || 0) * (Number(row.units) || 0);
+    if (row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
+      totalCost += Number(row.calculatedAmount !== undefined ? row.calculatedAmount : row.totalAmount) || 0;
+    } else if (row.memberId !== undefined || row.workerCount !== undefined) {
+      // Member-level attendance record
+      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
+      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || 0)) || 0;
+      totalCost += (count * customUnits * wage);
     } else {
       // Legacy headcount logic
       Object.keys(row).forEach(key => {
@@ -1065,23 +1070,27 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
   // Compile labour expenses from headcounts and member-level attendance records
   const siteLabour = labourHistory.filter(l => l.siteId === site.id);
   siteLabour.forEach(l => {
-    if (l.memberId !== undefined || l.categoryId !== undefined || l.units !== undefined) {
-      const count = Number(l.workerCount) || 1;
-      const units = l.units !== undefined && l.units !== null && !isNaN(Number(l.units))
-        ? Number(l.units)
-        : (count * (l.workUnit !== undefined ? Number(l.workUnit) : (l.attendanceType === "Half Day" ? 0.5 : 1.0)));
-      const wage = Number(l.wage) || 0;
-      const cost = wage > 0 ? (units * wage) : 0;
+    if (l.calculatedAmount !== undefined || l.totalAmount !== undefined || l.memberId !== undefined || l.categoryId !== undefined || l.units !== undefined || l.workerCount !== undefined) {
+      const count = Number(l.workerCount !== undefined ? l.workerCount : 1) || 1;
+      const customUnits = Number(l.customWorkUnits !== undefined ? l.customWorkUnits : (l.units !== undefined ? l.units : (l.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
+      const wage = Number(l.dailyWage !== undefined ? l.dailyWage : (l.wage || 0)) || 0;
+      const cost = Number(
+        l.calculatedAmount !== undefined 
+          ? l.calculatedAmount 
+          : (l.totalAmount !== undefined 
+              ? l.totalAmount 
+              : (count * customUnits * wage))
+      ) || 0;
       labourExpenseTotal += cost;
       if (cost > 0) {
         expenses.push({
           id: l.id || `labour_${l.memberId || l.categoryId}_${l.date || l.attendanceDate}`,
           type: "Expense",
           category: "Labour Expense",
-          name: `${l.memberName || l.categoryName || 'Worker'} (${units} units)`,
+          name: `${l.memberName || l.categoryName || 'Worker'} (${count * customUnits} units)`,
           date: l.date || l.attendanceDate,
           amount: cost,
-          description: `Labour Attendance: ${units} unit(s) @ ₹${wage}/unit`,
+          description: `Labour Attendance: ${count} worker(s) x ${customUnits} unit(s) @ ₹${wage}/unit`,
           status: "Approved"
         });
       }

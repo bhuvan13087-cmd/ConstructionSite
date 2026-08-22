@@ -250,26 +250,42 @@ export default function PayrollSummary() {
       const categoryName = categoryObj ? categoryObj.name : categoryId;
       const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
 
+      let totalUnits = 0;
+      let totalAmountForGroup = 0;
       let fullDays = 0;
       let halfDays = 0;
 
       records.forEach(r => {
         const count = Number(r.workerCount) || 1;
-        if (r.attendanceType === "Full Day") {
+        const customUnits = Number(
+          r.customWorkUnits !== undefined 
+            ? r.customWorkUnits 
+            : (r.units !== undefined 
+                ? r.units 
+                : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
+        ) || 1.0;
+        const wage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : dailyWage));
+        const amount = Number(
+          r.calculatedAmount !== undefined 
+            ? r.calculatedAmount 
+            : (r.totalAmount !== undefined 
+                ? r.totalAmount 
+                : (count * customUnits * wage))
+        ) || 0;
+
+        totalUnits += count * customUnits;
+        totalAmountForGroup += amount;
+
+        if (customUnits >= 1.0) {
           fullDays += count;
-        } else if (r.attendanceType === "Half Day") {
-          halfDays += count;
         } else {
-          if (Number(r.attendanceValue) === 1.0) {
-            fullDays += count;
-          } else {
-            halfDays += count;
-          }
+          halfDays += count;
         }
       });
 
-      const attendanceUnits = fullDays * 1.0 + halfDays * 0.5;
-      const totalAmount = attendanceUnits * dailyWage;
+      const attendanceUnits = totalUnits;
+      const totalAmount = totalAmountForGroup;
+      const effectiveDailyWage = Number(records[0]?.dailyWage || records[0]?.wage || dailyWage);
 
       const statusKey = `labour_${teamId}_${categoryId}_${monthKey}`;
       const statusObj = payrollStatuses[statusKey] || { status: "Pending", paymentDate: "", paymentMethod: "", notes: "" };
@@ -286,7 +302,7 @@ export default function PayrollSummary() {
         fullDays,
         halfDays,
         attendanceUnits,
-        dailyWage,
+        dailyWage: effectiveDailyWage,
         totalAmount,
         statusObj
       });

@@ -1745,8 +1745,15 @@ export default function AdminLabour() {
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px", fontSize: "11.5px" }}>
                       <span style={{ color: "#64748b" }}>Worker Count</span>
-                      <strong style={{ color: "#0f172a" }}>{workerCount} workers</strong>
+                      <strong style={{ color: "#0f172a" }}>{workerCount} workers ({record.customWorkUnits || record.units || 1.0} units)</strong>
                     </div>
+
+                    {(record.calculatedAmount !== undefined || record.totalAmount !== undefined) && (
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#fff7ed", padding: "6px 10px", borderRadius: "6px", fontSize: "11.5px", border: "1px solid #ffedd5" }}>
+                        <span style={{ color: "#ea580c", fontWeight: "700" }}>Calculated Amount</span>
+                        <strong style={{ color: "#9a3412", fontFamily: "monospace", fontSize: "13px" }}>₹{Number(record.calculatedAmount !== undefined ? record.calculatedAmount : record.totalAmount).toLocaleString("en-IN")}</strong>
+                      </div>
+                    )}
                   </div>
                 );
               })}
