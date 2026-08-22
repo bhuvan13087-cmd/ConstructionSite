@@ -768,15 +768,24 @@ export default function AdminDashboard() {
               </div>
             ) : (
               <table className="admin-attendance-table">
+                <colgroup>
+                  <col className="col-att-engineer" />
+                  <col className="col-att-site" />
+                  <col className="col-att-in" />
+                  <col className="col-att-out" />
+                  <col className="col-att-gps" />
+                  <col className="col-att-photo" />
+                  <col className="col-att-action" />
+                </colgroup>
                 <thead>
                   <tr>
-                    <th>Engineer</th>
-                    <th>Assigned Site</th>
-                    <th>Check-In Time</th>
-                    <th>Check-Out / Status</th>
-                    <th>Location & Geofence</th>
-                    <th style={{ textAlign: "center" }}>Photo Proof</th>
-                    <th style={{ textAlign: "right" }}>Action</th>
+                    <th className="col-att-engineer">Engineer</th>
+                    <th className="col-att-site">Assigned Site</th>
+                    <th className="col-att-in">Check-In Time</th>
+                    <th className="col-att-out">Check-Out / Status</th>
+                    <th className="col-att-gps">Location & Geofence</th>
+                    <th className="col-att-photo">Photo Proof</th>
+                    <th className="col-att-action">Action</th>
                   </tr>
                 </thead>
                 <tbody>

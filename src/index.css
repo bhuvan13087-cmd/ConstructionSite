@@ -7295,9 +7295,17 @@ body:has(.landing-page-container) {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
-  table-layout: auto;
+  table-layout: fixed;
   min-width: 760px;
 }
+
+.col-att-engineer { width: 22%; }
+.col-att-site { width: 18%; }
+.col-att-in { width: 13%; }
+.col-att-out { width: 14%; }
+.col-att-gps { width: 18%; }
+.col-att-photo { width: 75px; text-align: center; }
+.col-att-action { width: 75px; text-align: right; }
 
 .admin-attendance-table th {
   background-color: #f8fafc;
@@ -7310,6 +7318,16 @@ body:has(.landing-page-container) {
   border-bottom: 1px solid var(--border-color, #e2e8f0);
   white-space: nowrap;
   vertical-align: middle;
+}
+
+.admin-attendance-table th.col-att-photo,
+.admin-attendance-table td.col-att-photo {
+  text-align: center;
+}
+
+.admin-attendance-table th.col-att-action,
+.admin-attendance-table td.col-att-action {
+  text-align: right;
 }
 
 .admin-attendance-table td {
