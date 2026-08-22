@@ -4,6 +4,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import Modal from "../components/common/Modal";
 import { 
   getSiteEngineers,
   getSites,
@@ -27,7 +28,11 @@ import {
   FileText, 
   Activity,
   ClipboardCheck,
-  CalendarCheck
+  CalendarCheck,
+  ShieldCheck,
+  LogIn,
+  LogOut,
+  X
 } from "lucide-react";
 
 export default function EngineerActivityDashboard({ engineerId, onBack }) {
@@ -42,6 +47,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   const [activeSubTab, setActiveSubTab] = useState("attendance");
+  const [selectedPhotoModal, setSelectedPhotoModal] = useState(null);
 
   // Filters State
   const [siteFilter, setSiteFilter] = useState("");
@@ -73,7 +79,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
         getEngineerLeaves(engineerId)
       ]);
 
-      const currentEng = fetchedEngineers.find(e => e.id === engineerId);
+      const currentEng = fetchedEngineers.find(e => e.id === engineerId || e.uid === engineerId);
       if (!currentEng) {
         showToast("Engineer not found.", "error");
         onBack();
@@ -111,9 +117,8 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
 
   if (!engineer) return null;
 
-
   const filteredProgress = progressUpdates.filter(up => {
-    const matchesSite = !siteFilter || up.siteId === siteFilter;
+    const matchesSite = !siteFilter || String(up.siteId || "").trim() === String(siteFilter || "").trim();
     const matchesDate = !dateFilter || (up.createdAt?.seconds 
       ? new Date(up.createdAt.seconds * 1000).toISOString().split("T")[0] === dateFilter
       : (up.createdAt ? new Date(up.createdAt).toISOString().split("T")[0] === dateFilter : true));
@@ -121,7 +126,7 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
   });
 
   const filteredPhotos = photos.filter(pt => {
-    const matchesSite = !siteFilter || pt.siteId === siteFilter;
+    const matchesSite = !siteFilter || String(pt.siteId || "").trim() === String(siteFilter || "").trim();
     const matchesDate = !dateFilter || (pt.capturedAt?.seconds 
       ? new Date(pt.capturedAt.seconds * 1000).toISOString().split("T")[0] === dateFilter
       : (pt.capturedAt ? new Date(pt.capturedAt).toISOString().split("T")[0] === dateFilter : true));
@@ -129,25 +134,43 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
   });
 
   const filteredAttendance = attendance.filter(att => {
-    const matchesSite = !siteFilter || att.siteId === siteFilter;
-    const matchesDate = !dateFilter || att.date === dateFilter;
+    const matchesSite = !siteFilter || String(att.siteId || "").trim() === String(siteFilter || "").trim();
+    const recDate = att.date || att.attendanceDate || "";
+    const matchesDate = !dateFilter || recDate === dateFilter;
     return matchesSite && matchesDate;
   });
 
-  // Calculate site-wise activities counts
+  // Calculate site-wise activities counts across assigned sites and all attendance records
   const siteActivitySummary = {};
   engineer.assignedSites?.forEach(assignedId => {
     const siteObj = sites.find(s => s.id === assignedId);
     siteActivitySummary[assignedId] = {
       siteName: siteObj ? siteObj.siteName : `Site (ID: ${assignedId})`,
       status: siteObj ? siteObj.status : "Planning",
-      daysAttended: 0
+      daysAttended: 0,
+      entries: 0,
+      exits: 0
     };
   });
 
   attendance.forEach(att => {
-    if (siteActivitySummary[att.siteId]) {
-      siteActivitySummary[att.siteId].daysAttended += 1;
+    const sid = att.siteId || "_general";
+    if (!siteActivitySummary[sid]) {
+      const siteObj = sites.find(s => s.id === sid);
+      siteActivitySummary[sid] = {
+        siteName: att.siteName || (siteObj ? siteObj.siteName : `Site (ID: ${sid})`),
+        status: siteObj ? siteObj.status : "Active",
+        daysAttended: 0,
+        entries: 0,
+        exits: 0
+      };
+    }
+    siteActivitySummary[sid].daysAttended += 1;
+    if (att.time || att.checkInTime || att.checkInTimeFormatted) {
+      siteActivitySummary[sid].entries += 1;
+    }
+    if (att.isCheckedOut || att.checkOutTime || att.checkOutTimeFormatted) {
+      siteActivitySummary[sid].exits += 1;
     }
   });
 
@@ -250,11 +273,11 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", textAlign: "center", borderTop: "1px dashed var(--border-color)", paddingTop: "8px", marginTop: "4px" }}>
                         <div>
-                          <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Entries</span>
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Check-Ins</span>
                           <strong style={{ fontSize: "13px", color: "var(--primary-800)" }}>{summary.entries}</strong>
                         </div>
                         <div>
-                          <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Exits</span>
+                          <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Check-Outs</span>
                           <strong style={{ fontSize: "13px", color: "var(--primary-800)" }}>{summary.exits}</strong>
                         </div>
                         <div>
@@ -295,6 +318,10 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
                 >
                   <option value="">All Assigned Sites</option>
                   {engineer.assignedSites?.map(sid => {
+                    const siteObj = sites.find(s => s.id === sid);
+                    return <option key={sid} value={sid}>{siteObj ? siteObj.siteName : sid}</option>;
+                  })}
+                  {Object.keys(siteActivitySummary).filter(sid => !engineer.assignedSites?.includes(sid) && sid !== "_general").map(sid => {
                     const siteObj = sites.find(s => s.id === sid);
                     return <option key={sid} value={sid}>{siteObj ? siteObj.siteName : sid}</option>;
                   })}
@@ -364,8 +391,6 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
           {/* Sub-Tab Contents */}
           <div>
             
-
-
             {/* 2. Sub-Tab: Progress Reports */}
             {activeSubTab === "progress" && (
               <Card title="Submitted Progress Milestones">
@@ -458,37 +483,194 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
             {activeSubTab === "attendance" && (
               <Card title="Daily Attendance Logs">
                 {filteredAttendance.length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", textAlign: "center", padding: "20px" }}>
-                    No attendance records logged for this query.
-                  </p>
+                  <div style={{ padding: "32px 16px", textAlign: "center" }}>
+                    <ClipboardCheck size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "8px" }} />
+                    <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", margin: 0 }}>
+                      No attendance records logged for this query.
+                    </p>
+                  </div>
                 ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                    {filteredAttendance.map(att => {
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {filteredAttendance.map((att, idx) => {
                       const siteObj = sites.find(s => s.id === att.siteId);
+                      const resolvedSiteName = att.siteName || (siteObj ? siteObj.siteName : (att.siteId ? `Site (ID: ${att.siteId})` : "General Site"));
+                      const resolvedEngName = att.engineerName || engineer.fullName || "Site Engineer";
+                      const recDate = att.date || att.attendanceDate || "--";
+                      const checkInTime = att.checkInTimeFormatted || att.time || "--";
+                      const checkOutTime = att.checkOutTimeFormatted;
+                      const isCheckedOut = att.isCheckedOut || att.status === "checked_out" || Boolean(checkOutTime);
+                      const photoUrl = att.photoUrl || att.checkInPhotoUrl;
+                      const checkOutPhotoUrl = att.checkOutPhotoUrl;
+
                       return (
-                        <div key={att.id} style={{
-                          padding: "12px",
-                          backgroundColor: "var(--primary-50)",
+                        <div key={att.id || `att_${att.siteId}_${recDate}_${idx}`} style={{
+                          padding: "16px",
+                          backgroundColor: "#ffffff",
                           border: "1px solid var(--border-color)",
-                          borderRadius: "8px",
+                          borderRadius: "10px",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.03)",
                           display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center"
+                          flexDirection: "column",
+                          gap: "12px",
+                          transition: "border-color 0.15s ease"
                         }}>
-                          <div>
-                            <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>
-                              {siteObj ? siteObj.siteName : "Registered Site"}
-                            </strong>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                              Logged GPS: {att.latitude?.toFixed(5)}, {att.longitude?.toFixed(5)} • {att.address || "No geocoded address"}
-                            </span>
+                          {/* Row 1: Header - Site Name, Engineer Name, Date, Status */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+                            <div style={{ display: "flex", alignItems: "flex-start", gap: "12px" }}>
+                              {photoUrl ? (
+                                <img 
+                                  src={photoUrl} 
+                                  alt="Check-in Verification" 
+                                  onClick={() => setSelectedPhotoModal({ url: photoUrl, title: `Selfie Verification - ${resolvedEngName} (${recDate})` })}
+                                  style={{ 
+                                    width: "48px", 
+                                    height: "48px", 
+                                    borderRadius: "8px", 
+                                    objectFit: "cover", 
+                                    flexShrink: 0, 
+                                    border: "1.5px solid var(--border-color)",
+                                    cursor: "pointer" 
+                                  }} 
+                                  title="Click to expand selfie verification"
+                                />
+                              ) : (
+                                <div style={{
+                                  width: "48px",
+                                  height: "48px",
+                                  borderRadius: "8px",
+                                  backgroundColor: "var(--primary-100)",
+                                  color: "var(--primary-700)",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  flexShrink: 0,
+                                  fontWeight: "800",
+                                  fontSize: "13px"
+                                }}>
+                                  <Building2 size={20} />
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                                  <strong style={{ fontSize: "14px", fontWeight: "750", color: "var(--primary-950)" }}>
+                                    {resolvedSiteName}
+                                  </strong>
+                                  <span style={{ fontSize: "11px", color: "var(--text-muted)", background: "var(--primary-50)", padding: "2px 6px", borderRadius: "4px", border: "1px solid var(--border-color)" }}>
+                                    {resolvedEngName}
+                                  </span>
+                                </div>
+                                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", color: "var(--text-muted)", fontSize: "11.5px" }}>
+                                  <Calendar size={13} style={{ flexShrink: 0 }} />
+                                  <span className="font-mono" style={{ fontWeight: "600", color: "#334155" }}>{recDate}</span>
+                                </div>
+                              </div>
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              {isCheckedOut ? (
+                                <Badge status="info">Checked Out</Badge>
+                              ) : (
+                                <Badge status="success">Present / On Site</Badge>
+                              )}
+                              {(att.verificationStatus === "verified" || att.isVerified) && (
+                                <span style={{ 
+                                  display: "inline-flex", 
+                                  alignItems: "center", 
+                                  gap: "3px", 
+                                  fontSize: "10.5px", 
+                                  fontWeight: "700", 
+                                  color: "#059669", 
+                                  backgroundColor: "#ecfdf5", 
+                                  padding: "2px 8px", 
+                                  borderRadius: "12px",
+                                  border: "1px solid #a7f3d0"
+                                }}>
+                                  <ShieldCheck size={12} />
+                                  Verified
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ textAlign: "right" }}>
-                            <Badge status="success">Present</Badge>
-                            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block", marginTop: "2px" }} className="font-mono">
-                              {att.date} {att.time || ""}
-                            </span>
+
+                          {/* Row 2: Check-in & Check-out details strip */}
+                          <div style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                            gap: "10px",
+                            backgroundColor: "var(--primary-50)",
+                            padding: "10px 12px",
+                            borderRadius: "6px",
+                            border: "1px solid var(--border-color)",
+                            fontSize: "12px"
+                          }}>
+                            {/* Check-In */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#dcfce7", color: "#15803d", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <LogIn size={13} />
+                              </div>
+                              <div>
+                                <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-In Time</span>
+                                <strong className="font-mono" style={{ color: "var(--primary-900)", fontSize: "12px" }}>{checkInTime}</strong>
+                              </div>
+                            </div>
+
+                            {/* Check-Out */}
+                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                              <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: isCheckedOut ? "#e0e7ff" : "#f1f5f9", color: isCheckedOut ? "#4338ca" : "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                                <LogOut size={13} />
+                              </div>
+                              <div>
+                                <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-Out Time</span>
+                                <strong className="font-mono" style={{ color: isCheckedOut ? "#1e1b4b" : "var(--text-muted)", fontSize: "12px" }}>
+                                  {checkOutTime || (isCheckedOut ? "Logged" : "Not yet checked out")}
+                                </strong>
+                              </div>
+                            </div>
                           </div>
+
+                          {/* Row 3: GPS & Geofence Verification Metadata */}
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px", fontSize: "11px", color: "var(--text-muted)", paddingTop: "4px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <MapPin size={13} style={{ color: "var(--primary-600)", flexShrink: 0 }} />
+                              <span>{att.addressDisplay || att.address || "GPS Location Captured"}</span>
+                              {att.latitude && att.longitude && (
+                                <span className="font-mono" style={{ color: "var(--text-muted)", opacity: 0.8 }}>
+                                  ({Number(att.latitude).toFixed(4)}, {Number(att.longitude).toFixed(4)})
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              {att.distance !== undefined && att.distance !== null && (
+                                <span style={{ fontWeight: "600", color: Number(att.distance) <= 500 ? "#15803d" : "#b45309" }}>
+                                  🎯 {Math.round(att.distance)}m from site
+                                </span>
+                              )}
+                              {att.gpsAccuracy && (
+                                <span style={{ color: "var(--text-muted)" }}>
+                                  Accuracy: ±{Math.round(att.gpsAccuracy)}m
+                                </span>
+                              )}
+                              {checkOutPhotoUrl && (
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPhotoModal({ url: checkOutPhotoUrl, title: `Check-out Photo - ${resolvedEngName} (${recDate})` })}
+                                  style={{
+                                    border: "none",
+                                    background: "none",
+                                    color: "var(--primary-600)",
+                                    cursor: "pointer",
+                                    textDecoration: "underline",
+                                    fontSize: "11px",
+                                    padding: 0
+                                  }}
+                                >
+                                  View Check-Out Photo
+                                </button>
+                              )}
+                            </div>
+                          </div>
+
                         </div>
                       );
                     })}
@@ -502,6 +684,27 @@ export default function EngineerActivityDashboard({ engineerId, onBack }) {
         </div>
 
       </div>
+
+      {/* Modal for viewing expanded verification photo */}
+      {selectedPhotoModal && (
+        <Modal
+          isOpen={true}
+          onClose={() => setSelectedPhotoModal(null)}
+          title={selectedPhotoModal.title || "Verification Photo"}
+          maxWidth="500px"
+        >
+          <div style={{ textAlign: "center", padding: "8px" }}>
+            <img 
+              src={selectedPhotoModal.url} 
+              alt="Verification selfie preview" 
+              style={{ maxWidth: "100%", maxHeight: "65vh", borderRadius: "8px", objectFit: "contain", border: "1px solid var(--border-color)" }}
+            />
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end" }}>
+              <Button variant="outline" onClick={() => setSelectedPhotoModal(null)}>Close</Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
     </Layout>
   );

@@ -821,6 +821,43 @@ export function getLabourDisplayName(category) {
 }
 
 /**
+ * Canonical calculation of category labour amount supporting both group duration
+ * and individual worker custom durations.
+ * 
+ * Formula:
+ * - When workerEntries are provided: sum of (1 * worker.customWorkUnits * worker.dailyWage) for each worker
+ *   plus any remaining unassigned workers in workerCount @ (defaultUnits * wage).
+ * - When no workerEntries: (workerCount * customWorkUnits * dailyWage).
+ */
+export function calculateCategoryLabourAmount({
+  workerCount = 0,
+  customWorkUnits = 1.0,
+  dailyWage = 0,
+  workerEntries = []
+} = {}) {
+  const defaultUnits = Math.max(0.01, Number(customWorkUnits) || 1.0);
+  const wage = Number(dailyWage) || 0;
+  const count = Number(workerCount) || 0;
+
+  if (Array.isArray(workerEntries) && workerEntries.length > 0) {
+    let customSum = 0;
+    workerEntries.forEach(w => {
+      const wUnits = Math.max(0.01, Number(w.customWorkUnits !== undefined ? w.customWorkUnits : (w.units !== undefined ? w.units : defaultUnits)));
+      const wWage = Number(w.dailyWage !== undefined ? w.dailyWage : (w.wage !== undefined ? w.wage : wage));
+      const wAmount = Number(w.calculatedAmount !== undefined ? w.calculatedAmount : (wUnits * wWage));
+      customSum += wAmount;
+    });
+
+    // If total workerCount exceeds configured worker entries, calculate remaining at default rate
+    const remainingCount = Math.max(0, count - workerEntries.length);
+    const remainingSum = remainingCount * defaultUnits * wage;
+    return customSum + remainingSum;
+  }
+
+  return count * defaultUnits * wage;
+}
+
+/**
  * Reconciles daily counts work duration costs with logged payments.
  */
 export function calculateLabourFinancials(siteId, labourHistory = [], labourMaster = {}, paymentsList = []) {
@@ -834,7 +871,13 @@ export function calculateLabourFinancials(siteId, labourHistory = [], labourMast
       const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
       const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
       const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || 0)) || 0;
-      totalCost += (count * customUnits * wage);
+      const calculated = calculateCategoryLabourAmount({
+        workerCount: count,
+        customWorkUnits: customUnits,
+        dailyWage: wage,
+        workerEntries: row.workerEntries || []
+      });
+      totalCost += calculated;
     } else {
       // Legacy headcount logic
       Object.keys(row).forEach(key => {

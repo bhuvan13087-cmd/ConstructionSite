@@ -126,6 +126,7 @@ import {
   ArrowRightLeft,
   Inbox,
   ChevronDown,
+  ChevronUp,
   Check
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -554,6 +555,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [workUnitsSelections, setWorkUnitsSelections] = useState({});
   const [workModeSelections, setWorkModeSelections] = useState({});
   const [savingRecordKeys, setSavingRecordKeys] = useState({});
+  const [expandedWorkerCategories, setExpandedWorkerCategories] = useState({});
   const [filterDate, setFilterDate] = useState("");
   const [filterDateMode, setFilterDateMode] = useState("This Month");
   const [filterTeamId, setFilterTeamId] = useState("");
@@ -795,6 +797,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     loadDashboardData();
   }, [userProfile, activeSiteId]);
 
+  // Fetch Existing Attendance Records for site + date + team
   useEffect(() => {
     if (!activeSiteId || !labourDate || !selectedLabourTeamId) {
       setAttendanceRows([]);
@@ -816,6 +819,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           customWorkUnits: r.customWorkUnits !== undefined ? Number(r.customWorkUnits) : (r.units !== undefined ? Number(r.units) : 1.0),
           units: r.units !== undefined ? Number(r.units) : (r.customWorkUnits !== undefined ? Number(r.customWorkUnits) : 1.0),
           dailyWage: Number(r.dailyWage || r.wage || 0),
+          workerEntries: Array.isArray(r.workerEntries) ? r.workerEntries : [],
           calculatedAmount: Number(r.calculatedAmount || r.totalAmount || 0),
           attendanceType: r.attendanceType || `${r.customWorkUnits || r.units || 1.0} Units`,
           dbId: r.id,
@@ -1865,6 +1869,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     });
   };
 
+  // Toggle individual worker custom durations panel per category
+  const toggleExpandWorkerCategory = (categoryId) => {
+    setExpandedWorkerCategories(prev => ({
+      ...prev,
+      [categoryId]: !prev[categoryId]
+    }));
+  };
+
   // Count-based worker attendance handlers with custom work units & daily wage
   const handleCountChange = async (categoryId, customUnitsVal, increment) => {
     if (isLabourSubmitted) {
@@ -1898,7 +1910,34 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           setAttendanceRows(prev => prev.filter(r => r.categoryId !== categoryId));
         }
       } else {
-        const calculatedAmount = newCount * units * dailyWage;
+        const registeredMembers = cat?.members ? (Array.isArray(cat.members) ? cat.members : Object.values(cat.members)) : [];
+        let updatedWorkerEntries = [];
+        if (record && Array.isArray(record.workerEntries) && record.workerEntries.length > 0) {
+          if (newCount < record.workerEntries.length) {
+            updatedWorkerEntries = record.workerEntries.slice(0, newCount);
+          } else if (newCount > record.workerEntries.length) {
+            updatedWorkerEntries = [...record.workerEntries];
+            for (let i = record.workerEntries.length; i < newCount; i++) {
+              const memberObj = registeredMembers[i];
+              updatedWorkerEntries.push({
+                workerId: memberObj?.memberId || memberObj?.id || `worker_${i + 1}`,
+                workerName: memberObj?.name || `${cat?.name || "Worker"} ${i + 1}`,
+                customWorkUnits: units,
+                units: units,
+                dailyWage,
+                wage: dailyWage,
+                calculatedAmount: units * dailyWage
+              });
+            }
+          } else {
+            updatedWorkerEntries = record.workerEntries;
+          }
+        }
+
+        const calculatedAmount = updatedWorkerEntries.length > 0
+          ? updatedWorkerEntries.reduce((sum, w) => sum + (Number(w.calculatedAmount) || (w.units * w.wage)), 0)
+          : (newCount * units * dailyWage);
+
         const dbId = await saveLabourAttendanceRecord(record?.dbId || null, {
           siteId: activeSiteId,
           teamId: selectedLabourTeamId,
@@ -1911,8 +1950,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           units: units,
           dailyWage,
           wage: dailyWage,
+          workerEntries: updatedWorkerEntries,
           calculatedAmount,
-          attendanceType: `${units} Units`,
+          attendanceType: updatedWorkerEntries.length > 0 ? `${newCount} Workers (Custom Units)` : `${units} Units`,
           createdBy: currentEngineerId
         });
 
@@ -1920,9 +1960,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           setAttendanceRows(prev => {
             const exists = prev.some(r => r.categoryId === categoryId);
             if (exists) {
-              return prev.map(r => r.categoryId === categoryId ? { ...r, workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true } : r);
+              return prev.map(r => r.categoryId === categoryId ? { ...r, workerCount: newCount, customWorkUnits: units, units, dailyWage, workerEntries: updatedWorkerEntries, calculatedAmount, dbId, isSaved: true } : r);
             } else {
-              return [...prev, { id: dbId, categoryId, categoryName: cat?.name || "", workerCount: newCount, customWorkUnits: units, units, dailyWage, calculatedAmount, dbId, isSaved: true }];
+              return [...prev, { id: dbId, categoryId, categoryName: cat?.name || "", workerCount: newCount, customWorkUnits: units, units, dailyWage, workerEntries: updatedWorkerEntries, calculatedAmount, dbId, isSaved: true }];
             }
           });
         }
@@ -1951,7 +1991,26 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
       const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
       const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
-      const calculatedAmount = record.workerCount * units * dailyWage;
+
+      let updatedWorkerEntries = [];
+      if (Array.isArray(record.workerEntries) && record.workerEntries.length > 0) {
+        updatedWorkerEntries = record.workerEntries.map(w => {
+          const wUnits = w.customWorkUnits !== undefined ? Number(w.customWorkUnits) : units;
+          const wWage = w.dailyWage !== undefined ? Number(w.dailyWage) : dailyWage;
+          return {
+            ...w,
+            customWorkUnits: wUnits,
+            units: wUnits,
+            dailyWage: wWage,
+            wage: wWage,
+            calculatedAmount: wUnits * wWage
+          };
+        });
+      }
+
+      const calculatedAmount = updatedWorkerEntries.length > 0
+        ? updatedWorkerEntries.reduce((sum, w) => sum + (Number(w.calculatedAmount) || (w.units * w.wage)), 0)
+        : (record.workerCount * units * dailyWage);
 
       try {
         const dbId = await saveLabourAttendanceRecord(record.dbId, {
@@ -1966,15 +2025,98 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           units: units,
           dailyWage,
           wage: dailyWage,
+          workerEntries: updatedWorkerEntries,
           calculatedAmount,
-          attendanceType: `${units} Units`,
+          attendanceType: updatedWorkerEntries.length > 0 ? `${record.workerCount} Workers (Custom Units)` : `${units} Units`,
           createdBy: currentEngineerId
         });
 
-        setAttendanceRows(prev => prev.map(r => r.categoryId === categoryId ? { ...r, customWorkUnits: units, units, calculatedAmount, dbId, isSaved: true } : r));
+        setAttendanceRows(prev => prev.map(r => r.categoryId === categoryId ? {
+          ...r,
+          customWorkUnits: units,
+          units,
+          workerEntries: updatedWorkerEntries,
+          calculatedAmount,
+          dbId,
+          isSaved: true
+        } : r));
       } catch (err) {
         console.error("Failed to update work units:", err);
       }
+    }
+  };
+
+  // Configure custom duration for a specific worker inside a category
+  const handleWorkerCustomDurationChange = async (categoryId, workerIndex, newUnitsStr, customWorkerName = null) => {
+    if (isLabourSubmitted) {
+      showToast("Cannot modify duration: This team's attendance is submitted and locked.", "error");
+      return;
+    }
+    const newUnit = Math.max(0.01, Number(newUnitsStr) || 1.0);
+    const record = attendanceRows.find(r => r.categoryId === categoryId);
+    if (!record || record.workerCount <= 0) return;
+
+    const selectedTeamObj = labourTeams.find(t => t.id === selectedLabourTeamId);
+    const teamName = selectedTeamObj?.name || selectedTeamObj?.teamName || "Labour Team";
+    const cat = categories.find(c => c.id === categoryId) || (selectedTeamObj?.categories ? (Array.isArray(selectedTeamObj.categories) ? selectedTeamObj.categories.find(c => c.id === categoryId) : (selectedTeamObj.categories[categoryId] || Object.values(selectedTeamObj.categories).find(c => c.id === categoryId))) : null);
+    const dailyWage = Number(cat?.wage || cat?.salaryAmount || cat?.baseWage || 0);
+    const registeredMembers = cat?.members ? (Array.isArray(cat.members) ? cat.members : Object.values(cat.members)) : [];
+    const defaultUnits = Number(record.customWorkUnits !== undefined ? record.customWorkUnits : (record.units !== undefined ? record.units : 1.0)) || 1.0;
+
+    const currentWorkerEntries = [];
+    for (let i = 0; i < record.workerCount; i++) {
+      const existingEntry = (record.workerEntries || [])[i];
+      const memberObj = registeredMembers[i];
+      const wId = existingEntry?.workerId || memberObj?.memberId || memberObj?.id || `worker_${i + 1}`;
+      const wName = (i === workerIndex && customWorkerName) ? customWorkerName : (existingEntry?.workerName || memberObj?.name || `${cat?.name || "Worker"} ${i + 1}`);
+      const wUnits = (i === workerIndex) ? newUnit : (existingEntry?.customWorkUnits !== undefined ? Number(existingEntry.customWorkUnits) : defaultUnits);
+      const wWage = existingEntry?.dailyWage !== undefined ? Number(existingEntry.dailyWage) : dailyWage;
+      const wAmount = wUnits * wWage;
+
+      currentWorkerEntries.push({
+        workerId: wId,
+        workerName: wName,
+        customWorkUnits: wUnits,
+        units: wUnits,
+        dailyWage: wWage,
+        wage: wWage,
+        calculatedAmount: wAmount
+      });
+    }
+
+    const calculatedAmount = currentWorkerEntries.reduce((sum, w) => sum + w.calculatedAmount, 0);
+
+    try {
+      const dbId = await saveLabourAttendanceRecord(record.dbId, {
+        siteId: activeSiteId,
+        teamId: selectedLabourTeamId,
+        teamName,
+        categoryId,
+        categoryName: cat?.name || "",
+        attendanceDate: labourDate,
+        workerCount: record.workerCount,
+        customWorkUnits: defaultUnits,
+        units: defaultUnits,
+        dailyWage,
+        wage: dailyWage,
+        workerEntries: currentWorkerEntries,
+        calculatedAmount,
+        attendanceType: `${record.workerCount} Workers (Custom Units)`,
+        createdBy: currentEngineerId
+      });
+
+      if (isMountedRef.current) {
+        setAttendanceRows(prev => prev.map(r => r.categoryId === categoryId ? {
+          ...r,
+          workerEntries: currentWorkerEntries,
+          calculatedAmount,
+          dbId,
+          isSaved: true
+        } : r));
+      }
+    } catch (err) {
+      console.error("Failed to update worker duration:", err);
+      showToast("Failed to update worker duration: " + err.message, "error");
     }
   };
 
@@ -8453,8 +8595,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   const currentUnitsStr = workUnitsSelections[cat.id] !== undefined ? workUnitsSelections[cat.id] : (record?.customWorkUnits || record?.units || "1.0");
                   const currentUnits = Math.max(0.01, Number(currentUnitsStr) || 1.0);
                   const dailyWage = Number(cat.wage || cat.salaryAmount || cat.baseWage || 0);
-                  const rowAmount = count * currentUnits * dailyWage;
+                  const rowAmount = (record?.calculatedAmount !== undefined && record.calculatedAmount !== null) ? Number(record.calculatedAmount) : (count * currentUnits * dailyWage);
                   const isSaving = savingRecordKeys[`${cat.id}`] || false;
+                  const hasCustomEntries = record?.workerEntries && record.workerEntries.length > 0;
+                  const isExpanded = expandedWorkerCategories[cat.id] !== undefined ? expandedWorkerCategories[cat.id] : hasCustomEntries;
                   
                   return (
                     <div key={cat.id} style={{
@@ -8580,7 +8724,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         }}>
                           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                             <span style={{ fontSize: "12px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
-                              Work Units
+                              Default Duration
                             </span>
                             <input
                               type="number"
@@ -8608,14 +8752,177 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
                           <div style={{ textAlign: "right" }}>
                             <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block" }}>
-                              Calculated Amount
+                              Total Amount
                             </span>
-                            <span style={{ fontSize: "15px", fontWeight: "850", color: rowAmount > 0 ? "#ea580c" : "#0f172a" }}>
+                            <span style={{ fontSize: "16px", fontWeight: "850", color: rowAmount > 0 ? "#ea580c" : "#0f172a" }}>
                               ₹{rowAmount.toLocaleString("en-IN")}
                             </span>
                           </div>
                         </div>
                       </div>
+
+                      {/* Individual Worker / Custom Durations Expandable Section */}
+                      {count > 0 && (
+                        <div style={{
+                          borderTop: "1px dashed #e2e8f0",
+                          paddingTop: "10px",
+                          display: "flex",
+                          flexDirection: "column",
+                          gap: "10px"
+                        }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                            <button
+                              type="button"
+                              onClick={() => toggleExpandWorkerCategory(cat.id)}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "6px",
+                                background: "none",
+                                border: "none",
+                                color: hasCustomEntries ? "#c2410c" : "#64748b",
+                                fontSize: "12.5px",
+                                fontWeight: "750",
+                                cursor: "pointer",
+                                padding: "2px 0"
+                              }}
+                            >
+                              <Users size={14} />
+                              <span>Individual Worker / Custom Durations</span>
+                              {hasCustomEntries && (
+                                <span style={{ marginLeft: "4px", fontSize: "10.5px", backgroundColor: "#ffedd5", color: "#c2410c", padding: "1px 6px", borderRadius: "6px", fontWeight: "800" }}>
+                                  {record.workerEntries.length} Configured
+                                </span>
+                              )}
+                              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                            </button>
+
+                            <span style={{ fontSize: "11px", color: "#64748b" }}>
+                              {count} {count === 1 ? "worker" : "workers"}
+                            </span>
+                          </div>
+
+                          {isExpanded && (
+                            <div style={{
+                              backgroundColor: "#f8fafc",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "10px",
+                              padding: "12px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "8px"
+                            }}>
+                              <div style={{
+                                display: "grid",
+                                gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
+                                gap: "8px",
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                color: "#64748b",
+                                textTransform: "uppercase",
+                                borderBottom: "1px solid #e2e8f0",
+                                paddingBottom: "6px"
+                              }}>
+                                <span>Worker</span>
+                                <span style={{ textAlign: "center" }}>Duration</span>
+                                <span style={{ textAlign: "right" }}>Rate</span>
+                                <span style={{ textAlign: "right" }}>Amount</span>
+                              </div>
+
+                              {Array.from({ length: count }).map((_, idx) => {
+                                const registeredMembers = cat.members ? (Array.isArray(cat.members) ? cat.members : Object.values(cat.members)) : [];
+                                const memberObj = registeredMembers[idx];
+                                const existingEntry = (record?.workerEntries || [])[idx];
+                                const workerName = existingEntry?.workerName || memberObj?.name || `${cat.name} ${idx + 1}`;
+                                const workerUnits = existingEntry?.customWorkUnits !== undefined ? Number(existingEntry.customWorkUnits) : currentUnits;
+                                const workerWage = existingEntry?.dailyWage !== undefined ? Number(existingEntry.dailyWage) : dailyWage;
+                                const workerAmount = workerUnits * workerWage;
+
+                                return (
+                                  <div key={idx} style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
+                                    gap: "8px",
+                                    alignItems: "center",
+                                    padding: "5px 0",
+                                    borderBottom: idx < count - 1 ? "1px solid #f1f5f9" : "none"
+                                  }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                      <div style={{
+                                        width: "20px",
+                                        height: "20px",
+                                        borderRadius: "50%",
+                                        backgroundColor: "#e2e8f0",
+                                        color: "#475569",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                        fontSize: "10px",
+                                        fontWeight: "800",
+                                        flexShrink: 0
+                                      }}>
+                                        {idx + 1}
+                                      </div>
+                                      <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={workerName}>
+                                        {workerName}
+                                      </span>
+                                    </div>
+
+                                    <div style={{ display: "flex", justifyContent: "center" }}>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0.01"
+                                        value={workerUnits}
+                                        onChange={(e) => handleWorkerCustomDurationChange(cat.id, idx, e.target.value, workerName)}
+                                        disabled={isLabourSubmitted}
+                                        style={{
+                                          width: "60px",
+                                          height: "30px",
+                                          boxSizing: "border-box",
+                                          padding: "4px 6px",
+                                          borderRadius: "6px",
+                                          border: "1px solid #cbd5e1",
+                                          fontSize: "12px",
+                                          fontWeight: "800",
+                                          textAlign: "center",
+                                          backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
+                                          outline: "none"
+                                        }}
+                                      />
+                                    </div>
+
+                                    <div style={{ textAlign: "right", fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
+                                      ₹{workerWage.toLocaleString("en-IN")}
+                                    </div>
+
+                                    <div style={{ textAlign: "right", fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
+                                      ₹{workerAmount.toLocaleString("en-IN")}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+
+                              <div style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "center",
+                                borderTop: "1px solid #e2e8f0",
+                                paddingTop: "8px",
+                                marginTop: "4px",
+                                fontSize: "12px",
+                                fontWeight: "800",
+                                color: "#0f172a"
+                              }}>
+                                <span>Category Combined Total</span>
+                                <span style={{ color: "#ea580c", fontSize: "14px" }}>
+                                  ₹{rowAmount.toLocaleString("en-IN")}
+                                </span>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
 
                     </div>
                   );

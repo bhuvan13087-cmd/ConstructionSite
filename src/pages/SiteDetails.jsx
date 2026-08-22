@@ -2363,6 +2363,7 @@ export default function SiteDetails({ siteId, onBack }) {
                         ) || 1.0;
                         const baseRate = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
                         const effectiveRate = baseRate * customUnits;
+                        const hasCustomWorkers = Array.isArray(row.workerEntries) && row.workerEntries.length > 0;
                         const earnedPayment = Number(
                           row.calculatedAmount !== undefined 
                             ? row.calculatedAmount 
@@ -2373,13 +2374,17 @@ export default function SiteDetails({ siteId, onBack }) {
 
                         const workType = row.categoryName || row.name || (row.categoryId ? String(row.categoryId).replace(/^cat_/, '') : (isMember ? "Labour" : "General Headcount"));
                         const teamName = row.teamName || (row.teamId ? "Labour Team" : "");
-                        const unitLabel = customUnits !== 1.0 
-                          ? `${customUnits} days` 
-                          : (row.attendanceType ? `${customUnits} unit` : "1 day");
+                        const unitLabel = hasCustomWorkers 
+                          ? "Custom Durations"
+                          : (customUnits !== 1.0 
+                              ? `${customUnits} days` 
+                              : (row.attendanceType ? `${customUnits} unit` : "1 day"));
                         const rateLabel = customUnits !== 1.0 
                           ? `₹${baseRate.toLocaleString("en-IN")}/day` 
                           : (baseRate > 0 ? `₹${baseRate.toLocaleString("en-IN")}` : "--");
-                        const calculationText = `${count} × ₹${effectiveRate.toLocaleString("en-IN")} = ₹${earnedPayment.toLocaleString("en-IN")}`;
+                        const calculationText = hasCustomWorkers
+                          ? `${count} workers with custom durations = ₹${earnedPayment.toLocaleString("en-IN")}`
+                          : `${count} × ₹${effectiveRate.toLocaleString("en-IN")} = ₹${earnedPayment.toLocaleString("en-IN")}`;
 
                         return (
                           <tr 
@@ -2397,6 +2402,11 @@ export default function SiteDetails({ siteId, onBack }) {
                                   {(row.isAdminEntry || row.createdVia === "admin_assisted_entry") && (
                                     <span style={{ fontSize: "10px", fontWeight: "800", color: "#1d4ed8", backgroundColor: "#eff6ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #bfdbfe" }} title={`Admin Override Entry by ${row.createdByName || "Admin"}`}>
                                       🛡️ Admin Entry
+                                    </span>
+                                  )}
+                                  {hasCustomWorkers && (
+                                    <span style={{ fontSize: "10px", fontWeight: "800", color: "#c2410c", backgroundColor: "#ffedd5", padding: "1px 6px", borderRadius: "4px" }}>
+                                      {row.workerEntries.length} Custom Workers
                                     </span>
                                   )}
                                 </div>
@@ -2427,7 +2437,7 @@ export default function SiteDetails({ siteId, onBack }) {
 
                             {/* Effective Rate */}
                             <td style={{ textAlign: "right", padding: "12px 16px", fontFamily: "monospace", fontSize: "13.5px", fontWeight: "700", color: "#0f172a" }}>
-                              ₹{effectiveRate.toLocaleString("en-IN")}
+                              {hasCustomWorkers ? "--" : `₹${effectiveRate.toLocaleString("en-IN")}`}
                             </td>
 
                             {/* Calculation */}
@@ -2528,6 +2538,7 @@ export default function SiteDetails({ siteId, onBack }) {
               ) || 1.0;
               const baseRate = Number(rec.dailyWage !== undefined ? rec.dailyWage : (rec.wage || rec.baseWage || 0));
               const effectiveRate = baseRate * customUnits;
+              const hasCustomWorkers = Array.isArray(rec.workerEntries) && rec.workerEntries.length > 0;
               const earnedPayment = Number(
                 rec.calculatedAmount !== undefined 
                   ? rec.calculatedAmount 
@@ -2568,17 +2579,17 @@ export default function SiteDetails({ siteId, onBack }) {
                       </div>
                       <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Workers & Duration</span>
-                        <strong className="font-mono">{count} worker(s) × {customUnits} day(s)</strong>
+                        <strong className="font-mono">{count} worker(s) {hasCustomWorkers ? "(Custom Durations)" : `× ${customUnits} day(s)`}</strong>
                       </div>
                       <div style={{ backgroundColor: "#f8fafc", padding: "10px 12px", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
                         <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Effective Rate</span>
-                        <strong className="font-mono">₹{effectiveRate.toLocaleString("en-IN")} / worker</strong>
+                        <strong className="font-mono">{hasCustomWorkers ? "Per Worker" : `₹${effectiveRate.toLocaleString("en-IN")} / worker`}</strong>
                       </div>
                       <div style={{ gridColumn: "1 / -1", backgroundColor: "#f0fdf4", padding: "12px 14px", borderRadius: "8px", border: "1px solid #bbf7d0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                         <div>
                           <span style={{ fontSize: "11px", color: "#16a34a", display: "block", fontWeight: "700", textTransform: "uppercase" }}>Calculation</span>
                           <span style={{ fontSize: "13px", fontWeight: "800", color: "#0f172a", fontFamily: "monospace" }}>
-                            ₹{effectiveRate.toLocaleString("en-IN")} × {count} workers = ₹{earnedPayment.toLocaleString("en-IN")}
+                            {hasCustomWorkers ? `${count} workers customized` : `₹${effectiveRate.toLocaleString("en-IN")} × ${count} workers`} = ₹{earnedPayment.toLocaleString("en-IN")}
                           </span>
                         </div>
                         <div style={{ textAlign: "right" }}>
@@ -2587,6 +2598,47 @@ export default function SiteDetails({ siteId, onBack }) {
                         </div>
                       </div>
                     </div>
+
+                    {/* Individual Worker Details Table if workerEntries exist */}
+                    {hasCustomWorkers && (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                        <span style={{ fontSize: "12px", fontWeight: "750", color: "#334155" }}>
+                          Individual Worker Durations Breakdown
+                        </span>
+                        <div style={{
+                          backgroundColor: "#f8fafc",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: "8px",
+                          overflow: "hidden"
+                        }}>
+                          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                            <thead>
+                              <tr style={{ backgroundColor: "#f1f5f9", borderBottom: "1px solid #e2e8f0" }}>
+                                <th style={{ textAlign: "left", padding: "6px 10px", color: "#475569" }}>Worker</th>
+                                <th style={{ textAlign: "center", padding: "6px 10px", color: "#475569" }}>Duration</th>
+                                <th style={{ textAlign: "right", padding: "6px 10px", color: "#475569" }}>Wage</th>
+                                <th style={{ textAlign: "right", padding: "6px 10px", color: "#475569" }}>Amount</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rec.workerEntries.map((w, wIdx) => {
+                                const wU = Number(w.customWorkUnits !== undefined ? w.customWorkUnits : (w.units || customUnits));
+                                const wR = Number(w.dailyWage !== undefined ? w.dailyWage : (w.wage || baseRate));
+                                const wA = Number(w.calculatedAmount !== undefined ? w.calculatedAmount : (wU * wR));
+                                return (
+                                  <tr key={wIdx} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                                    <td style={{ padding: "6px 10px", fontWeight: "600", color: "#0f172a" }}>{w.workerName || `Worker ${wIdx + 1}`}</td>
+                                    <td style={{ textAlign: "center", padding: "6px 10px", fontFamily: "monospace" }}>{wU} day(s)</td>
+                                    <td style={{ textAlign: "right", padding: "6px 10px", fontFamily: "monospace" }}>₹{wR.toLocaleString("en-IN")}</td>
+                                    <td style={{ textAlign: "right", padding: "6px 10px", fontWeight: "700", color: "#16a34a", fontFamily: "monospace" }}>₹{wA.toLocaleString("en-IN")}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    )}
 
                     {rec.markedBy && (
                       <div style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>

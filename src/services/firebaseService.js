@@ -1043,8 +1043,26 @@ export function isEngineerAttendanceRecord(data, docId = "") {
   }
 
   // 3. Must have a date and an engineer/user identifier
-  const hasDate = Boolean(data.date || data.attendanceDate);
-  const hasUser = Boolean(data.engineerId || data.userId);
+  const hasDate = Boolean(
+    data.date || 
+    data.attendanceDate || 
+    data.dateStr || 
+    (data.timestamp?.seconds ? new Date(data.timestamp.seconds * 1000).toISOString().split("T")[0] : null) ||
+    (data.checkInTime?.seconds ? new Date(data.checkInTime.seconds * 1000).toISOString().split("T")[0] : null)
+  );
+  
+  const hasUser = Boolean(
+    data.engineerId || 
+    data.userId || 
+    data.uid || 
+    data.user_id || 
+    data.engineer_id || 
+    data.engineerEmail || 
+    data.email || 
+    data.engineerName ||
+    idStr.startsWith("att_")
+  );
+
   if (!hasDate || !hasUser) return false;
 
   return true;
@@ -1109,8 +1127,14 @@ export function deduplicateDailyAttendance(records = []) {
   const groups = new Map();
 
   for (const rec of validOnly) {
-    const engId = String(rec.engineerId || rec.userId || "").trim();
-    const dateStr = String(rec.date || rec.attendanceDate || "").trim();
+    const engId = String(rec.engineerId || rec.userId || rec.uid || rec.user_id || rec.engineer_id || "").trim();
+    const dateStr = String(
+      rec.date || 
+      rec.attendanceDate || 
+      rec.dateStr || 
+      (rec.timestamp?.seconds ? new Date(rec.timestamp.seconds * 1000).toISOString().split("T")[0] : "") ||
+      (rec.checkInTime?.seconds ? new Date(rec.checkInTime.seconds * 1000).toISOString().split("T")[0] : "")
+    ).trim();
     const siteId = String(rec.siteId || "").trim();
     if (!engId || !dateStr) continue;
 
@@ -1123,11 +1147,12 @@ export function deduplicateDailyAttendance(records = []) {
     groups.get(key).push(rec);
   }
 
-  // 3. For each group, pick the highest scoring record
+  // 3. For each group, pick the highest scoring record and normalize canonical fields
   const result = [];
   for (const groupList of groups.values()) {
+    let chosen;
     if (groupList.length === 1) {
-      result.push(groupList[0]);
+      chosen = groupList[0];
     } else {
       // Sort descending by completeness score, then by timestamp
       groupList.sort((a, b) => {
@@ -1139,8 +1164,48 @@ export function deduplicateDailyAttendance(records = []) {
         const timeB = b.checkInTime?.seconds || b.timestamp?.seconds || 0;
         return timeA - timeB; // prefer original / earlier checkin if equal score
       });
-      result.push(groupList[0]);
+      chosen = groupList[0];
     }
+
+    const normDate = String(
+      chosen.date || 
+      chosen.attendanceDate || 
+      chosen.dateStr || 
+      (chosen.timestamp?.seconds ? new Date(chosen.timestamp.seconds * 1000).toISOString().split("T")[0] : "") ||
+      (chosen.checkInTime?.seconds ? new Date(chosen.checkInTime.seconds * 1000).toISOString().split("T")[0] : "")
+    ).trim();
+
+    const checkInFormatted = chosen.time && chosen.time !== "--"
+      ? chosen.time
+      : (chosen.checkInTime?.seconds 
+          ? new Date(chosen.checkInTime.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+          : (chosen.timestamp?.seconds 
+              ? new Date(chosen.timestamp.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+              : "--"));
+
+    const checkOutFormatted = chosen.checkOutTime?.seconds 
+      ? new Date(chosen.checkOutTime.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+      : (chosen.checkOutTime && typeof chosen.checkOutTime === "string" ? chosen.checkOutTime : null);
+
+    const isCheckedOut = chosen.status === "checked_out" || Boolean(chosen.checkOutTime);
+    const isVerified = chosen.verificationStatus === "verified" || chosen.verificationStatus === "success" || chosen.status === "present" || chosen.status === "checked_out";
+
+    result.push({
+      ...chosen,
+      date: normDate,
+      attendanceDate: normDate,
+      engineerId: chosen.engineerId || chosen.userId || chosen.uid || "",
+      userId: chosen.userId || chosen.engineerId || chosen.uid || "",
+      siteId: chosen.siteId || "",
+      time: checkInFormatted,
+      checkInTimeFormatted: checkInFormatted,
+      checkOutTimeFormatted: checkOutFormatted,
+      isCheckedOut,
+      isVerified,
+      addressDisplay: chosen.address && chosen.address !== "GPS Captured" 
+        ? chosen.address 
+        : (chosen.latitude && chosen.longitude ? `${Number(chosen.latitude).toFixed(5)}, ${Number(chosen.longitude).toFixed(5)}` : "GPS Captured")
+    });
   }
 
   // 4. Sort results descending by date, then by checkInTime
@@ -2655,27 +2720,40 @@ export async function getLabourDailyCountsHistory(siteId) {
               ? data.wage 
               : (catWage !== undefined ? catWage : 500))
       ) || 0;
-      const calculatedAmount = Number(
-        data.calculatedAmount !== undefined 
-          ? data.calculatedAmount 
-          : (data.totalAmount !== undefined 
-              ? data.totalAmount 
-              : (workerCount * customWorkUnits * dailyWage))
-      ) || 0;
+
+      const rawWorkerEntries = Array.isArray(data.workerEntries) ? data.workerEntries : [];
+      let calculatedAmount = 0;
+      if (data.calculatedAmount !== undefined) {
+        calculatedAmount = Number(data.calculatedAmount);
+      } else if (data.totalAmount !== undefined) {
+        calculatedAmount = Number(data.totalAmount);
+      } else if (rawWorkerEntries.length > 0) {
+        let customSum = 0;
+        rawWorkerEntries.forEach(w => {
+          customSum += Number(w.calculatedAmount) || (Number(w.units || w.customWorkUnits || 1) * Number(w.dailyWage || w.wage || dailyWage));
+        });
+        const remainingCount = Math.max(0, workerCount - rawWorkerEntries.length);
+        calculatedAmount = customSum + (remainingCount * customWorkUnits * dailyWage);
+      } else {
+        calculatedAmount = workerCount * customWorkUnits * dailyWage;
+      }
       const totalAmount = Number(data.totalAmount !== undefined ? data.totalAmount : calculatedAmount);
 
       const catName = data.categoryName || teamCatNameMap[`${data.teamId}_${data.categoryId}`] || "Workers";
       const tName = data.teamName || teamNameMap[data.teamId] || "Team";
+      const displayType = rawWorkerEntries.length > 0 ? "Custom Durations" : (data.attendanceType || `${customWorkUnits} Units`);
+
       newList.push({
         id: d.id,
         ...data,
         date: data.attendanceDate || data.date,
         attendanceDate: data.attendanceDate || data.date,
-        memberId: `${data.categoryId}_${data.attendanceType || `${customWorkUnits} Units`}`,
-        memberName: `${workerCount} x ${catName} (${data.attendanceType || `${customWorkUnits} Units`})`,
+        memberId: `${data.categoryId}_${displayType}`,
+        memberName: `${workerCount} x ${catName} (${displayType})`,
         workerCount,
         customWorkUnits,
         units: customWorkUnits,
+        workerEntries: rawWorkerEntries,
         wage: dailyWage,
         dailyWage,
         calculatedAmount,
@@ -2723,21 +2801,17 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
   const currentMonthStr = currentMonth < 10 ? `0${currentMonth}` : `${currentMonth}`;
   const yearMonthPrefix = `${currentYear}-${currentMonthStr}`; // "YYYY-MM"
   
-  const cleanEngineerId = String(engineerId).trim();
-  const attendanceColl = collection(db, "attendance");
+  const cleanEngineerId = (typeof engineerId === "object" ? String(engineerId.id || engineerId.uid || "").trim() : String(engineerId).trim());
   const leavesColl = collection(db, "leaves");
 
-  const [snap1, snap2, leavesSnap] = await Promise.all([
-    getDocs(query(attendanceColl, where("engineerId", "==", cleanEngineerId))).catch(err => {
-      console.warn("Attendance stats fetch error:", err);
-      return { docs: [] };
-    }),
-    getDocs(query(attendanceColl, where("userId", "==", cleanEngineerId))).catch(err => {
-      console.warn("Attendance stats fetch error (userId):", err);
-      return { docs: [] };
-    }),
+  const [validRecords, leavesSnap1, leavesSnap2] = await Promise.all([
+    getEngineerAttendanceHistory(cleanEngineerId),
     getDocs(query(leavesColl, where("engineerId", "==", cleanEngineerId))).catch(err => {
       console.warn("Leaves stats fetch error:", err);
+      return null;
+    }),
+    getDocs(query(leavesColl, where("userId", "==", cleanEngineerId))).catch(err => {
+      console.warn("Leaves stats fetch error (userId):", err);
       return null;
     })
   ]);
@@ -2746,16 +2820,6 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
   let leavesThisMonth = 0;
   let leavesThisYear = 0;
 
-  const rawDocs = [];
-  const seenIds = new Set();
-  [...(snap1.docs || []), ...(snap2.docs || [])].forEach(docSnap => {
-    if (!seenIds.has(docSnap.id)) {
-      seenIds.add(docSnap.id);
-      rawDocs.push({ id: docSnap.id, ...docSnap.data() });
-    }
-  });
-
-  const validRecords = deduplicateDailyAttendance(rawDocs);
   const distinctDatesWorked = new Set();
 
   validRecords.forEach(data => {
@@ -2776,23 +2840,24 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
     }
   });
 
-  if (leavesSnap) {
-    leavesSnap.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.date) {
-        // Only count approved leaves (or undefined for backward compatibility)
-        const isApproved = data.status === "approved" || data.status === undefined;
-        if (isApproved) {
-          if (data.date.startsWith(`${currentYear}-`)) {
-            leavesThisYear++;
-          }
-          if (data.date.startsWith(yearMonthPrefix)) {
-            leavesThisMonth++;
-          }
+  const seenLeaveIds = new Set();
+  [...(leavesSnap1?.docs || []), ...(leavesSnap2?.docs || [])].forEach(docSnap => {
+    if (seenLeaveIds.has(docSnap.id)) return;
+    seenLeaveIds.add(docSnap.id);
+    const data = docSnap.data();
+    if (data.date) {
+      // Only count approved leaves (or undefined for backward compatibility)
+      const isApproved = data.status === "approved" || data.status === undefined;
+      if (isApproved) {
+        if (data.date.startsWith(`${currentYear}-`)) {
+          leavesThisYear++;
+        }
+        if (data.date.startsWith(yearMonthPrefix)) {
+          leavesThisMonth++;
         }
       }
-    });
-  }
+    }
+  });
 
   const remainingHolidays = Math.max(0, Number(holidayAllowance) - leavesThisYear);
   
@@ -3072,28 +3137,96 @@ export async function deleteSitePhoto(photoId) {
   await batch.commit();
 }
 
-// Get all attendance records for an engineer across all sites (deduplicated per day)
+// Get all attendance records for an engineer across all sites (deduplicated per day & site)
 export async function getEngineerAttendanceHistory(engineerId) {
   if (!engineerId) return [];
-  const cleanEngineerId = String(engineerId).trim();
+  const cleanEngineerId = (typeof engineerId === "object" ? String(engineerId.id || engineerId.uid || "").trim() : String(engineerId).trim());
+  if (!cleanEngineerId) return [];
+
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  
-  const [snap1, snap2] = await Promise.all([
-    getDocs(query(attendanceColl, where("engineerId", "==", cleanEngineerId))).catch(() => ({ docs: [] })),
-    getDocs(query(attendanceColl, where("userId", "==", cleanEngineerId))).catch(() => ({ docs: [] }))
+
+  // Collect all known alias identifiers for this engineer
+  const aliasSet = new Set([cleanEngineerId.toLowerCase()]);
+  if (typeof engineerId === "object") {
+    if (engineerId.uid) aliasSet.add(String(engineerId.uid).trim().toLowerCase());
+    if (engineerId.id) aliasSet.add(String(engineerId.id).trim().toLowerCase());
+    if (engineerId.userId) aliasSet.add(String(engineerId.userId).trim().toLowerCase());
+    if (engineerId.email) aliasSet.add(String(engineerId.email).trim().toLowerCase());
+  }
+
+  // Lookup engineer profile from siteEngineers / users to resolve all aliases
+  try {
+    const [engSnap, userSnap] = await Promise.all([
+      getDoc(doc(db, "siteEngineers", cleanEngineerId)).catch(() => null),
+      getDoc(doc(db, "users", cleanEngineerId)).catch(() => null)
+    ]);
+    if (engSnap && engSnap.exists()) {
+      const d = engSnap.data();
+      if (d.uid) aliasSet.add(String(d.uid).trim().toLowerCase());
+      if (d.email) aliasSet.add(String(d.email).trim().toLowerCase());
+      if (d.userId) aliasSet.add(String(d.userId).trim().toLowerCase());
+    }
+    if (userSnap && userSnap.exists()) {
+      const d = userSnap.data();
+      if (d.uid) aliasSet.add(String(d.uid).trim().toLowerCase());
+      if (d.email) aliasSet.add(String(d.email).trim().toLowerCase());
+      if (d.userId) aliasSet.add(String(d.userId).trim().toLowerCase());
+    }
+  } catch (e) {}
+
+  const aliasList = Array.from(aliasSet).filter(Boolean);
+
+  // Method 1: Parallel targeted queries across all known aliases
+  const queryPromises = [];
+  for (const alias of aliasList) {
+    queryPromises.push(
+      getDocs(query(attendanceColl, where("engineerId", "==", alias))).catch(() => ({ docs: [] })),
+      getDocs(query(attendanceColl, where("userId", "==", alias))).catch(() => ({ docs: [] })),
+      getDocs(query(attendanceColl, where("uid", "==", alias))).catch(() => ({ docs: [] }))
+    );
+  }
+
+  // Method 2: Comprehensive canonical collection query (single source of truth fallback)
+  // Ensures records across all assigned sites with any legacy or casing formats are resolved
+  const [targetedResults, allCollSnap] = await Promise.all([
+    Promise.all(queryPromises),
+    getDocs(attendanceColl).catch(() => ({ docs: [] }))
   ]);
 
-  const records = [];
+  const rawRecords = [];
   const seenIds = new Set();
-  [...(snap1.docs || []), ...(snap2.docs || [])].forEach(docSnap => {
+
+  const addDocSnap = (docSnap) => {
     if (!seenIds.has(docSnap.id)) {
       seenIds.add(docSnap.id);
-      records.push({ id: docSnap.id, ...docSnap.data() });
+      rawRecords.push({ id: docSnap.id, ...docSnap.data() });
+    }
+  };
+
+  targetedResults.forEach(res => {
+    (res.docs || []).forEach(addDocSnap);
+  });
+
+  (allCollSnap.docs || []).forEach(docSnap => {
+    if (seenIds.has(docSnap.id)) return;
+    const data = docSnap.data();
+    if (!isEngineerAttendanceRecord(data, docSnap.id)) return;
+
+    const docEngId = String(data.engineerId || data.userId || data.uid || data.user_id || data.engineer_id || "").trim().toLowerCase();
+    const docEmail = String(data.engineerEmail || data.email || "").trim().toLowerCase();
+    const docIdStr = String(docSnap.id).toLowerCase();
+
+    const matchesAlias = aliasList.some(alias => 
+      alias && (docEngId === alias || docEmail === alias || docIdStr.includes(`_${alias}_`) || docIdStr.includes(`_${alias}`))
+    );
+
+    if (matchesAlias) {
+      addDocSnap(docSnap);
     }
   });
 
-  return deduplicateDailyAttendance(records);
+  return deduplicateDailyAttendance(rawRecords);
 }
 
 // Get all attendance records for a given site (deduplicated per engineer and date)
@@ -5316,7 +5449,35 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
   const workerCount = Number(recordData.workerCount) || 0;
   const customWorkUnits = Number(recordData.customWorkUnits !== undefined ? recordData.customWorkUnits : (recordData.units !== undefined ? recordData.units : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
   const dailyWage = Number(recordData.dailyWage !== undefined ? recordData.dailyWage : (recordData.wage || 0)) || 0;
-  const calculatedAmount = Number(recordData.calculatedAmount) || (workerCount * customWorkUnits * dailyWage);
+
+  const rawWorkerEntries = Array.isArray(recordData.workerEntries) ? recordData.workerEntries : [];
+  const normalizedWorkerEntries = rawWorkerEntries.map((w, idx) => {
+    const wUnits = Math.max(0.01, Number(w.customWorkUnits !== undefined ? w.customWorkUnits : (w.units !== undefined ? w.units : customWorkUnits)));
+    const wWage = Number(w.dailyWage !== undefined ? w.dailyWage : (w.wage !== undefined ? w.wage : dailyWage));
+    const wAmount = Number(w.calculatedAmount !== undefined ? w.calculatedAmount : (wUnits * wWage));
+    return {
+      workerId: w.workerId || `worker_${idx + 1}`,
+      workerName: w.workerName || `Worker ${idx + 1}`,
+      customWorkUnits: wUnits,
+      units: wUnits,
+      dailyWage: wWage,
+      wage: wWage,
+      calculatedAmount: wAmount
+    };
+  });
+
+  let calculatedAmount = 0;
+  if (normalizedWorkerEntries.length > 0) {
+    let customSum = 0;
+    normalizedWorkerEntries.forEach(w => {
+      customSum += Number(w.calculatedAmount) || (w.units * w.wage);
+    });
+    const remainingCount = Math.max(0, workerCount - normalizedWorkerEntries.length);
+    const remainingSum = remainingCount * customWorkUnits * dailyWage;
+    calculatedAmount = customSum + remainingSum;
+  } else {
+    calculatedAmount = Number(recordData.calculatedAmount) || (workerCount * customWorkUnits * dailyWage);
+  }
 
   const payload = {
     id: docId,
@@ -5332,9 +5493,10 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
     units: customWorkUnits,
     dailyWage,
     wage: dailyWage,
+    workerEntries: normalizedWorkerEntries,
     calculatedAmount,
     totalAmount: calculatedAmount,
-    attendanceType: `${customWorkUnits} Units`,
+    attendanceType: normalizedWorkerEntries.length > 0 ? `${customWorkUnits} Units (Custom Workers)` : `${customWorkUnits} Units`,
     createdBy: recordData.createdBy,
     updatedAt: serverTimestamp()
   };
@@ -6267,7 +6429,36 @@ export async function submitAdminAssistedLabourAttendance({
 
     const units = Math.max(0.01, Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1.0)));
     const dailyWage = Number(row.dailyWage || row.wage || 0);
-    const calculatedAmount = Number(row.calculatedAmount) || (workerCount * units * dailyWage);
+
+    const rawWorkerEntries = Array.isArray(row.workerEntries) ? row.workerEntries : [];
+    const normalizedWorkerEntries = rawWorkerEntries.map((w, idx) => {
+      const wUnits = Math.max(0.01, Number(w.customWorkUnits !== undefined ? w.customWorkUnits : (w.units !== undefined ? w.units : units)));
+      const wWage = Number(w.dailyWage !== undefined ? w.dailyWage : (w.wage !== undefined ? w.wage : dailyWage));
+      const wAmount = Number(w.calculatedAmount !== undefined ? w.calculatedAmount : (wUnits * wWage));
+      return {
+        workerId: w.workerId || `worker_${idx + 1}`,
+        workerName: w.workerName || `Worker ${idx + 1}`,
+        customWorkUnits: wUnits,
+        units: wUnits,
+        dailyWage: wWage,
+        wage: wWage,
+        calculatedAmount: wAmount
+      };
+    });
+
+    let calculatedAmount = 0;
+    if (normalizedWorkerEntries.length > 0) {
+      let customSum = 0;
+      normalizedWorkerEntries.forEach(w => {
+        customSum += Number(w.calculatedAmount) || (w.units * w.wage);
+      });
+      const remainingCount = Math.max(0, workerCount - normalizedWorkerEntries.length);
+      const remainingSum = remainingCount * units * dailyWage;
+      calculatedAmount = customSum + remainingSum;
+    } else {
+      calculatedAmount = Number(row.calculatedAmount) || (workerCount * units * dailyWage);
+    }
+
     const safeType = `${units}_Units`.replace(/\s+/g, "_");
     const docId = row.id || `${cleanSiteId}_${cleanTeamId}_${row.categoryId}_${safeType}_${cleanDateStr}`;
     const docRef = doc(db, "labourMemberAttendance", docId);
@@ -6286,9 +6477,10 @@ export async function submitAdminAssistedLabourAttendance({
       units: units,
       dailyWage,
       wage: dailyWage,
+      workerEntries: normalizedWorkerEntries,
       calculatedAmount,
       totalAmount: calculatedAmount,
-      attendanceType: `${units} Units`,
+      attendanceType: normalizedWorkerEntries.length > 0 ? `${units} Units (Custom Workers)` : `${units} Units`,
       
       // Audit information
       assignedEngineerId: cleanAssignedEngId,

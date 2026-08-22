@@ -14,7 +14,9 @@ import {
   Trash2,
   Lock,
   Clock,
-  Info
+  Info,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import { Modal } from "./Modal";
 import Button from "./Button";
@@ -145,18 +147,6 @@ export default function AdminAssistedEntryModal({
     return matched;
   }, [currentSite, engineers]);
 
-  // Auto-select assigned engineer when site changes
-  useEffect(() => {
-    if (siteAssignedEngineers.length > 0) {
-      const exists = siteAssignedEngineers.some(e => e.id === selectedEngineerId);
-      if (!exists) {
-        setSelectedEngineerId(siteAssignedEngineers[0].id);
-      }
-    } else {
-      setSelectedEngineerId("");
-    }
-  }, [siteAssignedEngineers]);
-
   // Selected assigned engineer object
   const assignedEngineer = useMemo(() => {
     return engineers.find(e => e.id === selectedEngineerId) || null;
@@ -190,24 +180,20 @@ export default function AdminAssistedEntryModal({
         units: 1.0,
         dailyWage: wage,
         wage: wage,
+        workerEntries: [],
         calculatedAmount: 0
       };
     });
     setLabourAttendanceRows(rows);
 
-    // Check lock status for this Site + Date + Team
+    // Check lock status
     if (selectedSiteId && selectedDate && selectedLabourTeamId) {
       setCheckingLabourLock(true);
       checkLabourSubmissionStatus(selectedSiteId, selectedDate, selectedLabourTeamId)
         .then(status => {
           setLabourLockStatus(status);
         })
-        .catch(() => {
-          setLabourLockStatus({ submitted: false });
-        })
-        .finally(() => {
-          setCheckingLabourLock(false);
-        });
+        .finally(() => setCheckingLabourLock(false));
     }
   }, [selectedLabourTeamId, selectedSiteId, selectedDate, labourTeams]);
 
@@ -219,10 +205,42 @@ export default function AdminAssistedEntryModal({
       const newCount = Math.max(0, (row.workerCount || 0) + delta);
       const units = Math.max(0.01, Number(row.customWorkUnits || 1.0));
       const wage = Number(row.dailyWage || 0);
+      const team = labourTeams.find(t => t.id === selectedLabourTeamId);
+      const catObj = team?.categories ? (Array.isArray(team.categories) ? team.categories.find(c => c.id === categoryId) : team.categories[categoryId]) : null;
+      const registeredMembers = catObj?.members ? (Array.isArray(catObj.members) ? catObj.members : Object.values(catObj.members)) : [];
+
+      let updatedWorkerEntries = [];
+      if (Array.isArray(row.workerEntries) && row.workerEntries.length > 0) {
+        if (newCount < row.workerEntries.length) {
+          updatedWorkerEntries = row.workerEntries.slice(0, newCount);
+        } else if (newCount > row.workerEntries.length) {
+          updatedWorkerEntries = [...row.workerEntries];
+          for (let i = row.workerEntries.length; i < newCount; i++) {
+            const memberObj = registeredMembers[i];
+            updatedWorkerEntries.push({
+              workerId: memberObj?.memberId || memberObj?.id || `worker_${i + 1}`,
+              workerName: memberObj?.name || `${row.categoryName || "Worker"} ${i + 1}`,
+              customWorkUnits: units,
+              units: units,
+              dailyWage: wage,
+              wage: wage,
+              calculatedAmount: units * wage
+            });
+          }
+        } else {
+          updatedWorkerEntries = row.workerEntries;
+        }
+      }
+
+      const calculatedAmount = updatedWorkerEntries.length > 0
+        ? updatedWorkerEntries.reduce((sum, w) => sum + (Number(w.calculatedAmount) || (w.units * w.wage)), 0)
+        : (newCount * units * wage);
+
       return {
         ...row,
         workerCount: newCount,
-        calculatedAmount: newCount * units * wage
+        workerEntries: updatedWorkerEntries,
+        calculatedAmount
       };
     }));
   };
@@ -235,11 +253,71 @@ export default function AdminAssistedEntryModal({
       if (row.categoryId !== categoryId) return row;
       const count = Number(row.workerCount || 0);
       const wage = Number(row.dailyWage || 0);
+
+      let updatedWorkerEntries = [];
+      if (Array.isArray(row.workerEntries) && row.workerEntries.length > 0) {
+        updatedWorkerEntries = row.workerEntries.map(w => ({
+          ...w,
+          customWorkUnits: w.customWorkUnits !== undefined ? w.customWorkUnits : units,
+          units: w.units !== undefined ? w.units : units,
+          calculatedAmount: (w.customWorkUnits !== undefined ? w.customWorkUnits : units) * (w.dailyWage || wage)
+        }));
+      }
+
+      const calculatedAmount = updatedWorkerEntries.length > 0
+        ? updatedWorkerEntries.reduce((sum, w) => sum + (Number(w.calculatedAmount) || (w.units * w.wage)), 0)
+        : (count * units * wage);
+
       return {
         ...row,
         customWorkUnits: units,
         units: units,
-        calculatedAmount: count * units * wage
+        workerEntries: updatedWorkerEntries,
+        calculatedAmount
+      };
+    }));
+  };
+
+  // Configure custom duration for a specific worker inside admin entry modal
+  const handleAdminWorkerCustomDurationChange = (categoryId, workerIndex, newUnitsStr, customWorkerName = null) => {
+    if (labourLockStatus.submitted) return;
+    const newUnit = Math.max(0.01, Number(newUnitsStr) || 1.0);
+    setLabourAttendanceRows(prev => prev.map(row => {
+      if (row.categoryId !== categoryId) return row;
+      const count = Number(row.workerCount || 0);
+      const defaultUnits = Math.max(0.01, Number(row.customWorkUnits || 1.0));
+      const dailyWage = Number(row.dailyWage || 0);
+      const team = labourTeams.find(t => t.id === selectedLabourTeamId);
+      const catObj = team?.categories ? (Array.isArray(team.categories) ? team.categories.find(c => c.id === categoryId) : team.categories[categoryId]) : null;
+      const registeredMembers = catObj?.members ? (Array.isArray(catObj.members) ? catObj.members : Object.values(catObj.members)) : [];
+
+      const currentWorkerEntries = [];
+      for (let i = 0; i < count; i++) {
+        const existingEntry = (row.workerEntries || [])[i];
+        const memberObj = registeredMembers[i];
+        const wId = existingEntry?.workerId || memberObj?.memberId || memberObj?.id || `worker_${i + 1}`;
+        const wName = (i === workerIndex && customWorkerName) ? customWorkerName : (existingEntry?.workerName || memberObj?.name || `${row.categoryName || "Worker"} ${i + 1}`);
+        const wUnits = (i === workerIndex) ? newUnit : (existingEntry?.customWorkUnits !== undefined ? Number(existingEntry.customWorkUnits) : defaultUnits);
+        const wWage = existingEntry?.dailyWage !== undefined ? Number(existingEntry.dailyWage) : dailyWage;
+        const wAmount = wUnits * wWage;
+
+        currentWorkerEntries.push({
+          workerId: wId,
+          workerName: wName,
+          customWorkUnits: wUnits,
+          units: wUnits,
+          dailyWage: wWage,
+          wage: wWage,
+          calculatedAmount: wAmount
+        });
+      }
+
+      const calculatedAmount = currentWorkerEntries.reduce((sum, w) => sum + w.calculatedAmount, 0);
+
+      return {
+        ...row,
+        workerEntries: currentWorkerEntries,
+        calculatedAmount
       };
     }));
   };
@@ -726,91 +804,207 @@ export default function AdminAssistedEntryModal({
             {/* Category Rows */}
             {selectedLabourTeamId && labourAttendanceRows.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "300px", overflowY: "auto", paddingRight: "4px" }}>
-                {labourAttendanceRows.map(row => (
-                  <div
-                    key={row.categoryId}
-                    style={{
-                      backgroundColor: "#ffffff",
-                      borderRadius: "10px",
-                      border: row.workerCount > 0 ? "1.5px solid #ea580c" : "1px solid #e2e8f0",
-                      padding: "12px 14px",
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center"
-                    }}
-                  >
-                    <div>
-                      <strong style={{ fontSize: "14px", color: "#0f172a", display: "block" }}>{row.categoryName}</strong>
-                      <span style={{ fontSize: "11.5px", color: "#166534", fontWeight: "700" }}>
-                        ₹{row.dailyWage.toLocaleString("en-IN")} / Day
-                      </span>
+                {labourAttendanceRows.map(row => {
+                  const hasCustom = row.workerEntries && row.workerEntries.length > 0;
+                  const isExpanded = expandedAdminWorkerCategories[row.categoryId] !== undefined ? expandedAdminWorkerCategories[row.categoryId] : hasCustom;
+                  const team = labourTeams.find(t => t.id === selectedLabourTeamId);
+                  const catObj = team?.categories ? (Array.isArray(team.categories) ? team.categories.find(c => c.id === row.categoryId) : team.categories[row.categoryId]) : null;
+                  const registeredMembers = catObj?.members ? (Array.isArray(catObj.members) ? catObj.members : Object.values(catObj.members)) : [];
+
+                  return (
+                    <div
+                      key={row.categoryId}
+                      style={{
+                        backgroundColor: "#ffffff",
+                        borderRadius: "10px",
+                        border: row.workerCount > 0 ? "1.5px solid #ea580c" : "1px solid #e2e8f0",
+                        padding: "12px 14px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "10px"
+                      }}
+                    >
+                      <div style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center"
+                      }}>
+                        <div>
+                          <strong style={{ fontSize: "14px", color: "#0f172a", display: "block" }}>{row.categoryName}</strong>
+                          <span style={{ fontSize: "11.5px", color: "#166534", fontWeight: "700" }}>
+                            ₹{row.dailyWage.toLocaleString("en-IN")} / Day
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
+                          {/* Work Units Input */}
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Default:</span>
+                            <input
+                              type="number"
+                              step="any"
+                              min="0.01"
+                              value={row.customWorkUnits}
+                              onChange={(e) => handleLabourUnitsChange(row.categoryId, e.target.value)}
+                              disabled={labourLockStatus.submitted}
+                              style={{ width: "55px", padding: "4px 6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", textAlign: "center" }}
+                            />
+                          </div>
+
+                          {/* Count increment / decrement */}
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <button
+                              type="button"
+                              onClick={() => handleLabourCountChange(row.categoryId, -1)}
+                              disabled={row.workerCount <= 0 || labourLockStatus.submitted}
+                              style={{
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "50%",
+                                border: "1.5px solid #ea580c",
+                                backgroundColor: row.workerCount <= 0 ? "#f1f5f9" : "#fff7ed",
+                                color: row.workerCount <= 0 ? "#94a3b8" : "#ea580c",
+                                fontWeight: "800",
+                                cursor: row.workerCount <= 0 ? "not-allowed" : "pointer"
+                              }}
+                            >
+                              -
+                            </button>
+                            <span style={{ fontSize: "15px", fontWeight: "800", minWidth: "24px", textAlign: "center" }}>
+                              {row.workerCount}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleLabourCountChange(row.categoryId, 1)}
+                              disabled={labourLockStatus.submitted}
+                              style={{
+                                width: "32px",
+                                height: "32px",
+                                borderRadius: "50%",
+                                border: "1.5px solid #ea580c",
+                                backgroundColor: "#ea580c",
+                                color: "#ffffff",
+                                fontWeight: "800",
+                                cursor: "pointer"
+                              }}
+                            >
+                              +
+                            </button>
+                          </div>
+
+                          {/* Row calculated amount */}
+                          <div style={{ minWidth: "80px", textAlign: "right" }}>
+                            <strong style={{ fontSize: "13.5px", color: row.calculatedAmount > 0 ? "#ea580c" : "#64748b" }}>
+                              ₹{row.calculatedAmount.toLocaleString("en-IN")}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Custom worker durations breakdown when workerCount > 0 */}
+                      {row.workerCount > 0 && (
+                        <div style={{ borderTop: "1px dashed #e2e8f0", paddingTop: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => setExpandedAdminWorkerCategories(prev => ({ ...prev, [row.categoryId]: !prev[row.categoryId] }))}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              background: "none",
+                              border: "none",
+                              color: hasCustom ? "#ea580c" : "#64748b",
+                              fontSize: "12px",
+                              fontWeight: "750",
+                              cursor: "pointer",
+                              padding: "2px 0"
+                            }}
+                          >
+                            <Users size={13} />
+                            <span>Individual Worker Custom Durations</span>
+                            {hasCustom && (
+                              <span style={{ fontSize: "10.5px", backgroundColor: "#ffedd5", color: "#c2410c", padding: "1px 6px", borderRadius: "6px", fontWeight: "800" }}>
+                                {row.workerEntries.length} Configured
+                              </span>
+                            )}
+                            {isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                          </button>
+
+                          {isExpanded && (
+                            <div style={{
+                              backgroundColor: "#f8fafc",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "8px",
+                              padding: "10px",
+                              marginTop: "6px",
+                              display: "flex",
+                              flexDirection: "column",
+                              gap: "6px"
+                            }}>
+                              <div style={{
+                                display: "grid",
+                                gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
+                                gap: "6px",
+                                fontSize: "10.5px",
+                                fontWeight: "750",
+                                color: "#64748b",
+                                textTransform: "uppercase",
+                                borderBottom: "1px solid #e2e8f0",
+                                paddingBottom: "4px"
+                              }}>
+                                <span>Worker</span>
+                                <span style={{ textAlign: "center" }}>Duration</span>
+                                <span style={{ textAlign: "right" }}>Rate</span>
+                                <span style={{ textAlign: "right" }}>Amount</span>
+                              </div>
+
+                              {Array.from({ length: row.workerCount }).map((_, idx) => {
+                                const memberObj = registeredMembers[idx];
+                                const existingEntry = (row.workerEntries || [])[idx];
+                                const workerName = existingEntry?.workerName || memberObj?.name || `${row.categoryName} ${idx + 1}`;
+                                const workerUnits = existingEntry?.customWorkUnits !== undefined ? Number(existingEntry.customWorkUnits) : Number(row.customWorkUnits || 1.0);
+                                const workerWage = existingEntry?.dailyWage !== undefined ? Number(existingEntry.dailyWage) : Number(row.dailyWage || 0);
+                                const workerAmount = workerUnits * workerWage;
+
+                                return (
+                                  <div key={idx} style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
+                                    gap: "6px",
+                                    alignItems: "center",
+                                    padding: "3px 0",
+                                    borderBottom: idx < row.workerCount - 1 ? "1px solid #f1f5f9" : "none"
+                                  }}>
+                                    <span style={{ fontSize: "12px", fontWeight: "700", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                      {workerName}
+                                    </span>
+                                    <div style={{ display: "flex", justifyContent: "center" }}>
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        min="0.01"
+                                        value={workerUnits}
+                                        onChange={(e) => handleAdminWorkerCustomDurationChange(row.categoryId, idx, e.target.value, workerName)}
+                                        disabled={labourLockStatus.submitted}
+                                        style={{ width: "50px", padding: "3px 4px", borderRadius: "5px", border: "1px solid #cbd5e1", fontSize: "11.5px", textAlign: "center" }}
+                                      />
+                                    </div>
+                                    <span style={{ textAlign: "right", fontSize: "11.5px", color: "#64748b" }}>
+                                      ₹{workerWage.toLocaleString("en-IN")}
+                                    </span>
+                                    <span style={{ textAlign: "right", fontSize: "12px", fontWeight: "800", color: "#0f172a" }}>
+                                      ₹{workerAmount.toLocaleString("en-IN")}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-                      {/* Work Units Input */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                        <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b" }}>Units:</span>
-                        <input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          value={row.customWorkUnits}
-                          onChange={(e) => handleLabourUnitsChange(row.categoryId, e.target.value)}
-                          disabled={labourLockStatus.submitted}
-                          style={{ width: "55px", padding: "4px 6px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12px", textAlign: "center" }}
-                        />
-                      </div>
-
-                      {/* Count increment / decrement */}
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                        <button
-                          type="button"
-                          onClick={() => handleLabourCountChange(row.categoryId, -1)}
-                          disabled={row.workerCount <= 0 || labourLockStatus.submitted}
-                          style={{
-                            width: "32px",
-                            height: "32px",
-                            borderRadius: "50%",
-                            border: "1.5px solid #ea580c",
-                            backgroundColor: row.workerCount <= 0 ? "#f1f5f9" : "#fff7ed",
-                            color: row.workerCount <= 0 ? "#94a3b8" : "#ea580c",
-                            fontWeight: "800",
-                            cursor: row.workerCount <= 0 ? "not-allowed" : "pointer"
-                          }}
-                        >
-                          -
-                        </button>
-                        <span style={{ fontSize: "15px", fontWeight: "800", minWidth: "24px", textAlign: "center" }}>
-                          {row.workerCount}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleLabourCountChange(row.categoryId, 1)}
-                          disabled={labourLockStatus.submitted}
-                          style={{
-                            width: "32px",
-                            height: "32px",
-                            borderRadius: "50%",
-                            border: "1.5px solid #ea580c",
-                            backgroundColor: "#ea580c",
-                            color: "#ffffff",
-                            fontWeight: "800",
-                            cursor: "pointer"
-                          }}
-                        >
-                          +
-                        </button>
-                      </div>
-
-                      {/* Row calculated amount */}
-                      <div style={{ minWidth: "80px", textAlign: "right" }}>
-                        <strong style={{ fontSize: "13.5px", color: row.calculatedAmount > 0 ? "#ea580c" : "#64748b" }}>
-                          ₹{row.calculatedAmount.toLocaleString("en-IN")}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 

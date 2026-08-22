@@ -7,6 +7,7 @@ import {
   saveSiteEngineerProfile,
   getSites,
   getEngineerAttendanceAndLeaveStats,
+  getEngineerAttendanceHistory,
   getEngineerLeaves,
   updateEngineerPasswordInDb,
   deleteSiteEngineer
@@ -107,10 +108,8 @@ export default function SiteEngineers() {
   const [selectedEngineer, setSelectedEngineer] = useState(null);
   const [selectedEngineerStats, setSelectedEngineerStats] = useState(null);
   const [selectedEngineerLeaves, setSelectedEngineerLeaves] = useState([]);
+  const [selectedEngineerAttendance, setSelectedEngineerAttendance] = useState([]);
   const [statsLoading, setStatsLoading] = useState(false);
-
-
-
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -197,12 +196,17 @@ export default function SiteEngineers() {
     setShowDetailsModal(true);
     setSelectedEngineerStats(null);
     setSelectedEngineerLeaves([]);
+    setSelectedEngineerAttendance([]);
     setStatsLoading(true);
     try {
-      const stats = await getEngineerAttendanceAndLeaveStats(eng.id, eng.holidayAllowance || 24);
+      const [stats, leaves, attend] = await Promise.all([
+        getEngineerAttendanceAndLeaveStats(eng.id, eng.holidayAllowance || 24),
+        getEngineerLeaves(eng.id),
+        getEngineerAttendanceHistory(eng.id)
+      ]);
       setSelectedEngineerStats(stats);
-      const leaves = await getEngineerLeaves(eng.id);
       setSelectedEngineerLeaves(leaves);
+      setSelectedEngineerAttendance(attend);
     } catch (err) {
       console.error("Error fetching stats:", err);
     } finally {
@@ -1303,6 +1307,64 @@ export default function SiteEngineers() {
                   })
                 )}
               </ul>
+            </div>
+
+            {/* Attendance Records Section */}
+            <div style={{ marginTop: "20px", borderTop: "1px solid var(--border-color)", paddingTop: "16px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <h5 style={{ margin: 0, fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>
+                  Recent Attendance Logs Across Sites
+                </h5>
+                <Button 
+                  size="sm" 
+                  variant="outline"
+                  onClick={() => {
+                    setShowDetailsModal(false);
+                    setSelectedEngineerId(selectedEngineer.id);
+                  }}
+                  style={{ fontSize: "11px", padding: "4px 8px" }}
+                >
+                  View Full Logs
+                </Button>
+              </div>
+              {statsLoading ? (
+                <div style={{ padding: "8px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+                  Retrieving attendance logs...
+                </div>
+              ) : selectedEngineerAttendance.length === 0 ? (
+                <p style={{ fontSize: "12px", color: "var(--text-muted)", margin: 0 }}>
+                  No attendance records logged for this engineer.
+                </p>
+              ) : (
+                <div style={{ maxHeight: "180px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {selectedEngineerAttendance.slice(0, 10).map((att, idx) => {
+                    const siteObj = sites.find(s => s.id === att.siteId);
+                    const siteName = att.siteName || (siteObj ? siteObj.siteName : (att.siteId ? `Site (ID: ${att.siteId})` : "General Site"));
+                    const checkInTime = att.checkInTimeFormatted || att.time || "--";
+                    const isCheckedOut = att.isCheckedOut || att.status === "checked_out";
+                    return (
+                      <div key={att.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fff", border: "1px solid var(--border-color)", borderRadius: "6px" }}>
+                        <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
+                              {siteName}
+                            </span>
+                            <span className="font-mono" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                              ({att.date || att.attendanceDate})
+                            </span>
+                          </div>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                            In: <strong>{checkInTime}</strong> {isCheckedOut ? `• Out: ${att.checkOutTimeFormatted || "Checked Out"}` : "• On Site"}
+                          </span>
+                        </div>
+                        <Badge status={isCheckedOut ? "info" : "success"}>
+                          {isCheckedOut ? "Checked Out" : "Present"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {/* Administrative Actions */}
