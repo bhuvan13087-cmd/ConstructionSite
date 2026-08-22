@@ -6653,7 +6653,7 @@ body:has(.landing-page-container) {
 .admin-dashboard-container {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
@@ -6662,8 +6662,8 @@ body:has(.landing-page-container) {
 /* 1. TOP SUMMARY CARDS GRID (6 Cards) */
 .admin-summary-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
-  gap: 16px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 14px;
   width: 100%;
   box-sizing: border-box;
 }
@@ -6677,8 +6677,9 @@ body:has(.landing-page-container) {
   display: flex;
   align-items: center;
   gap: 12px;
-  min-height: 78px;
+  min-height: 82px;
   height: 100%;
+  min-width: 0;
   box-sizing: border-box;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
 }
@@ -6705,10 +6706,11 @@ body:has(.landing-page-container) {
   justify-content: center;
   min-width: 0;
   flex: 1;
+  gap: 2px;
 }
 
 .admin-summary-value {
-  font-size: 20px;
+  font-size: 19px;
   font-weight: 800;
   color: var(--primary-950, #0f172a);
   line-height: 1.2;
@@ -6717,6 +6719,9 @@ body:has(.landing-page-container) {
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
 }
 
 .admin-summary-label {
@@ -6728,16 +6733,22 @@ body:has(.landing-page-container) {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-top: 2px;
 }
 
-/* 2. ANALYTICS & INSIGHTS GRID (3-Column Executive Stack) */
+/* 2. ANALYTICS & INSIGHTS GRID (3-Column Equal Height Row) */
 .admin-analytics-grid {
   display: grid;
-  grid-template-columns: 1fr 1.25fr 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
   width: 100%;
+  align-items: stretch;
   box-sizing: border-box;
+}
+
+@media (max-width: 1080px) {
+  .admin-analytics-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-middle-grid {
@@ -6748,12 +6759,6 @@ body:has(.landing-page-container) {
   box-sizing: border-box;
 }
 
-@media (max-width: 1200px) {
-  .admin-analytics-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
 .admin-card {
   background: #ffffff;
   border: 1px solid var(--border-color, #e2e8f0);
@@ -6762,7 +6767,22 @@ body:has(.landing-page-container) {
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 16px;
+  box-sizing: border-box;
+  height: 100%;
+}
+
+.admin-deadlines-card {
+  background: #ffffff;
+  border: 1px solid var(--border-color, #e2e8f0);
+  border-radius: 12px;
+  padding: 18px 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 16px;
   box-sizing: border-box;
   height: 100%;
 }
@@ -6771,7 +6791,6 @@ body:has(.landing-page-container) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 14px;
   gap: 8px;
 }
 
@@ -6794,20 +6813,20 @@ body:has(.landing-page-container) {
 /* Status Cards Grid inside Construction Status */
 .admin-status-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
   width: 100%;
 }
 
 .admin-status-box {
-  padding: 12px 8px;
+  padding: 12px 6px;
   border-radius: 8px;
   text-align: center;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 64px;
+  min-height: 72px;
   box-sizing: border-box;
 }
 
@@ -6819,17 +6838,17 @@ body:has(.landing-page-container) {
 .admin-status-box.running .status-lbl { color: #15803d; }
 
 .admin-status-box.completed {
-  background-color: #fff7ed;
-  border: 1px solid #ffedd5;
+  background-color: #eff6ff;
+  border: 1px solid #bfdbfe;
 }
-.admin-status-box.completed .status-num { color: #ea580c; }
-.admin-status-box.completed .status-lbl { color: #c2410c; }
+.admin-status-box.completed .status-num { color: #2563eb; }
+.admin-status-box.completed .status-lbl { color: #1d4ed8; }
 
 .admin-status-box.on-hold {
   background-color: #fef3c7;
   border: 1px solid #fde68a;
 }
-.admin-status-box.on-hold .status-num { color: #b45309; }
+.admin-status-box.on-hold .status-num { color: #d97706; }
 .admin-status-box.on-hold .status-lbl { color: #92400e; }
 
 .admin-status-box.delayed {
@@ -6840,22 +6859,25 @@ body:has(.landing-page-container) {
 .admin-status-box.delayed .status-lbl { color: #991b1b; }
 
 .admin-status-box .status-num {
-  font-size: 18px;
+  font-size: 20px;
   font-weight: 800;
   line-height: 1.1;
+  font-variant-numeric: tabular-nums;
 }
 
 .admin-status-box .status-lbl {
   font-size: 11px;
   font-weight: 700;
   margin-top: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
 }
 
 /* Expense Overview List */
 .admin-expense-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
 }
 
@@ -6869,7 +6891,7 @@ body:has(.landing-page-container) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .admin-expense-cat {
@@ -6881,6 +6903,7 @@ body:has(.landing-page-container) {
   font-weight: 700;
   color: var(--primary-950, #0f172a);
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .admin-progress-track {
@@ -6897,7 +6920,42 @@ body:has(.landing-page-container) {
   transition: width 0.3s ease;
 }
 
-/* 3. BOTTOM ROW (Projects Table + Deadlines) */
+/* Deadlines Card */
+.admin-deadlines-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.admin-deadline-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 12px;
+  background-color: #f8fafc;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e2e8f0);
+  gap: 12px;
+  min-height: 48px;
+  box-sizing: border-box;
+}
+
+.admin-deadline-info {
+  min-width: 0;
+  flex: 1;
+}
+
+.admin-deadline-meta {
+  text-align: right;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
+
+/* 3. BOTTOM ROW (Projects Operations Matrix Table) */
 .admin-bottom-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 340px;
@@ -6916,6 +6974,7 @@ body:has(.landing-page-container) {
   flex-direction: column;
   overflow: hidden;
   box-sizing: border-box;
+  width: 100%;
 }
 
 .admin-table-header {
@@ -6938,17 +6997,17 @@ body:has(.landing-page-container) {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
-  font-size: 13px;
+  font-size: 12.5px;
   text-align: left;
   table-layout: fixed;
-  min-width: 680px;
+  min-width: 820px;
 }
 
 .admin-table th {
   background-color: #f8fafc;
   color: var(--primary-700, #334155);
   font-weight: 700;
-  font-size: 11.5px;
+  font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   padding: 10px 14px;
@@ -6958,10 +7017,12 @@ body:has(.landing-page-container) {
 }
 
 .admin-table td {
-  padding: 11px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--primary-100, #f1f5f9);
   color: var(--primary-900, #0f172a);
   vertical-align: middle;
+  height: 54px;
+  box-sizing: border-box;
 }
 
 .admin-table tbody tr:last-child td {
@@ -6972,13 +7033,37 @@ body:has(.landing-page-container) {
   background-color: #f8fafc;
 }
 
+.admin-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  background: #ffffff;
+  border: 1px solid #cbd5e1;
+  color: var(--primary-800, #1e293b);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.admin-action-btn:hover {
+  border-color: var(--brand-orange, #f97316);
+  color: var(--brand-orange, #f97316);
+  background-color: #fff7ed;
+}
+
 /* Explicit Table Column Sizing */
-.col-site { width: 26%; }
+.col-site { width: 24%; }
 .col-engineer { width: 20%; }
-.col-progress { width: 16%; }
-.col-workers { width: 11%; }
-.col-expense { width: 13%; }
-.col-status { width: 14%; text-align: center; }
+.col-progress { width: 18%; }
+.col-workers { width: 12%; }
+.col-expense { width: 12%; }
+.col-status { width: 12%; text-align: center; }
 .col-action { width: 64px; text-align: right; }
 
 .admin-table th.col-status,
@@ -6991,54 +7076,11 @@ body:has(.landing-page-container) {
   text-align: right;
 }
 
-/* Deadlines Card */
-.admin-deadlines-card {
-  background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 12px;
-  padding: 18px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
-  display: flex;
-  flex-direction: column;
-  box-sizing: border-box;
-}
-
-.admin-deadlines-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-}
-
-.admin-deadline-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px 12px;
-  background-color: #f8fafc;
-  border-radius: 8px;
-  border: 1px solid var(--border-color, #e2e8f0);
-  gap: 8px;
-}
-
-.admin-deadline-info {
-  min-width: 0;
-  flex: 1;
-}
-
-.admin-deadline-meta {
-  text-align: right;
-  flex-shrink: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 3px;
-}
-
 /* 4. RESPONSIVE BREAKPOINTS */
 @media (max-width: 1280px) {
   .admin-summary-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
   }
 }
 
@@ -7051,12 +7093,13 @@ body:has(.landing-page-container) {
   }
 }
 
-@media (max-width: 680px) {
+@media (max-width: 768px) {
   .admin-summary-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
   .admin-status-grid {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .admin-summary-card {
     padding: 10px 12px;
@@ -7075,7 +7118,7 @@ body:has(.landing-page-container) {
   }
 }
 
-@media (max-width: 420px) {
+@media (max-width: 480px) {
   .admin-summary-grid {
     grid-template-columns: 1fr;
   }
@@ -7088,8 +7131,8 @@ body:has(.landing-page-container) {
 .admin-attendance-card {
   background: #ffffff;
   border: 1px solid var(--border-color, #e2e8f0);
-  border-radius: 14px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 6px 16px rgba(0, 0, 0, 0.02);
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -7098,7 +7141,7 @@ body:has(.landing-page-container) {
 }
 
 .admin-attendance-header {
-  padding: 16px 20px;
+  padding: 14px 18px;
   border-bottom: 1px solid var(--border-color, #e2e8f0);
   background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
   display: flex;
@@ -7106,6 +7149,8 @@ body:has(.landing-page-container) {
   justify-content: space-between;
   align-items: center;
   gap: 12px;
+  min-height: 56px;
+  box-sizing: border-box;
 }
 
 .admin-attendance-title-group {
@@ -7117,7 +7162,7 @@ body:has(.landing-page-container) {
 
 .admin-attendance-title {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 800;
   color: var(--primary-950, #0f172a);
   display: flex;
@@ -7128,21 +7173,21 @@ body:has(.landing-page-container) {
 .admin-attendance-live-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background-color: #f0fdf4;
   color: #16a34a;
   border: 1px solid #bbf7d0;
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 100px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
   letter-spacing: 0.3px;
   text-transform: uppercase;
 }
 
 .admin-attendance-live-dot {
-  width: 7px;
-  height: 7px;
+  width: 6px;
+  height: 6px;
   background-color: #22c55e;
   border-radius: 50%;
   box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.7);
@@ -7175,11 +7220,14 @@ body:has(.landing-page-container) {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 10px;
+  height: 28px;
+  padding: 0 10px;
   border-radius: 6px;
-  font-size: 12px;
+  font-size: 11.5px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
+  box-sizing: border-box;
+  white-space: nowrap;
 }
 
 .admin-attendance-metric-pill.present {
@@ -7206,8 +7254,32 @@ body:has(.landing-page-container) {
   border: 1px solid #ffedd5;
 }
 
+.admin-attendance-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 11.5px;
+  font-weight: 700;
+  color: var(--brand-orange, #f97316);
+  background-color: #fff7ed;
+  border: 1px solid #ffedd5;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.admin-attendance-link-pill:hover {
+  background-color: #ffedd5;
+  border-color: #fed7aa;
+  color: #ea580c;
+}
+
 .admin-attendance-controls-bar {
-  padding: 12px 20px;
+  padding: 12px 18px;
   background-color: #f8fafc;
   border-bottom: 1px solid var(--border-color, #e2e8f0);
   display: flex;
@@ -7222,18 +7294,21 @@ body:has(.landing-page-container) {
   align-items: center;
   gap: 10px;
   flex: 1;
-  min-width: 240px;
+  min-width: 260px;
 }
 
 .admin-attendance-search-input-wrap {
   position: relative;
   flex: 1;
   max-width: 320px;
+  height: 36px;
+  display: flex;
+  align-items: center;
 }
 
 .admin-attendance-search-icon {
   position: absolute;
-  left: 10px;
+  left: 11px;
   top: 50%;
   transform: translateY(-50%);
   color: #94a3b8;
@@ -7242,7 +7317,8 @@ body:has(.landing-page-container) {
 
 .admin-attendance-search-input {
   width: 100%;
-  padding: 7px 12px 7px 32px;
+  height: 36px;
+  padding: 0 12px 0 34px;
   font-size: 12.5px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -7259,7 +7335,8 @@ body:has(.landing-page-container) {
 }
 
 .admin-attendance-select {
-  padding: 7px 10px;
+  height: 36px;
+  padding: 0 12px;
   font-size: 12px;
   border: 1px solid #cbd5e1;
   border-radius: 6px;
@@ -7269,32 +7346,51 @@ body:has(.landing-page-container) {
   font-weight: 600;
   cursor: pointer;
   max-width: 200px;
+  box-sizing: border-box;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.admin-attendance-select:focus {
+  border-color: var(--brand-orange, #f97316);
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.12);
 }
 
 .admin-attendance-tabs {
-  display: flex;
+  display: inline-flex;
   align-items: center;
-  gap: 4px;
-  background: #e2e8f0;
+  gap: 3px;
+  background: #f1f5f9;
   padding: 3px;
-  border-radius: 7px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
 }
 
 .admin-attendance-tab-btn {
   border: none;
   background: transparent;
-  padding: 5px 12px;
-  font-size: 11.5px;
-  font-weight: 700;
-  color: #475569;
-  border-radius: 5px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  border-radius: 6px;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.admin-attendance-tab-btn:hover {
+  color: #0f172a;
+  background: rgba(255, 255, 255, 0.6);
 }
 
 .admin-attendance-tab-btn.active {
   background: #ffffff;
   color: var(--brand-orange, #f97316);
+  font-weight: 800;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
@@ -7309,8 +7405,8 @@ body:has(.landing-page-container) {
   border-collapse: separate;
   border-spacing: 0;
   font-size: 12.5px;
-  table-layout: auto;
-  min-width: 760px;
+  table-layout: fixed;
+  min-width: 860px;
 }
 
 .admin-attendance-table th {
@@ -7327,10 +7423,12 @@ body:has(.landing-page-container) {
 }
 
 .admin-attendance-table td {
-  padding: 12px 14px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--primary-100, #f1f5f9);
   color: var(--primary-900, #0f172a);
   vertical-align: middle;
+  height: 56px;
+  box-sizing: border-box;
 }
 
 .admin-attendance-table tr:hover td {
@@ -7406,6 +7504,7 @@ body:has(.landing-page-container) {
   padding: 2px 7px;
   border-radius: 4px;
   border: 1px solid #bae6fd;
+  white-space: nowrap;
 }
 
 .admin-attendance-distance-badge {
@@ -7416,6 +7515,7 @@ body:has(.landing-page-container) {
   font-weight: 700;
   padding: 2px 6px;
   border-radius: 4px;
+  white-space: nowrap;
 }
 
 .admin-attendance-distance-badge.on-site {
@@ -7488,3 +7588,4 @@ body:has(.landing-page-container) {
   font-weight: 600;
   color: #0f172a;
 }
+

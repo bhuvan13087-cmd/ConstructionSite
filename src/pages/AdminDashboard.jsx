@@ -516,9 +516,9 @@ export default function AdminDashboard() {
               <UserCheck size={20} />
             </div>
             <div className="admin-summary-info">
-              <div className="admin-summary-value" style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
-                <span>{presentCount} / {activeEngineersCount}</span>
-                <span style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>
+              <div className="admin-summary-value">
+                <span>{presentCount}/{activeEngineersCount}</span>
+                <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#16a34a" }}>
                   ({attendanceRate}%)
                 </span>
               </div>
@@ -600,16 +600,7 @@ export default function AdminDashboard() {
               </div>
               <Link 
                 to="/admin/engineers" 
-                style={{ 
-                  fontSize: "12px", 
-                  fontWeight: "700", 
-                  color: "var(--brand-orange)", 
-                  textDecoration: "none",
-                  marginLeft: "4px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "3px"
-                }}
+                className="admin-attendance-link-pill"
               >
                 All Engineers →
               </Link>
@@ -699,6 +690,15 @@ export default function AdminDashboard() {
               </div>
             ) : (
               <table className="admin-attendance-table">
+                <colgroup>
+                  <col style={{ width: "22%" }} />
+                  <col style={{ width: "18%" }} />
+                  <col style={{ width: "12%" }} />
+                  <col style={{ width: "14%" }} />
+                  <col style={{ width: "20%" }} />
+                  <col style={{ width: "70px" }} />
+                  <col style={{ width: "70px" }} />
+                </colgroup>
                 <thead>
                   <tr>
                     <th>Engineer</th>
@@ -731,11 +731,11 @@ export default function AdminDashboard() {
                                 {(rec.engineerName || "E").charAt(0).toUpperCase()}
                               </div>
                             )}
-                            <div>
-                              <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {rec.engineerName}
                               </strong>
-                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>
+                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {rec.engineerPhone || rec.engineerEmail || "Site Engineer"}
                               </span>
                             </div>
@@ -746,12 +746,12 @@ export default function AdminDashboard() {
                         <td>
                           <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                             <Building2 size={14} style={{ color: "var(--brand-orange)", flexShrink: 0 }} />
-                            <div>
-                              <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
+                            <div style={{ minWidth: 0, flex: 1 }}>
+                              <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                 {rec.siteName}
                               </strong>
                               {rec.clientName && (
-                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)", display: "block" }}>
+                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                   Client: {rec.clientName}
                                 </span>
                               )}
@@ -799,7 +799,8 @@ export default function AdminDashboard() {
                               padding: "3px 8px", 
                               borderRadius: "6px",
                               fontSize: "11px",
-                              fontWeight: "700"
+                              fontWeight: "700",
+                              whiteSpace: "nowrap"
                             }}>
                               <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }} />
                               Active On-Site
@@ -807,10 +808,10 @@ export default function AdminDashboard() {
                           )}
                         </td>
 
-                        {/* Location & Geofence Details */}
+                        {/* Location & Geofence Details (Structured 2-Line Layout) */}
                         <td>
-                          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "nowrap", overflow: "hidden" }}>
                               <span className="admin-attendance-gps-badge">
                                 <MapPin size={11} />
                                 {rec.latitude && rec.longitude 
@@ -822,12 +823,12 @@ export default function AdminDashboard() {
                                 <span className={`admin-attendance-distance-badge ${isOnSiteGeofence ? "on-site" : "off-site"}`}>
                                   <Navigation size={10} />
                                   {rec.distance < 1000 
-                                    ? `${Math.round(rec.distance)}m from site` 
-                                    : `${(rec.distance / 1000).toFixed(1)}km from site`}
+                                    ? `${Math.round(rec.distance)}m` 
+                                    : `${(rec.distance / 1000).toFixed(1)}km`}
                                 </span>
                               )}
                             </div>
-                            <span style={{ fontSize: "11px", color: "#64748b", maxWidth: "240px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={rec.addressDisplay}>
+                            <span style={{ fontSize: "11px", color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }} title={rec.addressDisplay}>
                               {rec.addressDisplay}
                             </span>
                           </div>
@@ -970,7 +971,7 @@ export default function AdminDashboard() {
                       <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {site.siteName}
                       </strong>
-                      <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "1px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         Client: {site.clientName || "Internal"}
                       </span>
                     </div>
@@ -1002,15 +1003,24 @@ export default function AdminDashboard() {
 
           <div className="admin-table-scroll">
             <table className="admin-table">
+              <colgroup>
+                <col style={{ width: "24%" }} />
+                <col style={{ width: "20%" }} />
+                <col style={{ width: "18%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "12%" }} />
+                <col style={{ width: "60px" }} />
+              </colgroup>
               <thead>
                 <tr>
-                  <th style={{ width: "24%" }}>Site Name</th>
-                  <th style={{ width: "20%" }}>Assigned Engineers</th>
-                  <th style={{ width: "18%" }}>Live Progress</th>
-                  <th style={{ width: "12%" }}>Active On-Site</th>
-                  <th style={{ width: "13%" }}>Today's Expense</th>
-                  <th style={{ width: "13%", textAlign: "center" }}>Status</th>
-                  <th style={{ width: "60px", textAlign: "right" }}>Action</th>
+                  <th>Site Name</th>
+                  <th>Assigned Engineers</th>
+                  <th>Live Progress</th>
+                  <th>Active On-Site</th>
+                  <th>Today's Expense</th>
+                  <th style={{ textAlign: "center" }}>Status</th>
+                  <th style={{ textAlign: "right" }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -1045,19 +1055,27 @@ export default function AdminDashboard() {
                     return (
                       <tr key={site.id}>
                         <td>
-                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", lineHeight: "1.3" }}>{site.siteName}</strong>
+                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{site.siteName}</strong>
                           <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                             {site.clientName || site.location || "Site Project"}
                           </span>
                         </td>
                         <td>
                           {assignedEngNames.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                              {assignedEngNames.map((name, idx) => (
-                                <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px" }}>
+                              {assignedEngNames.slice(0, 2).map((name, idx) => (
+                                <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap" }}>
                                   {name}
                                 </span>
                               ))}
+                              {assignedEngNames.length > 2 && (
+                                <span 
+                                  title={assignedEngNames.slice(2).join(", ")}
+                                  style={{ fontSize: "10px", fontWeight: "800", backgroundColor: "#e2e8f0", color: "#475569", padding: "2px 5px", borderRadius: "4px", cursor: "help", whiteSpace: "nowrap" }}
+                                >
+                                  +{assignedEngNames.length - 2} more
+                                </span>
+                              )}
                             </div>
                           ) : (
                             <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
@@ -1083,7 +1101,7 @@ export default function AdminDashboard() {
                           <Badge status={site.status || "active"} />
                         </td>
                         <td style={{ textAlign: "right" }}>
-                          <Link to="/admin/sites" className="erp-btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                          <Link to="/admin/sites" className="admin-action-btn">
                             View
                           </Link>
                         </td>
