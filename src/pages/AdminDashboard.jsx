@@ -22,29 +22,36 @@ import {
   AlertTriangle, 
   CheckCircle2, 
   Filter, 
-  Eye,
-  FolderOpen,
-  HardHat,
-  ArrowRight,
-  ChevronRight,
-  TrendingUp,
-  Search,
-  Bell,
-  Briefcase,
-  FileText,
-  DollarSign
+  Eye, 
+  FolderOpen, 
+  HardHat, 
+  ArrowRight, 
+  ChevronRight, 
+  TrendingUp, 
+  Search, 
+  Bell, 
+  Briefcase, 
+  FileText, 
+  DollarSign, 
+  ExternalLink, 
+  UserCheck, 
+  Navigation, 
+  Maximize2, 
+  ShieldCheck, 
+  X
 } from "lucide-react";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
+import { Modal } from "../components/common/Modal";
 import { Link } from "react-router-dom";
-import { deduplicateDailyAttendance } from "../services/firebaseService";
+import { deduplicateDailyAttendance, isEngineerAttendanceRecord } from "../services/firebaseService";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
-  const [rawAttendanceToday, setRawAttendanceToday] = useState([]);
+  const [rawAttendance, setRawAttendance] = useState([]);
   const [rawMaterials, setRawMaterials] = useState([]);
   const [rawWorkers, setRawWorkers] = useState([]);
   const [systemActivities, setSystemActivities] = useState([]);
@@ -52,36 +59,14 @@ export default function AdminDashboard() {
   const [documents, setDocuments] = useState([]);
   const [rawExpenses, setRawExpenses] = useState([]);
   
+  // Attendance Activity Filter States
+  const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
+  const [attendanceSiteFilter, setAttendanceSiteFilter] = useState("");
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState("all"); // 'all' | 'onsite' | 'checkout'
+  const [selectedInspectRecord, setSelectedInspectRecord] = useState(null);
+
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
-
-  const attendanceTodayCount = useMemo(() => {
-    const siteIds = new Set(sites.map(s => s.id));
-    const validToday = deduplicateDailyAttendance(rawAttendanceToday);
-    return validToday.filter(record => siteIds.has(record.siteId)).length;
-  }, [sites, rawAttendanceToday]);
-
-  const totalMaterialsCount = useMemo(() => {
-    const siteIds = new Set(sites.map(s => s.id));
-    return rawMaterials.filter(m => siteIds.has(m.siteId)).length;
-  }, [sites, rawMaterials]);
-
-  const activeWorkersCount = useMemo(() => {
-    return rawWorkers.length;
-  }, [rawWorkers]);
-
-  const metrics = {
-    totalSites: sites.length,
-    activeEngineers: engineers.filter(e => e.status === "active").length,
-    attendanceToday: attendanceTodayCount,
-    totalMaterials: totalMaterialsCount,
-    activeWorkers: activeWorkersCount
-  };
-
-  // Timeline Filter States
-  const [filterSite, setFilterSite] = useState("");
-  const [filterEngineer, setFilterEngineer] = useState("");
-  const [filterDate, setFilterDate] = useState("");
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -89,6 +74,33 @@ export default function AdminDashboard() {
       setToast(prev => ({ ...prev, show: false }));
     }, 4000);
   };
+
+  // Canonical Today Date Keys (UTC and Indian Standard Time)
+  const todayDateKeys = useMemo(() => {
+    const now = new Date();
+    const utcDate = now.toISOString().split("T")[0];
+    let istDate = utcDate;
+    try {
+      istDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(now);
+    } catch (e) {
+      istDate = utcDate;
+    }
+    return Array.from(new Set([utcDate, istDate]));
+  }, []);
+
+  const formattedTodayDate = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString("en-IN", { 
+        timeZone: "Asia/Kolkata", 
+        weekday: "long", 
+        day: "numeric", 
+        month: "short", 
+        year: "numeric" 
+      });
+    } catch (e) {
+      return new Date().toDateString();
+    }
+  }, []);
 
   useEffect(() => {
     const db = getFirebaseDb();
@@ -178,17 +190,15 @@ export default function AdminDashboard() {
       });
     });
 
-    // 3. Attendance Today Listener
-    const todayStr = new Date().toISOString().split("T")[0];
-    const qAttendance = query(collection(db, "attendance"), where("date", "==", todayStr));
-    const unsubAttendance = onSnapshot(qAttendance, (snapshot) => {
+    // 3. Single Data Source: Attendance Real-Time Listener
+    const unsubAttendance = onSnapshot(collection(db, "attendance"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, ...docSnap.data() });
       });
-      setRawAttendanceToday(list);
+      setRawAttendance(list);
     }, (err) => {
-      console.error("Attendance today listener error:", err);
+      console.error("Attendance listener error on Admin Dashboard:", err);
     });
 
     // 4. Materials Listener
@@ -202,7 +212,7 @@ export default function AdminDashboard() {
       console.error("Materials listener error:", err);
     });
 
-    // 5. Teams Listener
+    // 5. Teams / Labour Listener
     const unsubWorkers = onSnapshot(collection(db, "labourTeams"), (snapshot) => {
       const flattenedWorkers = [];
       snapshot.forEach(docSnap => {
@@ -231,7 +241,7 @@ export default function AdminDashboard() {
       console.error("Labour teams listener error on Dashboard:", err);
     });
 
-    // 7. System Activities Listener
+    // 6. System Activities Listener
     const qSys = query(collection(db, "activities"), limit(50));
     const unsubSys = onSnapshot(qSys, (snapshot) => {
       const list = [];
@@ -243,7 +253,7 @@ export default function AdminDashboard() {
       console.error("System activities listener error:", err);
     });
 
-    // 8. Approvals Listener
+    // 7. Approvals Listener
     const unsubApprovals = onSnapshot(collection(db, "approvals"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
@@ -254,7 +264,7 @@ export default function AdminDashboard() {
       console.error("Approvals listener error:", err);
     });
 
-    // 9. Documents Listener
+    // 8. Documents Listener
     const unsubDocuments = onSnapshot(collection(db, "documents"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
@@ -265,7 +275,7 @@ export default function AdminDashboard() {
       console.error("Documents listener error:", err);
     });
 
-    // 10. Expenses Listener
+    // 9. Expenses Listener
     const unsubExpenses = onSnapshot(doc(db, "expenses", "general"), (snapshot) => {
       if (snapshot.exists()) {
         setRawExpenses(snapshot.data().expenses || []);
@@ -288,158 +298,117 @@ export default function AdminDashboard() {
       unsubDocuments();
       unsubExpenses();
     };
-  }, []);
+  }, [user]);
 
-  // Map engineers by ID for quick lookups
-  const engineersMap = {};
-  engineers.forEach(eng => {
-    engineersMap[eng.id] = eng.fullName;
-  });
+  // Single Source of Truth: Canonical Today's Engineer Attendance List
+  const todayAttendanceList = useMemo(() => {
+    const todaySet = new Set(todayDateKeys);
+    
+    // 1. Deduplicate via canonical service function (filters non-engineer records and duplicate entries)
+    const deduplicated = deduplicateDailyAttendance(rawAttendance);
 
-  const totalAssignedProjects = sites.filter(
-    site => site.assignedEngineers && site.assignedEngineers.length > 0
-  ).length;
-
-  const pendingCount = approvals.filter(r => (r.status || "").toLowerCase() === "pending").length;
-
-  // Compute Alerts dynamically
-  const alerts = [];
-  const nowMs = Date.now();
-
-  approvals.forEach(a => {
-    if ((a.status || "").toLowerCase() === "pending") {
-      const createdMs = a.createdAt?.seconds 
-        ? a.createdAt.seconds * 1000 
-        : (a.createdAt ? new Date(a.createdAt).getTime() : nowMs);
-      const diffDays = (nowMs - createdMs) / (1000 * 60 * 60 * 24);
-      if (diffDays >= 3) {
-        alerts.push({
-          id: `alert_app_${a.id}`,
-          type: "warning",
-          category: "Approvals",
-          title: "Pending Requisition",
-          message: `${a.type} from ${a.requestedBy} has been pending for over 3 days.`
-        });
-      }
-    }
-  });
-
-  const pendingDocs = documents.filter(d => (d.status || "").toLowerCase() === "uploaded" || (d.status || "").toLowerCase() === "pending" || !d.status);
-  if (pendingDocs.length > 0) {
-    alerts.push({
-      id: "alert_pending_docs",
-      type: "warning",
-      category: "Documents",
-      title: "Document Review",
-      message: `There are ${pendingDocs.length} site document(s) awaiting verification.`
+    // 2. Filter for today's date
+    const todayRecords = deduplicated.filter(r => {
+      const d = r.date || r.attendanceDate;
+      return d && todaySet.has(d);
     });
-  }
 
-  sites.forEach(site => {
-    if ((site.status || "").toLowerCase() === "active") {
-      const updates = systemActivities.filter(a => a.siteId === site.id && a.moduleType === "Progress");
-      let lastUpdatedMs = 0;
-      if (updates.length > 0) {
-        const latestUpdate = updates[0];
-        lastUpdatedMs = latestUpdate.createdAt?.seconds 
-          ? latestUpdate.createdAt.seconds * 1000 
-          : (latestUpdate.createdAt ? new Date(latestUpdate.createdAt).getTime() : 0);
-      } else {
-        lastUpdatedMs = site.createdAt?.seconds 
-          ? site.createdAt.seconds * 1000 
-          : (site.createdAt ? new Date(site.createdAt).getTime() : 0);
-      }
-      
-      const diffHours = (nowMs - lastUpdatedMs) / (1000 * 60 * 60);
-      if (diffHours >= 48) {
-        alerts.push({
-          id: `alert_dpr_${site.id}`,
-          type: "danger",
-          category: "Progress",
-          title: "Missing DPR",
-          message: `No updates logged for "${site.siteName}" in the last 48 hours.`
-        });
-      }
-    }
-  });
+    // 3. Enrich with live engineer & site details
+    return todayRecords.map(rec => {
+      const engId = rec.engineerId || rec.userId;
+      const engineer = engineers.find(e => e.id === engId || e.uid === engId);
+      const site = sites.find(s => s.id === rec.siteId);
 
-  sites.forEach(site => {
-    if (site.status === "Delayed" || site.isSiteDelayed) {
-      alerts.push({
-        id: `alert_delay_${site.id}`,
-        type: "danger",
-        category: "Milestone",
-        title: "Timeline Slippage",
-        message: `Project "${site.siteName}" timeline has slipped behind target.`
-      });
-    }
-  });
+      const checkInTime = rec.time || (rec.checkInTime?.seconds 
+        ? new Date(rec.checkInTime.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+        : (rec.timestamp?.seconds 
+            ? new Date(rec.timestamp.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+            : "--"));
 
-  const mappedSys = systemActivities.map(s => ({
-    id: s.id,
-    type: s.actionType,
-    engineerId: s.userId,
-    engineerName: s.userName || "System",
-    siteId: s.siteId,
-    siteName: s.siteName || "N/A",
-    date: s.date,
-    time: s.createdAt?.seconds 
-      ? new Date(s.createdAt.seconds * 1000).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true })
-      : new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }),
-    description: s.description,
-    details: `Module: ${s.moduleType}`,
-    timestamp: s.createdAt,
-    isSystem: true,
-    moduleType: s.moduleType
-  }));
+      const checkOutTime = rec.checkOutTime?.seconds 
+        ? new Date(rec.checkOutTime.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) 
+        : (rec.checkOutTime ? String(rec.checkOutTime) : null);
 
-  const combinedTimeline = [...mappedSys]
-    .sort((a, b) => {
-      const tA = a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0);
-      const tB = b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+      const isCheckedOut = rec.status === "checked_out" || !!checkOutTime;
+      const isVerified = rec.verificationStatus === "verified" || rec.verificationStatus === "success" || rec.status === "present" || rec.status === "checked_out";
+
+      return {
+        ...rec,
+        resolvedEngineerId: engId,
+        engineerName: engineer?.fullName || engineer?.name || rec.engineerName || "Site Engineer",
+        engineerEmail: engineer?.email || "",
+        engineerPhone: engineer?.phone || engineer?.mobile || "",
+        engineerAvatar: engineer?.photoUrl || engineer?.avatarUrl || null,
+        resolvedSiteId: rec.siteId,
+        siteName: site?.siteName || rec.siteName || "Assigned Site",
+        clientName: site?.clientName || "",
+        siteLocation: site?.location || site?.city || "",
+        checkInTimeFormatted: checkInTime,
+        checkOutTimeFormatted: checkOutTime,
+        isCheckedOut,
+        isVerified,
+        photoUrl: rec.photoUrl || rec.checkInPhotoUrl || null,
+        checkOutPhotoUrl: rec.checkOutPhotoUrl || null,
+        distance: rec.distance !== undefined && rec.distance !== null ? Number(rec.distance) : null,
+        gpsAccuracy: rec.gpsAccuracy ? Number(rec.gpsAccuracy) : null,
+        addressDisplay: rec.address && rec.address !== "GPS Captured" 
+          ? rec.address 
+          : (rec.latitude && rec.longitude ? `${Number(rec.latitude).toFixed(5)}, ${Number(rec.longitude).toFixed(5)}` : "GPS Captured")
+      };
+    }).sort((a, b) => {
+      const tA = a.checkInTime?.seconds ? a.checkInTime.seconds * 1000 : (a.timestamp?.seconds ? a.timestamp.seconds * 1000 : (a.timestamp ? new Date(a.timestamp).getTime() : 0));
+      const tB = b.checkInTime?.seconds ? b.checkInTime.seconds * 1000 : (b.timestamp?.seconds ? b.timestamp.seconds * 1000 : (b.timestamp ? new Date(b.timestamp).getTime() : 0));
       return tB - tA;
-    })
-    .filter(log => {
-      if (filterSite && log.siteId !== filterSite) return false;
-      if (filterEngineer && log.engineerId !== filterEngineer) return false;
-      if (filterDate && log.date !== filterDate) return false;
+    });
+  }, [rawAttendance, todayDateKeys, engineers, sites]);
+
+  // Filtered Today Attendance based on search and tab selections
+  const filteredTodayAttendance = useMemo(() => {
+    return todayAttendanceList.filter(rec => {
+      // 1. Site filter
+      if (attendanceSiteFilter && rec.resolvedSiteId !== attendanceSiteFilter) {
+        return false;
+      }
+      // 2. Status filter
+      if (attendanceStatusFilter === "onsite" && rec.isCheckedOut) {
+        return false;
+      }
+      if (attendanceStatusFilter === "checkout" && !rec.isCheckedOut) {
+        return false;
+      }
+      // 3. Search query
+      if (attendanceSearchQuery.trim()) {
+        const q = attendanceSearchQuery.toLowerCase().trim();
+        const matchName = (rec.engineerName || "").toLowerCase().includes(q);
+        const matchEmail = (rec.engineerEmail || "").toLowerCase().includes(q);
+        const matchPhone = (rec.engineerPhone || "").toLowerCase().includes(q);
+        const matchSite = (rec.siteName || "").toLowerCase().includes(q);
+        if (!matchName && !matchEmail && !matchPhone && !matchSite) return false;
+      }
       return true;
     });
+  }, [todayAttendanceList, attendanceSiteFilter, attendanceStatusFilter, attendanceSearchQuery]);
 
-  // Calculate KPI values
-  const todayExpensesSum = useMemo(() => {
-    const todayStr = new Date().toISOString().split("T")[0];
-    return rawExpenses
-      .filter(e => e.date === todayStr || (e.createdAt?.seconds && new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0] === todayStr))
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  }, [rawExpenses]);
+  // Derived KPI Metrics
+  const activeEngineersCount = useMemo(() => {
+    return engineers.filter(e => e.status === "active").length || engineers.length;
+  }, [engineers]);
 
-  const avgProgress = useMemo(() => {
-    if (sites.length === 0) return 0;
-    const totalProg = sites.reduce((sum, s) => sum + (Number(s.progress) || Number(s.completionPercentage) || 0), 0);
-    return Math.round(totalProg / sites.length);
-  }, [sites]);
+  const presentCount = todayAttendanceList.length;
+  const onSiteCount = todayAttendanceList.filter(r => !r.isCheckedOut).length;
+  const checkedOutCount = todayAttendanceList.filter(r => r.isCheckedOut).length;
+  const verifiedCount = todayAttendanceList.filter(r => r.isVerified).length;
+  const attendanceRate = activeEngineersCount > 0 ? Math.round((presentCount / activeEngineersCount) * 100) : 0;
 
-  const pendingDprCount = useMemo(() => {
-    const activeSites = sites.filter(s => (s.status || "").toLowerCase() === "active");
-    const todayStr = new Date().toISOString().split("T")[0];
-    const reportedSiteIds = new Set(systemActivities.filter(a => a.date === todayStr && a.moduleType === "Progress").map(a => a.siteId));
-    return activeSites.filter(s => !reportedSiteIds.has(s.id)).length;
-  }, [sites, systemActivities]);
+  const totalMaterialsCount = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    return rawMaterials.filter(m => siteIds.has(m.siteId)).length;
+  }, [sites, rawMaterials]);
 
-  const pendingMaterialApprovalCount = useMemo(() => {
-    return approvals.filter(a => (a.status || "").toLowerCase() === "pending" && a.type === "Material").length;
-  }, [approvals]);
+  const activeWorkersCount = useMemo(() => {
+    return rawWorkers.length;
+  }, [rawWorkers]);
 
-  const pendingEngineerApprovalCount = useMemo(() => {
-    return approvals.filter(a => (a.status || "").toLowerCase() === "pending" && (a.type === "Leave" || a.type === "Location")).length;
-  }, [approvals]);
-
-  const pendingExpenseCount = useMemo(() => {
-    return rawExpenses.filter(e => (e.status || "").toLowerCase() === "pending").length;
-  }, [rawExpenses]);
-
-  // Derived values for the 6 exact KPI cards
   const runningProjectsCount = useMemo(() => {
     return sites.filter(s => {
       const st = (s.status || "active").toLowerCase();
@@ -462,7 +431,15 @@ export default function AdminDashboard() {
     return sites.filter(s => (s.status || "").toLowerCase() === "delayed" || s.isSiteDelayed).length;
   }, [sites]);
 
-  // Expenses breakdown by category for Expense Overview Chart
+  // Today Expenses Sum
+  const todayExpensesSum = useMemo(() => {
+    const todayStr = todayDateKeys[0];
+    return rawExpenses
+      .filter(e => todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0])))
+      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [rawExpenses, todayDateKeys]);
+
+  // Expenses breakdown by category
   const expenseCategoryBreakdown = useMemo(() => {
     const categories = { "Material": 0, "Labour": 0, "Fuel & Equipment": 0, "Other": 0 };
     rawExpenses.forEach(exp => {
@@ -480,7 +457,7 @@ export default function AdminDashboard() {
     return Object.values(expenseCategoryBreakdown).reduce((a, b) => a + b, 0);
   }, [expenseCategoryBreakdown]);
 
-  // Projects sorted for Upcoming Deadlines card
+  // Upcoming Deadlines
   const upcomingDeadlines = useMemo(() => {
     return sites
       .filter(s => s.expectedEndDate || s.startDate)
@@ -533,18 +510,34 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* KPI 3: Today's Labour */}
+          {/* KPI 3: Today's Engineer Attendance (Single Source of Truth) */}
+          <div className="admin-summary-card" style={{ borderColor: presentCount > 0 ? "#bbf7d0" : "var(--border-color)" }}>
+            <div className="admin-summary-icon" style={{ backgroundColor: "#f0fdf4", color: "#16a34a" }}>
+              <UserCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ display: "flex", alignItems: "baseline", gap: "6px" }}>
+                <span>{presentCount} / {activeEngineersCount}</span>
+                <span style={{ fontSize: "12px", fontWeight: "700", color: "#16a34a" }}>
+                  ({attendanceRate}%)
+                </span>
+              </div>
+              <div className="admin-summary-label">Today's Attendance</div>
+            </div>
+          </div>
+
+          {/* KPI 4: Today's Labour */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-slate">
               <Users size={20} />
             </div>
             <div className="admin-summary-info">
-              <div className="admin-summary-value">{metrics.activeWorkers}</div>
+              <div className="admin-summary-value">{activeWorkersCount}</div>
               <div className="admin-summary-label">Today's Labour</div>
             </div>
           </div>
 
-          {/* KPI 4: Today's Expense */}
+          {/* KPI 5: Today's Expense */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-orange">
               <DollarSign size={20} />
@@ -552,17 +545,6 @@ export default function AdminDashboard() {
             <div className="admin-summary-info">
               <div className="admin-summary-value">₹{todayExpensesSum.toLocaleString()}</div>
               <div className="admin-summary-label">Today's Expense</div>
-            </div>
-          </div>
-
-          {/* KPI 5: Total Engineers */}
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-green">
-              <HardHat size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{engineers.length}</div>
-              <div className="admin-summary-label">Total Engineers</div>
             </div>
           </div>
 
@@ -648,7 +630,325 @@ export default function AdminDashboard() {
 
         </div>
 
-        {/* ── 3. THIRD ROW: ACTIVE PROJECTS TABLE + UPCOMING DEADLINES ── */}
+        {/* ── 3. DEDICATED SECTION: TODAY'S ATTENDANCE ACTIVITY (SINGLE SOURCE OF TRUTH) ── */}
+        <div className="admin-attendance-card" id="today-attendance-activity-section">
+          
+          {/* Attendance Section Header */}
+          <div className="admin-attendance-header">
+            <div className="admin-attendance-title-group">
+              <h3 className="admin-attendance-title">
+                <ClipboardCheck size={18} style={{ color: "var(--brand-orange)" }} />
+                Today's Attendance Activity
+              </h3>
+              <div className="admin-attendance-live-badge">
+                <span className="admin-attendance-live-dot" />
+                Live Sync
+              </div>
+              <span style={{ fontSize: "12px", color: "var(--primary-600)", fontWeight: "600" }}>
+                • {formattedTodayDate}
+              </span>
+            </div>
+
+            {/* Live Metrics Summary Strip */}
+            <div className="admin-attendance-metrics">
+              <div className="admin-attendance-metric-pill present">
+                <UserCheck size={14} />
+                <span>Present: {presentCount}/{activeEngineersCount}</span>
+              </div>
+              <div className="admin-attendance-metric-pill onsite">
+                <Clock size={14} />
+                <span>On-Site: {onSiteCount}</span>
+              </div>
+              <div className="admin-attendance-metric-pill checkout">
+                <CheckCircle2 size={14} />
+                <span>Checked Out: {checkedOutCount}</span>
+              </div>
+              <div className="admin-attendance-metric-pill verified">
+                <ShieldCheck size={14} />
+                <span>GPS Verified: {verifiedCount}</span>
+              </div>
+              <Link 
+                to="/admin/engineers" 
+                style={{ 
+                  fontSize: "12px", 
+                  fontWeight: "700", 
+                  color: "var(--brand-orange)", 
+                  textDecoration: "none",
+                  marginLeft: "4px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "3px"
+                }}
+              >
+                All Engineers →
+              </Link>
+            </div>
+          </div>
+
+          {/* Interactive Toolbar: Search, Site Filter & Status Tabs */}
+          <div className="admin-attendance-controls-bar">
+            <div className="admin-attendance-search-group">
+              <div className="admin-attendance-search-input-wrap">
+                <Search size={14} className="admin-attendance-search-icon" />
+                <input 
+                  type="text"
+                  placeholder="Search engineer name, email or site..."
+                  value={attendanceSearchQuery}
+                  onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                  className="admin-attendance-search-input"
+                />
+              </div>
+
+              <select
+                value={attendanceSiteFilter}
+                onChange={(e) => setAttendanceSiteFilter(e.target.value)}
+                className="admin-attendance-select"
+              >
+                <option value="">All Sites ({sites.length})</option>
+                {sites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="admin-attendance-tabs">
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "all" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("all")}
+              >
+                All Checked-In ({todayAttendanceList.length})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "onsite" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("onsite")}
+              >
+                On-Site Now ({onSiteCount})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${attendanceStatusFilter === "checkout" ? "active" : ""}`}
+                onClick={() => setAttendanceStatusFilter("checkout")}
+              >
+                Checked Out ({checkedOutCount})
+              </button>
+            </div>
+          </div>
+
+          {/* Attendance Activity Table / List */}
+          <div className="admin-attendance-table-wrap">
+            {filteredTodayAttendance.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "40px 20px", background: "#f8fafc" }}>
+                <div style={{ width: "44px", height: "44px", borderRadius: "100px", backgroundColor: "#ffedd5", color: "#ea580c", display: "inline-flex", alignItems: "center", justifyContent: "center", marginBottom: "10px" }}>
+                  <ClipboardCheck size={22} />
+                </div>
+                <h4 style={{ margin: "0 0 4px 0", fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                  {todayAttendanceList.length === 0 ? "No Attendance Marked Yet Today" : "No Attendance Matching Selected Filters"}
+                </h4>
+                <p style={{ margin: 0, fontSize: "12px", color: "#64748b", maxWidth: "420px", marginInline: "auto" }}>
+                  {todayAttendanceList.length === 0 
+                    ? "When site engineers check in via the mobile or web portal with GPS verification and photo proof, their records will sync here in real-time."
+                    : "Try clearing search keywords or site filters to view all recorded attendance for today."}
+                </p>
+                {todayAttendanceList.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceSearchQuery("");
+                      setAttendanceSiteFilter("");
+                      setAttendanceStatusFilter("all");
+                    }}
+                    className="erp-btn-secondary"
+                    style={{ marginTop: "12px", fontSize: "11.5px", padding: "5px 12px" }}
+                  >
+                    Reset Filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <table className="admin-attendance-table">
+                <thead>
+                  <tr>
+                    <th>Engineer</th>
+                    <th>Assigned Site</th>
+                    <th>Check-In Time</th>
+                    <th>Check-Out / Status</th>
+                    <th>Location & Geofence</th>
+                    <th style={{ textAlign: "center" }}>Photo Proof</th>
+                    <th style={{ textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTodayAttendance.map((rec) => {
+                    const hasDistance = rec.distance !== null && rec.distance !== undefined;
+                    const isOnSiteGeofence = hasDistance && rec.distance <= 150;
+
+                    return (
+                      <tr key={rec.id}>
+                        {/* Engineer Info */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                            {rec.engineerAvatar ? (
+                              <img 
+                                src={rec.engineerAvatar} 
+                                alt={rec.engineerName} 
+                                className="admin-attendance-avatar"
+                              />
+                            ) : (
+                              <div className="admin-attendance-avatar">
+                                {(rec.engineerName || "E").charAt(0).toUpperCase()}
+                              </div>
+                            )}
+                            <div>
+                              <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>
+                                {rec.engineerName}
+                              </strong>
+                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>
+                                {rec.engineerPhone || rec.engineerEmail || "Site Engineer"}
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Assigned Site */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Building2 size={14} style={{ color: "var(--brand-orange)", flexShrink: 0 }} />
+                            <div>
+                              <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
+                                {rec.siteName}
+                              </strong>
+                              {rec.clientName && (
+                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)", display: "block" }}>
+                                  Client: {rec.clientName}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Check-In Time */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                            <Clock size={14} style={{ color: "#16a34a", flexShrink: 0 }} />
+                            <div>
+                              <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#15803d", display: "block" }}>
+                                {rec.checkInTimeFormatted}
+                              </span>
+                              <span style={{ fontSize: "10.5px", color: "#64748b" }}>
+                                Checked In
+                              </span>
+                            </div>
+                          </div>
+                        </td>
+
+                        {/* Check-Out / Active Status */}
+                        <td>
+                          {rec.isCheckedOut ? (
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <CheckCircle2 size={14} style={{ color: "#2563eb", flexShrink: 0 }} />
+                              <div>
+                                <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#1d4ed8", display: "block" }}>
+                                  {rec.checkOutTimeFormatted || "Completed"}
+                                </span>
+                                <span style={{ fontSize: "10.5px", color: "#64748b" }}>
+                                  Checked Out
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <span style={{ 
+                              display: "inline-flex", 
+                              alignItems: "center", 
+                              gap: "5px",
+                              backgroundColor: "#f0fdf4", 
+                              color: "#16a34a", 
+                              border: "1px solid #bbf7d0", 
+                              padding: "3px 8px", 
+                              borderRadius: "6px",
+                              fontSize: "11px",
+                              fontWeight: "700"
+                            }}>
+                              <span style={{ width: "6px", height: "6px", backgroundColor: "#22c55e", borderRadius: "50%" }} />
+                              Active On-Site
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Location & Geofence Details */}
+                        <td>
+                          <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                              <span className="admin-attendance-gps-badge">
+                                <MapPin size={11} />
+                                {rec.latitude && rec.longitude 
+                                  ? `${Number(rec.latitude).toFixed(4)}, ${Number(rec.longitude).toFixed(4)}`
+                                  : "GPS Logged"}
+                              </span>
+
+                              {hasDistance && (
+                                <span className={`admin-attendance-distance-badge ${isOnSiteGeofence ? "on-site" : "off-site"}`}>
+                                  <Navigation size={10} />
+                                  {rec.distance < 1000 
+                                    ? `${Math.round(rec.distance)}m from site` 
+                                    : `${(rec.distance / 1000).toFixed(1)}km from site`}
+                                </span>
+                              )}
+                            </div>
+                            <span style={{ fontSize: "11px", color: "#64748b", maxWidth: "240px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={rec.addressDisplay}>
+                              {rec.addressDisplay}
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Photo Proof */}
+                        <td style={{ textAlign: "center" }}>
+                          {rec.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInspectRecord(rec)}
+                              className="admin-attendance-thumb-btn"
+                              title="Click to view full photo verification"
+                            >
+                              <img 
+                                src={rec.photoUrl} 
+                                alt="Check-in Selfie" 
+                                className="admin-attendance-thumb-img"
+                              />
+                              <div className="admin-attendance-thumb-overlay">
+                                <Eye size={12} />
+                              </div>
+                            </button>
+                          ) : (
+                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>
+                              No Photo
+                            </span>
+                          )}
+                        </td>
+
+                        {/* Action: Inspect */}
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInspectRecord(rec)}
+                            className="erp-btn-secondary"
+                            style={{ padding: "4px 10px", fontSize: "11px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          >
+                            <Eye size={12} />
+                            Details
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* ── 4. FOURTH ROW: ACTIVE PROJECTS TABLE + UPCOMING DEADLINES ── */}
         <div className="admin-bottom-grid">
           
           {/* ACTIVE PROJECTS TABLE */}
@@ -707,13 +1007,12 @@ export default function AdminDashboard() {
                       });
 
                       // Calculate site's today expense
-                      const todayStr = new Date().toISOString().split("T")[0];
                       const siteExpenseToday = rawExpenses
-                        .filter(e => e.siteId === site.id && (e.date === todayStr || (e.createdAt?.seconds && new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0] === todayStr)))
+                        .filter(e => e.siteId === site.id && (todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0]))))
                         .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
 
                       // Count workers at this site today
-                      const siteWorkerCount = rawAttendanceToday.filter(a => a.siteId === site.id).length;
+                      const siteWorkerCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
 
                       return (
                         <tr key={site.id}>
@@ -747,7 +1046,7 @@ export default function AdminDashboard() {
                             </div>
                           </td>
                           <td className="col-workers" style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600", fontVariantNumeric: "tabular-nums" }}>
-                            {siteWorkerCount > 0 ? `${siteWorkerCount} Active` : "--"}
+                            {siteWorkerCount > 0 ? `${siteWorkerCount} Eng Present` : "--"}
                           </td>
                           <td className="col-expense" style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
                             {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
@@ -813,8 +1112,149 @@ export default function AdminDashboard() {
 
       </div>
 
+      {/* ── ATTENDANCE VERIFICATION & PHOTO INSPECTION MODAL ── */}
+      <Modal
+        isOpen={Boolean(selectedInspectRecord)}
+        onClose={() => setSelectedInspectRecord(null)}
+        title={selectedInspectRecord ? `Attendance Proof: ${selectedInspectRecord.engineerName}` : "Attendance Verification"}
+        maxWidth="680px"
+      >
+        {selectedInspectRecord && (
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            <div className="admin-attendance-inspect-grid">
+              
+              {/* Photo Box */}
+              <div className="admin-attendance-inspect-photo-box">
+                {selectedInspectRecord.photoUrl ? (
+                  <img 
+                    src={selectedInspectRecord.photoUrl} 
+                    alt="Engineer Check-in" 
+                    className="admin-attendance-inspect-photo"
+                  />
+                ) : (
+                  <div style={{ textAlign: "center", color: "#94a3b8" }}>
+                    <HardHat size={36} style={{ marginBottom: "6px" }} />
+                    <span style={{ fontSize: "11px", display: "block" }}>No photo proof</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Details List */}
+              <div className="admin-attendance-inspect-details">
+                <div className="admin-attendance-inspect-row">
+                  <span className="admin-attendance-inspect-label">Site Engineer</span>
+                  <span className="admin-attendance-inspect-val" style={{ fontSize: "14px", fontWeight: "800" }}>
+                    {selectedInspectRecord.engineerName}
+                  </span>
+                  <span style={{ fontSize: "11.5px", color: "#64748b" }}>
+                    {selectedInspectRecord.engineerEmail} {selectedInspectRecord.engineerPhone ? `• ${selectedInspectRecord.engineerPhone}` : ""}
+                  </span>
+                </div>
+
+                <div className="admin-attendance-inspect-row">
+                  <span className="admin-attendance-inspect-label">Assigned Site</span>
+                  <span className="admin-attendance-inspect-val" style={{ color: "var(--brand-orange)" }}>
+                    {selectedInspectRecord.siteName}
+                  </span>
+                  {selectedInspectRecord.clientName && (
+                    <span style={{ fontSize: "11px", color: "#64748b" }}>
+                      Client: {selectedInspectRecord.clientName}
+                    </span>
+                  )}
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+                  <div className="admin-attendance-inspect-row">
+                    <span className="admin-attendance-inspect-label">Check-In Time</span>
+                    <span className="admin-attendance-inspect-val" style={{ color: "#16a34a" }}>
+                      {selectedInspectRecord.checkInTimeFormatted}
+                    </span>
+                  </div>
+                  <div className="admin-attendance-inspect-row">
+                    <span className="admin-attendance-inspect-label">Check-Out Time</span>
+                    <span className="admin-attendance-inspect-val" style={{ color: selectedInspectRecord.isCheckedOut ? "#2563eb" : "#f97316" }}>
+                      {selectedInspectRecord.checkOutTimeFormatted || "Active On-Site"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="admin-attendance-inspect-row">
+                  <span className="admin-attendance-inspect-label">GPS Geofence Distance</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "2px" }}>
+                    {selectedInspectRecord.distance !== null && selectedInspectRecord.distance !== undefined ? (
+                      <span className={`admin-attendance-distance-badge ${selectedInspectRecord.distance <= 150 ? "on-site" : "off-site"}`}>
+                        <Navigation size={11} />
+                        {selectedInspectRecord.distance < 1000 
+                          ? `${Math.round(selectedInspectRecord.distance)} meters from site boundary` 
+                          : `${(selectedInspectRecord.distance / 1000).toFixed(2)} km from site`}
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#64748b" }}>Standard GPS Logged</span>
+                    )}
+
+                    <span className="admin-attendance-gps-badge">
+                      <ShieldCheck size={11} />
+                      Verified
+                    </span>
+                  </div>
+                </div>
+
+                <div className="admin-attendance-inspect-row">
+                  <span className="admin-attendance-inspect-label">Captured Location & Address</span>
+                  <span className="admin-attendance-inspect-val" style={{ fontSize: "12px", lineHeight: "1.4" }}>
+                    {selectedInspectRecord.addressDisplay}
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Check-Out Photo Preview if present */}
+            {selectedInspectRecord.checkOutPhotoUrl && (
+              <div style={{ padding: "12px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <span className="admin-attendance-inspect-label" style={{ display: "block", marginBottom: "8px" }}>
+                  Check-Out Verification Photo
+                </span>
+                <div style={{ width: "100px", height: "100px", borderRadius: "6px", overflow: "hidden" }}>
+                  <img 
+                    src={selectedInspectRecord.checkOutPhotoUrl} 
+                    alt="Check-out proof" 
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }} 
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingTop: "12px", borderTop: "1px solid #e2e8f0" }}>
+              {selectedInspectRecord.latitude && selectedInspectRecord.longitude ? (
+                <a
+                  href={`https://www.google.com/maps?q=${selectedInspectRecord.latitude},${selectedInspectRecord.longitude}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="erp-btn-secondary"
+                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px" }}
+                >
+                  <MapPin size={14} style={{ color: "#0284c7" }} />
+                  Open in Google Maps
+                  <ExternalLink size={12} />
+                </a>
+              ) : <div />}
+
+              <button
+                type="button"
+                onClick={() => setSelectedInspectRecord(null)}
+                className="erp-btn-primary"
+                style={{ padding: "6px 18px", fontSize: "12.5px" }}
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
       <Loading show={loading} text="Loading Construction ERP..." />
     </Layout>
   );
 }
-
