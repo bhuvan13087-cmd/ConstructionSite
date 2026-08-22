@@ -6731,13 +6731,27 @@ body:has(.landing-page-container) {
   margin-top: 2px;
 }
 
-/* 2. MIDDLE ROW (Status & Expense Overview) */
+/* 2. ANALYTICS & INSIGHTS GRID (3-Column Executive Stack) */
+.admin-analytics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.25fr 1fr;
+  gap: 16px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .admin-middle-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   width: 100%;
   box-sizing: border-box;
+}
+
+@media (max-width: 1200px) {
+  .admin-analytics-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .admin-card {

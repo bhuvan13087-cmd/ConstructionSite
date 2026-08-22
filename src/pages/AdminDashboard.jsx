@@ -561,76 +561,7 @@ export default function AdminDashboard() {
 
         </div>
 
-        {/* ── 2. SECOND ROW: CONSTRUCTION STATUS & EXPENSE OVERVIEW ── */}
-        <div className="admin-middle-grid">
-          
-          {/* CONSTRUCTION STATUS CARD */}
-          <div className="admin-card">
-            <div className="admin-card-header">
-              <h3 className="admin-card-title">
-                <Building2 size={16} style={{ color: "var(--brand-orange)" }} />
-                Construction Site Status
-              </h3>
-              <span className="admin-card-subtitle">Total Sites: {sites.length}</span>
-            </div>
-
-            <div className="admin-status-grid">
-              <div className="admin-status-box running">
-                <div className="status-num">{runningProjectsCount}</div>
-                <div className="status-lbl">Running</div>
-              </div>
-              <div className="admin-status-box completed">
-                <div className="status-num">{completedProjectsCount}</div>
-                <div className="status-lbl">Completed</div>
-              </div>
-              <div className="admin-status-box on-hold">
-                <div className="status-num">{onHoldProjectsCount}</div>
-                <div className="status-lbl">On Hold</div>
-              </div>
-              <div className="admin-status-box delayed">
-                <div className="status-num">{delayedProjectsCount}</div>
-                <div className="status-lbl">Delayed</div>
-              </div>
-            </div>
-          </div>
-
-          {/* EXPENSE OVERVIEW */}
-          <div className="admin-card">
-            <div className="admin-card-header">
-              <h3 className="admin-card-title">
-                <DollarSign size={16} style={{ color: "var(--brand-orange)" }} />
-                Expense Overview
-              </h3>
-              <span className="admin-card-subtitle">Total Logged: ₹{totalExpenseAllTime.toLocaleString()}</span>
-            </div>
-
-            <div className="admin-expense-list">
-              {Object.entries(expenseCategoryBreakdown).map(([catName, amount]) => {
-                const pct = totalExpenseAllTime > 0 ? Math.round((amount / totalExpenseAllTime) * 100) : 0;
-                return (
-                  <div key={catName} className="admin-expense-item">
-                    <div className="admin-expense-item-header">
-                      <span className="admin-expense-cat">{catName}</span>
-                      <span className="admin-expense-val">₹{amount.toLocaleString()} ({pct}%)</span>
-                    </div>
-                    <div className="admin-progress-track">
-                      <div 
-                        className="admin-progress-fill"
-                        style={{ 
-                          width: `${Math.max(3, pct)}%`, 
-                          backgroundColor: catName === "Material" ? "#f97316" : catName === "Labour" ? "#ea580c" : catName === "Fuel & Equipment" ? "#16a34a" : "#64748b" 
-                        }} 
-                      />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-        </div>
-
-        {/* ── 3. DEDICATED SECTION: TODAY'S ATTENDANCE ACTIVITY (SINGLE SOURCE OF TRUTH) ── */}
+        {/* ── 2. DEDICATED SECTION: TODAY'S ATTENDANCE ACTIVITY (LIVE WORKFORCE FEED) ── */}
         <div className="admin-attendance-card" id="today-attendance-activity-section">
           
           {/* Attendance Section Header */}
@@ -948,127 +879,74 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        {/* ── 4. FOURTH ROW: ACTIVE PROJECTS TABLE + UPCOMING DEADLINES ── */}
-        <div className="admin-bottom-grid">
+        {/* ── 3. THIRD ROW: 3-CARD ANALYTICS & INSIGHTS GRID ── */}
+        <div className="admin-analytics-grid">
           
-          {/* ACTIVE PROJECTS TABLE */}
-          <div className="admin-table-card">
-            <div className="admin-table-header">
-              <div>
-                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Active Projects Overview</h3>
-                <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Detailed site progress, supervision, and daily costs</p>
-              </div>
-              <Link to="/admin/sites" style={{ fontSize: "12px", fontWeight: "700", color: "var(--brand-orange)", textDecoration: "none" }}>
-                View All ({sites.length}) →
-              </Link>
+          {/* CARD 1: CONSTRUCTION STATUS */}
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <h3 className="admin-card-title">
+                <Building2 size={16} style={{ color: "var(--brand-orange)" }} />
+                Construction Site Status
+              </h3>
+              <span className="admin-card-subtitle">Total Sites: {sites.length}</span>
             </div>
 
-            <div className="admin-table-scroll">
-              <table className="admin-table">
-                <colgroup>
-                  <col className="col-site" />
-                  <col className="col-engineer" />
-                  <col className="col-progress" />
-                  <col className="col-workers" />
-                  <col className="col-expense" />
-                  <col className="col-status" />
-                  <col className="col-action" />
-                </colgroup>
-                <thead>
-                  <tr>
-                    <th className="col-site">Site Name</th>
-                    <th className="col-engineer">Engineer</th>
-                    <th className="col-progress">Progress</th>
-                    <th className="col-workers">Workers</th>
-                    <th className="col-expense">Today's Expense</th>
-                    <th className="col-status">Status</th>
-                    <th className="col-action">View</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sites.length === 0 ? (
-                    <tr>
-                      <td colSpan="7">
-                        <div className="erp-empty-state">
-                          <div className="erp-empty-icon"><Building2 size={22} /></div>
-                          <span style={{ fontSize: "13px", fontWeight: "600" }}>No active construction sites registered.</span>
-                          <Link to="/admin/sites" className="erp-btn-primary" style={{ marginTop: "4px" }}>+ Add Site</Link>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : (
-                    sites.map(site => {
-                      const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
-                      
-                      // Engineer name lookup
-                      const assignedEngNames = (site.assignedEngineers || []).map(uid => {
-                        const e = engineers.find(eng => eng.id === uid);
-                        return e ? e.fullName : "Engineer";
-                      });
-
-                      // Calculate site's today expense
-                      const siteExpenseToday = rawExpenses
-                        .filter(e => e.siteId === site.id && (todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0]))))
-                        .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-
-                      // Count workers at this site today
-                      const siteWorkerCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
-
-                      return (
-                        <tr key={site.id}>
-                          <td className="col-site">
-                            <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", lineHeight: "1.3" }}>{site.siteName}</strong>
-                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {site.clientName || site.location || "Site Project"}
-                            </span>
-                          </td>
-                          <td className="col-engineer">
-                            {assignedEngNames.length > 0 ? (
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
-                                {assignedEngNames.map((name, idx) => (
-                                  <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px" }}>
-                                    {name}
-                                  </span>
-                                ))}
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
-                            )}
-                          </td>
-                          <td className="col-progress">
-                            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                              <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                                <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#ea580c"), borderRadius: "100px" }} />
-                              </div>
-                              <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-950)", minWidth: "28px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                                {progVal}%
-                              </span>
-                            </div>
-                          </td>
-                          <td className="col-workers" style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600", fontVariantNumeric: "tabular-nums" }}>
-                            {siteWorkerCount > 0 ? `${siteWorkerCount} Eng Present` : "--"}
-                          </td>
-                          <td className="col-expense" style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
-                            {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
-                          </td>
-                          <td className="col-status">
-                            <Badge status={site.status || "active"} />
-                          </td>
-                          <td className="col-action">
-                            <Link to="/admin/sites" className="erp-btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>
-                              View
-                            </Link>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
+            <div className="admin-status-grid">
+              <div className="admin-status-box running">
+                <div className="status-num">{runningProjectsCount}</div>
+                <div className="status-lbl">Running</div>
+              </div>
+              <div className="admin-status-box completed">
+                <div className="status-num">{completedProjectsCount}</div>
+                <div className="status-lbl">Completed</div>
+              </div>
+              <div className="admin-status-box on-hold">
+                <div className="status-num">{onHoldProjectsCount}</div>
+                <div className="status-lbl">On Hold</div>
+              </div>
+              <div className="admin-status-box delayed">
+                <div className="status-num">{delayedProjectsCount}</div>
+                <div className="status-lbl">Delayed</div>
+              </div>
             </div>
           </div>
 
-          {/* UPCOMING DEADLINES CARD */}
+          {/* CARD 2: EXPENSE OVERVIEW */}
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <h3 className="admin-card-title">
+                <DollarSign size={16} style={{ color: "var(--brand-orange)" }} />
+                Expense Overview
+              </h3>
+              <span className="admin-card-subtitle">Total Logged: ₹{totalExpenseAllTime.toLocaleString()}</span>
+            </div>
+
+            <div className="admin-expense-list">
+              {Object.entries(expenseCategoryBreakdown).map(([catName, amount]) => {
+                const pct = totalExpenseAllTime > 0 ? Math.round((amount / totalExpenseAllTime) * 100) : 0;
+                return (
+                  <div key={catName} className="admin-expense-item">
+                    <div className="admin-expense-item-header">
+                      <span className="admin-expense-cat">{catName}</span>
+                      <span className="admin-expense-val">₹{amount.toLocaleString()} ({pct}%)</span>
+                    </div>
+                    <div className="admin-progress-track">
+                      <div 
+                        className="admin-progress-fill"
+                        style={{ 
+                          width: `${Math.max(3, pct)}%`, 
+                          backgroundColor: catName === "Material" ? "#f97316" : catName === "Labour" ? "#ea580c" : catName === "Fuel & Equipment" ? "#16a34a" : "#64748b" 
+                        }} 
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* CARD 3: UPCOMING DEADLINES */}
           <div className="admin-deadlines-card">
             <div className="admin-card-header">
               <h3 className="admin-card-title">
@@ -1108,6 +986,114 @@ export default function AdminDashboard() {
             </div>
           </div>
 
+        </div>
+
+        {/* ── 4. FOURTH ROW: ACTIVE PROJECTS OVERVIEW TABLE (FULL WIDTH) ── */}
+        <div className="admin-table-card" style={{ width: "100%" }}>
+          <div className="admin-table-header">
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Active Projects Operations Matrix</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Detailed site supervision, real-time workforce deployment, and daily costs</p>
+            </div>
+            <Link to="/admin/sites" style={{ fontSize: "12px", fontWeight: "700", color: "var(--brand-orange)", textDecoration: "none" }}>
+              View All Sites ({sites.length}) →
+            </Link>
+          </div>
+
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th style={{ width: "24%" }}>Site Name</th>
+                  <th style={{ width: "20%" }}>Assigned Engineers</th>
+                  <th style={{ width: "18%" }}>Live Progress</th>
+                  <th style={{ width: "12%" }}>Active On-Site</th>
+                  <th style={{ width: "13%" }}>Today's Expense</th>
+                  <th style={{ width: "13%", textAlign: "center" }}>Status</th>
+                  <th style={{ width: "60px", textAlign: "right" }}>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sites.length === 0 ? (
+                  <tr>
+                    <td colSpan="7">
+                      <div className="erp-empty-state">
+                        <div className="erp-empty-icon"><Building2 size={22} /></div>
+                        <span style={{ fontSize: "13px", fontWeight: "600" }}>No active construction sites registered.</span>
+                        <Link to="/admin/sites" className="erp-btn-primary" style={{ marginTop: "4px" }}>+ Add Site</Link>
+                      </div>
+                    </td>
+                  </tr>
+                ) : (
+                  sites.map(site => {
+                    const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
+                    
+                    // Engineer name lookup
+                    const assignedEngNames = (site.assignedEngineers || []).map(uid => {
+                      const e = engineers.find(eng => eng.id === uid);
+                      return e ? e.fullName : "Engineer";
+                    });
+
+                    // Calculate site's today expense
+                    const siteExpenseToday = rawExpenses
+                      .filter(e => e.siteId === site.id && (todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0]))))
+                      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+
+                    // Count workers at this site today
+                    const siteWorkerCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
+
+                    return (
+                      <tr key={site.id}>
+                        <td>
+                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", lineHeight: "1.3" }}>{site.siteName}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {site.clientName || site.location || "Site Project"}
+                          </span>
+                        </td>
+                        <td>
+                          {assignedEngNames.length > 0 ? (
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                              {assignedEngNames.map((name, idx) => (
+                                <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px" }}>
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
+                          )}
+                        </td>
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                              <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#ea580c"), borderRadius: "100px" }} />
+                            </div>
+                            <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-950)", minWidth: "28px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                              {progVal}%
+                            </span>
+                          </div>
+                        </td>
+                        <td style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600", fontVariantNumeric: "tabular-nums" }}>
+                          {siteWorkerCount > 0 ? `${siteWorkerCount} Eng Present` : "--"}
+                        </td>
+                        <td style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
+                          {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          <Badge status={site.status || "active"} />
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          <Link to="/admin/sites" className="erp-btn-secondary" style={{ padding: "4px 10px", fontSize: "11px" }}>
+                            View
+                          </Link>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
 
       </div>
