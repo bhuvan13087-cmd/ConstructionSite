@@ -66,7 +66,8 @@ import {
   receiveMaterialTransfer,
   subscribeMaterialTransfersForSite,
   hasVerifiedAttendanceForDate,
-  verifyEngineerAttendanceGate
+  verifyEngineerAttendanceGate,
+  subscribeTodayAttendance
 } from "../services/firebaseService.js";
 import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
@@ -273,29 +274,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   // Production Attendance Verification Gate Check for Site + Date + Engineer
   const isAttendanceVerifiedForSiteAndDate = (siteId, dateStr) => {
-    if (!siteId || !dateStr || !currentEngineerId) return false;
-    const cleanSiteId = String(siteId).trim();
+    if (!currentEngineerId || !dateStr) return false;
+    const cleanSiteId = siteId ? String(siteId).trim() : "";
     const cleanDateStr = String(dateStr).trim();
     const cleanEngineerId = String(currentEngineerId).trim();
     const gateKey = `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`;
+    const dailyKey = `daily_${cleanEngineerId}_${cleanDateStr}`;
 
     // 1. Check in-memory unlocked cache
-    if (unlockedGates[gateKey]) {
+    if (unlockedGates[gateKey] || unlockedGates[dailyKey]) {
       return true;
     }
 
-    // 2. Check todayAttendance if date matches and site matches
+    // 2. Check todayAttendance if date matches and status is valid
     if (todayAttendance) {
       const todayDate = todayAttendance.date || todayAttendance.attendanceDate;
-      const todaySite = todayAttendance.siteId;
-      if (String(todaySite).trim() === cleanSiteId && String(todayDate).trim() === cleanDateStr) {
+      if (String(todayDate).trim() === cleanDateStr) {
         if (todayAttendance.type !== "labour_attendance_lock" && !todayAttendance.id?.startsWith("labour_lock_")) {
           const isPresent = todayAttendance.status === "present" || todayAttendance.status === "checked_out" || todayAttendance.status === "verified";
           const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent || !!todayAttendance.time;
           const isNotRejected = todayAttendance.status !== "absent" && todayAttendance.status !== "rejected" && todayAttendance.status !== "cancelled" && todayAttendance.status !== "failed";
           if (isVerified && isNotRejected) {
-            if (!unlockedGates[gateKey]) {
-              setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
+            if (!unlockedGates[gateKey] || !unlockedGates[dailyKey]) {
+              setUnlockedGates(prev => ({ ...prev, [gateKey]: true, [dailyKey]: true }));
             }
             return true;
           }
@@ -310,21 +311,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         return false;
       }
       const recDate = r.date || r.attendanceDate;
-      const recSite = r.siteId;
       const recUser = r.engineerId || r.userId;
       
-      const isSameSite = String(recSite).trim() === cleanSiteId;
       const isSameDate = String(recDate).trim() === cleanDateStr;
       const isSameEng = !recUser || String(recUser).trim() === cleanEngineerId;
       const isPresent = r.status === "present" || r.status === "checked_out" || r.status === "verified";
       const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent || !!r.time;
       const isNotRejected = r.status !== "absent" && r.status !== "rejected" && r.status !== "cancelled" && r.status !== "failed";
-      return isSameSite && isSameDate && isSameEng && isVerified && isNotRejected;
+      return isSameDate && isSameEng && isVerified && isNotRejected;
     });
 
     if (match) {
-      if (!unlockedGates[gateKey]) {
-        setUnlockedGates(prev => ({ ...prev, [gateKey]: true }));
+      if (!unlockedGates[gateKey] || !unlockedGates[dailyKey]) {
+        setUnlockedGates(prev => ({ ...prev, [gateKey]: true, [dailyKey]: true }));
       }
       return true;
     }
@@ -683,19 +682,21 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const todayStr = new Date().toISOString().split("T")[0];
       const engineerId = userProfile.uid || userProfile.id || "";
       
-      // Load assigned sites, all sites, and personal engineer records in parallel
+      // Load assigned sites, all sites, personal engineer records, and today's attendance in parallel
       const [
         filteredSites,
         sites,
         stats,
         leaves,
-        history
+        history,
+        todayAtt
       ] = await Promise.all([
         getAssignedSitesForEngineer(engineerId).catch(err => { console.error("Failed to load assigned sites:", err); return []; }),
         getSites().catch(err => { console.error("Failed to load all sites:", err); return []; }),
         getEngineerAttendanceAndLeaveStats(engineerId, userProfile.holidayAllowance || 24).catch(err => { console.error("Failed to load personal stats:", err); return null; }),
         getEngineerLeaves(engineerId).catch(err => { console.error("Failed to load leaves:", err); return []; }),
-        getEngineerAttendanceHistory(engineerId).catch(err => { console.error("Failed to load attendance history:", err); return []; })
+        getEngineerAttendanceHistory(engineerId).catch(err => { console.error("Failed to load attendance history:", err); return []; }),
+        getTodayAttendance(engineerId, todayStr).catch(err => { console.error("Failed to load today attendance:", err); return null; })
       ]);
 
       setAssignedSites(filteredSites);
@@ -703,6 +704,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       if (stats) setPersonalStats(stats);
       setLoggedLeaves(leaves);
       setAllSitesAttendance(history);
+      if (todayAtt) {
+        setTodayAttendance(todayAtt);
+        const unlockedKey = `${todayAtt.siteId}_${engineerId}_${todayStr}`;
+        setUnlockedGates(prev => ({
+          ...prev,
+          [unlockedKey]: true,
+          [`daily_${engineerId}_${todayStr}`]: true
+        }));
+      }
 
       if (filteredSites.length > 0) {
         let currentActiveId = activeSiteId;
@@ -710,14 +720,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           currentActiveId = filteredSites[0].id;
           setActiveSiteId(currentActiveId);
         } else if (!activeSiteId) {
-          // If multiple sites and none selected yet, leave activeSiteId empty
-          setActiveSiteId("");
-          setTodayAttendance(null);
-          setSitePhotos([]);
-          setDailyUpdates([]);
-          setMaterials([]);
-          setLoading(false);
-          return;
+          // If multiple sites and none selected yet, default to today's checked-in site if assigned, else first assigned site
+          currentActiveId = (todayAtt && filteredSites.some(s => s.id === todayAtt.siteId)) ? todayAtt.siteId : filteredSites[0].id;
+          setActiveSiteId(currentActiveId);
         } else {
           const isAssigned = filteredSites.some(s => s.id === activeSiteId);
           if (!isAssigned) {
@@ -740,7 +745,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           lm,
           userNotifications
         ] = await Promise.all([
-          getTodayAttendance(engineerId, todayStr).catch(() => null),
+          todayAtt ? Promise.resolve(todayAtt) : getTodayAttendance(engineerId, todayStr).catch(() => null),
           getDailyUpdatesForEngineer(engineerId, currentActiveId).catch(() => []),
           getMaterialsDetailed(currentActiveId).catch(() => []),
           getGeneralExpenses(currentActiveId).catch(() => []),
@@ -750,7 +755,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           getNotifications(engineerId).catch(() => [])
         ]);
 
-        setTodayAttendance(attendance);
+        if (attendance) {
+          setTodayAttendance(attendance);
+        }
         setDailyUpdates(updates);
         setMaterials(siteMats);
         setGeneralExpenses(ge);
@@ -953,6 +960,29 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       unsubscribeMatTeams();
     };
   }, []);
+
+  // Real-time synchronization for engineer's daily attendance
+  useEffect(() => {
+    const engineerId = userProfile?.uid || userProfile?.id;
+    if (!engineerId) return;
+    const todayStr = new Date().toISOString().split("T")[0];
+
+    const unsubscribe = subscribeTodayAttendance(engineerId, todayStr, (topRecord) => {
+      if (topRecord) {
+        setTodayAttendance(topRecord);
+        const unlockedKey = `${topRecord.siteId}_${engineerId}_${todayStr}`;
+        setUnlockedGates(prev => ({
+          ...prev,
+          [unlockedKey]: true,
+          [`daily_${engineerId}_${todayStr}`]: true
+        }));
+      }
+    });
+
+    return () => {
+      if (typeof unsubscribe === "function") unsubscribe();
+    };
+  }, [userProfile]);
 
   // Real-time synchronization for general expenses
   useEffect(() => {
@@ -4225,37 +4255,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   };
 
   const renderAttendanceView = () => {
-    if (!savedSiteLocation) {
+    // 1. If today's attendance is already marked / completed, ALWAYS render the confirmed card
+    if (todayAttendance) {
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <div style={{ textAlign: "center", marginBottom: "8px" }}>
             <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Today Attendance — Marked / Completed</p>
           </div>
-          <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <MapPin size={18} style={{ color: "var(--danger-600)" }} />
-                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site GPS Coordinates Not Set</span>
-              </div>
-              <Badge status="inactive">Action Required</Badge>
-            </div>
-            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5", textAlign: "left" }}>
-              The official coordinates for this construction worksite have not been set by the Admin yet. Please request your administrator to configure the GPS location using Google Maps in the Admin Control Panel.
-            </p>
-          </div>
-        </div>
-      );
-    }
 
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-        <div style={{ textAlign: "center", marginBottom: "8px" }}>
-          <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
-          <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
-        </div>
-
-        {todayAttendance ? (
           <div style={{
             backgroundColor: "#ffffff",
             borderRadius: "var(--radius-md)",
@@ -4282,7 +4290,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             </div>
             <div>
               <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--success-700)" }}>
-                Check-In Confirmed
+                Today Attendance Marked / Completed
               </h4>
               <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "var(--text-muted)" }}>
                 You are marked present at the construction site today.
@@ -4315,8 +4323,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 <strong style={{ color: "var(--primary-900)" }}>{todayAttendance.time || "Today"}</strong>
               </div>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
+                <span style={{ color: "var(--text-muted)" }}>Status:</span>
+                <strong style={{ color: "var(--success-700)", textTransform: "capitalize" }}>{todayAttendance.status || "Present"}</strong>
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
                 <span style={{ color: "var(--text-muted)" }}>Check-In GPS:</span>
-                <strong style={{ color: "var(--primary-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.gpsLocationAddress || (todayAttendance.latitude ? `${Number(todayAttendance.latitude).toFixed(4)}, ${Number(todayAttendance.longitude).toFixed(4)}` : "Verified Boundary")}</strong>
+                <strong style={{ color: "var(--primary-900)", wordBreak: "break-all", textAlign: "right" }}>{todayAttendance.address || todayAttendance.gpsLocationAddress || (todayAttendance.latitude ? `${Number(todayAttendance.latitude).toFixed(4)}, ${Number(todayAttendance.longitude).toFixed(4)}` : "Verified Boundary")}</strong>
               </div>
             </div>
 
@@ -4326,8 +4338,35 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               </div>
             )}
           </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        </div>
+      );
+    }
+
+    if (!savedSiteLocation) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          <div style={{ textAlign: "center", marginBottom: "8px" }}>
+            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-900)" }}>Site Check-In Verification</h4>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)" }}>Enforce location-tagged photo capture within worksite boundaries</p>
+          </div>
+          <div className="mobile-attendance-card" style={{ border: "1.5px dashed var(--danger-500)", backgroundColor: "var(--danger-50)", flexDirection: "column", alignItems: "stretch", gap: "12px", height: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <MapPin size={18} style={{ color: "var(--danger-600)" }} />
+                <span style={{ fontWeight: "800", color: "var(--primary-900)", fontSize: "14px" }}>Site GPS Coordinates Not Set</span>
+              </div>
+              <Badge status="inactive">Action Required</Badge>
+            </div>
+            <p style={{ margin: 0, fontSize: "12.5px", color: "var(--text-muted)", lineHeight: "1.5", textAlign: "left" }}>
+              The official coordinates for this construction worksite have not been set by the Admin yet. Please request your administrator to configure the GPS location using Google Maps in the Admin Control Panel.
+            </p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {locationCheckStatus === "unchecked" && (
               <div style={{ display: "flex", flexDirection: "column", gap: "16px", alignItems: "center", justifyContent: "center", padding: "32px 16px", backgroundColor: "#ffffff", borderRadius: "var(--radius-md)", border: "1px solid var(--border-color)", boxShadow: "var(--shadow-sm)" }}>
                 <div style={{
@@ -4662,8 +4701,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 </div>
               </div>
             )}
-          </div>
-        )}
       </div>
     );
   };

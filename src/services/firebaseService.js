@@ -1238,9 +1238,9 @@ export function calculateDistanceMeters(lat1, lon1, lat2, lon2) {
  * @returns {Promise<boolean>} - True if valid verified attendance exists for that day, false otherwise
  */
 export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) {
-  if (!siteId || !engineerId || !dateStr) return false;
+  if (!engineerId || !dateStr) return false;
 
-  const cleanSiteId = String(siteId).trim();
+  const cleanSiteId = siteId ? String(siteId).trim() : null;
   const cleanEngineerId = String(engineerId).trim();
   const cleanDateStr = String(dateStr).trim();
 
@@ -1256,50 +1256,36 @@ export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) 
       // 2. Ensure date matches
       const recDate = data.date || data.attendanceDate;
       if (recDate !== cleanDateStr) return false;
-      // 3. Ensure site matches
-      if (data.siteId !== cleanSiteId) return false;
-      // 4. Ensure engineer/user matches
+      // 3. Ensure engineer/user matches
       const recUser = data.engineerId || data.userId;
       if (recUser && recUser !== cleanEngineerId) return false;
-      // 5. Ensure valid presence/verification status and not rejected/absent/failed
+      // 4. Ensure valid presence/verification status and not rejected/absent/failed
       const isPresent = data.status === "present" || data.status === "checked_out" || data.status === "verified";
       const isVerified = data.verificationStatus === "verified" || data.verificationStatus === "success" || isPresent || !!data.time;
       const isNotRejected = data.status !== "absent" && data.status !== "rejected" && data.status !== "cancelled" && data.status !== "failed";
       return isVerified && isNotRejected;
     };
 
-    // Query 1: deterministic doc lookup: att_${cleanEngineerId}_${cleanDateStr}
-    const directDocRef1 = doc(db, "attendance", `att_${cleanEngineerId}_${cleanDateStr}`);
-    const directSnap1 = await getDoc(directDocRef1);
-    if (directSnap1.exists()) {
-      if (isValidRecord(directSnap1.data(), directSnap1.id)) {
-        return true;
-      }
+    // Query 1: deterministic doc lookups
+    const docIds = [
+      `att_${cleanEngineerId}_${cleanDateStr}`,
+      `${cleanEngineerId}_${cleanDateStr}`,
+      cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
+    ].filter(Boolean);
+
+    for (const dId of docIds) {
+      try {
+        const snap = await getDoc(doc(db, "attendance", dId));
+        if (snap.exists() && isValidRecord(snap.data(), snap.id)) {
+          return true;
+        }
+      } catch (e) {}
     }
 
-    // Query 2: deterministic doc lookup: ${cleanEngineerId}_${cleanDateStr}
-    const directDocRef2 = doc(db, "attendance", `${cleanEngineerId}_${cleanDateStr}`);
-    const directSnap2 = await getDoc(directDocRef2);
-    if (directSnap2.exists()) {
-      if (isValidRecord(directSnap2.data(), directSnap2.id)) {
-        return true;
-      }
-    }
-
-    // Query 3: deterministic doc lookup: ${cleanSiteId}_${cleanDateStr} (legacy)
-    const directDocRef3 = doc(db, "attendance", `${cleanSiteId}_${cleanDateStr}`);
-    const directSnap3 = await getDoc(directDocRef3);
-    if (directSnap3.exists()) {
-      if (isValidRecord(directSnap3.data(), directSnap3.id)) {
-        return true;
-      }
-    }
-
-    // Query 4: by engineerId, siteId, date
+    // Query 2: by engineerId, date
     const q1 = query(
       attendanceColl,
       where("engineerId", "==", cleanEngineerId),
-      where("siteId", "==", cleanSiteId),
       where("date", "==", cleanDateStr)
     );
     const snap1 = await getDocs(q1);
@@ -1309,11 +1295,10 @@ export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) 
       }
     }
 
-    // Query 5: by userId, siteId, date (backward compatibility)
+    // Query 3: by userId, date (backward compatibility)
     const q2 = query(
       attendanceColl,
       where("userId", "==", cleanEngineerId),
-      where("siteId", "==", cleanSiteId),
       where("date", "==", cleanDateStr)
     );
     const snap2 = await getDocs(q2);
@@ -1404,6 +1389,41 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
   }
 
   return deduplicated[0];
+}
+
+/**
+ * Real-time listener for an engineer's daily attendance records
+ * @param {string} engineerId 
+ * @param {string} dateStr 
+ * @param {function} callback 
+ * @returns {function} unsubscribe
+ */
+export function subscribeTodayAttendance(engineerId, dateStr, callback) {
+  if (!engineerId || !dateStr || typeof callback !== "function") {
+    return () => {};
+  }
+  const cleanEngineerId = String(engineerId).trim();
+  const cleanDateStr = String(dateStr).trim();
+
+  const db = getDb();
+  const attendanceColl = collection(db, "attendance");
+
+  const q = query(
+    attendanceColl,
+    where("engineerId", "==", cleanEngineerId),
+    where("date", "==", cleanDateStr)
+  );
+
+  return onSnapshot(q, (snapshot) => {
+    const list = [];
+    snapshot.forEach(docSnap => {
+      list.push({ id: docSnap.id, ...docSnap.data() });
+    });
+    const deduplicated = deduplicateDailyAttendance(list);
+    callback(deduplicated.length > 0 ? deduplicated[0] : null);
+  }, (err) => {
+    console.error("subscribeTodayAttendance error:", err);
+  });
 }
 
 // Mark attendance (Idempotent and duplicate-safe daily save mechanism)
