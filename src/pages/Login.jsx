@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn, signUp } from "../firebase/auth";
-import { createUserProfile, getUserByEmail, getUserByPhone, resetUserPasswordInAuthEmulator } from "../services/firebaseService";
+import { createUserProfile, getUserByEmail, getUserByPhone, resetUserPasswordInAuthEmulator, updateEngineerPasswordInDb } from "../services/firebaseService";
 import { useAuth } from "../context/AuthContext";
 import { 
   ShieldCheck, 

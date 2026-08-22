@@ -1060,7 +1060,7 @@ export default function ReportsDashboard() {
           cost = Number(m.totalAmount) || 0;
         } else {
           let unitCost = 500;
-          if (m.category === "Steel") fillUnitCost = 5000;
+          if (m.category === "Steel") unitCost = 5000;
           cost = (Number(m.quantity) || 0) * unitCost;
         }
         materialExpense += cost;
@@ -1172,6 +1172,7 @@ export default function ReportsDashboard() {
       // Resolve team
       const teamObj = teams.find(t => t.id === r.teamId);
       const teamId = r.teamId || "default_team";
+      const teamName = teamObj?.teamName || teamObj?.name || r.teamName || "General Labour";
       // Resolve assigned engineer and admin creator
       let engineerName = "";
       const assignedId = r.assignedEngineerId || r.engineerId;

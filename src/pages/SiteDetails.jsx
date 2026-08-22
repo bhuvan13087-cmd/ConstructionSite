@@ -3332,7 +3332,7 @@ export default function SiteDetails({ siteId, onBack }) {
           onClose={() => setShowAdminEntryModal(false)}
           initialSiteId={siteId}
           onSuccess={() => {
-            loadSiteDetails();
+            loadData();
             showToast("Admin entry saved and synced across system.", "success");
           }}
         />

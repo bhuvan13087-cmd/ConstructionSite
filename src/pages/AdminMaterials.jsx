@@ -489,8 +489,7 @@ export default function AdminMaterials() {
       await updateMaterial(selectedRequest.id, updates);
       showToast(`Material request ${status.toLowerCase()} successfully!`, "success");
       setShowApprovalModal(false);
-      await loadData();
-    } catch (err) {
+          } catch (err) {
       showToast(`Approval failed: ${err.message}`, "error");
     }
   };
@@ -520,8 +519,7 @@ export default function AdminMaterials() {
       });
       showToast("Material consumption logged successfully!", "success");
       setShowUsageModal(false);
-      await loadData();
-    } catch (err) {
+          } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
@@ -549,8 +547,7 @@ export default function AdminMaterials() {
       });
       showToast("Supplier payment reference recorded!", "success");
       setShowPaymentModal(false);
-      await loadData();
-    } catch (err) {
+          } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
   };
@@ -826,9 +823,9 @@ export default function AdminMaterials() {
                               variant="outline"
                               size="sm"
                               onClick={() => {
-                                setEditingTeam(team);
-                                setEditTeamName(team.name || "");
-                                setShowEditTeamModal(true);
+                                setTargetTeam(team);
+                                setRenamingTeamName(team.name || "");
+                                setShowRenameTeamModal(true);
                               }}
                               style={{ fontSize: "12px", padding: "6px 12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
                             >
@@ -968,9 +965,9 @@ export default function AdminMaterials() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      setEditingTeam(team);
-                                      setEditTeamName(team.name || "");
-                                      setShowEditTeamModal(true);
+                                      setTargetTeam(team);
+                                      setRenamingTeamName(team.name || "");
+                                      setShowRenameTeamModal(true);
                                     }}
                                     style={{
                                       background: "transparent",

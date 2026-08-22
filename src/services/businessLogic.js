@@ -431,7 +431,7 @@ export function formatProgress(progress) {
  * Normalizes request data structure for leave, location, and material requests to display on Approvals dashboard.
  * @param {object} item - Request item
  * @param {string} type - "Leave" | "Location" | "Material"
- * @param {array} engineers - Site engineers profiles list
+ * @param {Array} engineers - Site engineers profiles list
  * @returns {object} - Normalized request object
  */
 export function normalizeApprovalRequest(item, type, engineers) {

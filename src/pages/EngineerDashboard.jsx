@@ -2293,6 +2293,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     }
   };
 
+  const handleRemoveMaterialRow = (rowId) => {
+    setMaterialUsageRows(prev => prev.filter(row => row.rowId !== rowId));
+  };
+
   const handleQuantityRowChange = (rowId, qtyVal) => {
     setMaterialUsageRows(prev => prev.map(row => {
       if (row.rowId === rowId) {
