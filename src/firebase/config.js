@@ -6,16 +6,18 @@ let firebaseApp = null;
 let secondaryApp = null;
 let dbInstance = null;
 
-import { firebaseConfig as importedConfig } from "../../env";
+import { firebaseConfig as importedConfig } from "../../env.js";
+
+const metaEnv = (typeof import.meta !== "undefined" && import.meta && import.meta.env) ? import.meta.env : {};
 
 export const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || importedConfig?.apiKey,
-  googleMapsApiKey: import.meta.env.VITE_GOOGLE_MAPS_API_KEY || importedConfig?.googleMapsApiKey || importedConfig?.apiKey,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || importedConfig?.authDomain,
-  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || importedConfig?.projectId,
-  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || importedConfig?.storageBucket,
-  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || importedConfig?.messagingSenderId,
-  appId: import.meta.env.VITE_FIREBASE_APP_ID || importedConfig?.appId,
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || importedConfig?.apiKey,
+  googleMapsApiKey: metaEnv.VITE_GOOGLE_MAPS_API_KEY || importedConfig?.googleMapsApiKey || importedConfig?.apiKey,
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || importedConfig?.authDomain,
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || importedConfig?.projectId,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || importedConfig?.storageBucket,
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || importedConfig?.messagingSenderId,
+  appId: metaEnv.VITE_FIREBASE_APP_ID || importedConfig?.appId,
 };
 
 // Check if config exists

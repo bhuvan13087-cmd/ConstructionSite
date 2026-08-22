@@ -2136,16 +2136,19 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (activeMats.length > 0) {
       setMaterialUsageRows(activeMats.map(m => {
         const isCustom = m.type === "custom";
+        const isRateOnly = m.type === "rate_only";
         const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+        const displayName = (m.title || m.name || "").trim() || (isRateOnly ? "Rate Item" : "Material");
         return {
           rowId: `row_${m.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
           materialId: m.id,
-          materialName: m.name,
-          type: isCustom ? "custom" : "standard",
-          unit: isCustom ? "" : (m.unit || "Bag"),
+          materialName: displayName,
+          title: m.title || displayName,
+          type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+          unit: (isCustom || isRateOnly) ? "" : (m.unit || "Bag"),
           rate: amt,
           amount: amt,
-          quantity: isCustom ? 1 : ""
+          quantity: (isCustom || isRateOnly) ? 1 : ""
         };
       }));
     } else {
@@ -2171,19 +2174,22 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
     const nextMat = availableMats[0];
     const isCustom = nextMat.type === "custom";
+    const isRateOnly = nextMat.type === "rate_only";
     const amt = Number(nextMat.amount !== undefined ? nextMat.amount : (nextMat.rate !== undefined ? nextMat.rate : nextMat.unitPrice)) || 0;
+    const displayName = (nextMat.title || nextMat.name || "").trim() || (isRateOnly ? "Rate Item" : "Material");
 
     setMaterialUsageRows(prev => [
       ...prev,
       {
         rowId: `row_${nextMat.id}_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
         materialId: nextMat.id,
-        materialName: nextMat.name,
-        type: isCustom ? "custom" : "standard",
-        unit: isCustom ? "" : (nextMat.unit || "Bag"),
+        materialName: displayName,
+        title: nextMat.title || displayName,
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+        unit: (isCustom || isRateOnly) ? "" : (nextMat.unit || "Bag"),
         rate: amt,
         amount: amt,
-        quantity: isCustom ? 1 : ""
+        quantity: (isCustom || isRateOnly) ? 1 : ""
       }
     ]);
   };
@@ -2196,24 +2202,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     // Strict duplicate check across other rows in current unsaved list
     const isDuplicate = materialUsageRows.some(row => row.rowId !== rowId && row.materialId === newMatId);
     if (isDuplicate) {
-      showToast(`"${mat.name}" is already in your usage list.`, "warning");
+      showToast(`"${mat.name || mat.title || "Item"}" is already in your usage list.`, "warning");
       return;
     }
 
     const isCustom = mat.type === "custom";
+    const isRateOnly = mat.type === "rate_only";
     const amt = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice)) || 0;
+    const displayName = (mat.title || mat.name || "").trim() || (isRateOnly ? "Rate Item" : "Material");
 
     setMaterialUsageRows(prev => prev.map(row => {
       if (row.rowId === rowId) {
         return {
           ...row,
           materialId: mat.id,
-          materialName: mat.name,
-          type: isCustom ? "custom" : "standard",
-          unit: isCustom ? "" : (mat.unit || "Bag"),
+          materialName: displayName,
+          title: mat.title || displayName,
+          type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+          unit: (isCustom || isRateOnly) ? "" : (mat.unit || "Bag"),
           rate: amt,
           amount: amt,
-          quantity: isCustom ? 1 : ""
+          quantity: (isCustom || isRateOnly) ? 1 : ""
         };
       }
       return row;
@@ -2363,14 +2372,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const itemsToSave = [];
     materialUsageRows.forEach(row => {
       const isCustom = row.type === "custom";
-      if (isCustom) {
+      const isRateOnly = row.type === "rate_only";
+      if (isCustom || isRateOnly) {
         const itemAmt = Number(row.amount !== undefined ? row.amount : row.rate) || 0;
         itemsToSave.push({
           teamId: currentTeam.id,
           teamName: currentTeam.name,
-          materialName: row.materialName,
-          type: "custom",
-          materialType: "custom",
+          materialName: row.materialName || row.title || (isRateOnly ? "Rate Item" : "Material"),
+          title: row.title || row.materialName,
+          type: isRateOnly ? "rate_only" : "custom",
+          materialType: isRateOnly ? "rate_only" : "custom",
           category: currentTeam.name,
           unit: "",
           unitPrice: itemAmt,
@@ -2379,7 +2390,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           quantity: 1,
           requiredQuantity: 1,
           totalAmount: itemAmt,
-          notes: row.notes || `Custom ${row.materialName} entry for ${currentTeam.name} on ${bulkMaterialDate}`
+          notes: row.notes || `${isRateOnly ? "Rate Only" : "Custom"} ${row.materialName} entry for ${currentTeam.name} on ${bulkMaterialDate}`
         });
       } else {
         const qtyStr = row.quantity;
@@ -2404,7 +2415,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     });
 
     if (itemsToSave.length === 0) {
-      showToast(`Please enter a quantity greater than 0 for standard materials or include custom materials under "${currentTeam.name}".`, "error");
+      showToast(`Please enter a quantity greater than 0 for standard materials or include custom/rate only materials under "${currentTeam.name}".`, "error");
       return;
     }
 
@@ -2422,8 +2433,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
       showToast(`Material entry submitted & locked for "${currentTeam.name}" (${itemsToSave.length} item${itemsToSave.length !== 1 ? "s" : ""})!`, "success");
 
-      // Reset form standard quantities and remove custom items that were just submitted so engineer can add more materials
-      setMaterialUsageRows(prev => prev.filter(r => r.type !== "custom").map(r => ({ ...r, quantity: "" })));
+      // Reset form standard quantities and remove custom / rate_only items that were just submitted so engineer can add more materials
+      setMaterialUsageRows(prev => prev.filter(r => r.type !== "custom" && r.type !== "rate_only").map(r => ({ ...r, quantity: "" })));
 
       await loadDashboardData();
     } catch (err) {
@@ -5219,7 +5230,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               }
 
               const grandTotalAmount = materialUsageRows.reduce((acc, row) => {
-                if (row.type === "custom") {
+                if (row.type === "custom" || row.type === "rate_only") {
                   return acc + (Number(row.amount !== undefined ? row.amount : row.rate) || 0);
                 }
                 const q = Number(row.quantity) || 0;
@@ -5227,7 +5238,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                 return acc + (q * r);
               }, 0);
 
-              const itemsWithQtyCount = materialUsageRows.filter(r => r.type === "custom" || (Number(r.quantity) || 0) > 0).length;
+              const itemsWithQtyCount = materialUsageRows.filter(r => r.type === "custom" || r.type === "rate_only" || (Number(r.quantity) || 0) > 0).length;
 
               return (
                 <div style={{
@@ -5305,6 +5316,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                       <div>
                         {materialUsageRows.map((row) => {
                           const isCustom = row.type === "custom";
+                          const isRateOnly = row.type === "rate_only";
+                          const isSpecial = isCustom || isRateOnly;
                           const qtyNum = Number(row.quantity) || 0;
 
                           return (
@@ -5316,11 +5329,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 alignItems: "center",
                                 padding: "8px 8px",
                                 borderBottom: "1px solid #f1f5f9",
-                                backgroundColor: (isCustom || qtyNum > 0) ? "#fffaf5" : "#ffffff",
+                                backgroundColor: (isSpecial || qtyNum > 0) ? "#fffaf5" : "#ffffff",
                                 gap: "6px"
                               }}
                             >
-                              {/* 1. Material Name & Custom Amount Details */}
+                              {/* 1. Material Name & Custom / Rate Only Details */}
                               <div style={{ minWidth: 0, width: "100%", display: "flex", flexDirection: "column", gap: "2px" }}>
                                 <div style={{
                                   display: "flex",
@@ -5340,7 +5353,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                     wordBreak: "break-word",
                                     userSelect: "text"
                                   }}>
-                                    {row.materialName || "Select Material"}
+                                    {row.materialName || (isRateOnly ? "Rate Item" : "Select Material")}
                                   </span>
                                   {isCustom && (
                                     <span style={{
@@ -5356,23 +5369,37 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       Custom
                                     </span>
                                   )}
+                                  {isRateOnly && (
+                                    <span style={{
+                                      fontSize: "10.5px",
+                                      fontWeight: "750",
+                                      color: "#7c3aed",
+                                      backgroundColor: "#f5f3ff",
+                                      padding: "1px 6px",
+                                      borderRadius: "4px",
+                                      border: "1px solid #ddd6fe",
+                                      whiteSpace: "nowrap"
+                                    }}>
+                                      Rate Only
+                                    </span>
+                                  )}
                                 </div>
 
-                                {/* Custom amount subtitle & details trigger */}
+                                {/* Custom / Rate Only amount subtitle & details trigger */}
                                 <div style={{ paddingLeft: "2px", display: "flex", alignItems: "center", gap: "8px" }}>
-                                  {isCustom ? (
+                                  {isSpecial ? (
                                     <span 
-                                      onClick={() => handleOpenCustomMaterialModal(row)}
+                                      onClick={() => isCustom ? handleOpenCustomMaterialModal(row) : null}
                                       style={{
                                         fontSize: "12px",
                                         fontWeight: "750",
-                                        color: "#16a34a",
+                                        color: isRateOnly ? "#7c3aed" : "#16a34a",
                                         fontFamily: "monospace",
-                                        cursor: "pointer",
-                                        textDecoration: "underline",
+                                        cursor: isCustom ? "pointer" : "default",
+                                        textDecoration: isCustom ? "underline" : "none",
                                         textUnderlineOffset: "2px"
                                       }}
-                                      title="Tap to edit custom amount"
+                                      title={isCustom ? "Tap to edit custom amount" : "Fixed configured rate"}
                                     >
                                       ₹{(Number(row.amount !== undefined ? row.amount : row.rate) || 0).toLocaleString("en-IN")}
                                     </span>
@@ -5403,25 +5430,25 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 style={{ width: "100%", display: "flex", justifyContent: "center", alignItems: "center" }}
                                 onClick={(e) => e.stopPropagation()}
                               >
-                                {isCustom ? (
+                                {isSpecial ? (
                                   <div 
-                                    onClick={() => handleOpenCustomMaterialModal(row)}
-                                    title="Custom fixed rate entry - tap to edit amount"
+                                    onClick={() => isCustom ? handleOpenCustomMaterialModal(row) : null}
+                                    title={isRateOnly ? "Rate Only fixed entry" : "Custom fixed rate entry - tap to edit amount"}
                                     style={{
                                       width: "100%",
                                       maxWidth: "60px",
                                       height: "36px",
                                       boxSizing: "border-box",
                                       borderRadius: "6px",
-                                      border: "1.5px solid #bbf7d0",
-                                      backgroundColor: "#f0fdf4",
+                                      border: isRateOnly ? "1.5px solid #ddd6fe" : "1.5px solid #bbf7d0",
+                                      backgroundColor: isRateOnly ? "#f5f3ff" : "#f0fdf4",
                                       display: "flex",
                                       alignItems: "center",
                                       justifyContent: "center",
                                       fontSize: "13px",
                                       fontWeight: "750",
-                                      color: "#16a34a",
-                                      cursor: "pointer"
+                                      color: isRateOnly ? "#7c3aed" : "#16a34a",
+                                      cursor: isCustom ? "pointer" : "default"
                                     }}
                                   >
                                     1
@@ -5463,13 +5490,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                   borderRadius: "4px",
                                   fontSize: "11px",
                                   fontWeight: "750",
-                                  color: isCustom ? "#94a3b8" : "#475569",
+                                  color: isSpecial ? "#94a3b8" : "#475569",
                                   whiteSpace: "nowrap",
                                   textAlign: "center",
                                   minWidth: "32px",
                                   display: "inline-block"
                                 }}>
-                                  {isCustom ? "—" : (row.unit || "Unit")}
+                                  {isSpecial ? "—" : (row.unit || "Unit")}
                                 </span>
                               </div>
 

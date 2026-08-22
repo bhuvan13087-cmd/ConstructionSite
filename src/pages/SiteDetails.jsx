@@ -2499,46 +2499,50 @@ export default function SiteDetails({ siteId, onBack }) {
         {activeTab === "attendance" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
             <Card title="Engineer Attendance Records">
-              {attendance.length === 0 ? (
-                <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No attendance submissions found for this site.</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                  {attendance.map((record, index) => {
-                    const eng = engineers.find(e => e.id === record.engineerId) || { fullName: `Engineer (ID: ${record.engineerId})` };
-                    return (
-                      <div key={record.id || index} style={{
-                        padding: "12px",
-                        borderRadius: "8px",
-                        backgroundColor: "var(--primary-50)",
-                        border: "1px solid var(--border-color)",
-                        display: "flex",
-                        alignItems: "flex-start",
-                        gap: "12px"
-                      }}>
-                        {record.photoUrl && (
-                          <img 
-                            src={record.photoUrl} 
-                            alt="Selfie Verification" 
-                            style={{ width: "40px", height: "40px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--border-color)" }} 
-                          />
-                        )}
-                        <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, gap: "2px" }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
-                            <Badge status="success">Present</Badge>
+              {(() => {
+                const engineerRecords = (attendance || []).filter(r => r.type !== "labour_attendance_lock" && !String(r.id || "").startsWith("labour_lock_") && !String(r.id || "").startsWith("lock_"));
+                if (engineerRecords.length === 0) {
+                  return <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No attendance submissions found for this site.</p>;
+                }
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                    {engineerRecords.map((record, index) => {
+                      const eng = engineers.find(e => e.id === record.engineerId || e.id === record.userId) || { fullName: `Engineer (ID: ${record.engineerId || record.userId})` };
+                      return (
+                        <div key={record.id || `${record.engineerId}_${record.date}_${index}`} style={{
+                          padding: "12px",
+                          borderRadius: "8px",
+                          backgroundColor: "var(--primary-50)",
+                          border: "1px solid var(--border-color)",
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: "12px"
+                        }}>
+                          {record.photoUrl && (
+                            <img 
+                              src={record.photoUrl} 
+                              alt="Selfie Verification" 
+                              style={{ width: "40px", height: "40px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--border-color)" }} 
+                            />
+                          )}
+                          <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, gap: "2px" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                              <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
+                              <Badge status="success">Present</Badge>
+                            </div>
+                            <span style={{ fontSize: "11.5px", fontWeight: "600", color: "var(--primary-750)" }} className="font-mono">
+                              Date: {record.date || record.attendanceDate} {record.time ? `(${record.time})` : ""}
+                            </span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
+                              Address: {record.address || (record.latitude && record.longitude ? `Lat: ${Number(record.latitude).toFixed(5)}, Lng: ${Number(record.longitude).toFixed(5)}` : "GPS Captured")}
+                            </span>
                           </div>
-                          <span style={{ fontSize: "11.5px", fontWeight: "600", color: "var(--primary-750)" }} className="font-mono">
-                            Date: {record.date} ({record.time || "--"})
-                          </span>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                            Address: {record.address || "GPS Captured"}
-                          </span>
                         </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </Card>
           </div>
         )}

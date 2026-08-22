@@ -53,6 +53,7 @@ import {
   ChevronDown,
   ChevronUp,
   Eye,
+  Tag,
   ShieldAlert,
   Shield
 } from "lucide-react";
@@ -120,7 +121,7 @@ export default function AdminMaterials() {
   const [showAddTeamModal, setShowAddTeamModal] = useState(false);
   const [newTeamName, setNewTeamName] = useState("");
   const [newTeamMaterials, setNewTeamMaterials] = useState([
-    { id: 1, name: "", rate: "", unit: "Bag" }
+    { id: 1, type: "standard", name: "", title: "", rate: "", amount: "", unit: "Bag" }
   ]);
 
   const [showRenameTeamModal, setShowRenameTeamModal] = useState(false);
@@ -130,11 +131,11 @@ export default function AdminMaterials() {
   // Material within Team Modals state
   const [showAddMaterialModal, setShowAddMaterialModal] = useState(false);
   const [targetTeamForMat, setTargetTeamForMat] = useState(null);
-  const [newMaterialForm, setNewMaterialForm] = useState({ type: "standard", name: "", unit: "Bag", rate: "", amount: "" });
+  const [newMaterialForm, setNewMaterialForm] = useState({ type: "standard", name: "", title: "", unit: "Bag", rate: "", amount: "" });
 
   const [showEditMaterialModal, setShowEditMaterialModal] = useState(false);
   const [targetTeamForEditMat, setTargetTeamForEditMat] = useState(null);
-  const [editingMaterial, setEditingMaterial] = useState({ id: "", name: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
+  const [editingMaterial, setEditingMaterial] = useState({ id: "", name: "", title: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
 
   // Requisition Approval Modal state
   const [showApprovalModal, setShowApprovalModal] = useState(false);
@@ -204,7 +205,7 @@ export default function AdminMaterials() {
   const handleOpenAddTeamModal = () => {
     setNewTeamName("");
     setNewTeamMaterials([
-      { id: 1, type: "standard", name: "", rate: "", amount: "", unit: "Bag" }
+      { id: 1, type: "standard", name: "", title: "", rate: "", amount: "", unit: "Bag" }
     ]);
     setShowAddTeamModal(true);
   };
@@ -212,20 +213,33 @@ export default function AdminMaterials() {
   const handleAddMaterialRowInCreate = () => {
     setNewTeamMaterials(prev => [
       ...prev,
-      { id: Date.now() + Math.random(), type: "standard", name: "", rate: "", amount: "", unit: "Bag" }
+      { id: Date.now() + Math.random(), type: "standard", name: "", title: "", rate: "", amount: "", unit: "Bag" }
     ]);
   };
 
   const handleRemoveMaterialRowInCreate = (rowId) => {
     setNewTeamMaterials(prev => {
       const filtered = prev.filter(r => r.id !== rowId);
-      return filtered.length === 0 ? [{ id: Date.now(), type: "standard", name: "", rate: "", amount: "", unit: "Bag" }] : filtered;
+      return filtered.length === 0 ? [{ id: Date.now(), type: "standard", name: "", title: "", rate: "", amount: "", unit: "Bag" }] : filtered;
     });
   };
 
   const handleMaterialRowChangeInCreate = (rowId, field, value) => {
     setNewTeamMaterials(prev =>
-      prev.map(r => r.id === rowId ? { ...r, [field]: value } : r)
+      prev.map(r => {
+        if (r.id === rowId) {
+          const updated = { ...r, [field]: value };
+          if (field === "type") {
+            if (value === "rate_only" || value === "custom") {
+              updated.unit = "";
+            } else if (!updated.unit) {
+              updated.unit = "Bag";
+            }
+          }
+          return updated;
+        }
+        return r;
+      })
     );
   };
 
@@ -238,15 +252,24 @@ export default function AdminMaterials() {
     }
 
     const validMaterials = newTeamMaterials
-      .filter(m => m.name && m.name.trim().length > 0)
+      .filter(m => {
+        if (m.type === "rate_only") {
+          const amt = Number(m.amount !== undefined && m.amount !== "" ? m.amount : m.rate);
+          return !isNaN(amt) && amt > 0;
+        }
+        return m.name && m.name.trim().length > 0;
+      })
       .map(m => {
         const isCustom = m.type === "custom";
-        const amt = Number(isCustom ? m.amount : m.rate) || 0;
+        const isRateOnly = m.type === "rate_only";
+        const amt = Number(m.amount !== undefined && m.amount !== "" ? m.amount : m.rate) || 0;
+        const cleanName = (m.name || m.title || "").trim();
         return {
           id: m.id,
-          name: m.name.trim(),
-          type: isCustom ? "custom" : "standard",
-          unit: isCustom ? "" : (m.unit || "Bag"),
+          name: cleanName,
+          title: cleanName,
+          type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+          unit: (isCustom || isRateOnly) ? "" : (m.unit || "Bag"),
           rate: amt,
           amount: amt,
           unitPrice: amt,
@@ -255,16 +278,16 @@ export default function AdminMaterials() {
       });
 
     if (validMaterials.length === 0) {
-      showToast("Please add at least one material to the team.", "error");
+      showToast("Please add at least one material or rate item to the team.", "error");
       return;
     }
 
     try {
       await createMaterialTeam(teamNameClean, validMaterials);
       setNewTeamName("");
-      setNewTeamMaterials([{ id: 1, type: "standard", name: "", rate: "", amount: "", unit: "Bag" }]);
+      setNewTeamMaterials([{ id: 1, type: "standard", name: "", title: "", rate: "", amount: "", unit: "Bag" }]);
       setShowAddTeamModal(false);
-      showToast(`Material Team "${teamNameClean}" created successfully with ${validMaterials.length} materials!`, "success");
+      showToast(`Material Team "${teamNameClean}" created successfully with ${validMaterials.length} item(s)!`, "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
     }
@@ -311,19 +334,34 @@ export default function AdminMaterials() {
 
   const handleAddMaterialToTeamSubmit = async (e) => {
     e.preventDefault();
-    if (!targetTeamForMat || !newMaterialForm.name.trim()) return;
+    if (!targetTeamForMat) return;
+
+    const isCustom = newMaterialForm.type === "custom";
+    const isRateOnly = newMaterialForm.type === "rate_only";
+    const amt = Number(newMaterialForm.amount !== undefined && newMaterialForm.amount !== "" ? newMaterialForm.amount : newMaterialForm.rate);
+
+    if (isNaN(amt) || amt <= 0) {
+      showToast("Please enter a valid positive rate / amount.", "error");
+      return;
+    }
+
+    const cleanName = (newMaterialForm.name || newMaterialForm.title || "").trim();
+    if (!isRateOnly && !cleanName) {
+      showToast("Please enter a material name.", "error");
+      return;
+    }
+
     try {
-      const isCustom = newMaterialForm.type === "custom";
-      const amt = Number(isCustom ? newMaterialForm.amount : newMaterialForm.rate) || 0;
       await addMaterialToTeam(targetTeamForMat.id, {
-        name: newMaterialForm.name.trim(),
-        type: isCustom ? "custom" : "standard",
-        unit: isCustom ? "" : (newMaterialForm.unit || "Bag"),
+        name: cleanName,
+        title: cleanName,
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+        unit: (isCustom || isRateOnly) ? "" : (newMaterialForm.unit || "Bag"),
         rate: amt,
         amount: amt,
         status: "Active"
       });
-      setNewMaterialForm({ type: "standard", name: "", unit: "Bag", rate: "", amount: "" });
+      setNewMaterialForm({ type: "standard", name: "", title: "", unit: "Bag", rate: "", amount: "" });
       setShowAddMaterialModal(false);
       setTargetTeamForMat(null);
       showToast(`Material added to team "${targetTeamForMat.name}" successfully!`, "success");
@@ -334,21 +372,36 @@ export default function AdminMaterials() {
 
   const handleEditMaterialInTeamSubmit = async (e) => {
     e.preventDefault();
-    if (!targetTeamForEditMat || !editingMaterial.name.trim()) return;
+    if (!targetTeamForEditMat) return;
+
+    const isCustom = editingMaterial.type === "custom";
+    const isRateOnly = editingMaterial.type === "rate_only";
+    const amt = Number(editingMaterial.amount !== undefined && editingMaterial.amount !== "" ? editingMaterial.amount : editingMaterial.rate);
+
+    if (isNaN(amt) || amt <= 0) {
+      showToast("Please enter a valid positive rate / amount.", "error");
+      return;
+    }
+
+    const cleanName = (editingMaterial.name || editingMaterial.title || "").trim();
+    if (!isRateOnly && !cleanName) {
+      showToast("Please enter a material name.", "error");
+      return;
+    }
+
     try {
-      const isCustom = editingMaterial.type === "custom";
-      const amt = Number(isCustom ? editingMaterial.amount : editingMaterial.rate) || 0;
       await updateMaterialInTeam(targetTeamForEditMat.id, editingMaterial.id, {
-        name: editingMaterial.name.trim(),
-        type: isCustom ? "custom" : "standard",
-        unit: isCustom ? "" : (editingMaterial.unit || "Bag"),
+        name: cleanName,
+        title: cleanName,
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+        unit: (isCustom || isRateOnly) ? "" : (editingMaterial.unit || "Bag"),
         rate: amt,
         amount: amt,
         status: editingMaterial.status
       });
       setShowEditMaterialModal(false);
       setTargetTeamForEditMat(null);
-      setEditingMaterial({ id: "", name: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
+      setEditingMaterial({ id: "", name: "", title: "", type: "standard", unit: "Bag", rate: "", amount: "", status: "Active" });
       showToast("Material updated successfully!", "success");
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
@@ -1327,6 +1380,7 @@ export default function AdminMaterials() {
                 <tbody>
                   {newTeamMaterials.map((row, idx) => {
                     const isCustom = row.type === "custom";
+                    const isRateOnly = row.type === "rate_only";
                     return (
                       <tr key={row.id || idx} style={{ borderBottom: "1px solid #f1f5f9" }}>
                         <td style={{ padding: "6px 8px" }}>
@@ -1337,15 +1391,19 @@ export default function AdminMaterials() {
                           >
                             <option value="standard">Standard</option>
                             <option value="custom">Custom</option>
+                            <option value="rate_only">Rate Only</option>
                           </select>
                         </td>
                         <td style={{ padding: "6px 8px" }}>
                           <input
                             type="text"
-                            placeholder={isCustom ? "e.g. Steel, Plumbing Pipe" : "e.g. Sand, Jelly, Cement"}
+                            placeholder={isRateOnly ? "e.g. Plumbing Material (Optional)" : (isCustom ? "e.g. Steel, Plumbing Pipe" : "e.g. Sand, Jelly, Cement")}
                             value={row.name}
-                            onChange={(e) => handleMaterialRowChangeInCreate(row.id, "name", e.target.value)}
-                            required={idx === 0}
+                            onChange={(e) => {
+                              handleMaterialRowChangeInCreate(row.id, "name", e.target.value);
+                              handleMaterialRowChangeInCreate(row.id, "title", e.target.value);
+                            }}
+                            required={idx === 0 && !isRateOnly}
                             style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px" }}
                           />
                         </td>
@@ -1354,21 +1412,22 @@ export default function AdminMaterials() {
                             type="number"
                             min="0"
                             step="any"
-                            placeholder={isCustom ? "25000" : "800"}
-                            value={isCustom ? (row.amount !== undefined ? row.amount : row.rate) : row.rate}
+                            placeholder={isRateOnly ? "25000" : (isCustom ? "25000" : "800")}
+                            value={(isCustom || isRateOnly) ? (row.amount !== undefined && row.amount !== "" ? row.amount : row.rate) : row.rate}
                             onChange={(e) => {
-                              if (isCustom) {
+                              if (isCustom || isRateOnly) {
                                 handleMaterialRowChangeInCreate(row.id, "amount", e.target.value);
                                 handleMaterialRowChangeInCreate(row.id, "rate", e.target.value);
                               } else {
                                 handleMaterialRowChangeInCreate(row.id, "rate", e.target.value);
                               }
                             }}
+                            required={isRateOnly}
                             style={{ width: "100%", padding: "7px 9px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "12.5px", textAlign: "right" }}
                           />
                         </td>
                         <td style={{ padding: "6px 8px" }}>
-                          {isCustom ? (
+                          {(isCustom || isRateOnly) ? (
                             <span style={{ color: "#94a3b8", fontSize: "12px", fontWeight: "600", paddingLeft: "8px" }}>—</span>
                           ) : (
                             <select
@@ -1471,15 +1530,22 @@ export default function AdminMaterials() {
                   <tbody>
                     {activeViewingTeam.materials.map(mat => {
                       const isCustom = mat.type === "custom";
+                      const isRateOnly = mat.type === "rate_only";
                       const displayAmount = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice || 0));
+                      const displayName = (mat.title || mat.name || "").trim() || (isRateOnly ? "Rate Item" : "Material Item");
                       return (
                         <tr key={mat.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                           <td style={{ padding: "10px 14px", fontWeight: "700", color: "#0f172a" }}>
                             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                              <span>{mat.name}</span>
+                              <span>{displayName}</span>
                               {isCustom && (
                                 <span style={{ fontSize: "10px", fontWeight: "800", color: "#4338ca", backgroundColor: "#e0e7ff", padding: "1px 6px", borderRadius: "4px" }}>
                                   Custom
+                                </span>
+                              )}
+                              {isRateOnly && (
+                                <span style={{ fontSize: "10px", fontWeight: "800", color: "#7c3aed", backgroundColor: "#f5f3ff", padding: "1px 6px", borderRadius: "4px", border: "1px solid #ddd6fe" }}>
+                                  Rate Only
                                 </span>
                               )}
                             </div>
@@ -1488,7 +1554,7 @@ export default function AdminMaterials() {
                             ₹{displayAmount.toLocaleString("en-IN")}
                           </td>
                           <td style={{ padding: "10px 14px" }}>
-                            {isCustom ? (
+                            {(isCustom || isRateOnly) ? (
                               <span style={{ color: "#94a3b8", fontWeight: "600", fontSize: "12px" }}>—</span>
                             ) : (
                               <span className="font-mono" style={{ backgroundColor: "#f1f5f9", padding: "2px 8px", borderRadius: "4px", fontSize: "11.5px", fontWeight: "600", color: "#475569" }}>
@@ -1509,8 +1575,9 @@ export default function AdminMaterials() {
                                     setTargetTeamForEditMat(activeViewingTeam);
                                     setEditingMaterial({
                                       id: mat.id,
-                                      name: mat.name,
-                                      type: isCustom ? "custom" : "standard",
+                                      name: mat.name || mat.title || "",
+                                      title: mat.title || mat.name || "",
+                                      type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
                                       unit: mat.unit || "Bag",
                                       rate: mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0),
                                       amount: mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : (mat.unitPrice || 0)),
@@ -1669,53 +1736,111 @@ export default function AdminMaterials() {
               <label style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>
                 Material Type <span style={{ color: "var(--danger-600)" }}>*</span>
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
                 <button
                   type="button"
-                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "standard" }))}
+                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "standard", unit: prev.unit || "Bag" }))}
                   style={{
-                    padding: "10px 14px",
+                    padding: "9px 10px",
                     borderRadius: "8px",
-                    border: newMaterialForm.type !== "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
-                    backgroundColor: newMaterialForm.type !== "custom" ? "#fff7ed" : "#ffffff",
-                    color: newMaterialForm.type !== "custom" ? "#c2410c" : "#64748b",
+                    border: newMaterialForm.type === "standard" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: newMaterialForm.type === "standard" ? "#fff7ed" : "#ffffff",
+                    color: newMaterialForm.type === "standard" ? "#c2410c" : "#64748b",
                     fontWeight: "750",
-                    fontSize: "13px",
+                    fontSize: "12.5px",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: "6px"
+                    gap: "5px"
                   }}
                 >
-                  <Package size={15} />
-                  <span>Standard Material</span>
+                  <Package size={14} />
+                  <span>Standard</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "custom" }))}
+                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "custom", unit: "" }))}
                   style={{
-                    padding: "10px 14px",
+                    padding: "9px 10px",
                     borderRadius: "8px",
                     border: newMaterialForm.type === "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
                     backgroundColor: newMaterialForm.type === "custom" ? "#fff7ed" : "#ffffff",
                     color: newMaterialForm.type === "custom" ? "#c2410c" : "#64748b",
                     fontWeight: "750",
-                    fontSize: "13px",
+                    fontSize: "12.5px",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: "6px"
+                    gap: "5px"
                   }}
                 >
-                  <FileText size={15} />
+                  <FileText size={14} />
                   <span>Custom</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setNewMaterialForm(prev => ({ ...prev, type: "rate_only", unit: "" }))}
+                  style={{
+                    padding: "9px 10px",
+                    borderRadius: "8px",
+                    border: newMaterialForm.type === "rate_only" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: newMaterialForm.type === "rate_only" ? "#fff7ed" : "#ffffff",
+                    color: newMaterialForm.type === "rate_only" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "12.5px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "5px"
+                  }}
+                >
+                  <Tag size={14} />
+                  <span>Rate Only</span>
                 </button>
               </div>
             </div>
 
-            {newMaterialForm.type === "custom" ? (
+            {newMaterialForm.type === "rate_only" ? (
+              /* Rate Only Material Fields: Optional Title / Label, Required Rate / Amount */
+              <>
+                <div className="form-group">
+                  <label htmlFor="team-mat-rate-title" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Title / Label <span style={{ fontSize: "11.5px", fontWeight: "400", color: "var(--text-muted)" }}>(Optional)</span>
+                  </label>
+                  <input
+                    id="team-mat-rate-title"
+                    type="text"
+                    placeholder="e.g. Plumbing Material (Optional)"
+                    value={newMaterialForm.title !== undefined ? newMaterialForm.title : (newMaterialForm.name || "")}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, title: e.target.value, name: e.target.value }))}
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="team-mat-rate-amount" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Rate / Amount (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="team-mat-rate-amount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    placeholder="e.g. 25000"
+                    value={newMaterialForm.amount !== undefined && newMaterialForm.amount !== "" ? newMaterialForm.amount : newMaterialForm.rate}
+                    onChange={(e) => setNewMaterialForm(prev => ({ ...prev, amount: e.target.value, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    The entered rate represents the fixed rate for this item.
+                  </span>
+                </div>
+              </>
+            ) : newMaterialForm.type === "custom" ? (
               /* Custom Material Fields: Custom Material Name & Bill Amount / Amount ONLY */
               <>
                 <div className="form-group">
@@ -1847,53 +1972,110 @@ export default function AdminMaterials() {
               <label style={{ fontWeight: 700, fontSize: "13px", color: "var(--primary-900)", marginBottom: "6px", display: "block" }}>
                 Material Type <span style={{ color: "var(--danger-600)" }}>*</span>
               </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
                 <button
                   type="button"
-                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "standard" }))}
+                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "standard", unit: prev.unit || "Bag" }))}
                   style={{
-                    padding: "9px 12px",
+                    padding: "9px 10px",
                     borderRadius: "8px",
-                    border: editingMaterial.type !== "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
-                    backgroundColor: editingMaterial.type !== "custom" ? "#fff7ed" : "#ffffff",
-                    color: editingMaterial.type !== "custom" ? "#c2410c" : "#64748b",
+                    border: editingMaterial.type === "standard" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: editingMaterial.type === "standard" ? "#fff7ed" : "#ffffff",
+                    color: editingMaterial.type === "standard" ? "#c2410c" : "#64748b",
                     fontWeight: "750",
-                    fontSize: "13px",
+                    fontSize: "12.5px",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: "6px"
+                    gap: "5px"
                   }}
                 >
-                  <Package size={15} />
-                  <span>Standard Material</span>
+                  <Package size={14} />
+                  <span>Standard</span>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "custom" }))}
+                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "custom", unit: "" }))}
                   style={{
-                    padding: "9px 12px",
+                    padding: "9px 10px",
                     borderRadius: "8px",
                     border: editingMaterial.type === "custom" ? "2px solid #ea580c" : "1px solid #cbd5e1",
                     backgroundColor: editingMaterial.type === "custom" ? "#fff7ed" : "#ffffff",
                     color: editingMaterial.type === "custom" ? "#c2410c" : "#64748b",
                     fontWeight: "750",
-                    fontSize: "13px",
+                    fontSize: "12.5px",
                     cursor: "pointer",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "center",
-                    gap: "6px"
+                    gap: "5px"
                   }}
                 >
-                  <FileText size={15} />
+                  <FileText size={14} />
                   <span>Custom</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingMaterial(prev => ({ ...prev, type: "rate_only", unit: "" }))}
+                  style={{
+                    padding: "9px 10px",
+                    borderRadius: "8px",
+                    border: editingMaterial.type === "rate_only" ? "2px solid #ea580c" : "1px solid #cbd5e1",
+                    backgroundColor: editingMaterial.type === "rate_only" ? "#fff7ed" : "#ffffff",
+                    color: editingMaterial.type === "rate_only" ? "#c2410c" : "#64748b",
+                    fontWeight: "750",
+                    fontSize: "12.5px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "5px"
+                  }}
+                >
+                  <Tag size={14} />
+                  <span>Rate Only</span>
                 </button>
               </div>
             </div>
 
-            {editingMaterial.type === "custom" ? (
+            {editingMaterial.type === "rate_only" ? (
+              /* Rate Only Material: Optional Title / Label, Required Rate / Amount */
+              <>
+                <div className="form-group">
+                  <label htmlFor="edit-mat-rate-title" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Title / Label <span style={{ fontSize: "11.5px", fontWeight: "400", color: "var(--text-muted)" }}>(Optional)</span>
+                  </label>
+                  <input
+                    id="edit-mat-rate-title"
+                    type="text"
+                    placeholder="e.g. Plumbing Material (Optional)"
+                    value={editingMaterial.title !== undefined ? editingMaterial.title : (editingMaterial.name || "")}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, title: e.target.value, name: e.target.value }))}
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                </div>
+
+                <div className="form-group">
+                  <label htmlFor="edit-mat-rate-amount" style={{ fontWeight: 600, fontSize: "13px", color: "var(--primary-900)" }}>
+                    Rate / Amount (₹) <span style={{ color: "var(--danger-600)" }}>*</span>
+                  </label>
+                  <input
+                    id="edit-mat-rate-amount"
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={editingMaterial.amount !== undefined && editingMaterial.amount !== "" ? editingMaterial.amount : editingMaterial.rate}
+                    onChange={(e) => setEditingMaterial(prev => ({ ...prev, amount: e.target.value, rate: e.target.value }))}
+                    required
+                    style={{ width: "100%", padding: "10px 12px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", fontSize: "14px" }}
+                  />
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "4px", display: "block" }}>
+                    The entered rate represents the fixed rate for this item.
+                  </span>
+                </div>
+              </>
+            ) : editingMaterial.type === "custom" ? (
               /* Custom Material: Custom Material Name & Bill Amount / Amount ONLY */
               <>
                 <div className="form-group">

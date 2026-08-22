@@ -38,6 +38,7 @@ import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
 import { Link } from "react-router-dom";
+import { deduplicateDailyAttendance } from "../services/firebaseService";
 
 export default function AdminDashboard() {
   const { user } = useAuth();
@@ -56,7 +57,8 @@ export default function AdminDashboard() {
 
   const attendanceTodayCount = useMemo(() => {
     const siteIds = new Set(sites.map(s => s.id));
-    return rawAttendanceToday.filter(record => siteIds.has(record.siteId)).length;
+    const validToday = deduplicateDailyAttendance(rawAttendanceToday);
+    return validToday.filter(record => siteIds.has(record.siteId)).length;
   }, [sites, rawAttendanceToday]);
 
   const totalMaterialsCount = useMemo(() => {

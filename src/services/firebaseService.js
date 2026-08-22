@@ -18,7 +18,7 @@ import {
   addDoc,
   orderBy
 } from "firebase/firestore";
-import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth } from "../firebase/config";
+import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth } from "../firebase/config.js";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 
@@ -1021,6 +1021,133 @@ export async function deleteSite(siteId) {
   });
 }
 
+// Helper: Identifies genuine Engineer Attendance records
+// Strictly excludes labour submission lock records, material locks, or non-engineer attendance metadata.
+export function isEngineerAttendanceRecord(data, docId = "") {
+  if (!data) return false;
+  const idStr = String(docId || data.id || "");
+  
+  // 1. Exclude labour submission locks or other lock docs
+  if (
+    data.type === "labour_attendance_lock" ||
+    data.type === "material_lock" ||
+    idStr.startsWith("labour_lock_") ||
+    idStr.startsWith("lock_")
+  ) {
+    return false;
+  }
+  
+  // 2. If it has a teamId and no photo/GPS/time, it is a labour lock record, not engineer attendance
+  if (data.teamId && !data.time && !data.latitude && !data.photoUrl) {
+    return false;
+  }
+
+  // 3. Must have a date and an engineer/user identifier
+  const hasDate = Boolean(data.date || data.attendanceDate);
+  const hasUser = Boolean(data.engineerId || data.userId);
+  if (!hasDate || !hasUser) return false;
+
+  return true;
+}
+
+/**
+ * Score the completeness and validity of an engineer attendance record
+ * Higher score = more complete, valid record
+ */
+function scoreAttendanceRecord(rec) {
+  let score = 0;
+  if (!rec) return -1;
+  if (!isEngineerAttendanceRecord(rec, rec.id)) return -1;
+
+  // Has valid human-readable time string (not empty and not "--")
+  if (rec.time && rec.time !== "--" && typeof rec.time === "string" && rec.time.trim() !== "") {
+    score += 20;
+  }
+  // Has valid GPS latitude and longitude
+  if (rec.latitude !== undefined && rec.latitude !== null && !isNaN(Number(rec.latitude)) && Number(rec.latitude) !== 0) {
+    score += 20;
+  }
+  if (rec.longitude !== undefined && rec.longitude !== null && !isNaN(Number(rec.longitude)) && Number(rec.longitude) !== 0) {
+    score += 20;
+  }
+  // Has selfie / photo proof
+  if (rec.photoUrl && typeof rec.photoUrl === "string" && rec.photoUrl.trim() !== "") {
+    score += 15;
+  }
+  // Has address
+  if (rec.address && typeof rec.address === "string" && rec.address.trim() !== "" && rec.address !== "GPS Captured") {
+    score += 10;
+  }
+  // Status check
+  if (rec.status === "checked_out") {
+    score += 8;
+  } else if (rec.status === "present" || rec.status === "verified") {
+    score += 5;
+  }
+  // Verification status
+  if (rec.verificationStatus === "verified" || rec.verificationStatus === "success") {
+    score += 5;
+  }
+  // Timestamp present
+  if (rec.timestamp || rec.checkInTime) {
+    score += 5;
+  }
+  return score;
+}
+
+/**
+ * Single source of truth deduplication:
+ * Groups records by (engineerId) + "_" + (date) and returns exactly ONE canonical valid daily record.
+ */
+export function deduplicateDailyAttendance(records = []) {
+  if (!Array.isArray(records) || records.length === 0) return [];
+
+  // 1. Filter to genuine engineer attendance records only
+  const validOnly = records.filter(r => isEngineerAttendanceRecord(r, r.id));
+
+  // 2. Group by engineerId + date
+  const groups = new Map();
+
+  for (const rec of validOnly) {
+    const engId = String(rec.engineerId || rec.userId || "").trim();
+    const dateStr = String(rec.date || rec.attendanceDate || "").trim();
+    if (!engId || !dateStr) continue;
+
+    const key = `${engId}_${dateStr}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+    }
+    groups.get(key).push(rec);
+  }
+
+  // 3. For each group, pick the highest scoring record
+  const result = [];
+  for (const groupList of groups.values()) {
+    if (groupList.length === 1) {
+      result.push(groupList[0]);
+    } else {
+      // Sort descending by completeness score, then by timestamp
+      groupList.sort((a, b) => {
+        const scoreA = scoreAttendanceRecord(a);
+        const scoreB = scoreAttendanceRecord(b);
+        if (scoreB !== scoreA) return scoreB - scoreA;
+
+        const timeA = a.checkInTime?.seconds || a.timestamp?.seconds || 0;
+        const timeB = b.checkInTime?.seconds || b.timestamp?.seconds || 0;
+        return timeA - timeB; // prefer original / earlier checkin if equal score
+      });
+      result.push(groupList[0]);
+    }
+  }
+
+  // 4. Sort results descending by date
+  return result.sort((a, b) => {
+    const dateA = a.date || a.attendanceDate || "";
+    const dateB = b.date || b.attendanceDate || "";
+    return dateB.localeCompare(dateA);
+  });
+}
+
 // Load metric counts for Admin Dashboard
 export async function getDashboardMetrics() {
   const db = getDb();
@@ -1047,14 +1174,21 @@ export async function getDashboardMetrics() {
     const [sitesSnap, engineersCount, attendanceSnap, materialsSnap, workersSnap] = await Promise.all([
       getDocs(collection(db, "sites")).catch(() => ({ size: 0 })),
       fetchEngineers().catch(() => 0),
-      getDocs(query(collection(db, "attendance"), where("date", "==", todayStr))).catch(() => ({ size: 0 })),
+      getDocs(query(collection(db, "attendance"), where("date", "==", todayStr))).catch(() => ({ docs: [] })),
       getDocs(collection(db, "materials")).catch(() => ({ size: 0 })),
       getDocs(query(collection(db, "workers"), where("status", "==", "active"))).catch(() => ({ size: 0 }))
     ]);
 
     totalSitesCount = sitesSnap.size || 0;
     activeEngineersCount = engineersCount || 0;
-    attendanceTodayCount = attendanceSnap.size || 0;
+    
+    if (attendanceSnap && attendanceSnap.docs) {
+      const todayDocs = attendanceSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+      attendanceTodayCount = deduplicateDailyAttendance(todayDocs).length;
+    } else {
+      attendanceTodayCount = 0;
+    }
+    
     totalMaterialsCount = materialsSnap.size || 0;
     activeWorkersCount = workersSnap.size || 0;
   } catch (err) {
@@ -1114,7 +1248,7 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
 
     const isValidRecord = (data, id) => {
       // 1. Exclude labour submission lock records
-      if (data.type === "labour_attendance_lock" || (id && id.startsWith("labour_lock_"))) {
+      if (!isEngineerAttendanceRecord(data, id)) {
         return false;
       }
       // 2. Ensure date matches
@@ -1132,7 +1266,34 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
       return isVerified && isNotRejected;
     };
 
-    // Query 1: by engineerId, siteId, date
+    // Query 1: deterministic doc lookup: att_${cleanEngineerId}_${cleanDateStr}
+    const directDocRef1 = doc(db, "attendance", `att_${cleanEngineerId}_${cleanDateStr}`);
+    const directSnap1 = await getDoc(directDocRef1);
+    if (directSnap1.exists()) {
+      if (isValidRecord(directSnap1.data(), directSnap1.id)) {
+        return true;
+      }
+    }
+
+    // Query 2: deterministic doc lookup: ${cleanEngineerId}_${cleanDateStr}
+    const directDocRef2 = doc(db, "attendance", `${cleanEngineerId}_${cleanDateStr}`);
+    const directSnap2 = await getDoc(directDocRef2);
+    if (directSnap2.exists()) {
+      if (isValidRecord(directSnap2.data(), directSnap2.id)) {
+        return true;
+      }
+    }
+
+    // Query 3: deterministic doc lookup: ${cleanSiteId}_${cleanDateStr} (legacy)
+    const directDocRef3 = doc(db, "attendance", `${cleanSiteId}_${cleanDateStr}`);
+    const directSnap3 = await getDoc(directDocRef3);
+    if (directSnap3.exists()) {
+      if (isValidRecord(directSnap3.data(), directSnap3.id)) {
+        return true;
+      }
+    }
+
+    // Query 4: by engineerId, siteId, date
     const q1 = query(
       attendanceColl,
       where("engineerId", "==", cleanEngineerId),
@@ -1146,7 +1307,7 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
       }
     }
 
-    // Query 2: by userId, siteId, date (backward compatibility)
+    // Query 5: by userId, siteId, date (backward compatibility)
     const q2 = query(
       attendanceColl,
       where("userId", "==", cleanEngineerId),
@@ -1159,16 +1320,6 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
         return true;
       }
     }
-
-    // Query 3: check doc by deterministic docId `${cleanSiteId}_${cleanDateStr}`
-    const directDocRef = doc(db, "attendance", `${cleanSiteId}_${cleanDateStr}`);
-    const directSnap = await getDoc(directDocRef);
-    if (directSnap.exists()) {
-      const data = directSnap.data();
-      if (isValidRecord(data, directSnap.id)) {
-        return true;
-      }
-    }
   } catch (err) {
     console.error("Attendance Gate verification check failed:", err);
   }
@@ -1178,40 +1329,95 @@ export async function verifyEngineerAttendanceGate(engineerId, siteId, dateStr) 
 
 // Get the engineer's attendance record for a specific date
 export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
+  if (!engineerId || !dateStr) return null;
+  const cleanEngineerId = String(engineerId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const cleanSiteId = siteId ? String(siteId).trim() : null;
+
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  let q;
-  if (siteId) {
-    q = query(
+
+  const candidates = [];
+
+  // Query 1: engineerId + date
+  try {
+    const q1 = query(
       attendanceColl,
-      where("engineerId", "==", engineerId),
-      where("date", "==", dateStr),
-      where("siteId", "==", siteId)
+      where("engineerId", "==", cleanEngineerId),
+      where("date", "==", cleanDateStr)
     );
-  } else {
-    q = query(
+    const snap1 = await getDocs(q1);
+    snap1.forEach(docSnap => {
+      candidates.push({ id: docSnap.id, ...docSnap.data() });
+    });
+  } catch (e) {}
+
+  // Query 2: userId + date (compatibility)
+  try {
+    const q2 = query(
       attendanceColl,
-      where("engineerId", "==", engineerId),
-      where("date", "==", dateStr)
+      where("userId", "==", cleanEngineerId),
+      where("date", "==", cleanDateStr)
     );
+    const snap2 = await getDocs(q2);
+    snap2.forEach(docSnap => {
+      if (!candidates.some(c => c.id === docSnap.id)) {
+        candidates.push({ id: docSnap.id, ...docSnap.data() });
+      }
+    });
+  } catch (e) {}
+
+  // Query 3: direct doc lookups (deterministic keys)
+  const directDocIds = [
+    `att_${cleanEngineerId}_${cleanDateStr}`,
+    `${cleanEngineerId}_${cleanDateStr}`,
+    cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
+  ].filter(Boolean);
+
+  for (const docId of directDocIds) {
+    if (!candidates.some(c => c.id === docId)) {
+      try {
+        const directSnap = await getDoc(doc(db, "attendance", docId));
+        if (directSnap.exists()) {
+          candidates.push({ id: directSnap.id, ...directSnap.data() });
+        }
+      } catch (e) {}
+    }
   }
-  const snap = await getDocs(q);
-  if (snap.empty) return null;
-  
-  const records = [];
-  snap.forEach(doc => {
-    records.push({ id: doc.id, ...doc.data() });
-  });
-  return records[0];
+
+  // Deduplicate and filter out labour locks
+  const deduplicated = deduplicateDailyAttendance(candidates);
+  if (deduplicated.length === 0) return null;
+
+  if (cleanSiteId) {
+    const siteMatch = deduplicated.find(r => String(r.siteId).trim() === cleanSiteId);
+    return siteMatch || null;
+  }
+
+  return deduplicated[0];
 }
 
-// Mark attendance
+// Mark attendance (Idempotent and duplicate-safe daily save mechanism)
 export async function markAttendance(engineerId, siteId, dateStr, latitude, longitude, accuracy, address, photoUrl = "", verificationStatus = "verified", distance = null) {
+  if (!engineerId || !siteId || !dateStr) {
+    throw new Error("Engineer ID, Site ID, and Date are required to mark attendance.");
+  }
+  const cleanEngineerId = String(engineerId).trim();
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+
   const db = getDb();
-  // Duplicate check across any site for the day
-  const existing = await getTodayAttendance(engineerId, dateStr);
+  
+  // 1. Idempotent check: if valid attendance already recorded for this engineer on this date
+  const existing = await getTodayAttendance(cleanEngineerId, cleanDateStr);
   if (existing) {
-    throw new Error("Attendance already recorded for today.");
+    // If already marked present with valid GPS / time, preserve it idempotently
+    if (existing.status === "present" || existing.status === "checked_out" || existing.status === "verified") {
+      if (String(existing.siteId).trim() === cleanSiteId) {
+        return existing;
+      }
+      throw new Error("Attendance already recorded for today.");
+    }
   }
   
   // Format local date and time:
@@ -1224,25 +1430,32 @@ export async function markAttendance(engineerId, siteId, dateStr, latitude, long
   const minStr = minutes < 10 ? '0' + minutes : minutes;
   const timeStr = `${hours}:${minStr} ${ampm}`;
 
-  const docId = `${siteId}_${dateStr}`;
-  const newAttendanceRef = doc(db, "attendance", docId);
-  await setDoc(newAttendanceRef, {
-    userId: engineerId,
-    engineerId: engineerId, // compatibility
-    siteId,
-    date: dateStr,
+  // Deterministic, idempotent document ID per engineer and date
+  const deterministicDocId = `att_${cleanEngineerId}_${cleanDateStr}`;
+  const docRef = doc(db, "attendance", deterministicDocId);
+
+  const payload = {
+    type: "engineer_attendance",
+    userId: cleanEngineerId,
+    engineerId: cleanEngineerId,
+    siteId: cleanSiteId,
+    date: cleanDateStr,
+    attendanceDate: cleanDateStr,
     time: timeStr,
     latitude: Number(latitude),
     longitude: Number(longitude),
     gpsAccuracy: Number(accuracy) || null,
     address: address || "",
     timestamp: serverTimestamp(),
-    checkInTime: serverTimestamp(), // compatibility
-    photoUrl,
-    verificationStatus,
+    checkInTime: serverTimestamp(),
+    photoUrl: photoUrl || "",
+    verificationStatus: verificationStatus || "verified",
     status: "present",
-    distance: distance !== null ? Number(distance) : null // Store distance from site
-  });
+    distance: distance !== null && distance !== undefined ? Number(distance) : null
+  };
+
+  await setDoc(docRef, payload, { merge: true });
+  return { id: deterministicDocId, ...payload };
 }
 
 // Mark check-out attendance
@@ -2350,6 +2563,15 @@ export async function getLabourDailyCountsSummary(siteId) {
 
 // Get stats for engineer's personal attendance and leaves
 export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllowance = 24) {
+  if (!engineerId) {
+    return {
+      weekdaysWorkedThisMonth: 0,
+      leavesThisMonth: 0,
+      leavesThisYear: 0,
+      remainingHolidays: Number(holidayAllowance) || 24
+    };
+  }
+
   const db = getDb();
   
   const now = new Date();
@@ -2358,38 +2580,47 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
   const currentMonthStr = currentMonth < 10 ? `0${currentMonth}` : `${currentMonth}`;
   const yearMonthPrefix = `${currentYear}-${currentMonthStr}`; // "YYYY-MM"
   
+  const cleanEngineerId = String(engineerId).trim();
   const attendanceColl = collection(db, "attendance");
-  const attendanceQuery = query(
-    attendanceColl,
-    where("engineerId", "==", engineerId)
-  );
-
   const leavesColl = collection(db, "leaves");
-  const leavesQuery = query(
-    leavesColl,
-    where("engineerId", "==", engineerId)
-  );
 
-  let weekdaysWorkedThisMonth = 0;
-  let leavesThisMonth = 0;
-  let leavesThisYear = 0;
-
-  const [attendanceSnap, leavesSnap] = await Promise.all([
-    getDocs(attendanceQuery).catch(err => {
+  const [snap1, snap2, leavesSnap] = await Promise.all([
+    getDocs(query(attendanceColl, where("engineerId", "==", cleanEngineerId))).catch(err => {
       console.warn("Attendance stats fetch error:", err);
-      return null;
+      return { docs: [] };
     }),
-    getDocs(leavesQuery).catch(err => {
+    getDocs(query(attendanceColl, where("userId", "==", cleanEngineerId))).catch(err => {
+      console.warn("Attendance stats fetch error (userId):", err);
+      return { docs: [] };
+    }),
+    getDocs(query(leavesColl, where("engineerId", "==", cleanEngineerId))).catch(err => {
       console.warn("Leaves stats fetch error:", err);
       return null;
     })
   ]);
 
-  if (attendanceSnap) {
-    attendanceSnap.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.date && data.date.startsWith(yearMonthPrefix)) {
-        const parts = data.date.split('-');
+  let weekdaysWorkedThisMonth = 0;
+  let leavesThisMonth = 0;
+  let leavesThisYear = 0;
+
+  const rawDocs = [];
+  const seenIds = new Set();
+  [...(snap1.docs || []), ...(snap2.docs || [])].forEach(docSnap => {
+    if (!seenIds.has(docSnap.id)) {
+      seenIds.add(docSnap.id);
+      rawDocs.push({ id: docSnap.id, ...docSnap.data() });
+    }
+  });
+
+  const validRecords = deduplicateDailyAttendance(rawDocs);
+  const distinctDatesWorked = new Set();
+
+  validRecords.forEach(data => {
+    const recDate = data.date || data.attendanceDate;
+    if (recDate && recDate.startsWith(yearMonthPrefix)) {
+      if (!distinctDatesWorked.has(recDate)) {
+        distinctDatesWorked.add(recDate);
+        const parts = recDate.split('-');
         if (parts.length === 3) {
           const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
           const dayOfWeek = d.getDay(); // 0 = Sun, 1 = Mon, ..., 6 = Sat
@@ -2399,8 +2630,8 @@ export async function getEngineerAttendanceAndLeaveStats(engineerId, holidayAllo
           }
         }
       }
-    });
-  }
+    }
+  });
 
   if (leavesSnap) {
     leavesSnap.forEach(docSnap => {
@@ -2698,32 +2929,47 @@ export async function deleteSitePhoto(photoId) {
   await batch.commit();
 }
 
-// Get all attendance records for an engineer across all sites
+// Get all attendance records for an engineer across all sites (deduplicated per day)
 export async function getEngineerAttendanceHistory(engineerId) {
+  if (!engineerId) return [];
+  const cleanEngineerId = String(engineerId).trim();
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  const q = query(attendanceColl, where("engineerId", "==", engineerId));
-  const snap = await getDocs(q);
+  
+  const [snap1, snap2] = await Promise.all([
+    getDocs(query(attendanceColl, where("engineerId", "==", cleanEngineerId))).catch(() => ({ docs: [] })),
+    getDocs(query(attendanceColl, where("userId", "==", cleanEngineerId))).catch(() => ({ docs: [] }))
+  ]);
+
   const records = [];
-  snap.forEach(docSnap => {
-    records.push({ id: docSnap.id, ...docSnap.data() });
+  const seenIds = new Set();
+  [...(snap1.docs || []), ...(snap2.docs || [])].forEach(docSnap => {
+    if (!seenIds.has(docSnap.id)) {
+      seenIds.add(docSnap.id);
+      records.push({ id: docSnap.id, ...docSnap.data() });
+    }
   });
-  return records;
+
+  return deduplicateDailyAttendance(records);
 }
 
-
-
-// Get all attendance records for a given site
+// Get all attendance records for a given site (deduplicated per engineer and date)
 export async function getAttendanceForSite(siteId = null) {
   const db = getDb();
   const attendanceColl = collection(db, "attendance");
-  const q = siteId ? query(attendanceColl, where("siteId", "==", siteId)) : query(attendanceColl);
+  const cleanSiteId = siteId ? String(siteId).trim() : null;
+  const q = cleanSiteId ? query(attendanceColl, where("siteId", "==", cleanSiteId)) : query(attendanceColl);
   const snap = await getDocs(q);
   const records = [];
   snap.forEach(docSnap => {
     records.push({ id: docSnap.id, ...docSnap.data() });
   });
-  return records;
+  
+  const deduplicated = deduplicateDailyAttendance(records);
+  if (cleanSiteId) {
+    return deduplicated.filter(r => String(r.siteId).trim() === cleanSiteId);
+  }
+  return deduplicated;
 }
 
 // Get daily progress updates for a site
@@ -3203,15 +3449,18 @@ export async function saveMaterialTeams(teamsList) {
   (teamsList || []).forEach(team => {
     (team.materials || []).forEach(mat => {
       const isCustom = mat.type === "custom";
+      const isRateOnly = mat.type === "rate_only";
       const amt = Number(mat.amount !== undefined ? mat.amount : (mat.rate !== undefined ? mat.rate : mat.unitPrice)) || 0;
+      const cleanName = (mat.name || mat.title || "").trim();
       flatList.push({
         id: mat.id,
-        name: mat.name,
-        type: isCustom ? "custom" : "standard",
+        name: cleanName,
+        title: mat.title || cleanName,
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
         category: team.name,
         teamId: team.id,
         teamName: team.name,
-        unit: isCustom ? "" : (mat.unit || "Bag"),
+        unit: (isCustom || isRateOnly) ? "" : (mat.unit || "Bag"),
         unitPrice: amt,
         rate: amt,
         amount: amt,
@@ -3257,12 +3506,15 @@ export function subscribeMaterialTeams(onUpdate) {
             };
           }
           const isCustom = m.type === "custom";
+          const isRateOnly = m.type === "rate_only";
           const amt = Number(m.amount !== undefined ? m.amount : (m.unitPrice !== undefined ? m.unitPrice : m.rate)) || 0;
+          const cleanName = (m.name || m.title || "").trim();
           grouped[teamName].materials.push({
             id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-            name: m.name || "",
-            type: isCustom ? "custom" : "standard",
-            unit: isCustom ? "" : (m.unit || "Bag"),
+            name: cleanName,
+            title: m.title || cleanName,
+            type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+            unit: (isCustom || isRateOnly) ? "" : (m.unit || "Bag"),
             rate: amt,
             amount: amt,
             unitPrice: amt,
@@ -3294,15 +3546,25 @@ export async function createMaterialTeam(teamName, initialMaterials = []) {
   if (exists) throw new Error(`Material Team "${cleanName}" already exists.`);
 
   const formattedMaterials = (initialMaterials || [])
-    .filter(m => m && (m.name || "").trim())
+    .filter(m => {
+      if (!m) return false;
+      if (m.type === "rate_only") {
+        const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice));
+        return !isNaN(amt) && amt > 0;
+      }
+      return Boolean((m.name || "").trim());
+    })
     .map(m => {
       const isCustom = m.type === "custom";
+      const isRateOnly = m.type === "rate_only";
       const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+      const cleanMatName = (m.name || m.title || "").trim();
       return {
         id: m.id || `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
-        name: (m.name || "").trim(),
-        type: isCustom ? "custom" : "standard",
-        unit: isCustom ? "" : ((m.unit || "Bag").trim()),
+        name: cleanMatName,
+        title: m.title || cleanMatName,
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+        unit: (isCustom || isRateOnly) ? "" : ((m.unit || "Bag").trim()),
         rate: amt,
         amount: amt,
         unitPrice: amt,
@@ -3346,26 +3608,39 @@ export async function deleteMaterialTeam(teamId) {
 }
 
 export async function addMaterialToTeam(teamId, materialData) {
-  const nameClean = (materialData.name || "").trim();
   const isCustom = materialData.type === "custom";
-  const unitClean = isCustom ? "" : (materialData.unit || "Bag").trim();
+  const isRateOnly = materialData.type === "rate_only";
+  const nameClean = (materialData.name || materialData.title || "").trim();
+  const unitClean = (isCustom || isRateOnly) ? "" : (materialData.unit || "Bag").trim();
   const amountVal = Number(materialData.amount !== undefined ? materialData.amount : (materialData.rate !== undefined ? materialData.rate : materialData.unitPrice)) || 0;
 
-  if (!nameClean) throw new Error("Material Name cannot be empty.");
-  if (!isCustom && !unitClean) throw new Error("Unit of measure cannot be empty.");
+  if (isRateOnly) {
+    if (isNaN(amountVal) || amountVal <= 0) {
+      throw new Error("Rate / Amount must be a valid positive number.");
+    }
+  } else {
+    if (!nameClean) throw new Error("Material Name cannot be empty.");
+    if (!isCustom && !unitClean) throw new Error("Unit of measure cannot be empty.");
+    if (isNaN(amountVal) || amountVal < 0) {
+      throw new Error("Rate / Amount must be a valid number.");
+    }
+  }
 
   const currentTeams = await getMaterialTeams();
   const teamIndex = currentTeams.findIndex(t => t.id === teamId);
   if (teamIndex === -1) throw new Error("Material Team not found.");
 
   const team = currentTeams[teamIndex];
-  const matExists = (team.materials || []).some(m => (m.name || "").toLowerCase() === nameClean.toLowerCase());
-  if (matExists) throw new Error(`Material "${nameClean}" already exists under team "${team.name}".`);
+  if (nameClean) {
+    const matExists = (team.materials || []).some(m => (m.name || m.title || "").toLowerCase() === nameClean.toLowerCase());
+    if (matExists) throw new Error(`Material "${nameClean}" already exists under team "${team.name}".`);
+  }
 
   const newMat = {
     id: `mat_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
     name: nameClean,
-    type: isCustom ? "custom" : "standard",
+    title: materialData.title || nameClean,
+    type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
     unit: unitClean,
     rate: amountVal,
     amount: amountVal,
@@ -3393,6 +3668,7 @@ export async function updateMaterialInTeam(teamId, materialId, updatedData) {
   const updatedMaterials = (team.materials || []).map(m => {
     if (m.id === materialId) {
       const isCustom = updatedData.type !== undefined ? (updatedData.type === "custom") : (m.type === "custom");
+      const isRateOnly = updatedData.type !== undefined ? (updatedData.type === "rate_only") : (m.type === "rate_only");
       const amtVal = updatedData.amount !== undefined 
         ? Number(updatedData.amount)
         : (updatedData.rate !== undefined 
@@ -3401,12 +3677,16 @@ export async function updateMaterialInTeam(teamId, materialId, updatedData) {
                 ? Number(updatedData.unitPrice) 
                 : (m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice))));
       
-      const newUnit = isCustom ? "" : (updatedData.unit !== undefined ? updatedData.unit.trim() : (m.unit || "Bag"));
+      const newUnit = (isCustom || isRateOnly) ? "" : (updatedData.unit !== undefined ? updatedData.unit.trim() : (m.unit || "Bag"));
+      const newName = updatedData.name !== undefined 
+        ? updatedData.name.trim() 
+        : (updatedData.title !== undefined ? updatedData.title.trim() : m.name);
 
       return {
         ...m,
-        name: updatedData.name ? updatedData.name.trim() : m.name,
-        type: isCustom ? "custom" : "standard",
+        name: newName,
+        title: updatedData.title !== undefined ? updatedData.title.trim() : (m.title || newName),
+        type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
         unit: newUnit,
         rate: amtVal,
         amount: amtVal,
@@ -4993,16 +5273,17 @@ export function subscribeAllLabourAttendance(onUpdate) {
   });
 }
 
-// Real-time subscription to all engineer attendance logs
+// Real-time subscription to all engineer attendance logs (deduplicated per engineer and date)
 export function subscribeAllEngineerAttendance(onUpdate) {
   const db = getDb();
   const q = query(collection(db, "attendance"));
   return onSnapshot(q, (snapshot) => {
-    const list = [];
+    const rawList = [];
     snapshot.forEach(docSnap => {
-      list.push({ id: docSnap.id, ...docSnap.data() });
+      rawList.push({ id: docSnap.id, ...docSnap.data() });
     });
-    onUpdate(list);
+    const cleanList = deduplicateDailyAttendance(rawList);
+    onUpdate(cleanList);
   }, (err) => {
     console.error("All engineer attendance subscription failed:", err);
   });
@@ -5237,7 +5518,7 @@ export async function saveBulkMaterialEntry(bulkData) {
     throw new Error(`Attendance Verification Gate: Verified site attendance is required for site and date (${dateStr}) before submitting material entries.`);
   }
 
-  const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
+  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "rate_only" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
     throw new Error("Please enter at least one material for submission.");
   }
@@ -5248,12 +5529,13 @@ export async function saveBulkMaterialEntry(bulkData) {
   // Save each material item as a unique permanent record to materials collection in single atomic batch
   for (const item of validItems) {
     const isCustom = item.type === "custom";
-    const qty = isCustom ? 1 : Number(item.quantity);
+    const isRateOnly = item.type === "rate_only";
+    const qty = (isCustom || isRateOnly) ? 1 : Number(item.quantity);
     const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
-    const totAmount = isCustom 
+    const totAmount = (isCustom || isRateOnly) 
       ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
       : (qty * uPrice);
-    const matName = (item.materialName || item.name || "").trim();
+    const matName = (item.title || item.materialName || item.name || "").trim() || (isRateOnly ? "Rate Item" : "");
     
     // Generate unique record ID for each submitted material record
     const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
@@ -5265,18 +5547,18 @@ export async function saveBulkMaterialEntry(bulkData) {
       teamId: item.teamId || bulkData.teamId || null,
       teamName: item.teamName || bulkData.teamName || item.category || "General",
       materialName: matName,
-      materialType: isCustom ? "custom" : "standard",
+      materialType: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
       category: item.category || item.teamName || bulkData.teamName || "General",
       quantity: qty,
       requiredQuantity: qty,
-      unit: isCustom ? "" : (item.unit || "Unit"),
+      unit: (isCustom || isRateOnly) ? "" : (item.unit || "Unit"),
       unitPrice: uPrice,
       rate: uPrice,
       amount: totAmount,
       totalAmount: totAmount,
       supplierName: item.supplierName?.trim() || item.teamName || bulkData.teamName || "Material Supplier",
       purchaseDate: dateStr,
-      notes: item.notes?.trim() || `${isCustom ? "Custom Material" : "Material"} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
+      notes: item.notes?.trim() || `${isRateOnly ? "Rate Only" : (isCustom ? "Custom Material" : "Material")} Entry for ${item.teamName || bulkData.teamName || "Team"} on ${dateStr}`,
       invoiceUrl: item.invoiceUrl || "",
       status: "Approved", // Automatically approved material log
       locked: true,
@@ -5851,7 +6133,7 @@ export async function submitAdminAssistedMaterialEntry({
   if (!assignedEngineerId) {
     throw new Error("Assigned Site Engineer ID is required.");
   }
-  const validItems = (items || []).filter(item => item.type === "custom" || Number(item.quantity) > 0);
+  const validItems = (items || []).filter(item => item.type === "custom" || item.type === "rate_only" || Number(item.quantity) > 0);
   if (validItems.length === 0) {
     throw new Error("Please enter at least one material for submission.");
   }
@@ -5867,12 +6149,13 @@ export async function submitAdminAssistedMaterialEntry({
 
   for (const item of validItems) {
     const isCustom = item.type === "custom";
-    const qty = isCustom ? 1 : Number(item.quantity);
+    const isRateOnly = item.type === "rate_only";
+    const qty = (isCustom || isRateOnly) ? 1 : Number(item.quantity);
     const uPrice = Number(item.unitPrice !== undefined ? item.unitPrice : (item.amount !== undefined ? item.amount : item.rate)) || 0;
-    const totAmount = isCustom 
+    const totAmount = (isCustom || isRateOnly) 
       ? (Number(item.amount !== undefined ? item.amount : (item.totalAmount !== undefined ? item.totalAmount : uPrice)) || 0)
       : (qty * uPrice);
-    const matName = (item.materialName || item.name || "").trim();
+    const matName = (item.title || item.materialName || item.name || "").trim() || (isRateOnly ? "Rate Item" : "");
 
     const newDocRef = item.id ? doc(db, "materials", item.id) : doc(collection(db, "materials"));
 
@@ -5884,11 +6167,11 @@ export async function submitAdminAssistedMaterialEntry({
       teamId: item.teamId || null,
       teamName: item.teamName || item.category || "General",
       materialName: matName,
-      materialType: isCustom ? "custom" : "standard",
+      materialType: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
       category: item.category || item.teamName || "General",
       quantity: qty,
       requiredQuantity: qty,
-      unit: isCustom ? "" : (item.unit || "Unit"),
+      unit: (isCustom || isRateOnly) ? "" : (item.unit || "Unit"),
       unitPrice: uPrice,
       rate: uPrice,
       amount: totAmount,

@@ -255,19 +255,22 @@ export default function AdminAssistedEntryModal({
     if (activeMats.length > 0) {
       const newRows = activeMats.map(m => {
         const isCustom = m.type === "custom";
+        const isRateOnly = m.type === "rate_only";
         const amt = Number(m.amount !== undefined ? m.amount : (m.rate !== undefined ? m.rate : m.unitPrice)) || 0;
+        const displayName = (m.title || m.name || m.materialName || "").trim() || (isRateOnly ? "Rate Item" : "Material");
         return {
           id: `mat_row_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
           materialId: m.id,
-          materialName: m.name || m.materialName,
+          materialName: displayName,
+          title: m.title || displayName,
           category: team.name || "General",
           teamId: team.id,
           teamName: team.name,
-          type: isCustom ? "custom" : "standard",
-          unit: isCustom ? "" : (m.unit || "Unit"),
+          type: isRateOnly ? "rate_only" : (isCustom ? "custom" : "standard"),
+          unit: (isCustom || isRateOnly) ? "" : (m.unit || "Unit"),
           rate: amt,
           unitPrice: amt,
-          quantity: isCustom ? 1 : "",
+          quantity: (isCustom || isRateOnly) ? 1 : "",
           amount: amt,
           supplierName: m.supplierName || team.name || "Supplier",
           notes: ""
@@ -307,7 +310,11 @@ export default function AdminAssistedEntryModal({
       const qty = Number(updated.quantity) || 0;
       const rate = Number(updated.rate) || 0;
       updated.unitPrice = rate;
-      updated.amount = updated.type === "custom" && Number(updated.amount) > 0 ? Number(updated.amount) : (qty * rate);
+      if (updated.type === "rate_only" || updated.type === "custom") {
+        updated.amount = Number(updated.amount) > 0 ? Number(updated.amount) : rate;
+      } else {
+        updated.amount = qty * rate;
+      }
       return updated;
     }));
   };
@@ -386,7 +393,7 @@ export default function AdminAssistedEntryModal({
       return;
     }
 
-    const validItems = materialRows.filter(r => (r.materialName || "").trim() && (r.type === "custom" || Number(r.quantity) > 0));
+    const validItems = materialRows.filter(r => ((r.materialName || r.title || "").trim() || r.type === "rate_only") && (r.type === "custom" || r.type === "rate_only" || Number(r.quantity) > 0));
     if (validItems.length === 0) {
       showToast("Please enter at least one valid material with quantity/amount.", "error");
       return;
