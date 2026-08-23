@@ -67,9 +67,72 @@ import {
   Lock,
   Unlock,
   Archive,
-  Shield
+  Shield,
+  ShieldCheck,
+  LogIn,
+  LogOut
 } from "lucide-react";
 import AdminAssistedEntryModal from "../components/common/AdminAssistedEntryModal";
+import EngineerActivityDashboard from "./EngineerActivityDashboard";
+
+// Date formatting helpers for 30-day range and ISO conversions
+const formatDateForInput = (d) => {
+  if (!d || isNaN(new Date(d).getTime())) return "";
+  const dateObj = new Date(d);
+  const year = dateObj.getFullYear();
+  const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+  const day = String(dateObj.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
+const getInitial30DayRange = () => {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 30);
+  return {
+    from: formatDateForInput(from),
+    to: formatDateForInput(to)
+  };
+};
+
+const formatDisplayDate = (dateVal) => {
+  if (!dateVal) return "--";
+  const s = String(dateVal).trim();
+  const parts = s.split("-");
+  if (parts.length === 3 && parts[0].length === 4) {
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    }
+  }
+  const slashParts = s.split("/");
+  if (slashParts.length === 3) {
+    const d = new Date(Number(slashParts[2]), Number(slashParts[1]) - 1, Number(slashParts[0]));
+    if (!isNaN(d.getTime())) {
+      return d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+    }
+  }
+  return s;
+};
+
+const normalizeDateToISO = (dateVal) => {
+  if (!dateVal) return "";
+  const s = String(dateVal).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const parts = s.split("/");
+  if (parts.length === 3) {
+    const [d, m, y] = parts;
+    return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  }
+  const parsed = new Date(s);
+  if (!isNaN(parsed.getTime())) {
+    const year = parsed.getFullYear();
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+  return s;
+};
 
 export default function SiteDetails({ siteId, onBack }) {
   const { userProfile } = useAuth();
@@ -91,6 +154,16 @@ export default function SiteDetails({ siteId, onBack }) {
   const [showSiteInfoModal, setShowSiteInfoModal] = useState(false);
   const [showPendingActionsModal, setShowPendingActionsModal] = useState(false);
   const [showAdminEntryModal, setShowAdminEntryModal] = useState(false);
+
+  // Engineer Activity Dashboard navigation state
+  const [selectedEngineerForActivity, setSelectedEngineerForActivity] = useState(null);
+
+  // 30-Day Site Attendance History Modal State
+  const [showSiteAttendanceModal, setShowSiteAttendanceModal] = useState(false);
+  const [siteModalFromDate, setSiteModalFromDate] = useState(() => getInitial30DayRange().from);
+  const [siteModalToDate, setSiteModalToDate] = useState(() => getInitial30DayRange().to);
+  const [siteAppliedModalRange, setSiteAppliedModalRange] = useState(() => getInitial30DayRange());
+  const [selectedAttendancePhotoModal, setSelectedAttendancePhotoModal] = useState(null);
 
   // Completion Workflow Modal State
   const [completionModal, setCompletionModal] = useState({
@@ -429,9 +502,17 @@ export default function SiteDetails({ siteId, onBack }) {
       }
       setSite(currentSite);
 
-      const assigned = fetchedEngineers.filter(eng => 
-        currentSite.assignedEngineers && currentSite.assignedEngineers.includes(eng.id)
-      );
+      const assigned = fetchedEngineers.filter(eng => {
+        const isDirect = currentSite.assignedEngineers && (
+          currentSite.assignedEngineers.includes(eng.id) ||
+          currentSite.assignedEngineers.includes(eng.uid) ||
+          currentSite.assignedEngineers.includes(eng.customId) ||
+          currentSite.assignedEngineers.includes(eng.engineerId) ||
+          (eng.email && currentSite.assignedEngineers.includes(eng.email))
+        );
+        const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(currentSite.id);
+        return isDirect || isReverse;
+      });
       setEngineers(assigned);
 
       setMaterials(mats);
@@ -501,7 +582,249 @@ export default function SiteDetails({ siteId, onBack }) {
     );
   }
 
+  // If viewing a selected engineer's activity dashboard from Site Details
+  if (selectedEngineerForActivity) {
+    return (
+      <EngineerActivityDashboard 
+        engineerId={selectedEngineerForActivity} 
+        onBack={() => setSelectedEngineerForActivity(null)} 
+      />
+    );
+  }
+
   if (!site) return null;
+
+  // Canonical Site Engineer Attendance records (deduplicated and sorted descending by date/time)
+  const canonicalSiteEngineerAttendance = (attendance || [])
+    .filter(r => 
+      r.type !== "labour_attendance_lock" && 
+      !String(r.id || "").startsWith("labour_lock_") && 
+      !String(r.id || "").startsWith("lock_")
+    )
+    .sort((a, b) => {
+      const dateA = normalizeDateToISO(a.date || a.attendanceDate || "");
+      const dateB = normalizeDateToISO(b.date || b.attendanceDate || "");
+      if (dateA !== dateB) return dateB.localeCompare(dateA);
+      const timeA = a.timestamp?.seconds || (a.timestamp ? new Date(a.timestamp).getTime() : 0);
+      const timeB = b.timestamp?.seconds || (b.timestamp ? new Date(b.timestamp).getTime() : 0);
+      return timeB - timeA;
+    });
+
+  const latestSiteAttendanceRecord = canonicalSiteEngineerAttendance.length > 0 ? canonicalSiteEngineerAttendance[0] : null;
+
+  const modalFilteredSiteAttendance = canonicalSiteEngineerAttendance.filter(rec => {
+    const normDate = normalizeDateToISO(rec.date || rec.attendanceDate || "");
+    if (!normDate) return false;
+    if (siteAppliedModalRange.from && normDate < siteAppliedModalRange.from) return false;
+    if (siteAppliedModalRange.to && normDate > siteAppliedModalRange.to) return false;
+    return true;
+  });
+
+  const renderSiteAttendanceTable = (records = []) => {
+    if (!records || records.length === 0) {
+      return (
+        <div style={{ padding: "32px 16px", textAlign: "center", backgroundColor: "var(--primary-50)", borderRadius: "8px", border: "1px dashed var(--border-color)" }}>
+          <ClipboardCheck size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "8px" }} />
+          <p style={{ color: "var(--text-muted)", fontSize: "13px", margin: 0 }}>
+            No attendance records found for this site.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div style={{ 
+        overflowX: "auto", 
+        border: "1px solid var(--border-color)", 
+        borderRadius: "8px", 
+        backgroundColor: "#ffffff",
+        boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+      }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", textAlign: "left" }}>
+          <thead>
+            <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid var(--border-color)" }}>
+              <th style={{ padding: "10px 12px", width: "56px", textAlign: "center", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Photo</th>
+              <th style={{ padding: "10px 12px", width: "160px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Site Engineer</th>
+              <th style={{ padding: "10px 12px", width: "125px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Date</th>
+              <th style={{ padding: "10px 12px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Site</th>
+              <th style={{ padding: "10px 12px", width: "115px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Check-in</th>
+              <th style={{ padding: "10px 12px", width: "115px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Check-out</th>
+              <th style={{ padding: "10px 12px", width: "120px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Status</th>
+              <th style={{ padding: "10px 12px", width: "130px", color: "#475569", fontWeight: "750", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.5px" }}>Verification</th>
+            </tr>
+          </thead>
+          <tbody>
+            {records.map((record, idx) => {
+              const eng = engineers.find(e => e.id === record.engineerId || e.id === record.userId) || { fullName: record.engineerName || `Engineer (ID: ${record.engineerId || record.userId})` };
+              const recDate = record.date || record.attendanceDate || "--";
+              const checkInTime = record.checkInTimeFormatted || record.time || "--";
+              const checkOutTime = record.checkOutTimeFormatted;
+              const isCheckedOut = record.isCheckedOut || record.status === "checked_out" || Boolean(checkOutTime);
+              const photoUrl = record.photoUrl || record.checkInPhotoUrl;
+              const isVerified = record.verificationStatus === "verified" || record.isVerified;
+
+              return (
+                <tr 
+                  key={record.id || `site_att_row_${record.engineerId}_${recDate}_${idx}`} 
+                  style={{ 
+                    borderBottom: idx < records.length - 1 ? "1px solid #f1f5f9" : "none",
+                    transition: "background-color 0.15s ease"
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                  onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                >
+                  {/* Photo Column */}
+                  <td style={{ padding: "8px 12px", textAlign: "center", verticalAlign: "middle" }}>
+                    {photoUrl ? (
+                      <img 
+                        src={photoUrl} 
+                        alt="Selfie"
+                        onClick={() => setSelectedAttendancePhotoModal({ url: photoUrl, title: `Selfie Verification - ${eng.fullName} (${recDate})` })}
+                        style={{
+                          width: "36px",
+                          height: "36px",
+                          borderRadius: "6px",
+                          objectFit: "cover",
+                          border: "1px solid #cbd5e1",
+                          cursor: "pointer",
+                          display: "inline-block",
+                          verticalAlign: "middle"
+                        }}
+                        title="Click to expand verification selfie"
+                      />
+                    ) : (
+                      <div style={{
+                        width: "36px",
+                        height: "36px",
+                        borderRadius: "6px",
+                        backgroundColor: "#f1f5f9",
+                        color: "#64748b",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        border: "1px solid #e2e8f0",
+                        verticalAlign: "middle",
+                        margin: "0 auto"
+                      }}>
+                        <ClipboardCheck size={16} />
+                      </div>
+                    )}
+                  </td>
+
+                  {/* Site Engineer Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <strong style={{ fontSize: "13px", color: "var(--primary-950)", fontWeight: "750" }}>
+                      {eng.fullName}
+                    </strong>
+                  </td>
+
+                  {/* Date Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <span className="font-mono" style={{ fontWeight: "700", color: "#0f172a", fontSize: "13px" }}>
+                      {formatDisplayDate(recDate)}
+                    </span>
+                    {recDate !== formatDisplayDate(recDate) && (
+                      <span className="font-mono" style={{ display: "block", fontSize: "10.5px", color: "#64748b" }}>
+                        {recDate}
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Site Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle" }}>
+                    <strong style={{ color: "#1e293b", fontSize: "13px", display: "block" }}>
+                      {site.siteName}
+                    </strong>
+                    <span style={{ fontSize: "11px", color: "#64748b" }}>
+                      {eng.fullName}
+                    </span>
+                    {record.distance !== undefined && record.distance !== null && (
+                      <span style={{ display: "block", fontSize: "10.5px", color: Number(record.distance) <= 500 ? "#15803d" : "#b45309", fontWeight: "600" }}>
+                        🎯 {Math.round(record.distance)}m from site
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Check-in Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                      <LogIn size={13} style={{ color: "#16a34a" }} />
+                      <span className="font-mono" style={{ fontWeight: "700", color: "#15803d", fontSize: "12.5px" }}>
+                        {checkInTime}
+                      </span>
+                    </div>
+                  </td>
+
+                  {/* Check-out Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    {checkOutTime ? (
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: "5px" }}>
+                        <LogOut size={13} style={{ color: "#4338ca" }} />
+                        <span className="font-mono" style={{ fontWeight: "700", color: "#3730a3", fontSize: "12.5px" }}>
+                          {checkOutTime}
+                        </span>
+                      </div>
+                    ) : isCheckedOut ? (
+                      <span style={{ fontSize: "12px", color: "#4338ca", fontWeight: "600" }}>
+                        Logged Out
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: "12px", color: "#94a3b8", fontStyle: "italic" }}>
+                        —
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Status Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    <Badge status={isCheckedOut ? "info" : "success"}>
+                      {isCheckedOut ? "Checked Out" : "Present"}
+                    </Badge>
+                  </td>
+
+                  {/* Verification Column */}
+                  <td style={{ padding: "8px 12px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                    {isVerified ? (
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontSize: "11px",
+                        fontWeight: "700",
+                        color: "#059669",
+                        backgroundColor: "#ecfdf5",
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        border: "1px solid #a7f3d0"
+                      }}>
+                        <ShieldCheck size={12} />
+                        Verified
+                      </span>
+                    ) : (
+                      <span style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "4px",
+                        fontSize: "11px",
+                        fontWeight: "600",
+                        color: "#64748b",
+                        backgroundColor: "#f1f5f9",
+                        padding: "3px 8px",
+                        borderRadius: "12px",
+                        border: "1px solid #e2e8f0"
+                      }}>
+                        Logged
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   // Map materials to include derived tracking values strictly for this site
   const siteMaterials = materials.filter(m => m.siteId === siteId);
@@ -937,7 +1260,38 @@ export default function SiteDetails({ siteId, onBack }) {
             </div>
             <div style={{ fontSize: "12px" }}>
               <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Assigned Engineer</span>
-              <strong style={{ color: "#0f172a", fontWeight: "700" }}>{engineers.map(e => e.fullName).join(", ") || "Unassigned"}</strong>
+              {engineers.length === 0 ? (
+                <strong style={{ color: "#0f172a", fontWeight: "700" }}>Unassigned</strong>
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                  {engineers.map(e => (
+                    <span key={e.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                      <strong style={{ color: "#0f172a", fontWeight: "700" }}>{e.fullName}</strong>
+                      <button
+                        type="button"
+                        className="btn-icon btn-view-action"
+                        onClick={() => setSelectedEngineerForActivity(e.id)}
+                        title={`View ${e.fullName}'s activity dashboard`}
+                        style={{
+                          width: "20px",
+                          height: "20px",
+                          padding: 0,
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          borderRadius: "4px",
+                          border: "1px solid #bfdbfe",
+                          backgroundColor: "#eff6ff",
+                          color: "#2563eb",
+                          cursor: "pointer"
+                        }}
+                      >
+                        <Eye size={11} />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
             <div style={{ fontSize: "12px", textAlign: "right" }}>
               <span style={{ color: "#64748b", display: "block", fontSize: "10.5px", fontWeight: "700", textTransform: "uppercase" }}>Progress</span>
@@ -2663,51 +3017,205 @@ export default function SiteDetails({ siteId, onBack }) {
             =================================================================== */}
         {activeTab === "attendance" && (
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
-            <Card title="Engineer Attendance Records">
-              {(() => {
-                const engineerRecords = (attendance || []).filter(r => r.type !== "labour_attendance_lock" && !String(r.id || "").startsWith("labour_lock_") && !String(r.id || "").startsWith("lock_"));
-                if (engineerRecords.length === 0) {
-                  return <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic" }}>No attendance submissions found for this site.</p>;
-                }
-                return (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                    {engineerRecords.map((record, index) => {
-                      const eng = engineers.find(e => e.id === record.engineerId || e.id === record.userId) || { fullName: `Engineer (ID: ${record.engineerId || record.userId})` };
-                      return (
-                        <div key={record.id || `${record.engineerId}_${record.date}_${index}`} style={{
-                          padding: "12px",
-                          borderRadius: "8px",
-                          backgroundColor: "var(--primary-50)",
-                          border: "1px solid var(--border-color)",
+            <Card 
+              title="Site Attendance Overview"
+              subtitle="Compact verified supervisor attendance summary for this project."
+            >
+              {latestSiteAttendanceRecord ? (
+                <div style={{
+                  padding: "18px",
+                  backgroundColor: "#ffffff",
+                  border: "1.5px solid var(--border-color)",
+                  borderRadius: "12px",
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "14px"
+                }}>
+                  {/* Header: Latest Badge, Engineer Name, Date, Status */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      {latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl ? (
+                        <img 
+                          src={latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl} 
+                          alt="Selfie"
+                          onClick={() => setSelectedAttendancePhotoModal({ 
+                            url: latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl, 
+                            title: `Verification Selfie - ${(() => {
+                              const eng = engineers.find(e => e.id === latestSiteAttendanceRecord.engineerId || e.id === latestSiteAttendanceRecord.userId);
+                              return eng ? eng.fullName : (latestSiteAttendanceRecord.engineerName || "Site Engineer");
+                            })()} (${latestSiteAttendanceRecord.date || latestSiteAttendanceRecord.attendanceDate})` 
+                          })}
+                          style={{
+                            width: "48px",
+                            height: "48px",
+                            borderRadius: "10px",
+                            objectFit: "cover",
+                            flexShrink: 0,
+                            border: "1.5px solid var(--border-color)",
+                            cursor: "pointer"
+                          }}
+                          title="Click to view full selfie"
+                        />
+                      ) : (
+                        <div style={{
+                          width: "48px",
+                          height: "48px",
+                          borderRadius: "10px",
+                          backgroundColor: "#eff6ff",
+                          color: "#2563eb",
                           display: "flex",
-                          alignItems: "flex-start",
-                          gap: "12px"
+                          alignItems: "center",
+                          justifyContent: "center",
+                          flexShrink: 0,
+                          border: "1px solid #bfdbfe"
                         }}>
-                          {record.photoUrl && (
-                            <img 
-                              src={record.photoUrl} 
-                              alt="Selfie Verification" 
-                              style={{ width: "40px", height: "40px", borderRadius: "6px", objectFit: "cover", flexShrink: 0, border: "1px solid var(--border-color)" }} 
-                            />
-                          )}
-                          <div style={{ display: "flex", flexDirection: "column", flexGrow: 1, gap: "2px" }}>
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                              <span style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-900)" }}>{eng.fullName}</span>
-                              <Badge status="success">Present</Badge>
-                            </div>
-                            <span style={{ fontSize: "11.5px", fontWeight: "600", color: "var(--primary-750)" }} className="font-mono">
-                              Date: {record.date || record.attendanceDate} {record.time ? `(${record.time})` : ""}
-                            </span>
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                              Address: {record.address || (record.latitude && record.longitude ? `Lat: ${Number(record.latitude).toFixed(5)}, Lng: ${Number(record.longitude).toFixed(5)}` : "GPS Captured")}
-                            </span>
-                          </div>
+                          <ClipboardCheck size={24} />
                         </div>
-                      );
-                    })}
+                      )}
+                      <div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span style={{ 
+                            fontSize: "11px", 
+                            fontWeight: "800", 
+                            textTransform: "uppercase", 
+                            color: "#2563eb", 
+                            backgroundColor: "#dbeafe", 
+                            padding: "2px 8px", 
+                            borderRadius: "4px",
+                            letterSpacing: "0.5px" 
+                          }}>
+                            Latest Attendance
+                          </span>
+                          <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>
+                            {(() => {
+                              const eng = engineers.find(e => e.id === latestSiteAttendanceRecord.engineerId || e.id === latestSiteAttendanceRecord.userId);
+                              return eng ? eng.fullName : (latestSiteAttendanceRecord.engineerName || "Site Engineer");
+                            })()}
+                          </strong>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", color: "var(--text-muted)", fontSize: "12px" }}>
+                          <Calendar size={13} style={{ color: "var(--primary-600)" }} />
+                          <span className="font-mono" style={{ fontWeight: "750", color: "#1e293b" }}>
+                            {formatDisplayDate(latestSiteAttendanceRecord.date || latestSiteAttendanceRecord.attendanceDate)}
+                          </span>
+                          <span>•</span>
+                          <span>{site.siteName}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      {(latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.status === "checked_out" || latestSiteAttendanceRecord.checkOutTimeFormatted) ? (
+                        <Badge status="info">Checked Out</Badge>
+                      ) : (
+                        <Badge status="success">Present / On Site</Badge>
+                      )}
+                      {(latestSiteAttendanceRecord.verificationStatus === "verified" || latestSiteAttendanceRecord.isVerified) && (
+                        <span style={{ 
+                          display: "inline-flex", 
+                          alignItems: "center", 
+                          gap: "3px", 
+                          fontSize: "10.5px", 
+                          fontWeight: "700", 
+                          color: "#059669", 
+                          backgroundColor: "#ecfdf5", 
+                          padding: "2px 8px", 
+                          borderRadius: "12px", 
+                          border: "1px solid #a7f3d0" 
+                        }}>
+                          <ShieldCheck size={12} />
+                          Verified
+                        </span>
+                      )}
+                    </div>
                   </div>
-                );
-              })()}
+
+                  {/* Quick Check-In / Check-Out strip */}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+                    gap: "10px",
+                    backgroundColor: "var(--primary-50)",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    fontSize: "12px"
+                  }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#dcfce7", color: "#15803d", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <LogIn size={13} />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-In</span>
+                        <strong className="font-mono" style={{ color: "var(--primary-900)", fontSize: "12.5px" }}>
+                          {latestSiteAttendanceRecord.checkInTimeFormatted || latestSiteAttendanceRecord.time || "--"}
+                        </strong>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#e0e7ff" : "#f1f5f9", color: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#4338ca" : "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <LogOut size={13} />
+                      </div>
+                      <div>
+                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-Out</span>
+                        <strong className="font-mono" style={{ color: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#1e1b4b" : "var(--text-muted)", fontSize: "12.5px" }}>
+                          {latestSiteAttendanceRecord.checkOutTimeFormatted || (latestSiteAttendanceRecord.isCheckedOut ? "Logged" : "On Site")}
+                        </strong>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bottom Footer: GPS Location + Small View Attendance action */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", borderTop: "1px solid var(--border-color)", paddingTop: "12px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11.5px", color: "var(--text-muted)" }}>
+                      <MapPin size={13} style={{ color: "var(--primary-600)", flexShrink: 0 }} />
+                      <span>{latestSiteAttendanceRecord.address || (latestSiteAttendanceRecord.latitude && latestSiteAttendanceRecord.longitude ? `Lat: ${Number(latestSiteAttendanceRecord.latitude).toFixed(5)}, Lng: ${Number(latestSiteAttendanceRecord.longitude).toFixed(5)}` : "GPS Captured")}</span>
+                      {latestSiteAttendanceRecord.distance !== undefined && latestSiteAttendanceRecord.distance !== null && (
+                        <span style={{ fontWeight: "750", color: Number(latestSiteAttendanceRecord.distance) <= 500 ? "#15803d" : "#b45309" }}>
+                          • 🎯 {Math.round(latestSiteAttendanceRecord.distance)}m from site
+                        </span>
+                      )}
+                    </div>
+
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      icon={Calendar}
+                      onClick={() => setShowSiteAttendanceModal(true)}
+                      style={{
+                        padding: "6px 14px",
+                        fontSize: "12px",
+                        fontWeight: "750"
+                      }}
+                    >
+                      View Attendance
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{
+                  padding: "32px 16px",
+                  textAlign: "center",
+                  backgroundColor: "var(--primary-50)",
+                  borderRadius: "10px",
+                  border: "1px dashed var(--border-color)"
+                }}>
+                  <ClipboardCheck size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "8px" }} />
+                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", margin: "0 0 14px 0" }}>
+                    No attendance records found for this site.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    icon={Calendar}
+                    onClick={() => setShowSiteAttendanceModal(true)}
+                  >
+                    View Attendance
+                  </Button>
+                </div>
+              )}
             </Card>
           </div>
         )}
@@ -3093,9 +3601,40 @@ export default function SiteDetails({ siteId, onBack }) {
             <span style={{ color: "#64748b", fontWeight: "600" }}>Location</span>
             <strong style={{ color: "#0f172a", textAlign: "right", maxWidth: "260px" }}>{site.location || "—"}</strong>
           </div>
-          <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
             <span style={{ color: "#64748b", fontWeight: "600" }}>Assigned Engineer(s)</span>
-            <strong style={{ color: "#0f172a" }}>{engineers.map(e => e.fullName).join(", ") || "Unassigned"}</strong>
+            {engineers.length === 0 ? (
+              <strong style={{ color: "#0f172a" }}>Unassigned</strong>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                {engineers.map(e => (
+                  <span key={e.id} style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    <strong style={{ color: "#0f172a" }}>{e.fullName}</strong>
+                    <button
+                      type="button"
+                      className="btn-icon btn-view-action"
+                      onClick={() => setSelectedEngineerForActivity(e.id)}
+                      title={`View ${e.fullName}'s activity dashboard`}
+                      style={{
+                        width: "20px",
+                        height: "20px",
+                        padding: 0,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        borderRadius: "4px",
+                        border: "1px solid #bfdbfe",
+                        backgroundColor: "#eff6ff",
+                        color: "#2563eb",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <Eye size={11} />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
             <span style={{ color: "#64748b", fontWeight: "600" }}>Project Status</span>
@@ -3486,6 +4025,136 @@ export default function SiteDetails({ siteId, onBack }) {
             showToast("Admin entry saved and synced across system.", "success");
           }}
         />
+      )}
+
+      {/* ===================================================================
+          SITE ATTENDANCE HISTORY (30-DAY RESPONSIVE MODAL)
+          =================================================================== */}
+      {showSiteAttendanceModal && (
+        <Modal
+          isOpen={true}
+          onClose={() => setShowSiteAttendanceModal(false)}
+          title="Attendance History — Last 30 Days"
+          subtitle={`Canonical attendance records for ${site.siteName}`}
+          maxWidth="900px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            
+            {/* Filter Date Range Control Strip */}
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+              flexWrap: "wrap",
+              backgroundColor: "var(--primary-50)",
+              padding: "12px 16px",
+              borderRadius: "8px",
+              border: "1px solid var(--border-color)"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <label htmlFor="site-modal-from-date" style={{ fontSize: "12px", fontWeight: "700", color: "#334155" }}>From:</label>
+                  <input
+                    type="date"
+                    id="site-modal-from-date"
+                    value={siteModalFromDate}
+                    onChange={(e) => setSiteModalFromDate(e.target.value)}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-color)",
+                      fontSize: "12.5px",
+                      outline: "none",
+                      backgroundColor: "#ffffff"
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <label htmlFor="site-modal-to-date" style={{ fontSize: "12px", fontWeight: "700", color: "#334155" }}>To:</label>
+                  <input
+                    type="date"
+                    id="site-modal-to-date"
+                    value={siteModalToDate}
+                    onChange={(e) => setSiteModalToDate(e.target.value)}
+                    style={{
+                      padding: "6px 10px",
+                      borderRadius: "6px",
+                      border: "1px solid var(--border-color)",
+                      fontSize: "12.5px",
+                      outline: "none",
+                      backgroundColor: "#ffffff"
+                    }}
+                  />
+                </div>
+
+                <Button
+                  variant="primary"
+                  size="sm"
+                  onClick={() => setSiteAppliedModalRange({ from: siteModalFromDate, to: siteModalToDate })}
+                >
+                  Apply / View
+                </Button>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const r = getInitial30DayRange();
+                    setSiteModalFromDate(r.from);
+                    setSiteModalToDate(r.to);
+                    setSiteAppliedModalRange(r);
+                  }}
+                >
+                  Last 30 Days
+                </Button>
+              </div>
+
+              {/* Range Badge Summary */}
+              <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>
+                Range: <strong style={{ color: "#0f172a" }}>{formatDisplayDate(siteAppliedModalRange.from)}</strong> to <strong style={{ color: "#0f172a" }}>{formatDisplayDate(siteAppliedModalRange.to)}</strong>
+                <span style={{ marginLeft: "8px", backgroundColor: "#e2e8f0", padding: "2px 8px", borderRadius: "10px", fontWeight: "700", color: "#334155" }}>
+                  {modalFilteredSiteAttendance.length} record{modalFilteredSiteAttendance.length !== 1 ? "s" : ""}
+                </span>
+              </div>
+            </div>
+
+            {/* Attendance Records Table */}
+            <div style={{ maxHeight: "60vh", overflowY: "auto" }}>
+              {renderSiteAttendanceTable(modalFilteredSiteAttendance)}
+            </div>
+
+            {/* Modal Footer */}
+            <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: "10px", borderTop: "1px solid var(--border-color)" }}>
+              <Button variant="outline" onClick={() => setShowSiteAttendanceModal(false)}>
+                Close
+              </Button>
+            </div>
+
+          </div>
+        </Modal>
+      )}
+
+      {/* Modal for viewing expanded verification photo */}
+      {selectedAttendancePhotoModal && (
+        <Modal
+          isOpen={true}
+          onClose={() => setSelectedAttendancePhotoModal(null)}
+          title={selectedAttendancePhotoModal.title || "Verification Photo"}
+          maxWidth="500px"
+        >
+          <div style={{ textAlign: "center", padding: "8px" }}>
+            <img 
+              src={selectedAttendancePhotoModal.url} 
+              alt="Verification selfie preview" 
+              style={{ maxWidth: "100%", maxHeight: "65vh", borderRadius: "8px", objectFit: "contain", border: "1px solid var(--border-color)" }}
+            />
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end" }}>
+              <Button variant="outline" onClick={() => setSelectedAttendancePhotoModal(null)}>Close</Button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />

@@ -494,10 +494,9 @@ export default function Sites() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedEngineers] = await Promise.all([
-        getSites(adminId),
-        getSiteEngineers(adminId)
+        getSites(),
+        getSiteEngineers()
       ]);
       setSites(fetchedSites);
       setEngineers(fetchedEngineers);

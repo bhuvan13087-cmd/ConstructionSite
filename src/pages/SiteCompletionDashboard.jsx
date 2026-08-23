@@ -583,9 +583,17 @@ export default function SiteCompletionDashboard() {
                 <tbody style={{ fontSize: "13px" }}>
                   {filteredSites.map(site => {
                     const isCompleted = (site.status || "").toLowerCase() === "completed" || site.isCompleted === true;
-                    const summary = siteSummaries[site.id] || { hasPendingItems: false, totalPendingCount: 0 };
-                    const assignedEngs = engineers.filter(e => site.assignedEngineers && site.assignedEngineers.includes(e.id));
-                    const progressPct = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || (isCompleted ? 100 : 0)));
+                    const assignedEngs = engineers.filter(e => {
+                      const isDirect = site.assignedEngineers && (
+                        site.assignedEngineers.includes(e.id) ||
+                        site.assignedEngineers.includes(e.uid) ||
+                        site.assignedEngineers.includes(e.customId) ||
+                        site.assignedEngineers.includes(e.engineerId) ||
+                        (e.email && site.assignedEngineers.includes(e.email))
+                      );
+                      const isReverse = Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id);
+                      return isDirect || isReverse;
+                    });
 
                     return (
                       <tr 

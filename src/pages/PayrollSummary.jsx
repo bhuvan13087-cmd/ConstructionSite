@@ -107,11 +107,10 @@ export default function PayrollSummary() {
   const loadBaseData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.role === "admin" ? userProfile.uid || userProfile.id : null;
       const [fetchedSites, fetchedTeams, fetchedEngineers] = await Promise.all([
-        getSites(adminId),
-        getLabourTeams(adminId),
-        getSiteEngineers(adminId)
+        getSites(),
+        getLabourTeams(),
+        getSiteEngineers()
       ]);
       setSites(fetchedSites);
       setTeams(fetchedTeams);

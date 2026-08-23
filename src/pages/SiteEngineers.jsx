@@ -44,7 +44,10 @@ import {
   Building2,
   Users,
   UserCheck,
-  UserX
+  UserX,
+  LogIn,
+  LogOut,
+  Calendar
 } from "lucide-react";
 
 
@@ -121,10 +124,9 @@ export default function SiteEngineers() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedEngineers] = await Promise.all([
-        getSites(adminId),
-        getSiteEngineers(adminId)
+        getSites(),
+        getSiteEngineers()
       ]);
       setSites(fetchedSites);
       setEngineers(fetchedEngineers);
@@ -154,8 +156,7 @@ export default function SiteEngineers() {
       await updateEngineerStatus(id, newStatus);
       showToast(`Status updated to ${newStatus}.`, "success");
       // Reload engineers list
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      const fetchedEngineers = await getSiteEngineers(adminId);
+      const fetchedEngineers = await getSiteEngineers();
       setEngineers(fetchedEngineers);
     } catch (err) {
       console.error("Error toggling status:", err);
@@ -1336,33 +1337,102 @@ export default function SiteEngineers() {
                   No attendance records logged for this engineer.
                 </p>
               ) : (
-                <div style={{ maxHeight: "180px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "8px" }}>
-                  {selectedEngineerAttendance.slice(0, 10).map((att, idx) => {
-                    const siteObj = sites.find(s => s.id === att.siteId);
-                    const siteName = att.siteName || (siteObj ? siteObj.siteName : (att.siteId ? `Site (ID: ${att.siteId})` : "General Site"));
-                    const checkInTime = att.checkInTimeFormatted || att.time || "--";
-                    const isCheckedOut = att.isCheckedOut || att.status === "checked_out";
-                    return (
-                      <div key={att.id || idx} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fff", border: "1px solid var(--border-color)", borderRadius: "6px" }}>
-                        <div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
-                              {siteName}
-                            </span>
-                            <span className="font-mono" style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                              ({att.date || att.attendanceDate})
-                            </span>
-                          </div>
-                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>
-                            In: <strong>{checkInTime}</strong> {isCheckedOut ? `• Out: ${att.checkOutTimeFormatted || "Checked Out"}` : "• On Site"}
-                          </span>
-                        </div>
-                        <Badge status={isCheckedOut ? "info" : "success"}>
-                          {isCheckedOut ? "Checked Out" : "Present"}
-                        </Badge>
-                      </div>
-                    );
-                  })}
+                <div style={{ maxHeight: "240px", overflowY: "auto", overflowX: "auto", border: "1px solid var(--border-color)", borderRadius: "8px", backgroundColor: "#ffffff" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px", textAlign: "left" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid var(--border-color)" }}>
+                        <th style={{ padding: "8px 10px", width: "46px", textAlign: "center", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Photo</th>
+                        <th style={{ padding: "8px 10px", width: "140px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Site Engineer</th>
+                        <th style={{ padding: "8px 10px", width: "110px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Date</th>
+                        <th style={{ padding: "8px 10px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Site</th>
+                        <th style={{ padding: "8px 10px", width: "100px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Check-in</th>
+                        <th style={{ padding: "8px 10px", width: "100px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Check-out</th>
+                        <th style={{ padding: "8px 10px", width: "95px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Status</th>
+                        <th style={{ padding: "8px 10px", width: "105px", color: "#475569", fontWeight: "750", fontSize: "11px", textTransform: "uppercase" }}>Verification</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedEngineerAttendance.slice(0, 15).map((att, idx) => {
+                        const siteObj = sites.find(s => s.id === att.siteId);
+                        const siteName = att.siteName || (siteObj ? siteObj.siteName : (att.siteId ? `Site (ID: ${att.siteId})` : "General Site"));
+                        const engName = att.engineerName || selectedEngineer?.fullName || "Site Engineer";
+                        const recDate = att.date || att.attendanceDate || "--";
+                        const checkInTime = att.checkInTimeFormatted || att.time || "--";
+                        const checkOutTime = att.checkOutTimeFormatted;
+                        const isCheckedOut = att.isCheckedOut || att.status === "checked_out" || Boolean(checkOutTime);
+                        const photoUrl = att.photoUrl || att.checkInPhotoUrl;
+                        const isVerified = att.verificationStatus === "verified" || att.isVerified;
+
+                        return (
+                          <tr 
+                            key={att.id || `se_att_${idx}`} 
+                            style={{ 
+                              borderBottom: idx < Math.min(selectedEngineerAttendance.length, 15) - 1 ? "1px solid #f1f5f9" : "none" 
+                            }}
+                          >
+                            <td style={{ padding: "6px 10px", textAlign: "center", verticalAlign: "middle" }}>
+                              {photoUrl ? (
+                                <img 
+                                  src={photoUrl} 
+                                  alt="Selfie"
+                                  style={{ width: "32px", height: "32px", borderRadius: "6px", objectFit: "cover", border: "1px solid #cbd5e1" }}
+                                />
+                              ) : (
+                                <div style={{ width: "32px", height: "32px", borderRadius: "6px", backgroundColor: "#f1f5f9", color: "#64748b", display: "inline-flex", alignItems: "center", justifyContent: "center", border: "1px solid #e2e8f0" }}>
+                                  <Building2 size={14} />
+                                </div>
+                              )}
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              <strong style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "750" }}>
+                                {engName}
+                              </strong>
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              <span className="font-mono" style={{ fontWeight: "700", color: "#0f172a" }}>
+                                {recDate}
+                              </span>
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle" }}>
+                              <strong style={{ color: "#1e293b", fontSize: "12px", display: "block" }}>
+                                {siteName}
+                              </strong>
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              <span className="font-mono" style={{ fontWeight: "700", color: "#15803d" }}>
+                                {checkInTime}
+                              </span>
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              {checkOutTime ? (
+                                <span className="font-mono" style={{ fontWeight: "700", color: "#3730a3" }}>
+                                  {checkOutTime}
+                                </span>
+                              ) : (
+                                <span style={{ color: "#94a3b8", fontStyle: "italic" }}>—</span>
+                              )}
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              <Badge status={isCheckedOut ? "info" : "success"}>
+                                {isCheckedOut ? "Checked Out" : "Present"}
+                              </Badge>
+                            </td>
+                            <td style={{ padding: "6px 10px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                              {isVerified ? (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "10.5px", fontWeight: "700", color: "#059669", backgroundColor: "#ecfdf5", padding: "2px 6px", borderRadius: "10px", border: "1px solid #a7f3d0" }}>
+                                  <ShieldCheck size={11} /> Verified
+                                </span>
+                              ) : (
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "3px", fontSize: "10.5px", fontWeight: "600", color: "#64748b", backgroundColor: "#f1f5f9", padding: "2px 6px", borderRadius: "10px", border: "1px solid #e2e8f0" }}>
+                                  Logged
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
               )}
             </div>

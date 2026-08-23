@@ -190,11 +190,10 @@ export default function AdminLabour() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedTeams, fetchedPayments] = await Promise.all([
-        getSites(adminId),
-        getLabourTeams(adminId),
-        getLabourPayments(adminId)
+        getSites(),
+        getLabourTeams(),
+        getLabourPayments()
       ]);
 
       setSites(fetchedSites);
@@ -286,7 +285,6 @@ export default function AdminLabour() {
   };
 
   useEffect(() => {
-    const adminId = userProfile?.uid || userProfile?.id || null;
     loadData();
     const unsubscribe = subscribeLabourTeams((teamsList) => {
       // Deduplicate teamsList by ID to maintain single source of truth
@@ -356,9 +354,9 @@ export default function AdminLabour() {
         }
       });
       setLabourMaster({ categories: categoriesMap, history: [] });
-    }, adminId);
+    });
     return () => unsubscribe();
-  }, [userProfile]);
+  }, []);
 
   useEffect(() => {
     const unsubscribeAllAttendance = subscribeAllLabourAttendance((records) => {
@@ -464,7 +462,7 @@ export default function AdminLabour() {
       setModalCategories([{ id: Date.now(), name: "", amount: "750", paymentType: "Daily" }]);
 
       // 3. Authoritative re-fetch directly from Firestore (single source of truth)
-      const freshTeams = await getLabourTeams(adminId);
+      const freshTeams = await getLabourTeams();
       
       // Deduplicate by ID to guarantee single entry
       const uniqueMap = new Map();
@@ -556,8 +554,7 @@ export default function AdminLabour() {
       setShowAddLabourModal(false);
 
       // 3. Authoritative re-fetch
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      const fetchedTeams = await getLabourTeams(adminId);
+      const fetchedTeams = await getLabourTeams();
       setTeams(fetchedTeams);
     } catch (err) {
       showToast(`Failed to add labour: ${err.message}`, "error");

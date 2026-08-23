@@ -133,9 +133,13 @@ export default function AdminAssistedEntryModal({
     if (!currentSite) return [];
     const directAssignedIds = currentSite.assignedEngineers || [];
     
-    // Check both site.assignedEngineers array and engineer.assignedSites
+    // Check both site.assignedEngineers array and engineer.assignedSites (multi-key resolution)
     const matched = engineers.filter(eng => {
-      const isDirect = directAssignedIds.includes(eng.id);
+      const isDirect = directAssignedIds.includes(eng.id) ||
+        directAssignedIds.includes(eng.uid) ||
+        directAssignedIds.includes(eng.customId) ||
+        directAssignedIds.includes(eng.engineerId) ||
+        (eng.email && directAssignedIds.includes(eng.email));
       const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(currentSite.id);
       return isDirect || isReverse;
     });

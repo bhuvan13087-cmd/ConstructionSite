@@ -45,13 +45,87 @@ import Card from "../components/common/Card";
 import Badge from "../components/common/Badge";
 import { Modal } from "../components/common/Modal";
 import { Link } from "react-router-dom";
-import { deduplicateDailyAttendance, isEngineerAttendanceRecord } from "../services/firebaseService";
+import { 
+  deduplicateDailyAttendance, 
+  isEngineerAttendanceRecord, 
+  subscribeAllLabourAttendance, 
+  subscribeGeneralExpenses 
+} from "../services/firebaseService";
+import { formatINR } from "../services/businessLogic";
+
+// Universal date string normalizer to ISO 'YYYY-MM-DD'
+const normalizeToISODate = (val) => {
+  if (!val) return "";
+  if (typeof val === "string") {
+    const s = val.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s.includes("T")) return s.split("T")[0];
+    const partsSlash = s.split("/");
+    if (partsSlash.length === 3) {
+      if (partsSlash[0].length === 4) return `${partsSlash[0]}-${String(partsSlash[1]).padStart(2, '0')}-${String(partsSlash[2]).padStart(2, '0')}`;
+      return `${partsSlash[2]}-${String(partsSlash[1]).padStart(2, '0')}-${String(partsSlash[0]).padStart(2, '0')}`;
+    }
+    const partsHyphen = s.split("-");
+    if (partsHyphen.length === 3 && partsHyphen[2].length === 4) {
+      return `${partsHyphen[2]}-${String(partsHyphen[1]).padStart(2, '0')}-${String(partsHyphen[0]).padStart(2, '0')}`;
+    }
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) {
+      const year = parsed.getFullYear();
+      const month = String(parsed.getMonth() + 1).padStart(2, '0');
+      const day = String(parsed.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+    return s;
+  }
+  if (typeof val === "number") {
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) return d.toISOString().split("T")[0];
+  }
+  if (val instanceof Date) {
+    if (!isNaN(val.getTime())) {
+      const year = val.getFullYear();
+      const month = String(val.getMonth() + 1).padStart(2, '0');
+      const day = String(val.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  if (typeof val === "object") {
+    if (typeof val.toDate === "function") {
+      try {
+        const d = val.toDate();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      } catch (e) {}
+    }
+    if (typeof val.seconds === "number") {
+      const d = new Date(val.seconds * 1000);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+  }
+  return "";
+};
+
+const isTodayRecord = (dateVal, createdAtVal, todayKeys) => {
+  const normDate = normalizeToISODate(dateVal);
+  if (normDate && todayKeys.includes(normDate)) return true;
+  const normCreated = normalizeToISODate(createdAtVal);
+  if (normCreated && todayKeys.includes(normCreated)) return true;
+  return false;
+};
 
 export default function AdminDashboard() {
   const { user } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [rawAttendance, setRawAttendance] = useState([]);
+  const [rawLabourAttendance, setRawLabourAttendance] = useState([]);
+  const [rawLegacyLabour, setRawLegacyLabour] = useState([]);
   const [rawMaterials, setRawMaterials] = useState([]);
   const [rawWorkers, setRawWorkers] = useState([]);
   const [systemActivities, setSystemActivities] = useState([]);
@@ -76,17 +150,21 @@ export default function AdminDashboard() {
     }, 4000);
   };
 
-  // Canonical Today Date Keys (UTC and Indian Standard Time)
+  // Canonical Today Date Keys (UTC, Indian Standard Time, and local timezone date)
   const todayDateKeys = useMemo(() => {
     const now = new Date();
     const utcDate = now.toISOString().split("T")[0];
     let istDate = utcDate;
     try {
       istDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(now);
-    } catch (e) {
-      istDate = utcDate;
-    }
-    return Array.from(new Set([utcDate, istDate]));
+    } catch (e) {}
+
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    const localDate = `${year}-${month}-${day}`;
+
+    return Array.from(new Set([utcDate, istDate, localDate].filter(Boolean)));
   }, []);
 
   const formattedTodayDate = useMemo(() => {
@@ -116,14 +194,11 @@ export default function AdminDashboard() {
       }
     };
 
-    // 1. Sites Listener
-    const adminUid = user?.uid || null;
+    // 1. Sites Listener (Shared canonical dataset across all authorized Admins)
     const unsubSites = onSnapshot(collection(db, "sites"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
-        list.push({ id: docSnap.id, ...data });
+        list.push({ id: docSnap.id, ...docSnap.data() });
       });
       setSites(list);
       sitesLoaded = true;
@@ -134,7 +209,7 @@ export default function AdminDashboard() {
       checkLoadingComplete();
     });
 
-    // 2. Engineers Listener
+    // 2. Engineers Listener (Shared canonical dataset across all authorized Admins)
     let unsubLegacyEngineers = null;
     const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
       if (snapshot.empty) {
@@ -144,7 +219,6 @@ export default function AdminDashboard() {
           const list = [];
           legacySnap.forEach(docSnap => {
             const data = docSnap.data();
-            if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
             list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
           });
           setEngineers(list);
@@ -163,7 +237,6 @@ export default function AdminDashboard() {
         const list = [];
         snapshot.forEach(docSnap => {
           const data = docSnap.data();
-          if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
           list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
         });
         setEngineers(list);
@@ -178,7 +251,6 @@ export default function AdminDashboard() {
         const list = [];
         legacySnap.forEach(docSnap => {
           const data = docSnap.data();
-          if (adminUid && data.createdByAdmin && data.createdByAdmin !== adminUid) return;
           list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
         });
         setEngineers(list);
@@ -202,23 +274,44 @@ export default function AdminDashboard() {
       console.error("Attendance listener error on Admin Dashboard:", err);
     });
 
-    // 4. Materials Listener
+    // 4. Materials Listener (Excluding lock / metadata docs)
     const unsubMaterials = onSnapshot(collection(db, "materials"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, ...docSnap.data() });
+        const data = docSnap.data();
+        if (docSnap.id.startsWith("lock_") || docSnap.id.startsWith("material_lock_") || docSnap.id === "__material_master__" || data.type === "material_lock" || data.type === "labour_attendance_lock") {
+          return;
+        }
+        list.push({ id: docSnap.id, ...data });
       });
       setRawMaterials(list);
     }, (err) => {
       console.error("Materials listener error:", err);
     });
 
-    // 5. Teams / Labour Listener
+    // 5. Labour Attendance Listener (Canonical Member-Level and Category Count Records)
+    const unsubLabourAtt = subscribeAllLabourAttendance((list) => {
+      setRawLabourAttendance(list || []);
+    });
+
+    // 5b. Legacy Site Labour Entries Listener (Fallback)
+    const unsubLegacyLabour = onSnapshot(collection(db, "siteLabourEntries"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        if (docSnap.id.startsWith("labour_lock_") || data.type === "labour_attendance_lock") return;
+        list.push({ id: docSnap.id, ...data });
+      });
+      setRawLegacyLabour(list);
+    }, (err) => {
+      console.warn("siteLabourEntries listener notice:", err);
+    });
+
+    // 5c. Teams / Roster Listener (Shared canonical dataset across all Admins)
     const unsubWorkers = onSnapshot(collection(db, "labourTeams"), (snapshot) => {
       const flattenedWorkers = [];
       snapshot.forEach(docSnap => {
         const team = docSnap.data();
-        if (adminUid && team.adminId !== adminUid) return;
         if (team.categories) {
           Object.keys(team.categories).forEach(catId => {
             const cat = team.categories[catId];
@@ -226,7 +319,7 @@ export default function AdminDashboard() {
               Object.keys(cat.members).forEach(memberId => {
                 const mem = cat.members[memberId];
                 flattenedWorkers.push({
-                  id: mem.memberId,
+                  id: mem.memberId || `${docSnap.id}_${memberId}`,
                   workerName: mem.name,
                   category: cat.name,
                   teamName: team.teamName,
@@ -276,15 +369,9 @@ export default function AdminDashboard() {
       console.error("Documents listener error:", err);
     });
 
-    // 9. Expenses Listener
-    const unsubExpenses = onSnapshot(doc(db, "expenses", "general"), (snapshot) => {
-      if (snapshot.exists()) {
-        setRawExpenses(snapshot.data().expenses || []);
-      } else {
-        setRawExpenses([]);
-      }
-    }, (err) => {
-      console.error("Expenses dashboard listener error:", err);
+    // 9. General Expenses Listener (Single Canonical Subscription with Fallback Merging)
+    const unsubExpenses = subscribeGeneralExpenses((expensesList) => {
+      setRawExpenses(expensesList || []);
     });
 
     return () => {
@@ -293,6 +380,8 @@ export default function AdminDashboard() {
       if (unsubLegacyEngineers) unsubLegacyEngineers();
       unsubAttendance();
       unsubMaterials();
+      unsubLabourAtt();
+      unsubLegacyLabour();
       unsubWorkers();
       unsubSys();
       unsubApprovals();
@@ -406,9 +495,194 @@ export default function AdminDashboard() {
     return rawMaterials.filter(m => siteIds.has(m.siteId)).length;
   }, [sites, rawMaterials]);
 
-  const activeWorkersCount = useMemo(() => {
-    return rawWorkers.length;
-  }, [rawWorkers]);
+  // 1. Today's Canonical Labour Records & Counts (Single Source of Truth)
+  const todayLabourRecords = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    const uniqueMap = new Map();
+
+    // Process canonical labourMemberAttendance records
+    (rawLabourAttendance || []).forEach(r => {
+      if (!r) return;
+      // Exclude lock/metadata records
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata) return;
+      if (siteIds.size > 0 && r.siteId && !siteIds.has(r.siteId)) return;
+
+      const dateField = r.attendanceDate || r.date;
+      if (!isTodayRecord(dateField, r.createdAt || r.updatedAt, todayDateKeys)) return;
+
+      const recKey = r.id || `${r.siteId}_${r.teamId}_${r.categoryId}_${r.date || r.attendanceDate}`;
+      if (uniqueMap.has(recKey)) return;
+
+      const workerCount = Number(
+        r.workerCount !== undefined 
+          ? r.workerCount 
+          : (r.workerEntries && Array.isArray(r.workerEntries) && r.workerEntries.length > 0 
+              ? r.workerEntries.length 
+              : (r.total !== undefined ? r.total : 1))
+      ) || 0;
+
+      const customUnits = Number(
+        r.customWorkUnits !== undefined 
+          ? r.customWorkUnits 
+          : (r.units !== undefined 
+              ? r.units 
+              : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
+      ) || 1.0;
+
+      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage || 0)) || 0;
+
+      let calculatedAmount = 0;
+      if (r.calculatedAmount !== undefined && r.calculatedAmount !== null) {
+        calculatedAmount = Number(r.calculatedAmount) || 0;
+      } else if (r.totalAmount !== undefined && r.totalAmount !== null) {
+        calculatedAmount = Number(r.totalAmount) || 0;
+      } else if (r.workerEntries && Array.isArray(r.workerEntries) && r.workerEntries.length > 0) {
+        r.workerEntries.forEach(w => {
+          calculatedAmount += Number(w.calculatedAmount) || (Number(w.units || w.customWorkUnits || 1) * Number(w.dailyWage || w.wage || dailyWage));
+        });
+      } else {
+        calculatedAmount = workerCount * customUnits * dailyWage;
+      }
+
+      uniqueMap.set(recKey, {
+        id: recKey,
+        siteId: r.siteId,
+        teamId: r.teamId,
+        workerCount,
+        customUnits,
+        dailyWage,
+        calculatedAmount,
+        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        rawRecord: r
+      });
+    });
+
+    // Process legacy siteLabourEntries records
+    (rawLegacyLabour || []).forEach(r => {
+      if (!r) return;
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock") return;
+      if (siteIds.size > 0 && r.siteId && !siteIds.has(r.siteId)) return;
+
+      const dateField = r.date || r.attendanceDate;
+      if (!isTodayRecord(dateField, r.createdAt, todayDateKeys)) return;
+
+      const recKey = r.id || `legacy_labour_${r.siteId}_${r.categoryId}_${r.date}`;
+      if (uniqueMap.has(recKey)) return;
+
+      let workerCount = Number(r.workerCount || r.total || 1) || 1;
+      let calculatedAmount = Number(r.calculatedAmount || r.totalAmount || (workerCount * 500)) || 0;
+
+      uniqueMap.set(recKey, {
+        id: recKey,
+        siteId: r.siteId,
+        workerCount,
+        customUnits: 1,
+        dailyWage: 500,
+        calculatedAmount,
+        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        rawRecord: r
+      });
+    });
+
+    return Array.from(uniqueMap.values());
+  }, [rawLabourAttendance, rawLegacyLabour, sites, todayDateKeys]);
+
+  // Aggregate Today's Labour Count (Metric Card 4)
+  const todayLabourCount = useMemo(() => {
+    return todayLabourRecords.reduce((sum, r) => sum + (Number(r.workerCount) || 0), 0);
+  }, [todayLabourRecords]);
+
+  // Aggregate Today's Labour Expense (Wage Accruals)
+  const todayLabourExpenseSum = useMemo(() => {
+    return todayLabourRecords.reduce((sum, r) => sum + (Number(r.calculatedAmount) || 0), 0);
+  }, [todayLabourRecords]);
+
+  // 2. Today's Canonical Material Expenses
+  const todayMaterialRecords = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    const uniqueMap = new Map();
+
+    (rawMaterials || []).forEach(m => {
+      if (!m) return;
+      if (m.id?.startsWith("lock_") || m.id === "__material_master__" || m.type === "material_lock" || m.type === "labour_attendance_lock") return;
+      if (siteIds.size > 0 && m.siteId && !siteIds.has(m.siteId)) return;
+
+      const dateField = m.purchaseDate || m.date || m.orderDate;
+      if (!isTodayRecord(dateField, m.createdAt || m.updatedAt, todayDateKeys)) return;
+
+      const recKey = m.id || `mat_${m.siteId}_${m.materialName}_${m.purchaseDate}`;
+      if (uniqueMap.has(recKey)) return;
+
+      let amount = 0;
+      if (m.totalAmount !== undefined && m.totalAmount !== null) {
+        amount = Number(m.totalAmount) || 0;
+      } else if (m.amount !== undefined && m.amount !== null) {
+        amount = Number(m.amount) || 0;
+      } else {
+        const qty = Number(m.quantity || m.requiredQuantity) || 0;
+        let unitCost = 500;
+        if (m.category === "Steel") unitCost = 5000;
+        else if (m.category === "Sand") unitCost = 2500;
+        else if (m.category === "Bricks") unitCost = 10;
+        else if (m.category === "Cement") unitCost = 400;
+        amount = qty * unitCost;
+      }
+
+      uniqueMap.set(recKey, {
+        id: recKey,
+        siteId: m.siteId,
+        category: "Material",
+        materialName: m.materialName,
+        amount,
+        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        rawRecord: m
+      });
+    });
+
+    return Array.from(uniqueMap.values());
+  }, [rawMaterials, sites, todayDateKeys]);
+
+  const todayMaterialExpenseSum = useMemo(() => {
+    return todayMaterialRecords.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+  }, [todayMaterialRecords]);
+
+  // 3. Today's Canonical General Expenses
+  const todayGeneralExpenseRecords = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    const uniqueMap = new Map();
+
+    (rawExpenses || []).forEach(e => {
+      if (!e) return;
+      if (siteIds.size > 0 && e.siteId && !siteIds.has(e.siteId)) return;
+
+      const dateField = e.date || e.expenseDate;
+      if (!isTodayRecord(dateField, e.createdAt || e.updatedAt, todayDateKeys)) return;
+
+      const recKey = e.id || `exp_${e.siteId}_${e.date}_${e.amount}_${e.description}`;
+      if (uniqueMap.has(recKey)) return;
+
+      const amount = Number(e.amount) || 0;
+      uniqueMap.set(recKey, {
+        id: recKey,
+        siteId: e.siteId,
+        category: e.category || "Site Expense",
+        amount,
+        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        rawRecord: e
+      });
+    });
+
+    return Array.from(uniqueMap.values());
+  }, [rawExpenses, sites, todayDateKeys]);
+
+  const todayGeneralExpenseSum = useMemo(() => {
+    return todayGeneralExpenseRecords.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+  }, [todayGeneralExpenseRecords]);
+
+  // 4. Consolidated Today's Total Expense (Metric Card 5)
+  const todayExpensesSum = useMemo(() => {
+    return todayGeneralExpenseSum + todayMaterialExpenseSum + todayLabourExpenseSum;
+  }, [todayGeneralExpenseSum, todayMaterialExpenseSum, todayLabourExpenseSum]);
 
   const runningProjectsCount = useMemo(() => {
     return sites.filter(s => {
@@ -432,27 +706,57 @@ export default function AdminDashboard() {
     return sites.filter(s => (s.status || "").toLowerCase() === "delayed" || s.isSiteDelayed).length;
   }, [sites]);
 
-  // Today Expenses Sum
-  const todayExpensesSum = useMemo(() => {
-    const todayStr = todayDateKeys[0];
-    return rawExpenses
-      .filter(e => todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0])))
-      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-  }, [rawExpenses, todayDateKeys]);
-
-  // Expenses breakdown by category
+  // Expenses breakdown by category across all logged records
   const expenseCategoryBreakdown = useMemo(() => {
     const categories = { "Material": 0, "Labour": 0, "Fuel & Equipment": 0, "Other": 0 };
-    rawExpenses.forEach(exp => {
+
+    (rawExpenses || []).forEach(exp => {
       const amt = Number(exp.amount) || 0;
-      const cat = exp.category || exp.expenseType || "Other";
-      if (cat.toLowerCase().includes("mat")) categories["Material"] += amt;
-      else if (cat.toLowerCase().includes("lab")) categories["Labour"] += amt;
-      else if (cat.toLowerCase().includes("fuel") || cat.toLowerCase().includes("equip")) categories["Fuel & Equipment"] += amt;
-      else categories["Other"] += amt;
+      const cat = (exp.category || exp.expenseType || "Other").toLowerCase();
+      if (cat.includes("fuel") || cat.includes("equip") || cat.includes("transport")) {
+        categories["Fuel & Equipment"] += amt;
+      } else if (cat.includes("mat")) {
+        categories["Material"] += amt;
+      } else if (cat.includes("lab")) {
+        categories["Labour"] += amt;
+      } else {
+        categories["Other"] += amt;
+      }
     });
+
+    (rawMaterials || []).forEach(m => {
+      if (m.id?.startsWith("lock_") || m.id === "__material_master__" || m.type === "material_lock") return;
+      let amt = 0;
+      if (m.totalAmount !== undefined && m.totalAmount !== null) amt = Number(m.totalAmount) || 0;
+      else if (m.amount !== undefined && m.amount !== null) amt = Number(m.amount) || 0;
+      else {
+        const qty = Number(m.quantity || m.requiredQuantity) || 0;
+        let unitCost = 500;
+        if (m.category === "Steel") unitCost = 5000;
+        else if (m.category === "Sand") unitCost = 2500;
+        else if (m.category === "Bricks") unitCost = 10;
+        else if (m.category === "Cement") unitCost = 400;
+        amt = qty * unitCost;
+      }
+      categories["Material"] += amt;
+    });
+
+    (rawLabourAttendance || []).forEach(r => {
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock") return;
+      let amt = 0;
+      if (r.calculatedAmount !== undefined && r.calculatedAmount !== null) amt = Number(r.calculatedAmount) || 0;
+      else if (r.totalAmount !== undefined && r.totalAmount !== null) amt = Number(r.totalAmount) || 0;
+      else {
+        const cnt = Number(r.workerCount || 1) || 1;
+        const u = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units || 1)) || 1;
+        const w = Number(r.dailyWage || r.wage || 500) || 500;
+        amt = cnt * u * w;
+      }
+      categories["Labour"] += amt;
+    });
+
     return categories;
-  }, [rawExpenses]);
+  }, [rawExpenses, rawMaterials, rawLabourAttendance]);
 
   const totalExpenseAllTime = useMemo(() => {
     return Object.values(expenseCategoryBreakdown).reduce((a, b) => a + b, 0);
@@ -527,13 +831,13 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* KPI 4: Today's Labour */}
+          {/* KPI 4: Today's Labour (Single Source of Truth) */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-slate">
               <Users size={20} />
             </div>
             <div className="admin-summary-info">
-              <div className="admin-summary-value">{activeWorkersCount}</div>
+              <div className="admin-summary-value">{todayLabourCount}</div>
               <div className="admin-summary-label">Today's Labour</div>
             </div>
           </div>
@@ -825,19 +1129,27 @@ export default function AdminDashboard() {
                   sites.map(site => {
                     const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
                     
-                    // Engineer name lookup
+                    // Engineer name lookup (multi-key resolution)
                     const assignedEngNames = (site.assignedEngineers || []).map(uid => {
-                      const e = engineers.find(eng => eng.id === uid);
-                      return e ? e.fullName : "Engineer";
+                      const e = engineers.find(eng => 
+                        eng.id === uid || 
+                        eng.uid === uid || 
+                        eng.customId === uid || 
+                        eng.engineerId === uid ||
+                        (eng.email && eng.email.toLowerCase() === String(uid).toLowerCase())
+                      );
+                      return e ? (e.fullName || e.name || "Site Engineer") : "Site Engineer";
                     });
 
-                    // Calculate site's today expense
-                    const siteExpenseToday = rawExpenses
-                      .filter(e => e.siteId === site.id && (todayDateKeys.includes(e.date) || (e.createdAt?.seconds && todayDateKeys.includes(new Date(e.createdAt.seconds * 1000).toISOString().split("T")[0]))))
-                      .reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+                    // Calculate site's today expense across all canonical sources (General + Material + Labour)
+                    const siteGen = todayGeneralExpenseRecords.filter(e => e.siteId === site.id).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+                    const siteMat = todayMaterialRecords.filter(m => m.siteId === site.id).reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+                    const siteLab = todayLabourRecords.filter(l => l.siteId === site.id).reduce((sum, l) => sum + (Number(l.calculatedAmount) || 0), 0);
+                    const siteExpenseToday = siteGen + siteMat + siteLab;
 
-                    // Count workers at this site today
-                    const siteWorkerCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
+                    // Count engineers and labour at this site today
+                    const siteEngCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
+                    const siteLabourCount = todayLabourRecords.filter(l => l.siteId === site.id).reduce((sum, l) => sum + (Number(l.workerCount) || 0), 0);
 
                     return (
                       <tr key={site.id}>
@@ -879,7 +1191,11 @@ export default function AdminDashboard() {
                           </div>
                         </td>
                         <td style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600", fontVariantNumeric: "tabular-nums" }}>
-                          {siteWorkerCount > 0 ? `${siteWorkerCount} Eng Present` : "--"}
+                          {siteEngCount > 0 && siteLabourCount > 0 
+                            ? `${siteEngCount} Eng • ${siteLabourCount} Labour`
+                            : (siteEngCount > 0 
+                                ? `${siteEngCount} Eng Present` 
+                                : (siteLabourCount > 0 ? `${siteLabourCount} Labour` : "--"))}
                         </td>
                         <td style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
                           {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}

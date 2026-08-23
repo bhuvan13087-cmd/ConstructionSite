@@ -100,11 +100,10 @@ export default function AdminPayments() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
       const [fetchedSites, fetchedLabourPayments, fetchedLabourMaster, fetchedAllMaterials] = await Promise.all([
-        getSites(adminId),
-        getLabourPayments(adminId),
-        getLabourMaster(adminId),
+        getSites(),
+        getLabourPayments(),
+        getLabourMaster(),
         getMaterialsDetailed(null)
       ]);
 

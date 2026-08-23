@@ -173,8 +173,7 @@ export default function AdminMaterials() {
     const initSubscriptions = async () => {
       try {
         setLoading(true);
-        const adminId = userProfile?.uid || userProfile?.id || null;
-        const fetchedSites = await getSites(adminId);
+        const fetchedSites = await getSites();
         if (!isMounted) return;
         setSites(fetchedSites);
         

@@ -365,13 +365,9 @@ export default function ReportsDashboard() {
   const [filterMonthVal, setFilterMonthVal] = useState("all");
   const [filterYearVal, setFilterYearVal] = useState("all");
 
-  // Enforce role-based access to sites
+  // Enforce role-based access to sites (Shared canonical access for all authorized Admins)
   const userSites = useMemo(() => {
-    if (isSuperAdmin) return sites;
-    if (userRole === "admin") {
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      return sites.filter(s => s.createdByAdmin === adminId);
-    }
+    if (isSuperAdmin || userRole === "admin") return sites;
     if (userRole === "site_engineer") {
       const assigned = userProfile?.assignedSites || [];
       return sites.filter(s => assigned.includes(s.id));
@@ -546,11 +542,19 @@ export default function ReportsDashboard() {
     };
   }, []);
 
-  // Map engineers for quick lookups
+  // Map engineers for quick lookups (Multi-key indexing for canonical resolution)
   const engineersMap = useMemo(() => {
     const map = {};
     engineers.forEach(eng => {
-      map[eng.id] = eng.fullName;
+      const name = eng.fullName || eng.name || "Site Engineer";
+      if (eng.id) map[eng.id] = name;
+      if (eng.uid) map[eng.uid] = name;
+      if (eng.customId) map[eng.customId] = name;
+      if (eng.engineerId) map[eng.engineerId] = name;
+      if (eng.email) {
+        map[eng.email.toLowerCase()] = name;
+        map[eng.email] = name;
+      }
     });
     return map;
   }, [engineers]);

@@ -312,13 +312,11 @@ export default function SiteAssignments() {
   const loadData = async () => {
     try {
       setLoading(true);
-      const adminId = userProfile?.uid || userProfile?.id || null;
-      
-      // Fetch sites, engineers, and detailed assignments list in parallel
+      // Fetch all shared organization sites, engineers, and detailed assignments in parallel
       const [fetchedSites, fetchedEngineers, fetchedAssignments] = await Promise.all([
-        getSites(adminId),
-        getSiteEngineers(adminId),
-        getSiteAssignmentsDetailed(adminId)
+        getSites(),
+        getSiteEngineers(),
+        getSiteAssignmentsDetailed()
       ]);
       setSites(fetchedSites);
       setEngineers(fetchedEngineers);
@@ -361,7 +359,7 @@ export default function SiteAssignments() {
     }
 
     // Validation: Verify if engineer selection is active
-    const engineer = engineers.find(eng => eng.id === engineerId);
+    const engineer = engineers.find(eng => eng.id === engineerId || eng.uid === engineerId);
     if (!engineer) {
       showToast("Selected engineer does not exist.", "error");
       return;
@@ -373,7 +371,7 @@ export default function SiteAssignments() {
 
     // Validation: Check for duplicate assignments
     const isDuplicate = assignments.some(
-      asg => asg.siteId === siteId && asg.engineerId === engineerId && asg.status === "active"
+      asg => asg.siteId === siteId && (asg.engineerId === engineerId || asg.engineerId === engineer.uid || asg.engineerId === engineer.id) && asg.status === "active"
     );
     if (isDuplicate) {
       showToast(`This engineer is already assigned to "${site.siteName}".`, "error");
@@ -384,7 +382,7 @@ export default function SiteAssignments() {
     try {
       const adminId = user?.uid || "admin";
       await assignEngineerToSite(siteId, engineerId, adminId);
-      showToast(`Assigned ${engineer.fullName} to "${site.siteName}" successfully!`, "success");
+      showToast(`Assigned ${engineer.fullName || engineer.name} to "${site.siteName}" successfully!`, "success");
       setSelectedEngineerId("");
       await loadData();
     } catch (err) {
@@ -410,15 +408,11 @@ export default function SiteAssignments() {
         setLoading(true);
         try {
           await removeEngineerFromSite(asg.id);
-          showToast("Assignment removed successfully.", "success");
+          showToast(`Removed allocation from "${asg.siteName}".`, "info");
           await loadData();
         } catch (err) {
-          console.error("Assignment deletion failed:", err);
-          if (err.code === "permission-denied") {
-            showToast("Permission Denied: Only admins can manage site allocations.", "error");
-          } else {
-            showToast(err.message || "Failed to delete assignment.", "error");
-          }
+          console.error("Assignment removal error:", err);
+          showToast(`Failed to remove assignment: ${err.message}`, "error");
         } finally {
           setLoading(false);
           closeConfirmModal();
@@ -427,7 +421,7 @@ export default function SiteAssignments() {
     });
   };
 
-  // Helper function to extract name initials
+  // Helper function to extract initials from engineer name
   const getInitials = (name) => {
     if (!name) return "EE";
     const parts = name.trim().split(/\s+/);
@@ -440,7 +434,7 @@ export default function SiteAssignments() {
   // Helper function to calculate engineer active projects workload
   const getWorkload = (engineerId) => {
     return assignments.filter(
-      asg => asg.engineerId === engineerId && asg.status === "active"
+      asg => (asg.engineerId === engineerId || asg.engineerDisplayId === engineerId) && asg.status === "active"
     ).length;
   };
 
@@ -453,6 +447,7 @@ export default function SiteAssignments() {
       asg.siteName?.toLowerCase().includes(query) ||
       asg.engineerName?.toLowerCase().includes(query) ||
       asg.engineerEmail?.toLowerCase().includes(query) ||
+      asg.engineerDisplayId?.toLowerCase().includes(query) ||
       asg.location?.toLowerCase().includes(query)
     );
   });
@@ -481,11 +476,10 @@ export default function SiteAssignments() {
         marginBottom: "24px"
       }}>
         {[
-          { label: "Total Assignments", value: totalAssignments, sub: "Active records", icon: "🔗", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
-          { label: "Site Assigned", value: siteAssigned, sub: "With active engineers", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" },
-          { label: "Engineers Active", value: activeEngineersList.length, sub: "Ready to deploy", icon: "👷", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
-          { label: "Engineers Assigned", value: uniqueEngineersDeployed, sub: "On active sites", icon: "✅", bg: "#fff7ed", border: "#ffedd5", color: "#c2410c" },
-          { label: "Total Sites", value: sites.length, sub: "Registered projects", icon: "📍", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" }
+          { label: "Active Deployments", value: totalAssignments, sub: "Live site allocations", icon: "📋", bg: "var(--accent-50, #fff7ed)", border: "var(--accent-100, #ffedd5)", color: "var(--accent-700, #c2410c)" },
+          { label: "Engineers Deployed", value: uniqueEngineersDeployed, sub: "Engineers in field", icon: "👷", bg: "var(--success-50)", border: "var(--success-100)", color: "var(--success-600)" },
+          { label: "Assigned Sites", value: siteAssigned, sub: "Sites with coverage", icon: "🏗️", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-700)" },
+          { label: "Total Sites", value: sites.length, sub: "All registered sites", icon: "📍", bg: "var(--primary-50)", border: "var(--border-color)", color: "var(--primary-800)" }
         ].map((kpi, i) => (
           <div key={i} style={{
             background: kpi.bg,
@@ -669,6 +663,8 @@ export default function SiteAssignments() {
                         : new Date(asg.assignedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }))
                     : "Today";
 
+                  const isResolved = asg.isEngineerResolved !== false;
+
                   return (
                     <tr
                       key={asg.id}
@@ -688,9 +684,9 @@ export default function SiteAssignments() {
                             width: "32px",
                             height: "32px",
                             borderRadius: "50%",
-                            backgroundColor: "var(--accent-50, #fff7ed)",
-                            border: "1.5px solid var(--accent-100, #ffedd5)",
-                            color: "var(--accent-700, #c2410c)",
+                            backgroundColor: isResolved ? "var(--accent-50, #fff7ed)" : "#fef2f2",
+                            border: `1.5px solid ${isResolved ? "var(--accent-100, #ffedd5)" : "#fecaca"}`,
+                            color: isResolved ? "var(--accent-700, #c2410c)" : "#dc2626",
                             display: "flex",
                             alignItems: "center",
                             justifyContent: "center",
@@ -698,11 +694,15 @@ export default function SiteAssignments() {
                             fontSize: "11px",
                             flexShrink: 0
                           }}>
-                            {getInitials(asg.engineerName)}
+                            {isResolved ? getInitials(asg.engineerName) : "!"}
                           </div>
                           <div style={{ minWidth: 0 }}>
-                            <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{asg.engineerName}</strong>
-                            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{asg.engineerEmail || "Engineer"}</span>
+                            <strong style={{ fontSize: "13px", color: isResolved ? "var(--primary-950)" : "#991b1b", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                              {asg.engineerName}
+                            </strong>
+                            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block", marginTop: "2px" }}>
+                              {asg.engineerEmail || (isResolved ? "Site Engineer" : "Profile Unavailable")}
+                            </span>
                           </div>
                         </div>
                       </td>
@@ -763,6 +763,8 @@ export default function SiteAssignments() {
                     : new Date(asg.assignedAt).toLocaleDateString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric" }))
                 : "Today";
 
+              const isResolved = asg.isEngineerResolved !== false;
+
               return (
                 <div
                   key={asg.id}
@@ -808,17 +810,17 @@ export default function SiteAssignments() {
                       gap: "10px",
                       marginTop: "12px",
                       padding: "10px 12px",
-                      backgroundColor: "#f8fafc",
+                      backgroundColor: isResolved ? "#f8fafc" : "#fef2f2",
                       borderRadius: "10px",
-                      border: "1px solid #f1f5f9"
+                      border: `1px solid ${isResolved ? "#f1f5f9" : "#fee2e2"}`
                     }}>
                       <div style={{
                         width: "34px",
                         height: "34px",
                         borderRadius: "50%",
-                        backgroundColor: "var(--accent-50, #fff7ed)",
-                        border: "1.5px solid var(--accent-100, #ffedd5)",
-                        color: "var(--accent-700, #c2410c)",
+                        backgroundColor: isResolved ? "var(--accent-50, #fff7ed)" : "#fee2e2",
+                        border: `1.5px solid ${isResolved ? "var(--accent-100, #ffedd5)" : "#fca5a5"}`,
+                        color: isResolved ? "var(--accent-700, #c2410c)" : "#dc2626",
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
@@ -826,14 +828,14 @@ export default function SiteAssignments() {
                         fontSize: "11px",
                         flexShrink: 0
                       }}>
-                        {getInitials(asg.engineerName)}
+                        {isResolved ? getInitials(asg.engineerName) : "!"}
                       </div>
                       <div style={{ minWidth: 0, flex: 1 }}>
-                        <strong style={{ fontSize: "13px", color: "var(--primary-950, #0f172a)", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        <strong style={{ fontSize: "13px", color: isResolved ? "var(--primary-950, #0f172a)" : "#991b1b", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                           {asg.engineerName}
                         </strong>
-                        <span style={{ fontSize: "11.5px", color: "var(--text-muted, #64748b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block" }}>
-                          {asg.engineerEmail || "Site Engineer"}
+                        <span style={{ fontSize: "11.5px", color: "var(--text-muted, #64748b)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "block", marginTop: "2px" }}>
+                          {asg.engineerEmail || (isResolved ? "Site Engineer" : "Profile Unavailable")}
                         </span>
                       </div>
                     </div>

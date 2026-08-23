@@ -198,30 +198,36 @@ export async function updateUserProfile(uid, updateData) {
   } catch (e) {}
 }
 
-// Fetch all registered site engineers
-// Get site engineers. If adminId is provided, filter to only engineers created by that admin.
-// Soft filter: legacy engineers without createdByAdmin are visible to all admins during transition.
-export async function getSiteEngineers(adminId = null) {
+/**
+ * Unified Canonical Engineer Profile Store & Multi-Key Indexing
+ * Fetches from both `siteEngineers` and `users` collections in parallel,
+ * merges rich profile data, and creates multi-key indices for instant canonical resolution.
+ */
+export async function buildCanonicalEngineersLookup() {
   const db = getDb();
   const siteEngineersCollection = collection(db, "siteEngineers");
+  const usersCollection = collection(db, "users");
   const assignmentsColl = collection(db, "siteAssignments");
 
-  const [querySnapshotRes, asgSnapshot] = await Promise.all([
-    getDocs(siteEngineersCollection).catch(async () => {
-      const usersCollection = collection(db, "users");
-      const q = query(usersCollection, where("role", "==", "site_engineer"));
-      return await getDocs(q);
+  const [seSnap, usersSnap, asgSnap] = await Promise.all([
+    getDocs(siteEngineersCollection).catch(e => {
+      console.warn("Could not fetch siteEngineers collection:", e);
+      return { docs: [] };
+    }),
+    getDocs(usersCollection).catch(e => {
+      console.warn("Could not fetch users collection:", e);
+      return { docs: [] };
     }),
     getDocs(assignmentsColl).catch(e => {
-      console.warn("Could not fetch canonical siteAssignments for engineers:", e);
-      return null;
+      console.warn("Could not fetch canonical siteAssignments:", e);
+      return { docs: [] };
     })
   ]);
 
-  // Authoritative: Fetch active site assignments directly from canonical siteAssignments collection
+  // Build active assignments map (engineerId -> Set of active siteIds)
   const activeAssignmentsMap = {};
-  if (asgSnapshot) {
-    asgSnapshot.forEach(docSnap => {
+  if (asgSnap && asgSnap.docs) {
+    asgSnap.docs.forEach(docSnap => {
       const data = docSnap.data();
       if (data.status === "active" && data.engineerId && data.siteId) {
         if (!activeAssignmentsMap[data.engineerId]) {
@@ -231,52 +237,176 @@ export async function getSiteEngineers(adminId = null) {
       }
     });
   }
-  
-  const engineers = [];
-  const querySnapshot = querySnapshotRes || [];
-  querySnapshot.forEach(doc => {
-    const data = doc.data();
-    // Soft adminId filter: skip engineers from a different admin if createdByAdmin is set
-    if (adminId && data.createdByAdmin && data.createdByAdmin !== adminId) {
-      return;
-    }
-    const canonicalSites = activeAssignmentsMap[doc.id]
-      ? Array.from(activeAssignmentsMap[doc.id])
-      : [];
 
-    engineers.push({ 
-      id: doc.id, 
-      uid: doc.id, 
-      fullName: data.name || data.fullName || "",
-      phoneNumber: data.phone || data.phoneNumber || "",
+  // Canonical engineer profile map (keyed by primary UID / Doc ID)
+  const profilesMap = new Map();
+
+  const processDoc = (docSnap, source) => {
+    const data = docSnap.data();
+    const docId = docSnap.id;
+    const uid = data.uid || data.userId || data.id || docId;
+    const email = (data.email || data.userEmail || "").trim().toLowerCase();
+    const primaryKey = uid || docId;
+
+    const existing = profilesMap.get(primaryKey) || (email ? Array.from(profilesMap.values()).find(p => p.email && p.email.toLowerCase() === email) : null);
+
+    const nameCandidates = [
+      data.fullName,
+      data.name,
+      data.displayName,
+      data.userName,
+      existing?.fullName,
+      existing?.name
+    ].filter(n => typeof n === "string" && n.trim().length > 0);
+
+    const cleanFullName = nameCandidates[0] || "";
+
+    const phone = data.phone || data.phoneNumber || existing?.phoneNumber || existing?.phone || "";
+    const status = data.status || existing?.status || "active";
+    const customId = data.customId || data.engineerId || data.empId || existing?.customId || existing?.engineerId || "";
+    const role = data.role || existing?.role || "site_engineer";
+    const holidayAllowance = Number(data.holidayAllowance) || Number(existing?.holidayAllowance) || 24;
+
+    const mergedSites = new Set([
+      ...(Array.isArray(data.assignedSites) ? data.assignedSites : []),
+      ...(Array.isArray(existing?.assignedSites) ? existing.assignedSites : [])
+    ]);
+
+    const activeCanonicalSites = [
+      ...(activeAssignmentsMap[docId] ? Array.from(activeAssignmentsMap[docId]) : []),
+      ...(activeAssignmentsMap[uid] ? Array.from(activeAssignmentsMap[uid]) : []),
+      ...(activeAssignmentsMap[customId] ? Array.from(activeAssignmentsMap[customId]) : [])
+    ];
+    activeCanonicalSites.forEach(s => mergedSites.add(s));
+
+    const profile = {
+      id: docId,
+      uid: uid || docId,
+      docId: docId,
+      fullName: cleanFullName,
+      name: cleanFullName,
+      email: data.email || existing?.email || "",
+      phone: phone,
+      phoneNumber: phone,
+      customId: customId,
+      engineerId: customId || uid || docId,
+      role: role,
+      status: status,
+      holidayAllowance: holidayAllowance,
+      assignedSites: Array.from(mergedSites),
+      sourceCollection: source,
       ...data,
-      assignedSites: canonicalSites
-    });
-  });
-  
-  // Fallback to legacy if empty
-  if (engineers.length === 0) {
-    try {
-      const usersCollection = collection(db, "users");
-      const q = query(usersCollection, where("role", "==", "site_engineer"));
-      const legacySnapshot = await getDocs(q);
-      legacySnapshot.forEach(doc => {
-        const data = doc.data();
-        if (adminId && data.createdByAdmin && data.createdByAdmin !== adminId) return;
-        const canonicalSites = activeAssignmentsMap[doc.id]
-          ? Array.from(activeAssignmentsMap[doc.id])
-          : [];
-        engineers.push({ 
-          id: doc.id, 
-          uid: doc.id, 
-          ...data,
-          assignedSites: canonicalSites
-        });
-      });
-    } catch (e) {}
+      fullName: cleanFullName,
+      name: cleanFullName,
+      assignedSites: Array.from(mergedSites)
+    };
+
+    profilesMap.set(primaryKey, profile);
+    if (docId !== primaryKey) {
+      profilesMap.set(docId, profile);
+    }
+  };
+
+  // 1. Process siteEngineers collection
+  if (seSnap && seSnap.docs) {
+    seSnap.docs.forEach(docSnap => processDoc(docSnap, "siteEngineers"));
   }
-  
-  return engineers;
+
+  // 2. Process users collection (filter for engineers)
+  if (usersSnap && usersSnap.docs) {
+    usersSnap.docs.forEach(docSnap => {
+      const data = docSnap.data();
+      const role = (data.role || "").toLowerCase();
+      const isEngineer = role === "site_engineer" || role === "engineer" || role.includes("engineer") || data.isEngineer === true || profilesMap.has(docSnap.id) || (data.email && Array.from(profilesMap.values()).some(p => p.email.toLowerCase() === data.email.toLowerCase()));
+      if (isEngineer) {
+        processDoc(docSnap, "users");
+      }
+    });
+  }
+
+  const engineersList = Array.from(new Set(profilesMap.values()));
+
+  // 3. Build fast Multi-Key Lookup Index
+  const lookupMap = {};
+  engineersList.forEach(eng => {
+    if (eng.id) lookupMap[eng.id] = eng;
+    if (eng.uid) lookupMap[eng.uid] = eng;
+    if (eng.docId) lookupMap[eng.docId] = eng;
+    if (eng.customId) lookupMap[eng.customId] = eng;
+    if (eng.engineerId) lookupMap[eng.engineerId] = eng;
+    if (eng.email) {
+      lookupMap[eng.email.toLowerCase()] = eng;
+      lookupMap[eng.email] = eng;
+    }
+  });
+
+  return { engineersList, lookupMap };
+}
+
+/**
+ * Resolve any engineer reference (UID, document ID, customId, email) to a clean canonical profile
+ */
+export function resolveEngineerIdentity(ref, lookupMap = {}) {
+  if (!ref) {
+    return {
+      isResolved: false,
+      engineerName: "Engineer Profile Unavailable",
+      engineerEmail: "",
+      engineerDisplayId: "",
+      rawRef: ""
+    };
+  }
+
+  const cleanRef = String(ref).trim();
+  let matched = lookupMap[cleanRef] || lookupMap[cleanRef.toLowerCase()];
+
+  // If not matched directly, check if any profile in lookupMap has this ref in any field
+  if (!matched) {
+    const allProfiles = Object.values(lookupMap);
+    matched = allProfiles.find(p => 
+      p && (
+        p.id === cleanRef || 
+        p.uid === cleanRef || 
+        p.docId === cleanRef ||
+        p.customId === cleanRef || 
+        p.engineerId === cleanRef ||
+        (p.email && p.email.toLowerCase() === cleanRef.toLowerCase())
+      )
+    );
+  }
+
+  if (matched) {
+    const name = matched.fullName || matched.name || matched.displayName || "Site Engineer";
+    const email = matched.email || "";
+    const displayId = matched.customId || matched.engineerId || matched.uid || matched.id || cleanRef;
+
+    return {
+      isResolved: true,
+      engineerName: name,
+      engineerEmail: email,
+      engineerDisplayId: displayId,
+      phoneNumber: matched.phoneNumber || matched.phone || "",
+      status: matched.status || "active",
+      profile: matched,
+      rawRef: cleanRef
+    };
+  }
+
+  // Fallback for unresolvable references
+  console.warn("Unresolved engineer assignment reference:", cleanRef);
+  return {
+    isResolved: false,
+    engineerName: "Engineer Profile Unavailable",
+    engineerEmail: "",
+    engineerDisplayId: cleanRef,
+    rawRef: cleanRef
+  };
+}
+
+// Fetch all registered site engineers (Shared canonical dataset for all authorized Admins)
+export async function getSiteEngineers(adminId = null) {
+  const { engineersList } = await buildCanonicalEngineersLookup();
+  return engineersList.sort((a, b) => (a.fullName || a.name || "").localeCompare(b.fullName || b.name || ""));
 }
 
 // Update status of site engineer
@@ -584,8 +714,7 @@ export async function seedDefaultSites() {
 }
 
 // Fetch all construction sites
-// Get all sites. If adminId is provided, filter to only sites created by that admin.
-// Soft filter: legacy sites without createdByAdmin are included for all admins during transition.
+// Fetch all construction sites (Shared canonical dataset for all authorized Admins)
 export async function getSites(adminId = null) {
   const db = getDb();
   const sitesCollection = collection(db, "sites");
@@ -616,13 +745,6 @@ export async function getSites(adminId = null) {
   const sites = [];
   sitesSnapshot.forEach(doc => {
     const data = doc.data();
-    // If adminId filter is active: include only sites owned by this admin,
-    // OR legacy sites that have no createdByAdmin set (backward compat).
-    if (adminId) {
-      if (data.createdByAdmin && data.createdByAdmin !== adminId) {
-        return; // skip another admin's site
-      }
-    }
     const canonicalEngineers = activeSiteEngineersMap[doc.id]
       ? Array.from(activeSiteEngineersMap[doc.id])
       : [];
@@ -1971,30 +2093,12 @@ export async function getAssignedSitesForEngineer(engineerId) {
 export async function getSiteAssignmentsDetailed(adminId = null) {
   const db = getDb();
   const assignmentsColl = collection(db, "siteAssignments");
-  
-  const fetchUsersSnap = async () => {
-    try {
-      const snap = await getDocs(collection(db, "siteEngineers"));
-      if (!snap.empty) return snap;
-    } catch (e) {}
-    return await getDocs(collection(db, "users"));
-  };
 
-  const [snapshot, sites, usersSnapshot] = await Promise.all([
+  const [snapshot, sites, { lookupMap }] = await Promise.all([
     getDocs(assignmentsColl),
     getSites(adminId),
-    fetchUsersSnap()
+    buildCanonicalEngineersLookup()
   ]);
-  
-  const usersMap = {};
-  usersSnapshot.forEach(doc => {
-    const data = doc.data();
-    usersMap[doc.id] = {
-      fullName: data.name || data.fullName || "",
-      email: data.email || "",
-      ...data
-    };
-  });
 
   const detailedAssignments = [];
   const seenPairs = new Set();
@@ -2004,26 +2108,33 @@ export async function getSiteAssignmentsDetailed(adminId = null) {
     // Only include valid active assignments
     if (data.status !== "active") return;
 
-    // Deduplicate any accidental duplicate (siteId + engineerId) records
-    const pairKey = `${data.siteId}_${data.engineerId}`;
+    const rawEngRef = data.engineerId || data.userId || data.uid || data.id;
+    if (!rawEngRef) return;
+
+    // Deduplicate any accidental duplicate (siteId + engineerRef) records
+    const pairKey = `${data.siteId}_${rawEngRef}`;
     if (seenPairs.has(pairKey)) return;
     seenPairs.add(pairKey);
 
     const site = sites.find(s => s.id === data.siteId);
-    if (adminId && !site) return;
-    const engineer = usersMap[data.engineerId];
+    const resolvedEng = resolveEngineerIdentity(rawEngRef, lookupMap);
 
     detailedAssignments.push({
       id: docSnap.id,
       siteId: data.siteId,
-      engineerId: data.engineerId,
+      engineerId: rawEngRef,
       assignedBy: data.assignedBy,
       assignedAt: data.assignedAt,
       status: data.status,
-      siteName: site ? site.siteName : `Site (ID: ${data.siteId})`,
-      location: site ? site.location : "--",
-      engineerName: engineer ? engineer.fullName : `Engineer (ID: ${data.engineerId})`,
-      engineerEmail: engineer ? engineer.email : "--"
+      siteName: site ? site.siteName : (data.siteName || `Site (${data.siteId})`),
+      location: site ? site.location : (data.location || "--"),
+      clientName: site ? site.clientName : (data.clientName || ""),
+      isEngineerResolved: resolvedEng.isResolved,
+      engineerName: resolvedEng.engineerName,
+      engineerEmail: resolvedEng.engineerEmail,
+      engineerDisplayId: resolvedEng.engineerDisplayId,
+      engineerPhone: resolvedEng.phoneNumber || "",
+      engineerStatus: resolvedEng.status || "active"
     });
   });
 
@@ -2045,33 +2156,32 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
     throw new Error("Invalid site selected.");
   }
 
-  // Validation: Check if engineer exists and is active (check siteEngineers first, then users)
-  let engineerData;
-  const engineerDocRef = doc(db, "siteEngineers", engineerId);
-  const engineerDoc = await getDoc(engineerDocRef);
-  if (!engineerDoc.exists()) {
-    const legacyDoc = await getDoc(doc(db, "users", engineerId));
-    if (!legacyDoc.exists()) {
-      throw new Error("Selected engineer profile does not exist.");
-    }
-    engineerData = legacyDoc.data();
-  } else {
-    engineerData = engineerDoc.data();
+  // Validation: Check if engineer exists and is active using unified lookup
+  const { lookupMap } = await buildCanonicalEngineersLookup();
+  const resolved = resolveEngineerIdentity(engineerId, lookupMap);
+  if (!resolved.isResolved) {
+    throw new Error("Selected engineer profile does not exist.");
   }
-  if (engineerData.status !== "active") {
+  if (resolved.status !== "active") {
     throw new Error("Cannot assign site to an inactive engineer.");
   }
+
+  const canonicalEngId = resolved.profile.id || resolved.profile.uid || engineerId;
 
   // Validation: Prevent duplicate active assignment
   const assignmentsColl = collection(db, "siteAssignments");
   const q = query(
     assignmentsColl,
     where("siteId", "==", siteId),
-    where("engineerId", "==", engineerId),
     where("status", "==", "active")
   );
   const existingSnapshot = await getDocs(q);
-  if (!existingSnapshot.empty) {
+  const isAlreadyAssigned = existingSnapshot.docs.some(d => {
+    const data = d.data();
+    const existingRef = data.engineerId || data.userId || data.uid;
+    return existingRef === canonicalEngId || existingRef === engineerId || existingRef === resolved.profile.uid || existingRef === resolved.profile.id;
+  });
+  if (isAlreadyAssigned) {
     throw new Error("This engineer is already actively assigned to this site.");
   }
 
@@ -2080,26 +2190,32 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
   const newAssignmentRef = doc(collection(db, "siteAssignments"));
   batch.set(newAssignmentRef, {
     siteId,
-    engineerId,
+    engineerId: canonicalEngId,
     assignedBy: adminId || "admin",
     assignedAt: serverTimestamp(),
     status: "active"
   });
 
-  // Also update engineer's profile assignedSites list in both collections
-  batch.update(doc(db, "siteEngineers", engineerId), {
-    assignedSites: arrayUnion(siteId)
-  });
+  // Also update engineer's profile assignedSites list in both collections if doc exists
   try {
-    batch.update(doc(db, "users", engineerId), {
-      assignedSites: arrayUnion(siteId)
+    batch.update(doc(db, "siteEngineers", canonicalEngId), {
+      assignedSites: arrayUnion(siteId),
+      updatedAt: serverTimestamp()
+    });
+  } catch (e) {}
+
+  try {
+    batch.update(doc(db, "users", canonicalEngId), {
+      assignedSites: arrayUnion(siteId),
+      updatedAt: serverTimestamp()
     });
   } catch (e) {}
 
   // Also update site's assignedEngineers list
   const siteDocRef = doc(db, "sites", siteId);
   batch.update(siteDocRef, {
-    assignedEngineers: arrayUnion(engineerId)
+    assignedEngineers: arrayUnion(canonicalEngId),
+    updatedAt: serverTimestamp()
   });
 
   await batch.commit();
@@ -2407,8 +2523,7 @@ export async function updateWorkerStatus(workerId, status) {
   });
 }
 
-// Fetch workers. If adminId is provided, filter to that admin's workers.
-// Soft filter: workers without adminId (legacy) are included for all admins during transition.
+// Fetch workers (Shared canonical dataset for all authorized Admins)
 export async function getWorkers(siteId = null, adminId = null) {
   const db = getDb();
   const workersColl = collection(db, "workers");
@@ -2424,10 +2539,6 @@ export async function getWorkers(siteId = null, adminId = null) {
   const workers = [];
   snap.forEach(d => {
     const data = d.data();
-    // Soft adminId filter: skip workers owned by a different admin if adminId is set on the record
-    if (adminId && data.adminId && data.adminId !== adminId) {
-      return;
-    }
     workers.push({ id: d.id, ...data });
   });
   
@@ -3382,20 +3493,11 @@ export async function rejectMaterialLog(materialId) {
 // CENTRAL LABOUR MASTER & SALARY MANAGEMENT API
 // ==========================================================================
 
-// Get admin-scoped labour master categories.
+// Get shared labour master categories and wage update history across all authorized Admins
 export async function getLabourMaster(adminId = null) {
   const db = getDb();
-  
   const collRef = collection(db, "labourCategories");
-  let resolvedAdminId = adminId;
-  if (!resolvedAdminId) {
-    try {
-      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-  }
-  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
-  const historyRef = doc(db, "users", docKey);
-
+  
   const fetchCategories = async () => {
     try {
       return await getDocs(query(collRef, orderBy("createdTime", "asc")));
@@ -3404,9 +3506,10 @@ export async function getLabourMaster(adminId = null) {
     }
   };
 
-  const [snap, historySnap] = await Promise.all([
+  const [snap, historySnapGlobal, historySnapLegacy] = await Promise.all([
     fetchCategories(),
-    getDoc(historyRef).catch(() => null)
+    getDoc(doc(db, "users", "labour_master_global")).catch(() => null),
+    adminId ? getDoc(doc(db, "users", `__labour_master__${adminId}`)).catch(() => null) : null
   ]);
 
   const categories = {};
@@ -3422,7 +3525,10 @@ export async function getLabourMaster(adminId = null) {
     };
   });
 
-  const history = (historySnap && historySnap.exists()) ? (historySnap.data().history || []) : [];
+  let history = (historySnapGlobal && historySnapGlobal.exists()) ? (historySnapGlobal.data().history || []) : [];
+  if (history.length === 0 && historySnapLegacy && historySnapLegacy.exists()) {
+    history = historySnapLegacy.data().history || [];
+  }
 
   return {
     categories,
@@ -3458,13 +3564,8 @@ export async function createLabourCategory(categoryData) {
     throw new Error("Failed to verify newly created Labour Category document in Firestore.");
   }
 
-  // Log history under the correct admin-scoped document to avoid reserved ID errors
-  let adminId = null;
-  try {
-    adminId = getFirebaseAuth().currentUser?.uid || null;
-  } catch (e) {}
-  const logKey = adminId ? `__labour_master__${adminId}` : "labour_master_global";
-  const logRef = doc(db, "users", logKey);
+  // Log history under shared global document
+  const logRef = doc(db, "users", "labour_master_global");
   const logSnap = await getDoc(logRef);
   const history = logSnap.exists() ? (logSnap.data().history || []) : [];
   const newLog = {
@@ -3474,7 +3575,7 @@ export async function createLabourCategory(categoryData) {
     changedDate: new Date().toISOString().split("T")[0],
     changedBy: categoryData.createdBy || "Admin"
   };
-  await setDoc(logRef, { history: [newLog, ...history] }, { merge: true });
+  await setDoc(logRef, { history: [newLog, ...history], updatedAt: serverTimestamp() }, { merge: true });
 
   return docRef.id;
 }
@@ -3500,14 +3601,9 @@ export async function updateLabourCategory(categoryId, categoryData) {
 
   await updateDoc(docRef, updates);
 
-  // Log history if wage changed under correct admin-scoped document to avoid reserved ID errors
+  // Log history if wage changed under shared global document
   if (categoryData.salaryAmount !== undefined && Number(categoryData.salaryAmount) !== Number(oldData.salaryAmount)) {
-    let adminId = null;
-    try {
-      adminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-    const logKey = adminId ? `__labour_master__${adminId}` : "labour_master_global";
-    const logRef = doc(db, "users", logKey);
+    const logRef = doc(db, "users", "labour_master_global");
     const logSnap = await getDoc(logRef);
     const history = logSnap.exists() ? (logSnap.data().history || []) : [];
     const newLog = {
@@ -3517,7 +3613,7 @@ export async function updateLabourCategory(categoryId, categoryData) {
       changedDate: new Date().toISOString().split("T")[0],
       changedBy: categoryData.updatedBy || "Admin"
     };
-    await setDoc(logRef, { history: [newLog, ...history] }, { merge: true });
+    await setDoc(logRef, { history: [newLog, ...history], updatedAt: serverTimestamp() }, { merge: true });
   }
 }
 
@@ -3527,17 +3623,10 @@ export async function deleteLabourCategory(categoryId) {
   await deleteDoc(doc(db, "labourCategories", categoryId));
 }
 
-// Save admin-scoped labour master categories (retained for compatibility/history updates).
+// Save shared labour master categories history
 export async function saveLabourMaster(categories, history, adminId = null) {
   const db = getDb();
-  let resolvedAdminId = adminId;
-  if (!resolvedAdminId) {
-    try {
-      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-  }
-  const docKey = resolvedAdminId ? `__labour_master__${resolvedAdminId}` : "labour_master_global";
-  const docRef = doc(db, "users", docKey);
+  const docRef = doc(db, "users", "labour_master_global");
   await setDoc(docRef, {
     history,
     updatedAt: serverTimestamp()
@@ -3575,74 +3664,52 @@ export function subscribeLabourCategories(onUpdate) {
   });
 }
 
-// Get admin-scoped labour payments.
-// Supports getLabourPayments(siteId) or getLabourPayments(adminId, siteId).
-// Reads from "__labour_payments__{adminId}" with automatic fallback to global.
+// Get shared labour payments across all authorized Admins
 export async function getLabourPayments(adminIdOrSiteId = null, siteId = null) {
   const db = getDb();
   let paymentsList = [];
   
   let targetSiteId = siteId;
-  let resolvedAdminId = null;
-
-  if (adminIdOrSiteId && !siteId) {
+  if (adminIdOrSiteId && !siteId && typeof adminIdOrSiteId === "string" && !adminIdOrSiteId.startsWith("admin_")) {
     targetSiteId = adminIdOrSiteId;
-    try {
-      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-  } else {
-    resolvedAdminId = adminIdOrSiteId;
-    if (!resolvedAdminId) {
-      try {
-        resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-      } catch (e) {}
-    }
   }
 
-  // Try admin-scoped doc first
-  if (resolvedAdminId) {
-    const scopedRef = doc(db, "users", `__labour_payments__${resolvedAdminId}`);
-    const scopedSnap = await getDoc(scopedRef);
-    if (scopedSnap.exists()) {
-      paymentsList = scopedSnap.data().payments || [];
-    }
-  }
-  if (paymentsList.length === 0 && adminIdOrSiteId && adminIdOrSiteId !== resolvedAdminId) {
-    const directScopedRef = doc(db, "users", `__labour_payments__${adminIdOrSiteId}`);
-    const directScopedSnap = await getDoc(directScopedRef);
-    if (directScopedSnap.exists()) {
-      paymentsList = directScopedSnap.data().payments || [];
-    }
-  }
-  if (paymentsList.length === 0) {
-    // Fallback to global document
+  // 1. Primary shared document
+  try {
     const docRef = doc(db, "users", "labour_payments_global");
     const docSnap = await getDoc(docRef);
     if (docSnap.exists()) {
       paymentsList = docSnap.data().payments || [];
     }
+  } catch (e) {}
+
+  // 2. Merge any legacy per-admin docs if global is empty or missing records
+  if (adminIdOrSiteId && typeof adminIdOrSiteId === "string") {
+    try {
+      const scopedRef = doc(db, "users", `__labour_payments__${adminIdOrSiteId}`);
+      const scopedSnap = await getDoc(scopedRef);
+      if (scopedSnap.exists()) {
+        const legacyPayments = scopedSnap.data().payments || [];
+        const seenIds = new Set(paymentsList.map(p => p.id));
+        legacyPayments.forEach(lp => {
+          if (!seenIds.has(lp.id)) {
+            paymentsList.push(lp);
+          }
+        });
+      }
+    } catch (e) {}
   }
 
-  if (targetSiteId) {
+  if (targetSiteId && targetSiteId !== "all") {
     return paymentsList.filter(p => p.siteId === targetSiteId);
   }
   return paymentsList;
 }
 
-// Save admin-scoped labour payment.
-// If adminId provided, writes to "__labour_payments___{adminId}".
+// Save shared labour payment across all authorized Admins
 export async function saveLabourPayment(paymentData, adminId = null) {
   const db = getDb();
-  
-  let resolvedAdminId = adminId;
-  if (!resolvedAdminId) {
-    try {
-      resolvedAdminId = getFirebaseAuth().currentUser?.uid || null;
-    } catch (e) {}
-  }
-
-  const docKey = resolvedAdminId ? `__labour_payments__${resolvedAdminId}` : "labour_payments_global";
-  const docRef = doc(db, "users", docKey);
+  const docRef = doc(db, "users", "labour_payments_global");
   const docSnap = await getDoc(docRef);
   
   const newPayment = {
@@ -3652,7 +3719,8 @@ export async function saveLabourPayment(paymentData, adminId = null) {
     date: paymentData.date || new Date().toISOString().split("T")[0],
     reference: paymentData.reference || "",
     notes: paymentData.notes || "",
-    loggedBy: paymentData.loggedBy || "admin"
+    loggedBy: paymentData.loggedBy || adminId || "admin",
+    createdAt: new Date().toISOString()
   };
   
   if (docSnap.exists()) {
@@ -5075,15 +5143,11 @@ export async function createLabourTeam(teamName, adminId) {
   return newTeamRef.id;
 }
 
+// Fetch all labour teams (Shared canonical dataset for all Admins and Engineers)
 export async function getLabourTeams(adminId = null) {
   const db = getDb();
   const collRef = collection(db, "labourTeams");
-  let snap;
-  if (adminId) {
-    snap = await getDocs(query(collRef, where("adminId", "==", adminId)));
-  } else {
-    snap = await getDocs(collRef);
-  }
+  const snap = await getDocs(collRef);
   const teams = [];
   snap.forEach(d => {
     teams.push({ id: d.id, ...d.data() });
@@ -5091,12 +5155,12 @@ export async function getLabourTeams(adminId = null) {
   return teams.sort((a, b) => (a.teamName || "").localeCompare(b.teamName || ""));
 }
 
+// Real-time synchronization of all labour teams across all Admins and Engineers
 export function subscribeLabourTeams(onUpdate, adminId = null) {
   const db = getDb();
   const collRef = collection(db, "labourTeams");
-  const q = adminId ? query(collRef, where("adminId", "==", adminId)) : query(collRef);
   
-  return onSnapshot(q, (snapshot) => {
+  return onSnapshot(collRef, (snapshot) => {
     const list = [];
     snapshot.forEach(docSnap => {
       list.push({ id: docSnap.id, ...docSnap.data() });
@@ -5108,26 +5172,22 @@ export function subscribeLabourTeams(onUpdate, adminId = null) {
   });
 }
 
-export async function updateLabourTeam(teamId, teamName, adminId) {
+export async function updateLabourTeam(teamId, teamName, adminId = null) {
   const db = getDb();
   const nameClean = teamName.trim();
   if (!nameClean) {
     throw new Error("Team Name cannot be empty.");
   }
 
-  // Check for duplicates
-  const q = query(
-    collection(db, "labourTeams"),
-    where("adminId", "==", adminId)
-  );
-  const snap = await getDocs(q);
+  // Check for duplicate team names
+  const snap = await getDocs(collection(db, "labourTeams"));
   const duplicate = snap.docs.some(docSnap => docSnap.id !== teamId && docSnap.data().teamName.trim().toLowerCase() === nameClean.toLowerCase());
   if (duplicate) {
     throw new Error("Another team already has this name.");
   }
 
   const docRef = doc(db, "labourTeams", teamId);
-  await updateDoc(docRef, { teamName: nameClean });
+  await updateDoc(docRef, { teamName: nameClean, ...(adminId ? { lastUpdatedByAdmin: adminId } : {}) });
 }
 
 export async function deleteLabourTeam(teamId) {
@@ -5646,19 +5706,45 @@ export async function savePayrollStatus(key, statusData) {
   await setDoc(docRef, { statuses: currentStatuses }, { merge: true });
 }
 
-// Real-time subscription to all general expenses
+// Real-time subscription to all general expenses (merging primary expenses/general and users/__site_expenses__)
 export function subscribeGeneralExpenses(onUpdate) {
   const db = getDb();
-  const docRef = doc(db, "expenses", "general");
-  return onSnapshot(docRef, (snapshot) => {
-    if (snapshot.exists()) {
-      onUpdate(snapshot.data().expenses || []);
-    } else {
-      onUpdate([]);
-    }
+  let expensesGeneral = [];
+  let expensesLegacy = [];
+
+  const emit = () => {
+    const combined = [...expensesGeneral, ...expensesLegacy];
+    const seen = new Set();
+    const unique = [];
+    combined.forEach(e => {
+      if (!e) return;
+      const key = e.id || `exp_${e.siteId}_${e.date}_${e.amount}_${e.description}`;
+      if (!seen.has(key)) {
+        seen.add(key);
+        unique.push({ id: key, ...e });
+      }
+    });
+    onUpdate(unique);
+  };
+
+  const unsub1 = onSnapshot(doc(db, "expenses", "general"), (snap) => {
+    expensesGeneral = snap.exists() ? (snap.data().expenses || []) : [];
+    emit();
   }, (err) => {
-    console.error("General expenses subscription failed:", err);
+    console.warn("expenses/general listener warning:", err);
   });
+
+  const unsub2 = onSnapshot(doc(db, "users", "__site_expenses__"), (snap) => {
+    expensesLegacy = snap.exists() ? (snap.data().expenses || []) : [];
+    emit();
+  }, (err) => {
+    console.warn("users/__site_expenses__ listener warning:", err);
+  });
+
+  return () => {
+    unsub1();
+    unsub2();
+  };
 }
 
 // Check daily labour attendance submission status per Site + Date + Team

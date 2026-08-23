@@ -746,8 +746,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           }
         }
 
-        const adminId = filteredSites.length > 0 ? (filteredSites[0].createdByAdmin || null) : null;
-
         // Fetch site-specific attendance and records concurrently in parallel for currentActiveId
         const [
           attendance,
@@ -763,9 +761,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           getDailyUpdatesForEngineer(engineerId, currentActiveId).catch(() => []),
           getMaterialsDetailed(currentActiveId).catch(() => []),
           getGeneralExpenses(currentActiveId).catch(() => []),
-          getLabourPayments(adminId, currentActiveId).catch(() => []),
+          getLabourPayments(currentActiveId).catch(() => []),
           getLabourDailyCountsSummary(currentActiveId).catch(() => []),
-          getLabourMaster(adminId).catch(() => null),
+          getLabourMaster().catch(() => null),
           getNotifications(engineerId).catch(() => [])
         ]);
 
@@ -869,18 +867,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
     
-    // Find active site to get the admin ID
-    const currentSite = assignedSites.find(s => s.id === activeSiteId) || allSites.find(s => s.id === activeSiteId);
-    const adminId = currentSite?.createdByAdmin || null;
-    if (!adminId) {
-      setLabourTeams([]);
-      return;
-    }
-    
+    // Subscribe to all company labour teams in real-time
     const unsubscribe = subscribeLabourTeams((teamsList) => {
-      setLabourTeams(teamsList);
+      setLabourTeams(teamsList || []);
       // Auto-select first team if none selected or if selected team no longer exists
-      if (teamsList.length > 0) {
+      if (teamsList && teamsList.length > 0) {
         setSelectedLabourTeamId(prev => {
           const exists = teamsList.some(t => t.id === prev);
           return exists ? prev : teamsList[0].id;
@@ -888,10 +879,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       } else {
         setSelectedLabourTeamId("");
       }
-    }, adminId);
+    });
     
     return () => unsubscribe();
-  }, [activeSiteId, assignedSites, allSites]);
+  }, [activeSiteId]);
 
   useEffect(() => {
     if (!activeSiteId) {
