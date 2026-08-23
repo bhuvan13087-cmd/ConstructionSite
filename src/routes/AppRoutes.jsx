@@ -15,6 +15,7 @@ import DocumentsDashboard from "../pages/DocumentsDashboard";
 import ReportsDashboard from "../pages/ReportsDashboard";
 import PayrollSummary from "../pages/PayrollSummary";
 import SiteCompletionDashboard from "../pages/SiteCompletionDashboard";
+import Settings from "../pages/Settings";
 import ProtectedRoute from "../components/common/ProtectedRoute";
 import ErrorBoundary from "../components/common/ErrorBoundary";
 import Loading from "../components/common/Loading";
@@ -46,7 +47,9 @@ export default function AppRoutes() {
         <Route path="/admin/labour" element={<ErrorBoundary><AdminLabour /></ErrorBoundary>} />
         <Route path="/admin/payments" element={<ErrorBoundary><AdminPayments /></ErrorBoundary>} />
         <Route path="/admin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
-        <Route path="/admin/documents" element={<ErrorBoundary><DocumentsDashboard /></ErrorBoundary>} />
+        <Route path="/admin/documents" element={<ErrorBoundary><Settings initialTab="documents" /></ErrorBoundary>} />
+        <Route path="/admin/settings" element={<ErrorBoundary><Settings initialTab="profile" /></ErrorBoundary>} />
+        <Route path="/admin/profile" element={<ErrorBoundary><Settings initialTab="profile" /></ErrorBoundary>} />
         <Route path="/admin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
       </Route>
 
@@ -74,7 +77,9 @@ export default function AppRoutes() {
         <Route path="/superadmin/approvals" element={<ErrorBoundary><SuperAdminDashboard tab="approvals" /></ErrorBoundary>} />
         <Route path="/superadmin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
         <Route path="/superadmin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
-        <Route path="/superadmin/documents" element={<ErrorBoundary><DocumentsDashboard /></ErrorBoundary>} />
+        <Route path="/superadmin/documents" element={<ErrorBoundary><Settings initialTab="documents" /></ErrorBoundary>} />
+        <Route path="/superadmin/settings" element={<ErrorBoundary><Settings initialTab="profile" /></ErrorBoundary>} />
+        <Route path="/superadmin/profile" element={<ErrorBoundary><Settings initialTab="profile" /></ErrorBoundary>} />
       </Route>
 
       {/* Fallback route redirection */}

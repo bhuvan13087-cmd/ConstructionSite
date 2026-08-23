@@ -199,6 +199,68 @@ export async function updateUserProfile(uid, updateData) {
 }
 
 /**
+ * Production-Safe Profile Update for the currently authenticated user.
+ * Updates strictly only permitted personal fields: fullName, name, phoneNumber, phone.
+ * Email, UID, Role, Status, Creation Date, and Site Assignments are permanently protected and immutable.
+ * 
+ * @param {string} uid - Authenticated user's UID
+ * @param {object} profileData - { fullName, phoneNumber }
+ */
+export async function updateAuthenticatedUserProfile(uid, { fullName, phoneNumber }) {
+  if (!uid) throw new Error("User UID is required for profile update.");
+
+  const db = getDb();
+  const trimmedName = (fullName || "").trim();
+  const trimmedPhone = (phoneNumber || "").trim();
+
+  if (!trimmedName) throw new Error("Admin name is required.");
+
+  // Build clean payload with ONLY permitted fields (Name and Phone)
+  const userPayload = {
+    fullName: trimmedName,
+    name: trimmedName,
+    phoneNumber: trimmedPhone,
+    phone: trimmedPhone,
+    updatedAt: serverTimestamp()
+  };
+
+  // Update canonical users collection doc
+  const userDocRef = doc(db, "users", uid);
+  try {
+    await updateDoc(userDocRef, userPayload);
+  } catch (e) {
+    await setDoc(userDocRef, userPayload, { merge: true });
+  }
+
+  // Also update corresponding role collections if they exist (without touching role, status, email, or assignedSites)
+  const rolePayload = { ...userPayload };
+  
+  try {
+    const adminDoc = doc(db, "admins", uid);
+    const snap = await getDoc(adminDoc);
+    if (snap.exists()) {
+      await updateDoc(adminDoc, rolePayload);
+    }
+  } catch (e) {}
+
+  try {
+    const superAdminDoc = doc(db, "superAdmins", uid);
+    const snap = await getDoc(superAdminDoc);
+    if (snap.exists()) {
+      await updateDoc(superAdminDoc, rolePayload);
+    }
+  } catch (e) {}
+
+  try {
+    const engineerDoc = doc(db, "siteEngineers", uid);
+    const snap = await getDoc(engineerDoc);
+    if (snap.exists()) {
+      await updateDoc(engineerDoc, rolePayload);
+    }
+  } catch (e) {}
+}
+
+/**
  * Unified Canonical Engineer Profile Store & Multi-Key Indexing
  * Fetches from both `siteEngineers` and `users` collections in parallel,
  * merges rich profile data, and creates multi-key indices for instant canonical resolution.
