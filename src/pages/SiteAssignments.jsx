@@ -342,6 +342,7 @@ export default function SiteAssignments() {
 
   // Handle engineer assignment
   const handleAssign = async (siteId, engineerId) => {
+    if (loading) return;
     if (!siteId) {
       showToast("Please select a construction site.", "error");
       return;

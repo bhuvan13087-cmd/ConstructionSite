@@ -14,6 +14,8 @@ export const Button = ({
   style = {},
   ...props
 }) => {
+  const lastClickRef = React.useRef(0);
+
   let btnClass = 'btn';
   let customStyle = { ...style };
 
@@ -47,12 +49,29 @@ export const Button = ({
     };
   }
 
+  const handleClick = (e) => {
+    if (disabled || isLoading) {
+      if (e && e.preventDefault) e.preventDefault();
+      return;
+    }
+    const now = Date.now();
+    // Guard against rapid duplicate clicks (within 350ms)
+    if (now - lastClickRef.current < 350) {
+      if (e && e.preventDefault) e.preventDefault();
+      return;
+    }
+    lastClickRef.current = now;
+    if (onClick) {
+      onClick(e);
+    }
+  };
+
   return (
     <button
       type={type}
       className={`${btnClass} ${className}`}
       disabled={disabled || isLoading}
-      onClick={onClick}
+      onClick={handleClick}
       style={customStyle}
       {...props}
     >

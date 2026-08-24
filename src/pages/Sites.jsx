@@ -599,6 +599,7 @@ export default function Sites() {
   };
 
   const executeSaveSite = async (budgetNum, rad) => {
+    if (loading) return;
     setLoading(true);
     try {
       if (formMode === "add") {
@@ -839,31 +840,117 @@ export default function Sites() {
         </Card>
       )}
 
-      {/* Toolbar header */}
-      <div className="subview-actions-header">
-        <div className="search-filter-bar">
-          <div className="input-wrapper search-wrapper">
-            <Search className="input-icon" size={16} />
+      {/* ── All Sites Search Bar & Actions Toolbar ── */}
+      <div 
+        className="sites-toolbar-container"
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "16px",
+          marginBottom: "24px",
+          flexWrap: "wrap",
+          width: "100%",
+          boxSizing: "border-box"
+        }}
+      >
+        {/* Search Bar Container */}
+        <div 
+          className="sites-search-wrapper"
+          style={{ 
+            flex: "1 1 320px", 
+            maxWidth: "460px", 
+            minWidth: "260px",
+            position: "relative"
+          }}
+        >
+          <div style={{ position: "relative", width: "100%", display: "flex", alignItems: "center" }}>
+            <Search 
+              size={16} 
+              style={{ 
+                position: "absolute", 
+                left: "14px", 
+                top: "50%", 
+                transform: "translateY(-50%)", 
+                color: "var(--text-muted)", 
+                pointerEvents: "none",
+                zIndex: 1
+              }} 
+            />
             <input 
               type="text" 
               placeholder="Search sites by name, client, or location..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              style={{
+                width: "100%",
+                height: "44px",
+                padding: "0 16px 0 42px",
+                borderRadius: "10px",
+                border: "1.5px solid var(--border-color)",
+                backgroundColor: "#ffffff",
+                fontSize: "13.5px",
+                fontWeight: "500",
+                color: "var(--text-dark)",
+                outline: "none",
+                boxShadow: "0 1px 2px rgba(0,0,0,0.03)",
+                transition: "border-color var(--transition-fast), box-shadow var(--transition-fast)",
+                boxSizing: "border-box"
+              }}
+              onFocus={(e) => {
+                e.target.style.borderColor = "var(--brand-orange)";
+                e.target.style.boxShadow = "0 0 0 3px rgba(249, 115, 22, 0.12)";
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = "var(--border-color)";
+                e.target.style.boxShadow = "0 1px 2px rgba(0,0,0,0.03)";
+              }}
             />
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+
+        {/* Action Controls */}
+        <div 
+          className="sites-actions-group"
+          style={{ 
+            display: "flex", 
+            alignItems: "center", 
+            gap: "10px", 
+            flexWrap: "wrap",
+            marginLeft: "auto"
+          }}
+        >
           <ViewToggle viewMode={viewMode} onChange={setViewMode} />
           <Button
             type="button"
             variant="outline"
             onClick={() => setShowAdminEntryModal(true)}
-            style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#eff6ff", borderColor: "#bfdbfe", color: "#1d4ed8", fontWeight: "750" }}
+            style={{ 
+              display: "flex", 
+              alignItems: "center", 
+              gap: "6px", 
+              backgroundColor: "#eff6ff", 
+              borderColor: "#bfdbfe", 
+              color: "#1d4ed8", 
+              fontWeight: "750",
+              height: "44px",
+              padding: "0 16px",
+              whiteSpace: "nowrap"
+            }}
           >
             <Shield size={16} />
             <span>Add Entry for Engineer</span>
           </Button>
-          <Button onClick={handleOpenAddModal} icon={Plus} className="btn-add">
+          <Button 
+            onClick={handleOpenAddModal} 
+            icon={Plus} 
+            className="btn-add"
+            style={{
+              height: "44px",
+              padding: "0 18px",
+              whiteSpace: "nowrap"
+            }}
+          >
             Add Site
           </Button>
         </div>

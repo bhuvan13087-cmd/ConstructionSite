@@ -367,6 +367,7 @@ export default function AdminLabour() {
 
   const handleLogPayment = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (!paymentSiteId) {
       showToast("Please select a construction site.", "error");
       return;
@@ -405,6 +406,7 @@ export default function AdminLabour() {
   // -------------------------------------------------------------
   const handleCreateTeam = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     if (!newTeamName.trim()) {
       showToast("Team Name cannot be empty.", "error");
       return;
@@ -425,6 +427,7 @@ export default function AdminLabour() {
 
   const handleCreateTeamModalSubmit = async (e) => {
     e.preventDefault();
+    if (submitting) return;
     const nameClean = modalTeamName.trim();
     if (!nameClean) {
       showToast("Please enter a Team Name.", "error");

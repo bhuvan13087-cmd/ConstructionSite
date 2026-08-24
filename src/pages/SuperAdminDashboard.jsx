@@ -265,16 +265,22 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     // 3. Admins Listener
+    let unsubFallbackAdmins = null;
     const unsubAdmins = onSnapshot(collection(db, "admins"), (snapshot) => {
       const list = [];
       snapshot.forEach(docSnap => {
         list.push({ id: docSnap.id, uid: docSnap.id, fullName: docSnap.data().name || docSnap.data().fullName || "", email: docSnap.data().email || "", role: "admin", ...docSnap.data() });
       });
       if (list.length > 0) {
+        if (unsubFallbackAdmins) {
+          unsubFallbackAdmins();
+          unsubFallbackAdmins = null;
+        }
         setAdmins(list);
       } else {
+        if (unsubFallbackAdmins) unsubFallbackAdmins();
         const qUsers = query(collection(db, "users"), where("role", "in", ["admin", "super_admin", "superadmin"]));
-        onSnapshot(qUsers, (uSnap) => {
+        unsubFallbackAdmins = onSnapshot(qUsers, (uSnap) => {
           const uList = [];
           uSnap.forEach(d => {
             uList.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", email: d.data().email || "", role: d.data().role || "admin", ...d.data() });
@@ -390,6 +396,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       unsubEngineers();
       if (unsubFallbackEngineers) unsubFallbackEngineers();
       unsubAdmins();
+      if (unsubFallbackAdmins) unsubFallbackAdmins();
       unsubMaterials();
       unsubReports();
       unsubLabour();
@@ -934,26 +941,26 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
           
           {/* Top Control Bar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px", marginBottom: "4px" }}>
             <div>
               <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
                 All Construction Sites ({filteredSites.length})
               </h2>
-              <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
+              <p style={{ margin: "3px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
                 Executive monitoring of all projects. Toggle between Card Grid and Table View to inspect operations.
               </p>
             </div>
 
             <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
               {/* Search */}
-              <div style={{ position: "relative", minWidth: "220px" }}>
-                <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+              <div style={{ position: "relative", minWidth: "240px", maxWidth: "360px", flex: "1 1 240px" }}>
+                <Search size={15} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
                 <input
                   type="text"
                   placeholder="Search site, client, location..."
                   value={siteSearchQuery}
                   onChange={(e) => setSiteSearchQuery(e.target.value)}
-                  style={{ width: "100%", height: "36px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+                  style={{ width: "100%", height: "38px", paddingLeft: "36px", paddingRight: "12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", boxSizing: "border-box", outline: "none" }}
                 />
               </div>
 
@@ -961,7 +968,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               <select
                 value={siteStatusFilter}
                 onChange={(e) => setSiteStatusFilter(e.target.value)}
-                style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600" }}
+                style={{ height: "38px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
               >
                 <option value="all">All Statuses</option>
                 <option value="active">Active</option>

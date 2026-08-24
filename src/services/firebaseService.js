@@ -260,149 +260,166 @@ export async function updateAuthenticatedUserProfile(uid, { fullName, phoneNumbe
   } catch (e) {}
 }
 
+let inFlightCanonicalEngineersPromise = null;
+
 /**
  * Unified Canonical Engineer Profile Store & Multi-Key Indexing
  * Fetches from both `siteEngineers` and `users` collections in parallel,
  * merges rich profile data, and creates multi-key indices for instant canonical resolution.
+ * Deduplicates identical concurrent in-flight requests for query efficiency.
  */
 export async function buildCanonicalEngineersLookup() {
-  const db = getDb();
-  const siteEngineersCollection = collection(db, "siteEngineers");
-  const usersCollection = collection(db, "users");
-  const assignmentsColl = collection(db, "siteAssignments");
+  if (inFlightCanonicalEngineersPromise) {
+    return inFlightCanonicalEngineersPromise;
+  }
 
-  const [seSnap, usersSnap, asgSnap] = await Promise.all([
-    getDocs(siteEngineersCollection).catch(e => {
-      console.warn("Could not fetch siteEngineers collection:", e);
-      return { docs: [] };
-    }),
-    getDocs(usersCollection).catch(e => {
-      console.warn("Could not fetch users collection:", e);
-      return { docs: [] };
-    }),
-    getDocs(assignmentsColl).catch(e => {
-      console.warn("Could not fetch canonical siteAssignments:", e);
-      return { docs: [] };
-    })
-  ]);
+  inFlightCanonicalEngineersPromise = (async () => {
+    try {
+      const db = getDb();
+      const siteEngineersCollection = collection(db, "siteEngineers");
+      const usersCollection = collection(db, "users");
+      const assignmentsColl = collection(db, "siteAssignments");
 
-  // Build active assignments map (engineerId -> Set of active siteIds)
-  const activeAssignmentsMap = {};
-  if (asgSnap && asgSnap.docs) {
-    asgSnap.docs.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.status === "active" && data.engineerId && data.siteId) {
-        if (!activeAssignmentsMap[data.engineerId]) {
-          activeAssignmentsMap[data.engineerId] = new Set();
+      const [seSnap, usersSnap, asgSnap] = await Promise.all([
+        getDocs(siteEngineersCollection).catch(e => {
+          console.warn("Could not fetch siteEngineers collection:", e);
+          return { docs: [] };
+        }),
+        getDocs(usersCollection).catch(e => {
+          console.warn("Could not fetch users collection:", e);
+          return { docs: [] };
+        }),
+        getDocs(assignmentsColl).catch(e => {
+          console.warn("Could not fetch canonical siteAssignments:", e);
+          return { docs: [] };
+        })
+      ]);
+
+      // Build active assignments map (engineerId -> Set of active siteIds)
+      const activeAssignmentsMap = {};
+      if (asgSnap && asgSnap.docs) {
+        asgSnap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.status === "active" && data.engineerId && data.siteId) {
+            if (!activeAssignmentsMap[data.engineerId]) {
+              activeAssignmentsMap[data.engineerId] = new Set();
+            }
+            activeAssignmentsMap[data.engineerId].add(data.siteId);
+          }
+        });
+      }
+
+      // Canonical engineer profile map (keyed by primary UID / Doc ID)
+      const profilesMap = new Map();
+
+      const processDoc = (docSnap, source) => {
+        const data = docSnap.data();
+        const docId = docSnap.id;
+        const uid = data.uid || data.userId || data.id || docId;
+        const email = (data.email || data.userEmail || "").trim().toLowerCase();
+        const primaryKey = uid || docId;
+
+        const existing = profilesMap.get(primaryKey) || (email ? Array.from(profilesMap.values()).find(p => p.email && p.email.toLowerCase() === email) : null);
+
+        const nameCandidates = [
+          data.fullName,
+          data.name,
+          data.displayName,
+          data.userName,
+          existing?.fullName,
+          existing?.name
+        ].filter(n => typeof n === "string" && n.trim().length > 0);
+
+        const cleanFullName = nameCandidates[0] || "";
+
+        const phone = data.phone || data.phoneNumber || existing?.phoneNumber || existing?.phone || "";
+        const status = data.status || existing?.status || "active";
+        const customId = data.customId || data.engineerId || data.empId || existing?.customId || existing?.engineerId || "";
+        const role = data.role || existing?.role || "site_engineer";
+        const holidayAllowance = Number(data.holidayAllowance) || Number(existing?.holidayAllowance) || 24;
+
+        const mergedSites = new Set([
+          ...(Array.isArray(data.assignedSites) ? data.assignedSites : []),
+          ...(Array.isArray(existing?.assignedSites) ? existing.assignedSites : [])
+        ]);
+
+        const activeCanonicalSites = [
+          ...(activeAssignmentsMap[docId] ? Array.from(activeAssignmentsMap[docId]) : []),
+          ...(activeAssignmentsMap[uid] ? Array.from(activeAssignmentsMap[uid]) : []),
+          ...(activeAssignmentsMap[customId] ? Array.from(activeAssignmentsMap[customId]) : [])
+        ];
+        activeCanonicalSites.forEach(s => mergedSites.add(s));
+
+        const profile = {
+          id: docId,
+          uid: uid || docId,
+          docId: docId,
+          fullName: cleanFullName,
+          name: cleanFullName,
+          email: data.email || existing?.email || "",
+          phone: phone,
+          phoneNumber: phone,
+          customId: customId,
+          engineerId: customId || uid || docId,
+          role: role,
+          status: status,
+          holidayAllowance: holidayAllowance,
+          assignedSites: Array.from(mergedSites),
+          sourceCollection: source,
+          ...data,
+          fullName: cleanFullName,
+          name: cleanFullName,
+          assignedSites: Array.from(mergedSites)
+        };
+
+        profilesMap.set(primaryKey, profile);
+        if (docId !== primaryKey) {
+          profilesMap.set(docId, profile);
         }
-        activeAssignmentsMap[data.engineerId].add(data.siteId);
+      };
+
+      // 1. Process siteEngineers collection
+      if (seSnap && seSnap.docs) {
+        seSnap.docs.forEach(docSnap => processDoc(docSnap, "siteEngineers"));
       }
-    });
-  }
 
-  // Canonical engineer profile map (keyed by primary UID / Doc ID)
-  const profilesMap = new Map();
-
-  const processDoc = (docSnap, source) => {
-    const data = docSnap.data();
-    const docId = docSnap.id;
-    const uid = data.uid || data.userId || data.id || docId;
-    const email = (data.email || data.userEmail || "").trim().toLowerCase();
-    const primaryKey = uid || docId;
-
-    const existing = profilesMap.get(primaryKey) || (email ? Array.from(profilesMap.values()).find(p => p.email && p.email.toLowerCase() === email) : null);
-
-    const nameCandidates = [
-      data.fullName,
-      data.name,
-      data.displayName,
-      data.userName,
-      existing?.fullName,
-      existing?.name
-    ].filter(n => typeof n === "string" && n.trim().length > 0);
-
-    const cleanFullName = nameCandidates[0] || "";
-
-    const phone = data.phone || data.phoneNumber || existing?.phoneNumber || existing?.phone || "";
-    const status = data.status || existing?.status || "active";
-    const customId = data.customId || data.engineerId || data.empId || existing?.customId || existing?.engineerId || "";
-    const role = data.role || existing?.role || "site_engineer";
-    const holidayAllowance = Number(data.holidayAllowance) || Number(existing?.holidayAllowance) || 24;
-
-    const mergedSites = new Set([
-      ...(Array.isArray(data.assignedSites) ? data.assignedSites : []),
-      ...(Array.isArray(existing?.assignedSites) ? existing.assignedSites : [])
-    ]);
-
-    const activeCanonicalSites = [
-      ...(activeAssignmentsMap[docId] ? Array.from(activeAssignmentsMap[docId]) : []),
-      ...(activeAssignmentsMap[uid] ? Array.from(activeAssignmentsMap[uid]) : []),
-      ...(activeAssignmentsMap[customId] ? Array.from(activeAssignmentsMap[customId]) : [])
-    ];
-    activeCanonicalSites.forEach(s => mergedSites.add(s));
-
-    const profile = {
-      id: docId,
-      uid: uid || docId,
-      docId: docId,
-      fullName: cleanFullName,
-      name: cleanFullName,
-      email: data.email || existing?.email || "",
-      phone: phone,
-      phoneNumber: phone,
-      customId: customId,
-      engineerId: customId || uid || docId,
-      role: role,
-      status: status,
-      holidayAllowance: holidayAllowance,
-      assignedSites: Array.from(mergedSites),
-      sourceCollection: source,
-      ...data,
-      fullName: cleanFullName,
-      name: cleanFullName,
-      assignedSites: Array.from(mergedSites)
-    };
-
-    profilesMap.set(primaryKey, profile);
-    if (docId !== primaryKey) {
-      profilesMap.set(docId, profile);
-    }
-  };
-
-  // 1. Process siteEngineers collection
-  if (seSnap && seSnap.docs) {
-    seSnap.docs.forEach(docSnap => processDoc(docSnap, "siteEngineers"));
-  }
-
-  // 2. Process users collection (filter for engineers)
-  if (usersSnap && usersSnap.docs) {
-    usersSnap.docs.forEach(docSnap => {
-      const data = docSnap.data();
-      const role = (data.role || "").toLowerCase();
-      const isEngineer = role === "site_engineer" || role === "engineer" || role.includes("engineer") || data.isEngineer === true || profilesMap.has(docSnap.id) || (data.email && Array.from(profilesMap.values()).some(p => p.email.toLowerCase() === data.email.toLowerCase()));
-      if (isEngineer) {
-        processDoc(docSnap, "users");
+      // 2. Process users collection (filter for engineers)
+      if (usersSnap && usersSnap.docs) {
+        usersSnap.docs.forEach(docSnap => {
+          const data = docSnap.data();
+          const role = (data.role || "").toLowerCase();
+          const isEngineer = role === "site_engineer" || role === "engineer" || role.includes("engineer") || data.isEngineer === true || profilesMap.has(docSnap.id) || (data.email && Array.from(profilesMap.values()).some(p => p.email.toLowerCase() === data.email.toLowerCase()));
+          if (isEngineer) {
+            processDoc(docSnap, "users");
+          }
+        });
       }
-    });
-  }
 
-  const engineersList = Array.from(new Set(profilesMap.values()));
+      const engineersList = Array.from(new Set(profilesMap.values()));
 
-  // 3. Build fast Multi-Key Lookup Index
-  const lookupMap = {};
-  engineersList.forEach(eng => {
-    if (eng.id) lookupMap[eng.id] = eng;
-    if (eng.uid) lookupMap[eng.uid] = eng;
-    if (eng.docId) lookupMap[eng.docId] = eng;
-    if (eng.customId) lookupMap[eng.customId] = eng;
-    if (eng.engineerId) lookupMap[eng.engineerId] = eng;
-    if (eng.email) {
-      lookupMap[eng.email.toLowerCase()] = eng;
-      lookupMap[eng.email] = eng;
+      // 3. Build fast Multi-Key Lookup Index
+      const lookupMap = {};
+      engineersList.forEach(eng => {
+        if (eng.id) lookupMap[eng.id] = eng;
+        if (eng.uid) lookupMap[eng.uid] = eng;
+        if (eng.docId) lookupMap[eng.docId] = eng;
+        if (eng.customId) lookupMap[eng.customId] = eng;
+        if (eng.engineerId) lookupMap[eng.engineerId] = eng;
+        if (eng.email) {
+          lookupMap[eng.email.toLowerCase()] = eng;
+          lookupMap[eng.email] = eng;
+        }
+      });
+
+      return { engineersList, lookupMap };
+    } finally {
+      setTimeout(() => {
+        inFlightCanonicalEngineersPromise = null;
+      }, 50);
     }
-  });
+  })();
 
-  return { engineersList, lookupMap };
+  return inFlightCanonicalEngineersPromise;
 }
 
 /**
@@ -502,39 +519,78 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
   const sitesToAdd = selectedSites.filter(siteId => !oldSites.includes(siteId));
   const sitesToRemove = oldSites.filter(siteId => !selectedSites.includes(siteId));
 
+  const [userSnap, seSnap] = await Promise.all([
+    getDoc(userDocRef).catch(() => null),
+    getDoc(engineerDocRef).catch(() => null)
+  ]);
+
   if (isEditMode) {
-    const updatePayload = {
+    const userUpdatePayload = {
       fullName: name,
       phoneNumber: phone,
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
       updatedAt: serverTimestamp()
     };
-    batch.update(userDocRef, updatePayload);
+    if (userSnap && userSnap.exists()) {
+      batch.update(userDocRef, userUpdatePayload);
+    } else {
+      batch.set(userDocRef, {
+        fullName: name,
+        email: email,
+        phoneNumber: phone,
+        role: "site_engineer",
+        status: "active",
+        ...userUpdatePayload,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+    }
     
-    batch.update(engineerDocRef, {
+    const engUpdatePayload = {
       name: name,
       phone: phone,
       assignedSites: selectedSites,
       holidayAllowance: Number(holidayAllowance) || 24,
       updatedAt: serverTimestamp()
-    });
+    };
+    if (seSnap && seSnap.exists()) {
+      batch.update(engineerDocRef, engUpdatePayload);
+    } else {
+      batch.set(engineerDocRef, {
+        uid: id,
+        name: name,
+        email: email,
+        phone: phone,
+        role: "site_engineer",
+        status: "active",
+        ...engUpdatePayload,
+        createdAt: serverTimestamp()
+      }, { merge: true });
+    }
     
     // Clear former site assignments array on sites
-    sitesToRemove.forEach(siteId => {
+    for (const siteId of sitesToRemove) {
       const siteDocRef = doc(db, "sites", siteId);
-      batch.update(siteDocRef, {
-        assignedEngineers: arrayRemove(id)
-      });
-    });
+      const sSnap = await getDoc(siteDocRef).catch(() => null);
+      if (sSnap && sSnap.exists()) {
+        batch.update(siteDocRef, {
+          assignedEngineers: arrayRemove(id),
+          updatedAt: serverTimestamp()
+        });
+      }
+    }
     
     // Apply new site assignments array on sites
-    sitesToAdd.forEach(siteId => {
+    for (const siteId of sitesToAdd) {
       const siteDocRef = doc(db, "sites", siteId);
-      batch.update(siteDocRef, {
-        assignedEngineers: arrayUnion(id)
-      });
-    });
+      const sSnap = await getDoc(siteDocRef).catch(() => null);
+      if (sSnap && sSnap.exists()) {
+        batch.update(siteDocRef, {
+          assignedEngineers: arrayUnion(id),
+          updatedAt: serverTimestamp()
+        });
+      }
+    }
   } else {
     // Create Mode: Register profile document
     const createPayload = {
@@ -552,7 +608,7 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
     if (password) {
       createPayload.password = password;
     }
-    batch.set(userDocRef, createPayload);
+    batch.set(userDocRef, createPayload, { merge: true });
     
     batch.set(engineerDocRef, {
       uid: id,
@@ -567,15 +623,19 @@ export async function saveSiteEngineerProfile(id, name, email, phone, selectedSi
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
       ...(password ? { password } : {})
-    });
+    }, { merge: true });
     
     // Apply site assignments array on sites
-    selectedSites.forEach(siteId => {
+    for (const siteId of selectedSites) {
       const siteDocRef = doc(db, "sites", siteId);
-      batch.update(siteDocRef, {
-        assignedEngineers: arrayUnion(id)
-      });
-    });
+      const sSnap = await getDoc(siteDocRef).catch(() => null);
+      if (sSnap && sSnap.exists()) {
+        batch.update(siteDocRef, {
+          assignedEngineers: arrayUnion(id),
+          updatedAt: serverTimestamp()
+        });
+      }
+    }
   }
 
   // Synchronize with canonical siteAssignments collection
@@ -775,49 +835,66 @@ export async function seedDefaultSites() {
   return false;
 }
 
+let inFlightGetSitesMap = {};
+
 // Fetch all construction sites
 // Fetch all construction sites (Shared canonical dataset for all authorized Admins)
 export async function getSites(adminId = null) {
-  const db = getDb();
-  const sitesCollection = collection(db, "sites");
-  const assignmentsColl = collection(db, "siteAssignments");
-
-  const [sitesSnapshot, asgSnapshot] = await Promise.all([
-    getDocs(sitesCollection),
-    getDocs(assignmentsColl).catch(e => {
-      console.warn("Could not fetch canonical siteAssignments for sites:", e);
-      return null;
-    })
-  ]);
-  
-  // Authoritative: Fetch active site assignments from canonical collection to populate assignedEngineers accurately
-  const activeSiteEngineersMap = {};
-  if (asgSnapshot) {
-    asgSnapshot.forEach(docSnap => {
-      const data = docSnap.data();
-      if (data.status === "active" && data.siteId && data.engineerId) {
-        if (!activeSiteEngineersMap[data.siteId]) {
-          activeSiteEngineersMap[data.siteId] = new Set();
-        }
-        activeSiteEngineersMap[data.siteId].add(data.engineerId);
-      }
-    });
+  const cacheKey = adminId || "__all__";
+  if (inFlightGetSitesMap[cacheKey]) {
+    return inFlightGetSitesMap[cacheKey];
   }
 
-  const sites = [];
-  sitesSnapshot.forEach(doc => {
-    const data = doc.data();
-    const canonicalEngineers = activeSiteEngineersMap[doc.id]
-      ? Array.from(activeSiteEngineersMap[doc.id])
-      : [];
+  inFlightGetSitesMap[cacheKey] = (async () => {
+    try {
+      const db = getDb();
+      const sitesCollection = collection(db, "sites");
+      const assignmentsColl = collection(db, "siteAssignments");
 
-    sites.push({ 
-      id: doc.id, 
-      ...data,
-      assignedEngineers: canonicalEngineers
-    });
-  });
-  return sites;
+      const [sitesSnapshot, asgSnapshot] = await Promise.all([
+        getDocs(sitesCollection),
+        getDocs(assignmentsColl).catch(e => {
+          console.warn("Could not fetch canonical siteAssignments for sites:", e);
+          return null;
+        })
+      ]);
+      
+      // Authoritative: Fetch active site assignments from canonical collection to populate assignedEngineers accurately
+      const activeSiteEngineersMap = {};
+      if (asgSnapshot) {
+        asgSnapshot.forEach(docSnap => {
+          const data = docSnap.data();
+          if (data.status === "active" && data.siteId && data.engineerId) {
+            if (!activeSiteEngineersMap[data.siteId]) {
+              activeSiteEngineersMap[data.siteId] = new Set();
+            }
+            activeSiteEngineersMap[data.siteId].add(data.engineerId);
+          }
+        });
+      }
+
+      const sites = [];
+      sitesSnapshot.forEach(doc => {
+        const data = doc.data();
+        const canonicalEngineers = activeSiteEngineersMap[doc.id]
+          ? Array.from(activeSiteEngineersMap[doc.id])
+          : [];
+
+        sites.push({ 
+          id: doc.id, 
+          ...data,
+          assignedEngineers: canonicalEngineers
+        });
+      });
+      return sites;
+    } finally {
+      setTimeout(() => {
+        delete inFlightGetSitesMap[cacheKey];
+      }, 50);
+    }
+  })();
+
+  return inFlightGetSitesMap[cacheKey];
 }
 
 // Create a new construction site document
@@ -2131,24 +2208,43 @@ export async function getDailyUpdatesForEngineer(engineerId, siteId = null) {
 // Get all active sites assigned to an engineer from canonical siteAssignments
 export async function getAssignedSitesForEngineer(engineerId) {
   const db = getDb();
+  if (!engineerId) return [];
   
+  const { lookupMap } = await buildCanonicalEngineersLookup();
+  const resolved = resolveEngineerIdentity(engineerId, lookupMap);
+  const candidateEngIds = new Set([
+    engineerId,
+    resolved.profile?.id,
+    resolved.profile?.uid,
+    resolved.profile?.docId,
+    resolved.profile?.customId,
+    resolved.profile?.engineerId
+  ].filter(Boolean));
+
   // 1. Fetch active assignments directly from canonical siteAssignments collection
   const assignmentsColl = collection(db, "siteAssignments");
-  const q = query(
-    assignmentsColl,
-    where("engineerId", "==", engineerId),
-    where("status", "==", "active")
-  );
-  const snap = await getDocs(q);
-  const assignedSiteIds = [...new Set(snap.docs.map(d => d.data().siteId))];
-  
-  if (assignedSiteIds.length === 0) {
+  const snap = await getDocs(assignmentsColl).catch(() => ({ docs: [] }));
+  const assignedSiteIds = new Set();
+
+  snap.docs.forEach(d => {
+    const data = d.data();
+    if (data.status === "active" && candidateEngIds.has(data.engineerId || data.userId || data.uid)) {
+      if (data.siteId) assignedSiteIds.add(data.siteId);
+    }
+  });
+
+  // Also include assignedSites array from engineer profile if any
+  if (resolved.profile && Array.isArray(resolved.profile.assignedSites)) {
+    resolved.profile.assignedSites.forEach(s => assignedSiteIds.add(s));
+  }
+
+  if (assignedSiteIds.size === 0) {
     return [];
   }
   
   // 2. Query sites collection for all these site documents
   const allSites = await getSites();
-  return allSites.filter(site => assignedSiteIds.includes(site.id) && site.status !== "Deleted");
+  return allSites.filter(site => assignedSiteIds.has(site.id) && site.status !== "Deleted");
 }
 
 // Get all site assignments (detailed list with site and engineer profiles)
@@ -2229,6 +2325,13 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
   }
 
   const canonicalEngId = resolved.profile.id || resolved.profile.uid || engineerId;
+  const candidateEngIds = new Set([
+    canonicalEngId,
+    engineerId,
+    resolved.profile?.uid,
+    resolved.profile?.id,
+    resolved.profile?.docId
+  ].filter(Boolean));
 
   // Validation: Prevent duplicate active assignment
   const assignmentsColl = collection(db, "siteAssignments");
@@ -2241,7 +2344,7 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
   const isAlreadyAssigned = existingSnapshot.docs.some(d => {
     const data = d.data();
     const existingRef = data.engineerId || data.userId || data.uid;
-    return existingRef === canonicalEngId || existingRef === engineerId || existingRef === resolved.profile.uid || existingRef === resolved.profile.id;
+    return candidateEngIds.has(existingRef);
   });
   if (isAlreadyAssigned) {
     throw new Error("This engineer is already actively assigned to this site.");
@@ -2258,27 +2361,36 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
     status: "active"
   });
 
-  // Also update engineer's profile assignedSites list in both collections if doc exists
-  try {
-    batch.update(doc(db, "siteEngineers", canonicalEngId), {
-      assignedSites: arrayUnion(siteId),
-      updatedAt: serverTimestamp()
-    });
-  } catch (e) {}
+  // Safely update engineer's profile assignedSites list if docs exist
+  for (const engKey of candidateEngIds) {
+    const seRef = doc(db, "siteEngineers", engKey);
+    const seSnap = await getDoc(seRef).catch(() => null);
+    if (seSnap && seSnap.exists()) {
+      batch.update(seRef, {
+        assignedSites: arrayUnion(siteId),
+        updatedAt: serverTimestamp()
+      });
+    }
 
-  try {
-    batch.update(doc(db, "users", canonicalEngId), {
-      assignedSites: arrayUnion(siteId),
-      updatedAt: serverTimestamp()
-    });
-  } catch (e) {}
+    const userRef = doc(db, "users", engKey);
+    const userSnap = await getDoc(userRef).catch(() => null);
+    if (userSnap && userSnap.exists()) {
+      batch.update(userRef, {
+        assignedSites: arrayUnion(siteId),
+        updatedAt: serverTimestamp()
+      });
+    }
+  }
 
-  // Also update site's assignedEngineers list
+  // Safely update site's assignedEngineers list if doc exists
   const siteDocRef = doc(db, "sites", siteId);
-  batch.update(siteDocRef, {
-    assignedEngineers: arrayUnion(canonicalEngId),
-    updatedAt: serverTimestamp()
-  });
+  const siteSnap = await getDoc(siteDocRef).catch(() => null);
+  if (siteSnap && siteSnap.exists()) {
+    batch.update(siteDocRef, {
+      assignedEngineers: arrayUnion(canonicalEngId),
+      updatedAt: serverTimestamp()
+    });
+  }
 
   await batch.commit();
 }
@@ -2286,35 +2398,119 @@ export async function assignEngineerToSite(siteId, engineerId, adminId) {
 // Remove engineer from site (delete or deactivate)
 export async function removeEngineerFromSite(assignmentId) {
   const db = getDb();
-  const assignmentDocRef = doc(db, "siteAssignments", assignmentId);
-  const assignmentDoc = await getDoc(assignmentDocRef);
-  
-  if (!assignmentDoc.exists()) {
+  let siteId = null;
+  let engineerId = null;
+  let assignmentDocRef = null;
+
+  // 1. Try to find assignment record by direct doc ID
+  if (assignmentId) {
+    assignmentDocRef = doc(db, "siteAssignments", assignmentId);
+    const assignmentDoc = await getDoc(assignmentDocRef).catch(() => null);
+    if (assignmentDoc && assignmentDoc.exists()) {
+      const assignmentData = assignmentDoc.data();
+      siteId = assignmentData.siteId;
+      engineerId = assignmentData.engineerId || assignmentData.userId || assignmentData.uid;
+    }
+  }
+
+  // 2. Fallback: Search in all siteAssignments if not found by direct doc ID
+  if (!siteId || !engineerId) {
+    const asgSnap = await getDocs(collection(db, "siteAssignments")).catch(() => ({ docs: [] }));
+    const match = asgSnap.docs.find(d => d.id === assignmentId);
+    if (match) {
+      assignmentDocRef = match.ref;
+      siteId = match.data().siteId;
+      engineerId = match.data().engineerId || match.data().userId || match.data().uid;
+    }
+  }
+
+  if (!siteId || !engineerId) {
     throw new Error("Assignment record not found.");
   }
-  const assignmentData = assignmentDoc.data();
-  const { siteId, engineerId } = assignmentData;
+
+  // 3. Resolve canonical engineer keys
+  const { lookupMap } = await buildCanonicalEngineersLookup();
+  const resolved = resolveEngineerIdentity(engineerId, lookupMap);
+  const candidateEngIds = new Set([
+    engineerId,
+    resolved.profile?.id,
+    resolved.profile?.uid,
+    resolved.profile?.docId,
+    resolved.profile?.customId,
+    resolved.profile?.engineerId
+  ].filter(Boolean));
+
+  // 4. Batch delete all matching siteAssignment docs for this (siteId, engineer)
+  const assignmentsColl = collection(db, "siteAssignments");
+  const matchingAsgQuery = query(
+    assignmentsColl,
+    where("siteId", "==", siteId)
+  );
+  const matchingAsgSnap = await getDocs(matchingAsgQuery).catch(() => ({ docs: [] }));
 
   const batch = writeBatch(db);
-  batch.delete(assignmentDocRef);
+  let batchOpsCount = 0;
 
-  // Remove siteId from engineer's assignedSites list in both collections
-  batch.update(doc(db, "siteEngineers", engineerId), {
-    assignedSites: arrayRemove(siteId)
+  // Delete direct assignment doc if found
+  if (assignmentDocRef) {
+    batch.delete(assignmentDocRef);
+    batchOpsCount++;
+  }
+
+  // Also delete any other duplicate/legacy assignments matching this engineer and site
+  matchingAsgSnap.docs.forEach(docSnap => {
+    const d = docSnap.data();
+    const engRef = d.engineerId || d.userId || d.uid;
+    if (candidateEngIds.has(engRef)) {
+      if (!assignmentDocRef || docSnap.id !== assignmentDocRef.id) {
+        batch.delete(docSnap.ref);
+        batchOpsCount++;
+      }
+    }
   });
-  try {
-    batch.update(doc(db, "users", engineerId), {
-      assignedSites: arrayRemove(siteId)
-    });
-  } catch (e) {}
 
-  // Remove engineerId from site's assignedEngineers list
-  const siteDocRef = doc(db, "sites", siteId);
-  batch.update(siteDocRef, {
-    assignedEngineers: arrayRemove(engineerId)
-  });
+  // 5. Safely clean up engineer documents (ONLY update if doc exists)
+  for (const engKey of candidateEngIds) {
+    const seRef = doc(db, "siteEngineers", engKey);
+    const seSnap = await getDoc(seRef).catch(() => null);
+    if (seSnap && seSnap.exists()) {
+      batch.update(seRef, {
+        assignedSites: arrayRemove(siteId),
+        updatedAt: serverTimestamp()
+      });
+      batchOpsCount++;
+    }
 
-  await batch.commit();
+    const userRef = doc(db, "users", engKey);
+    const userSnap = await getDoc(userRef).catch(() => null);
+    if (userSnap && userSnap.exists()) {
+      batch.update(userRef, {
+        assignedSites: arrayRemove(siteId),
+        updatedAt: serverTimestamp()
+      });
+      batchOpsCount++;
+    }
+  }
+
+  // 6. Safely clean up site document
+  if (siteId) {
+    const siteDocRef = doc(db, "sites", siteId);
+    const siteSnap = await getDoc(siteDocRef).catch(() => null);
+    if (siteSnap && siteSnap.exists()) {
+      const siteData = siteSnap.data();
+      const currentAssigned = Array.isArray(siteData.assignedEngineers) ? siteData.assignedEngineers : [];
+      const updatedEngineers = currentAssigned.filter(id => !candidateEngIds.has(id));
+      batch.update(siteDocRef, {
+        assignedEngineers: updatedEngineers,
+        updatedAt: serverTimestamp()
+      });
+      batchOpsCount++;
+    }
+  }
+
+  if (batchOpsCount > 0) {
+    await batch.commit();
+  }
 }
 
 // Reconcile and synchronize legacy document array fields with canonical siteAssignments

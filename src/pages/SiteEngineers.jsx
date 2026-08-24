@@ -256,6 +256,7 @@ export default function SiteEngineers() {
   // Form Submission (Add or Edit)
   const handleFormSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
 
     try {

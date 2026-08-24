@@ -242,8 +242,11 @@ export default function AdminMaterials() {
     );
   };
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleAddTeam = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     const teamNameClean = newTeamName.trim();
     if (!teamNameClean) {
       showToast("Please enter a Material Team name.", "error");

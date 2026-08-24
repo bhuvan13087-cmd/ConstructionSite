@@ -153,9 +153,13 @@ export default function AdminPayments() {
     setCurrentPage(1);
   }, [searchQuery, categoryFilter, fromDate, toDate, sortBy, selectedSiteId]);
 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
   const handleAddExpense = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!newExpense.amount || !newExpense.description.trim()) return;
+    setIsSubmitting(true);
     try {
       await saveGeneralExpense({
         siteId: selectedSiteId,
@@ -173,28 +177,37 @@ export default function AdminPayments() {
       await loadData();
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleApproveExpense = async (expenseId) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await approveGeneralExpense(expenseId);
       showToast("General expense requisition approved!", "success");
       await loadData();
     } catch (err) {
       showToast(`Failed: ${err.message}`, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handlePayoutSubmit = async (e) => {
     e.preventDefault();
+    if (isSubmitting) return;
     if (!payoutAmount || Number(payoutAmount) <= 0) return;
     
+    setIsSubmitting(true);
     try {
       const amt = Number(payoutAmount);
       if (payoutType === "material") {
         if (!selectedMaterialId) {
           showToast("Please select a pending material invoice", "error");
+          setIsSubmitting(false);
           return;
         }
         await logMaterialPayment(selectedMaterialId, {
@@ -215,6 +228,7 @@ export default function AdminPayments() {
       } else {
         if (!selectedGeneralExpenseId) {
           showToast("Please select an approved site expense invoice", "error");
+          setIsSubmitting(false);
           return;
         }
         await logGeneralExpensePayment(selectedGeneralExpenseId, {
@@ -225,13 +239,16 @@ export default function AdminPayments() {
         });
       }
 
-      showToast("Payment transaction logged successfully!", "success");
+      showToast("Payment disbursement recorded successfully!", "success");
+      setShowPayoutModal(false);
       setPayoutAmount("");
       setPayoutRef("");
       setPayoutNotes("");
       await loadData();
     } catch (err) {
       showToast(`Payment failed: ${err.message}`, "error");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
