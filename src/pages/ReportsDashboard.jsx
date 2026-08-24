@@ -13,7 +13,8 @@ import {
   subscribeAllEngineerAttendance,
   subscribeAllEngineerLeaves,
   subscribePayrollStatuses,
-  subscribeGeneralExpenses
+  subscribeGeneralExpenses,
+  subscribeCanonicalEngineers
 } from "../services/firebaseService";
 import {
   calculatePlannedProgress,
@@ -423,20 +424,9 @@ export default function ReportsDashboard() {
       checkLoadingComplete();
     });
 
-    // 3. Site Engineers
-    const unsubEngineers = onSnapshot(collection(db, "users"), (snapshot) => {
-      const list = [];
-      snapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        if (data.role === "site_engineer") {
-          list.push({ id: docSnap.id, ...data });
-        }
-      });
-      setEngineers(list);
-      engineersLoaded = true;
-      checkLoadingComplete();
-    }, (err) => {
-      console.error("Engineers load error:", err);
+    // 3. Canonical Site Engineers (merges siteEngineers, users, siteAssignments)
+    const unsubEngineers = subscribeCanonicalEngineers((list) => {
+      setEngineers(list || []);
       engineersLoaded = true;
       checkLoadingComplete();
     });

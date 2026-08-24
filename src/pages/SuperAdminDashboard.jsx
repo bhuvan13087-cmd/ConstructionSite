@@ -25,7 +25,9 @@ import {
   resolveApprovalRequest,
   getAllDocuments,
   deduplicateDailyAttendance,
-  subscribeAllLabourAttendance
+  subscribeAllLabourAttendance,
+  subscribeCanonicalEngineers,
+  resolveEngineerIdentity
 } from "../services/firebaseService";
 import {
   calculatePlannedProgress,
@@ -236,32 +238,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       setLoading(false);
     });
 
-    // 2. Engineers Listener
-    let unsubFallbackEngineers = null;
-    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
-      if (snapshot.empty) {
-        if (unsubFallbackEngineers) unsubFallbackEngineers();
-        const q = query(collection(db, "users"), where("role", "==", "site_engineer"));
-        unsubFallbackEngineers = onSnapshot(q, (snap) => {
-          const list = [];
-          snap.forEach(d => {
-            list.push({ id: d.id, uid: d.id, fullName: d.data().name || d.data().fullName || "", email: d.data().email || "", ...d.data() });
-          });
-          setEngineers(list);
-        });
-        return;
-      }
-      if (unsubFallbackEngineers) {
-        unsubFallbackEngineers();
-        unsubFallbackEngineers = null;
-      }
-      const list = [];
-      snapshot.forEach(docSnap => {
-        list.push({ id: docSnap.id, uid: docSnap.id, fullName: docSnap.data().name || docSnap.data().fullName || "", email: docSnap.data().email || "", ...docSnap.data() });
-      });
-      setEngineers(list);
-    }, (err) => {
-      console.error("Engineers listener error:", err);
+    // 2. Canonical Engineers Unified Listener (merges siteEngineers, users, siteAssignments)
+    const unsubEngineers = subscribeCanonicalEngineers((list) => {
+      setEngineers(list || []);
     });
 
     // 3. Admins Listener
@@ -394,7 +373,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     return () => {
       unsubSites();
       unsubEngineers();
-      if (unsubFallbackEngineers) unsubFallbackEngineers();
       unsubAdmins();
       if (unsubFallbackAdmins) unsubFallbackAdmins();
       unsubMaterials();
@@ -425,12 +403,20 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     return calculateOverallFinancials(sites, materials, flatLaborHistory, allDprs, labourMaster.categories, generalExpenses, labourPayments);
   }, [sites, materials, flatLaborHistory, allDprs, labourMaster, generalExpenses, labourPayments]);
 
-  // Engineers Map
+  // Engineers Map (Multi-key index)
   const engineersMap = useMemo(() => {
     const map = {};
     engineers.forEach(e => {
-      map[e.id] = e.fullName || e.name || "Site Engineer";
-      if (e.uid) map[e.uid] = e.fullName || e.name || "Site Engineer";
+      const name = e.fullName || e.name || e.displayName || "Site Engineer";
+      if (e.id) map[e.id] = name;
+      if (e.uid) map[e.uid] = name;
+      if (e.docId) map[e.docId] = name;
+      if (e.customId) map[e.customId] = name;
+      if (e.engineerId) map[e.engineerId] = name;
+      if (e.email) {
+        map[e.email.toLowerCase()] = name;
+        map[e.email] = name;
+      }
     });
     return map;
   }, [engineers]);

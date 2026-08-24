@@ -3,7 +3,8 @@ import Layout from "../components/layout/Layout";
 import { 
   resolveApprovalRequest,
   syncApprovalsFromLegacy,
-  getSites
+  getSites,
+  subscribeCanonicalEngineers
 } from "../services/firebaseService";
 import { 
   onSnapshot,
@@ -128,57 +129,11 @@ export default function ApprovalsDashboard() {
       }
     };
 
-    let unsubLegacyEngineers = null;
-    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
-      if (snapshot.empty) {
-        if (unsubLegacyEngineers) unsubLegacyEngineers();
-        const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
-        unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
-          const list = [];
-          legacySnap.forEach(docSnap => {
-            const data = docSnap.data();
-            list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-          });
-          setEngineers(list);
-          engineersLoaded = true;
-          checkLoadingComplete();
-        }, (err) => {
-          console.error("Legacy engineers listener error:", err);
-          engineersLoaded = true;
-          checkLoadingComplete();
-        });
-      } else {
-        if (unsubLegacyEngineers) {
-          unsubLegacyEngineers();
-          unsubLegacyEngineers = null;
-        }
-        const list = [];
-        snapshot.forEach(docSnap => {
-          const data = docSnap.data();
-          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-        });
-        setEngineers(list);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      }
-    }, (err) => {
-      console.warn("siteEngineers listener error, falling back to legacy users:", err);
-      if (unsubLegacyEngineers) unsubLegacyEngineers();
-      const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
-      unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
-        const list = [];
-        legacySnap.forEach(docSnap => {
-          const data = docSnap.data();
-          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-        });
-        setEngineers(list);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      }, (e) => {
-        console.error("Fallback engineers listener error:", e);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      });
+    // Canonical Engineers Unified Listener (merges siteEngineers, users, siteAssignments)
+    const unsubEngineers = subscribeCanonicalEngineers((list) => {
+      setEngineers(list || []);
+      engineersLoaded = true;
+      checkLoadingComplete();
     });
 
     const unsubApprovals = onSnapshot(collection(db, "approvals"), (snapshot) => {
@@ -202,7 +157,6 @@ export default function ApprovalsDashboard() {
 
     return () => {
       unsubEngineers();
-      if (unsubLegacyEngineers) unsubLegacyEngineers();
       unsubApprovals();
     };
   }, [userProfile]);

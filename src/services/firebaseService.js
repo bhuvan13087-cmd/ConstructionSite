@@ -423,9 +423,165 @@ export async function buildCanonicalEngineersLookup() {
 }
 
 /**
+ * Real-time unified subscription for canonical site engineers
+ * Merges siteEngineers, users (with engineer roles/assignedSites), and siteAssignments
+ * into a deduplicated single source of truth lookup map and list.
+ */
+export function subscribeCanonicalEngineers(callback) {
+  if (typeof callback !== "function") return () => {};
+
+  const db = getDb();
+  let seDocs = [];
+  let userDocs = [];
+  let asgDocs = [];
+
+  const recompute = () => {
+    // Build active assignments map (engineerId -> Set of active siteIds)
+    const activeAssignmentsMap = {};
+    asgDocs.forEach(docSnap => {
+      const data = docSnap.data ? docSnap.data() : docSnap;
+      if (data.status === "active" && data.engineerId && data.siteId) {
+        if (!activeAssignmentsMap[data.engineerId]) {
+          activeAssignmentsMap[data.engineerId] = new Set();
+        }
+        activeAssignmentsMap[data.engineerId].add(data.siteId);
+      }
+    });
+
+    const profilesMap = new Map();
+
+    const processDoc = (docSnap, source) => {
+      const data = docSnap.data ? docSnap.data() : docSnap;
+      const docId = docSnap.id || data.id || data.uid;
+      const uid = data.uid || data.userId || data.id || docId;
+      const email = (data.email || data.userEmail || "").trim().toLowerCase();
+      const primaryKey = uid || docId;
+
+      const existing = profilesMap.get(primaryKey) || (email ? Array.from(profilesMap.values()).find(p => p.email && p.email.toLowerCase() === email) : null);
+
+      const nameCandidates = [
+        data.fullName,
+        data.name,
+        data.displayName,
+        data.userName,
+        existing?.fullName,
+        existing?.name
+      ].filter(n => typeof n === "string" && n.trim().length > 0);
+
+      const cleanFullName = nameCandidates[0] || "";
+
+      const phone = data.phone || data.phoneNumber || existing?.phoneNumber || existing?.phone || "";
+      const status = data.status || existing?.status || "active";
+      const customId = data.customId || data.engineerId || data.empId || existing?.customId || existing?.engineerId || "";
+      const role = data.role || existing?.role || "site_engineer";
+      const holidayAllowance = Number(data.holidayAllowance) || Number(existing?.holidayAllowance) || 24;
+
+      const mergedSites = new Set([
+        ...(Array.isArray(data.assignedSites) ? data.assignedSites : []),
+        ...(Array.isArray(existing?.assignedSites) ? existing.assignedSites : [])
+      ]);
+
+      const activeCanonicalSites = [
+        ...(activeAssignmentsMap[docId] ? Array.from(activeAssignmentsMap[docId]) : []),
+        ...(activeAssignmentsMap[uid] ? Array.from(activeAssignmentsMap[uid]) : []),
+        ...(activeAssignmentsMap[customId] ? Array.from(activeAssignmentsMap[customId]) : [])
+      ];
+      activeCanonicalSites.forEach(s => mergedSites.add(s));
+
+      const profile = {
+        id: docId,
+        uid: uid || docId,
+        docId: docId,
+        fullName: cleanFullName,
+        name: cleanFullName,
+        email: data.email || existing?.email || "",
+        phone: phone,
+        phoneNumber: phone,
+        customId: customId,
+        engineerId: customId || uid || docId,
+        role: role,
+        status: status,
+        holidayAllowance: holidayAllowance,
+        assignedSites: Array.from(mergedSites),
+        sourceCollection: source,
+        ...data,
+        fullName: cleanFullName,
+        name: cleanFullName,
+        assignedSites: Array.from(mergedSites)
+      };
+
+      profilesMap.set(primaryKey, profile);
+      if (docId !== primaryKey) {
+        profilesMap.set(docId, profile);
+      }
+    };
+
+    // 1. Process siteEngineers
+    seDocs.forEach(d => processDoc(d, "siteEngineers"));
+
+    // 2. Process users collection (filter for engineers)
+    userDocs.forEach(docSnap => {
+      const data = docSnap.data ? docSnap.data() : docSnap;
+      const role = (data.role || "").toLowerCase();
+      const isEngineer = role === "site_engineer" || role === "engineer" || role.includes("engineer") || data.isEngineer === true || profilesMap.has(docSnap.id) || (data.email && Array.from(profilesMap.values()).some(p => p.email.toLowerCase() === data.email.toLowerCase()));
+      if (isEngineer) {
+        processDoc(docSnap, "users");
+      }
+    });
+
+    const engineersList = Array.from(new Set(profilesMap.values())).sort((a, b) => 
+      (a.fullName || a.name || "").localeCompare(b.fullName || b.name || "")
+    );
+
+    // Fast multi-key lookup map
+    const lookupMap = {};
+    engineersList.forEach(eng => {
+      if (eng.id) lookupMap[eng.id] = eng;
+      if (eng.uid) lookupMap[eng.uid] = eng;
+      if (eng.docId) lookupMap[eng.docId] = eng;
+      if (eng.customId) lookupMap[eng.customId] = eng;
+      if (eng.engineerId) lookupMap[eng.engineerId] = eng;
+      if (eng.email) {
+        lookupMap[eng.email.toLowerCase()] = eng;
+        lookupMap[eng.email] = eng;
+      }
+    });
+
+    callback(engineersList, lookupMap);
+  };
+
+  const unsubSE = onSnapshot(collection(db, "siteEngineers"), (snap) => {
+    seDocs = snap.docs || [];
+    recompute();
+  }, (err) => {
+    console.warn("siteEngineers snapshot listener warning:", err);
+  });
+
+  const unsubUsers = onSnapshot(collection(db, "users"), (snap) => {
+    userDocs = snap.docs || [];
+    recompute();
+  }, (err) => {
+    console.warn("users snapshot listener warning:", err);
+  });
+
+  const unsubAsg = onSnapshot(collection(db, "siteAssignments"), (snap) => {
+    asgDocs = snap.docs || [];
+    recompute();
+  }, (err) => {
+    console.warn("siteAssignments snapshot listener warning:", err);
+  });
+
+  return () => {
+    unsubSE();
+    unsubUsers();
+    unsubAsg();
+  };
+}
+
+/**
  * Resolve any engineer reference (UID, document ID, customId, email) to a clean canonical profile
  */
-export function resolveEngineerIdentity(ref, lookupMap = {}) {
+export function resolveEngineerIdentity(ref, lookupMap = {}, historicalRecords = []) {
   if (!ref) {
     return {
       isResolved: false,
@@ -471,8 +627,23 @@ export function resolveEngineerIdentity(ref, lookupMap = {}) {
     };
   }
 
-  // Fallback for unresolvable references
-  console.warn("Unresolved engineer assignment reference:", cleanRef);
+  // Check historical records (attendance, reports, materials, etc.)
+  if (Array.isArray(historicalRecords) && historicalRecords.length > 0) {
+    const recMatch = historicalRecords.find(r => 
+      r && (r.engineerId === cleanRef || r.userId === cleanRef || r.id === cleanRef || r.uid === cleanRef) && (r.engineerName || r.submittedByName || r.recordedByName)
+    );
+    if (recMatch) {
+      const histName = recMatch.engineerName || recMatch.submittedByName || recMatch.recordedByName;
+      return {
+        isResolved: true,
+        engineerName: histName,
+        engineerEmail: recMatch.engineerEmail || "",
+        engineerDisplayId: cleanRef,
+        rawRef: cleanRef
+      };
+    }
+  }
+
   return {
     isResolved: false,
     engineerName: "Engineer Profile Unavailable",

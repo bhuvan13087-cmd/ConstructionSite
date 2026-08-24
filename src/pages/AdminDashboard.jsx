@@ -49,7 +49,9 @@ import {
   deduplicateDailyAttendance, 
   isEngineerAttendanceRecord, 
   subscribeAllLabourAttendance, 
-  subscribeGeneralExpenses 
+  subscribeGeneralExpenses,
+  subscribeCanonicalEngineers,
+  resolveEngineerIdentity
 } from "../services/firebaseService";
 import { formatINR } from "../services/businessLogic";
 
@@ -123,6 +125,7 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
+  const [engineersLookup, setEngineersLookup] = useState({});
   const [rawAttendance, setRawAttendance] = useState([]);
   const [rawLabourAttendance, setRawLabourAttendance] = useState([]);
   const [rawLegacyLabour, setRawLegacyLabour] = useState([]);
@@ -210,58 +213,12 @@ export default function AdminDashboard() {
       checkLoadingComplete();
     });
 
-    // 2. Engineers Listener (Shared canonical dataset across all authorized Admins)
-    let unsubLegacyEngineers = null;
-    const unsubEngineers = onSnapshot(collection(db, "siteEngineers"), (snapshot) => {
-      if (snapshot.empty) {
-        if (unsubLegacyEngineers) unsubLegacyEngineers();
-        const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
-        unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
-          const list = [];
-          legacySnap.forEach(docSnap => {
-            const data = docSnap.data();
-            list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-          });
-          setEngineers(list);
-          engineersLoaded = true;
-          checkLoadingComplete();
-        }, (err) => {
-          console.error("Legacy engineers listener error:", err);
-          engineersLoaded = true;
-          checkLoadingComplete();
-        });
-      } else {
-        if (unsubLegacyEngineers) {
-          unsubLegacyEngineers();
-          unsubLegacyEngineers = null;
-        }
-        const list = [];
-        snapshot.forEach(docSnap => {
-          const data = docSnap.data();
-          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-        });
-        setEngineers(list);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      }
-    }, (err) => {
-      console.warn("siteEngineers listener error, falling back to legacy users:", err);
-      if (unsubLegacyEngineers) unsubLegacyEngineers();
-      const qLegacy = query(collection(db, "users"), where("role", "==", "site_engineer"));
-      unsubLegacyEngineers = onSnapshot(qLegacy, (legacySnap) => {
-        const list = [];
-        legacySnap.forEach(docSnap => {
-          const data = docSnap.data();
-          list.push({ id: docSnap.id, uid: docSnap.id, fullName: data.name || data.fullName || "", ...data });
-        });
-        setEngineers(list);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      }, (e) => {
-        console.error("Fallback engineers listener error:", e);
-        engineersLoaded = true;
-        checkLoadingComplete();
-      });
+    // 2. Canonical Engineers Unified Listener (merges siteEngineers, users, siteAssignments)
+    const unsubEngineers = subscribeCanonicalEngineers((list, map) => {
+      setEngineers(list || []);
+      setEngineersLookup(map || {});
+      engineersLoaded = true;
+      checkLoadingComplete();
     });
 
     // 3. Single Data Source: Attendance Real-Time Listener
@@ -389,7 +346,6 @@ export default function AdminDashboard() {
     return () => {
       unsubSites();
       unsubEngineers();
-      if (unsubLegacyEngineers) unsubLegacyEngineers();
       unsubAttendance();
       unsubMaterials();
       unsubLabourAtt();
@@ -1155,19 +1111,76 @@ export default function AdminDashboard() {
                   sites.map(site => {
                     const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
                     
-                    // 1. Resolve Assigned Engineers (multi-key resolution)
-                    const assignedEngList = (site.assignedEngineers || []).map(uid => {
-                      const e = engineers.find(eng => 
-                        eng.id === uid || 
-                        eng.uid === uid || 
-                        eng.customId === uid || 
-                        eng.engineerId === uid ||
-                        (eng.email && eng.email.toLowerCase() === String(uid).toLowerCase())
+                    // 1. Resolve Assigned Engineers (multi-key lookup + historical operational records fallback)
+                    const siteAssignedUids = new Set(site.assignedEngineers || []);
+
+                    // Include engineers who have this site in their assignedSites profile
+                    engineers.forEach(eng => {
+                      if (Array.isArray(eng.assignedSites) && eng.assignedSites.includes(site.id)) {
+                        siteAssignedUids.add(eng.id || eng.uid);
+                      }
+                    });
+
+                    // Include engineers who marked attendance on this site
+                    todayAttendanceList.filter(a => a.resolvedSiteId === site.id).forEach(a => {
+                      if (a.resolvedEngineerId) siteAssignedUids.add(a.resolvedEngineerId);
+                    });
+
+                    const assignedEngList = Array.from(siteAssignedUids).map(uid => {
+                      const cleanId = String(uid).trim();
+                      const e = engineersLookup[cleanId] || engineersLookup[cleanId.toLowerCase()] || engineers.find(eng => 
+                        eng.id === cleanId || 
+                        eng.uid === cleanId || 
+                        eng.docId === cleanId ||
+                        eng.customId === cleanId || 
+                        eng.engineerId === cleanId ||
+                        (eng.email && eng.email.toLowerCase() === cleanId.toLowerCase())
                       );
+
+                      let resolvedName = e ? (e.fullName || e.name || e.displayName) : "";
+
+                      // If still not resolved, check historical operational records for this site/engineer
+                      if (!resolvedName || resolvedName === "Site Engineer") {
+                        const attMatch = (rawAttendance || []).find(a => 
+                          (a.siteId === site.id || a.resolvedSiteId === site.id) &&
+                          (a.engineerId === cleanId || a.userId === cleanId || a.id === cleanId) &&
+                          a.engineerName && a.engineerName !== "Site Engineer"
+                        );
+                        if (attMatch) resolvedName = attMatch.engineerName;
+                      }
+                      if (!resolvedName || resolvedName === "Site Engineer") {
+                        const repMatch = (rawReports || []).find(r => 
+                          r.siteId === site.id && 
+                          (r.engineerId === cleanId || r.userId === cleanId) && 
+                          (r.engineerName || r.submittedByName)
+                        );
+                        if (repMatch) resolvedName = repMatch.engineerName || repMatch.submittedByName;
+                      }
+                      if (!resolvedName || resolvedName === "Site Engineer") {
+                        const matMatch = (rawMaterials || []).find(m => 
+                          m.siteId === site.id && 
+                          (m.engineerId === cleanId || m.userId === cleanId) && 
+                          (m.engineerName || m.recordedByName)
+                        );
+                        if (matMatch) resolvedName = matMatch.engineerName || matMatch.recordedByName;
+                      }
+                      if (!resolvedName || resolvedName === "Site Engineer") {
+                        const labMatch = (rawLabourAttendance || []).find(l => 
+                          l.siteId === site.id && 
+                          (l.engineerId === cleanId || l.userId === cleanId || l.submittedBy === cleanId) && 
+                          (l.engineerName || l.createdByName)
+                        );
+                        if (labMatch) resolvedName = labMatch.engineerName || labMatch.createdByName;
+                      }
+
+                      if (!resolvedName) {
+                        resolvedName = e?.email ? e.email.split('@')[0] : "Site Engineer";
+                      }
+
                       return {
-                        id: uid,
-                        uid: e?.uid || uid,
-                        name: e ? (e.fullName || e.name || "Site Engineer") : "Site Engineer"
+                        id: cleanId,
+                        uid: e?.uid || cleanId,
+                        name: resolvedName
                       };
                     });
 
