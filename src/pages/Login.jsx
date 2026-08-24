@@ -292,7 +292,34 @@ export default function Login() {
     try {
       await signIn(email.trim(), password);
     } catch (err) {
-      // If sign-in fails, check if we need to auto-create the default admin account
+      // If sign-in fails, check if we need to auto-create the default superadmin or admin account
+      if (email.trim() === "superadmin@visvas.com" && password === "123456") {
+        try {
+          const userCredential = await signUp(email.trim(), password);
+          const user = userCredential.user;
+
+          // Write super_admin profile document
+          await createUserProfile(user.uid, {
+            fullName: "Super Admin",
+            username: "superadmin",
+            role: "super_admin",
+            status: "active",
+            email: email.trim(),
+            isFirstLogin: false
+          });
+          return;
+        } catch (createErr) {
+          console.error("Super Admin auto-provisioning failed:", createErr);
+          if (createErr.code === "auth/email-already-in-use") {
+            setError("Incorrect password");
+          } else {
+            setError(createErr.message);
+          }
+          setLoading(false);
+          return;
+        }
+      }
+
       if (email.trim() === "admin@gmail.com" && password === "123456") {
         try {
           const userCredential = await signUp(email.trim(), password);

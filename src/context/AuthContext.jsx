@@ -28,7 +28,21 @@ export function AuthProvider({ children }) {
         setLoading(true);
         unsubProfile = subscribeToUserProfile(firebaseUser.uid, async (profile) => {
           try {
-            if (!profile && firebaseUser.email === "admin@gmail.com") {
+            if (!profile && firebaseUser.email === "superadmin@visvas.com") {
+              // Auto-provision super_admin user profile in Firestore if it doesn't exist
+              const superAdminProfile = {
+                fullName: "Super Admin",
+                username: "superadmin",
+                role: "super_admin",
+                status: "active",
+                email: firebaseUser.email,
+                isFirstLogin: false
+              };
+              await createUserProfile(firebaseUser.uid, superAdminProfile);
+              return;
+            }
+
+            if (!profile && (firebaseUser.email === "admin@gmail.com" || firebaseUser.email === "admin@visvas.com")) {
               // Auto-provision admin user profile in Firestore if it doesn't exist
               const adminProfile = {
                 fullName: "Admin",
