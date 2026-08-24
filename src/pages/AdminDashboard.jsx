@@ -131,6 +131,7 @@ export default function AdminDashboard() {
   const [systemActivities, setSystemActivities] = useState([]);
   const [approvals, setApprovals] = useState([]);
   const [documents, setDocuments] = useState([]);
+  const [rawReports, setRawReports] = useState([]);
   const [rawExpenses, setRawExpenses] = useState([]);
   
   // Attendance Activity Filter States
@@ -369,7 +370,18 @@ export default function AdminDashboard() {
       console.error("Documents listener error:", err);
     });
 
-    // 9. General Expenses Listener (Single Canonical Subscription with Fallback Merging)
+    // 9. Reports (DPRs) Listener
+    const unsubReports = onSnapshot(collection(db, "reports"), (snapshot) => {
+      const list = [];
+      snapshot.forEach(docSnap => {
+        list.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      setRawReports(list);
+    }, (err) => {
+      console.warn("Reports listener notice:", err);
+    });
+
+    // 10. General Expenses Listener (Single Canonical Subscription with Fallback Merging)
     const unsubExpenses = subscribeGeneralExpenses((expensesList) => {
       setRawExpenses(expensesList || []);
     });
@@ -386,6 +398,7 @@ export default function AdminDashboard() {
       unsubSys();
       unsubApprovals();
       unsubDocuments();
+      unsubReports();
       unsubExpenses();
     };
   }, [user]);
@@ -679,7 +692,18 @@ export default function AdminDashboard() {
     return todayGeneralExpenseRecords.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
   }, [todayGeneralExpenseRecords]);
 
-  // 4. Consolidated Today's Total Expense (Metric Card 5)
+  // 4. Today's Canonical Reports / DPRs
+  const todayReportsRecords = useMemo(() => {
+    const siteIds = new Set(sites.map(s => s.id));
+    return (rawReports || []).filter(r => {
+      if (!r) return false;
+      if (siteIds.size > 0 && r.siteId && !siteIds.has(r.siteId)) return false;
+      const dateField = r.date || r.reportDate || r.createdAt;
+      return isTodayRecord(dateField, r.createdAt, todayDateKeys);
+    });
+  }, [rawReports, sites, todayDateKeys]);
+
+  // 5. Consolidated Today's Total Expense (Metric Card 5)
   const todayExpensesSum = useMemo(() => {
     return todayGeneralExpenseSum + todayMaterialExpenseSum + todayLabourExpenseSum;
   }, [todayGeneralExpenseSum, todayMaterialExpenseSum, todayLabourExpenseSum]);
@@ -1095,29 +1119,31 @@ export default function AdminDashboard() {
           <div className="admin-table-scroll">
             <table className="admin-table">
               <colgroup>
-                <col style={{ width: "24%" }} />
-                <col style={{ width: "20%" }} />
-                <col style={{ width: "18%" }} />
-                <col style={{ width: "12%" }} />
-                <col style={{ width: "12%" }} />
-                <col style={{ width: "12%" }} />
-                <col style={{ width: "60px" }} />
+                <col className="col-matrix-site" />
+                <col className="col-matrix-engineers" />
+                <col className="col-matrix-activity" />
+                <col className="col-matrix-progress" />
+                <col className="col-matrix-labour" />
+                <col className="col-matrix-expense" />
+                <col className="col-matrix-status" />
+                <col className="col-matrix-action" />
               </colgroup>
               <thead>
                 <tr>
-                  <th>Site Name</th>
-                  <th>Assigned Engineers</th>
+                  <th>Site</th>
+                  <th>Site Engineers</th>
+                  <th>Today's Activity</th>
                   <th>Live Progress</th>
-                  <th>Active On-Site</th>
+                  <th>Today's Labour</th>
                   <th>Today's Expense</th>
                   <th style={{ textAlign: "center" }}>Status</th>
-                  <th style={{ textAlign: "right" }}>Action</th>
+                  <th style={{ textAlign: "right" }}>View</th>
                 </tr>
               </thead>
               <tbody>
                 {sites.length === 0 ? (
                   <tr>
-                    <td colSpan="7">
+                    <td colSpan="8">
                       <div className="erp-empty-state">
                         <div className="erp-empty-icon"><Building2 size={22} /></div>
                         <span style={{ fontSize: "13px", fontWeight: "600" }}>No active construction sites registered.</span>
@@ -1129,8 +1155,8 @@ export default function AdminDashboard() {
                   sites.map(site => {
                     const progVal = Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0));
                     
-                    // Engineer name lookup (multi-key resolution)
-                    const assignedEngNames = (site.assignedEngineers || []).map(uid => {
+                    // 1. Resolve Assigned Engineers (multi-key resolution)
+                    const assignedEngList = (site.assignedEngineers || []).map(uid => {
                       const e = engineers.find(eng => 
                         eng.id === uid || 
                         eng.uid === uid || 
@@ -1138,71 +1164,206 @@ export default function AdminDashboard() {
                         eng.engineerId === uid ||
                         (eng.email && eng.email.toLowerCase() === String(uid).toLowerCase())
                       );
-                      return e ? (e.fullName || e.name || "Site Engineer") : "Site Engineer";
+                      return {
+                        id: uid,
+                        uid: e?.uid || uid,
+                        name: e ? (e.fullName || e.name || "Site Engineer") : "Site Engineer"
+                      };
                     });
 
-                    // Calculate site's today expense across all canonical sources (General + Material + Labour)
-                    const siteGen = todayGeneralExpenseRecords.filter(e => e.siteId === site.id).reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
-                    const siteMat = todayMaterialRecords.filter(m => m.siteId === site.id).reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
-                    const siteLab = todayLabourRecords.filter(l => l.siteId === site.id).reduce((sum, l) => sum + (Number(l.calculatedAmount) || 0), 0);
-                    const siteExpenseToday = siteGen + siteMat + siteLab;
+                    // 2. Identify Engineers present on this site today
+                    const siteTodayEngineers = todayAttendanceList.filter(a => a.resolvedSiteId === site.id);
+                    const siteTodayEngSet = new Set(siteTodayEngineers.map(a => a.resolvedEngineerId || a.engineerName));
 
-                    // Count engineers and labour at this site today
-                    const siteEngCount = todayAttendanceList.filter(a => a.resolvedSiteId === site.id).length;
-                    const siteLabourCount = todayLabourRecords.filter(l => l.siteId === site.id).reduce((sum, l) => sum + (Number(l.workerCount) || 0), 0);
+                    // 3. Today's Labour records & worker count for this site
+                    const siteLabourRecs = todayLabourRecords.filter(l => l.siteId === site.id);
+                    const siteLabourCount = siteLabourRecs.reduce((sum, l) => sum + (Number(l.workerCount) || 0), 0);
+
+                    // 4. Today's Materials recorded for this site
+                    const siteMaterialRecs = todayMaterialRecords.filter(m => m.siteId === site.id);
+
+                    // 5. Today's General Expenses recorded for this site
+                    const siteGenExpRecs = todayGeneralExpenseRecords.filter(e => e.siteId === site.id);
+
+                    // 6. Today's Reports / DPRs filed for this site
+                    const siteReportsRecs = todayReportsRecords.filter(r => r.siteId === site.id);
+
+                    // 7. Calculate site's total today expense (General + Material + Labour)
+                    const siteGenExpSum = siteGenExpRecs.reduce((sum, e) => sum + (Number(e.amount) || 0), 0);
+                    const siteMatExpSum = siteMaterialRecs.reduce((sum, m) => sum + (Number(m.amount) || 0), 0);
+                    const siteLabExpSum = siteLabourRecs.reduce((sum, l) => sum + (Number(l.calculatedAmount) || 0), 0);
+                    const siteExpenseToday = siteGenExpSum + siteMatExpSum + siteLabExpSum;
+
+                    // 8. Compose Today's Activity checklist items
+                    const activities = [];
+                    if (siteTodayEngineers.length > 0) {
+                      activities.push({
+                        id: "attendance",
+                        text: `Attendance marked — ${siteTodayEngineers.length} ${siteTodayEngineers.length === 1 ? "engineer" : "engineers"}`,
+                        color: "#16a34a"
+                      });
+                    }
+                    if (siteLabourCount > 0) {
+                      activities.push({
+                        id: "labour",
+                        text: `Labour added — ${siteLabourCount} ${siteLabourCount === 1 ? "worker" : "workers"}`,
+                        color: "#0284c7"
+                      });
+                    }
+                    if (siteMaterialRecs.length > 0) {
+                      activities.push({
+                        id: "material",
+                        text: `Material added`,
+                        color: "#7c3aed"
+                      });
+                    }
+                    if (siteExpenseToday > 0) {
+                      activities.push({
+                        id: "expense",
+                        text: `Expense recorded — ₹${siteExpenseToday.toLocaleString()}`,
+                        color: "#d97706"
+                      });
+                    }
+                    if (siteReportsRecs.length > 0) {
+                      activities.push({
+                        id: "report",
+                        text: `Progress / report uploaded`,
+                        color: "#059669"
+                      });
+                    }
+
+                    const locationText = site.location || site.siteLocationName || site.city || "";
 
                     return (
                       <tr key={site.id}>
+                        {/* 1. SITE */}
                         <td>
-                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{site.siteName}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {site.clientName || site.location || "Site Project"}
-                          </span>
-                        </td>
-                        <td>
-                          {assignedEngNames.length > 0 ? (
-                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: "4px" }}>
-                              {assignedEngNames.slice(0, 2).map((name, idx) => (
-                                <span key={idx} style={{ fontSize: "10.5px", fontWeight: "700", backgroundColor: "#f1f5f9", color: "var(--primary-800)", padding: "2px 6px", borderRadius: "4px", whiteSpace: "nowrap" }}>
-                                  {name}
-                                </span>
-                              ))}
-                              {assignedEngNames.length > 2 && (
-                                <span 
-                                  title={assignedEngNames.slice(2).join(", ")}
-                                  style={{ fontSize: "10px", fontWeight: "800", backgroundColor: "#e2e8f0", color: "#475569", padding: "2px 5px", borderRadius: "4px", cursor: "help", whiteSpace: "nowrap" }}
-                                >
-                                  +{assignedEngNames.length - 2} more
-                                </span>
-                              )}
-                            </div>
+                          <strong style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-950)", display: "block", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {site.siteName}
+                          </strong>
+                          {locationText ? (
+                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px", marginTop: "2px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              <MapPin size={10} style={{ flexShrink: 0, color: "#94a3b8" }} />
+                              {locationText}
+                            </span>
                           ) : (
-                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
+                            <span style={{ fontSize: "10.5px", color: "#94a3b8", display: "block", marginTop: "2px" }}>
+                              Construction Project
+                            </span>
                           )}
                         </td>
+
+                        {/* 2. SITE ENGINEERS */}
                         <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                            <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                              <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#f97316" : "#ea580c"), borderRadius: "100px" }} />
+                          {assignedEngList.length > 0 ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                              {assignedEngList.map((eng, idx) => {
+                                const isPresent = siteTodayEngSet.has(eng.id) || siteTodayEngSet.has(eng.uid) || siteTodayEngSet.has(eng.name);
+                                return (
+                                  <div key={idx} style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "11.5px" }}>
+                                    <span style={{ 
+                                      width: "6px", 
+                                      height: "6px", 
+                                      borderRadius: "50%", 
+                                      backgroundColor: isPresent ? "#16a34a" : "#cbd5e1",
+                                      flexShrink: 0 
+                                    }} />
+                                    <span style={{ 
+                                      fontWeight: isPresent ? "700" : "500", 
+                                      color: isPresent ? "var(--primary-950)" : "var(--primary-700)",
+                                      overflow: "hidden",
+                                      textOverflow: "ellipsis",
+                                      whiteSpace: "nowrap"
+                                    }}>
+                                      {eng.name}
+                                    </span>
+                                    {isPresent && (
+                                      <span style={{ 
+                                        fontSize: "9px", 
+                                        fontWeight: "800", 
+                                        color: "#15803d", 
+                                        backgroundColor: "#dcfce7", 
+                                        padding: "1px 4px", 
+                                        borderRadius: "3px",
+                                        lineHeight: "1.2",
+                                        flexShrink: 0
+                                      }}>
+                                        Present
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <span style={{ fontSize: "11px", fontWeight: "800", color: "var(--primary-950)", minWidth: "28px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                          ) : (
+                            <span style={{ fontSize: "11.5px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
+                          )}
+                        </td>
+
+                        {/* 3. TODAY'S ACTIVITY */}
+                        <td>
+                          {activities.length > 0 ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                              {activities.map((act, i) => (
+                                <div key={i} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px", color: act.color, fontWeight: "600" }}>
+                                  <CheckCircle2 size={12} color={act.color} style={{ flexShrink: 0 }} />
+                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{act.text}</span>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: "11.5px", color: "#94a3b8", fontStyle: "italic" }}>No activity logged today</span>
+                          )}
+                        </td>
+
+                        {/* 4. LIVE PROGRESS */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%" }}>
+                            <div style={{ flex: 1, height: "7px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                              <div style={{ 
+                                width: `${progVal}%`, 
+                                height: "100%", 
+                                backgroundColor: progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#2563eb" : "#f97316"), 
+                                borderRadius: "100px",
+                                transition: "width 0.3s ease"
+                              }} />
+                            </div>
+                            <span style={{ fontSize: "11.5px", fontWeight: "800", color: "var(--primary-950)", minWidth: "30px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
                               {progVal}%
                             </span>
                           </div>
                         </td>
-                        <td style={{ fontSize: "12px", color: "var(--primary-800)", fontWeight: "600", fontVariantNumeric: "tabular-nums" }}>
-                          {siteEngCount > 0 && siteLabourCount > 0 
-                            ? `${siteEngCount} Eng • ${siteLabourCount} Labour`
-                            : (siteEngCount > 0 
-                                ? `${siteEngCount} Eng Present` 
-                                : (siteLabourCount > 0 ? `${siteLabourCount} Labour` : "--"))}
+
+                        {/* 5. TODAY'S LABOUR */}
+                        <td>
+                          <span style={{ 
+                            fontSize: "12px", 
+                            fontWeight: siteLabourCount > 0 ? "700" : "500", 
+                            color: siteLabourCount > 0 ? "var(--primary-950)" : "var(--primary-500)",
+                            fontVariantNumeric: "tabular-nums" 
+                          }}>
+                            {siteLabourCount > 0 ? `${siteLabourCount} Workers` : "0 Workers"}
+                          </span>
                         </td>
-                        <td style={{ fontSize: "12px", color: "var(--primary-950)", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
-                          {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
+
+                        {/* 6. TODAY'S EXPENSE */}
+                        <td>
+                          <span style={{ 
+                            fontSize: "12px", 
+                            fontWeight: siteExpenseToday > 0 ? "700" : "500", 
+                            color: siteExpenseToday > 0 ? "var(--primary-950)" : "var(--primary-500)",
+                            fontVariantNumeric: "tabular-nums" 
+                          }}>
+                            {siteExpenseToday > 0 ? `₹${siteExpenseToday.toLocaleString()}` : "₹0"}
+                          </span>
                         </td>
+
+                        {/* 7. STATUS */}
                         <td style={{ textAlign: "center" }}>
                           <Badge status={site.status || "active"} />
                         </td>
+
+                        {/* 8. VIEW */}
                         <td style={{ textAlign: "right" }}>
                           <Link to="/admin/sites" className="admin-action-btn">
                             View

@@ -36,7 +36,6 @@ import {
   deleteMaterial,
   deleteLabourDailyCounts,
   deleteDailyProgressReport,
-  deleteSitePhoto,
   updateSiteLocation,
   reverseGeocodeLatLng,
   getEngineerAttendanceHistory,
@@ -274,7 +273,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Memory Cache for unlocked Site + Engineer + Date combinations (Prevents re-locking within working session)
   const [unlockedGates, setUnlockedGates] = useState({});
 
-  // Production Attendance Verification Gate Check for Site + Date + Engineer
+  // Production Attendance Verification Gate Check for Site + Date + Engineer (Strict Engineer-Specific)
   const isAttendanceVerifiedForSiteAndDate = (siteId, dateStr) => {
     if (!currentEngineerId || !dateStr || !siteId) return false;
     const cleanSiteId = String(siteId).trim();
@@ -282,6 +281,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const cleanEngineerId = String(currentEngineerId).trim();
     if (!cleanSiteId || !cleanEngineerId || !cleanDateStr) return false;
     const gateKey = `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`;
+
+    const candidateEngIds = new Set([
+      cleanEngineerId,
+      userProfile?.uid,
+      userProfile?.id,
+      userProfile?.customId,
+      userProfile?.engineerId
+    ].filter(Boolean).map(String));
 
     // 1. Check in-memory unlocked cache for this exact Site + Engineer + Date
     if (unlockedGates[gateKey]) {
@@ -293,7 +300,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       const todayDate = String(todayAttendance.date || todayAttendance.attendanceDate || "").trim();
       const todaySite = String(todayAttendance.siteId || "").trim();
       const todayEng = String(todayAttendance.engineerId || todayAttendance.userId || "").trim();
-      if (todayDate === cleanDateStr && todaySite === cleanSiteId && (!todayEng || todayEng === cleanEngineerId)) {
+      if (todayDate === cleanDateStr && todaySite === cleanSiteId && todayEng && candidateEngIds.has(todayEng)) {
         if (todayAttendance.type !== "labour_attendance_lock" && !todayAttendance.id?.startsWith("labour_lock_")) {
           const isPresent = todayAttendance.status === "present" || todayAttendance.status === "checked_out" || todayAttendance.status === "verified";
           const isVerified = todayAttendance.verificationStatus === "verified" || todayAttendance.verificationStatus === "success" || isPresent || Boolean(todayAttendance.time && todayAttendance.time !== "--");
@@ -320,7 +327,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       
       const isSameSite = recSite === cleanSiteId;
       const isSameDate = recDate === cleanDateStr;
-      const isSameEng = !recUser || recUser === cleanEngineerId;
+      const isSameEng = recUser && candidateEngIds.has(recUser);
       const isPresent = r.status === "present" || r.status === "checked_out" || r.status === "verified";
       const isVerified = r.verificationStatus === "verified" || r.verificationStatus === "success" || isPresent || Boolean(r.time && r.time !== "--");
       const isNotRejected = r.status !== "absent" && r.status !== "rejected" && r.status !== "cancelled" && r.status !== "failed";
@@ -388,62 +395,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [leaveSubmitting, setLeaveSubmitting] = useState(false);
   const [showLeaveModal, setShowLeaveModal] = useState(false);
   
-  // Workforce submit and lock states
-  const [lockedDates, setLockedDates] = useState(new Set());
-  const [labourSubmitting, setLabourSubmitting] = useState(false);
-  const [isLabourLocked, setIsLabourLocked] = useState(false);
-  const [labourLockInfo, setLabourLockInfo] = useState(null);
-
-  const fetchLabourLockStatus = async (teamId = selectedLabourTeamId) => {
-    if (!activeSiteId || !labourDate || !teamId) {
-      setIsLabourLocked(false);
-      setLabourLockInfo(null);
-      return { submitted: false };
-    }
-    try {
-      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate, teamId);
-      const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
-      setIsLabourLocked(isSubmitted);
-      setLabourLockInfo(isSubmitted ? lockStatus : null);
-      return lockStatus;
-    } catch (err) {
-      console.error("Error checking labour submission status:", err);
-      setIsLabourLocked(false);
-      setLabourLockInfo(null);
-      return { submitted: false };
-    }
-  };
-
-  const loadLockedDates = async () => {
-    if (!activeSiteId) {
-      setLockedDates(new Set());
-      return;
-    }
-    try {
-      const records = await getLabourLocksForSite(activeSiteId);
-      const locked = new Set();
-      (records || []).forEach(r => {
-        if (r.status === "submitted" || r.locked || r.submitted) {
-          const d = r.date || r.attendanceDate;
-          if (d) {
-            if (r.teamId) {
-              locked.add(`${d}_${r.teamId}`);
-            } else {
-              locked.add(d);
-            }
-          }
-        }
-      });
-      setLockedDates(locked);
-    } catch (err) {
-      console.error("Failed to load locked dates:", err);
-    }
-  };
-
-  useEffect(() => {
-    loadLockedDates();
-  }, [activeSiteId]);
-
   const handleCloseLeaveModal = () => {
     setLeaveDate(new Date().toISOString().split("T")[0]);
     setLeaveReason("Personal Leave");
@@ -541,11 +492,79 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [pendingLabourCount, setPendingLabourCount] = useState(1);
   const [labourTeams, setLabourTeams] = useState([]);
   const [selectedLabourTeamId, setSelectedLabourTeamId] = useState("");
+  
+  // Workforce submit and lock states (Site-Level Lock)
+  const [lockedDates, setLockedDates] = useState(new Set());
+  const [labourSubmitting, setLabourSubmitting] = useState(false);
+  const [isLabourLocked, setIsLabourLocked] = useState(false);
+  const [labourLockInfo, setLabourLockInfo] = useState(null);
+  const isLabourSubmitted = isLabourLocked;
   const [attendanceRows, setAttendanceRows] = useState([]);
   const [labourHistoryRecords, setLabourHistoryRecords] = useState([]);
   const [activeWorkforceSubTab, setActiveWorkforceSubTab] = useState("new-entry"); // "new-entry" or "history"
   const [expandedDates, setExpandedDates] = useState([]);
-  const isLabourSubmitted = isLabourLocked;
+
+  const fetchLabourLockStatus = async (teamId = selectedLabourTeamId) => {
+    if (!activeSiteId || !labourDate) {
+      setIsLabourLocked(false);
+      setLabourLockInfo(null);
+      return { submitted: false };
+    }
+    try {
+      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate, teamId);
+      const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
+      if (isMountedRef.current) {
+        setIsLabourLocked(isSubmitted);
+        setLabourLockInfo(isSubmitted ? lockStatus : null);
+      }
+      return lockStatus;
+    } catch (err) {
+      console.error("Error checking labour submission status:", err);
+      if (isMountedRef.current) {
+        setIsLabourLocked(false);
+        setLabourLockInfo(null);
+      }
+      return { submitted: false };
+    }
+  };
+
+  const loadLockedDates = async () => {
+    if (!activeSiteId) {
+      setLockedDates(new Set());
+      return;
+    }
+    try {
+      const records = await getLabourLocksForSite(activeSiteId);
+      const locked = new Set();
+      (records || []).forEach(r => {
+        if (r.status === "submitted" || r.locked || r.submitted) {
+          const d = r.date || r.attendanceDate;
+          if (d) {
+            locked.add(d);
+            if (r.teamId) {
+              locked.add(`${d}_${r.teamId}`);
+            }
+          }
+        }
+      });
+      if (isMountedRef.current) {
+        setLockedDates(locked);
+      }
+    } catch (err) {
+      console.error("Failed to load locked dates:", err);
+    }
+  };
+
+  useEffect(() => {
+    loadLockedDates();
+  }, [activeSiteId]);
+
+  // Synchronize labour lock status whenever activeSite, date, or team changes
+  useEffect(() => {
+    if (activeSiteId && labourDate) {
+      fetchLabourLockStatus(selectedLabourTeamId);
+    }
+  }, [activeSiteId, labourDate, selectedLabourTeamId]);
   const [editingRecordId, setEditingRecordId] = useState(null);
   const [editingName, setEditingName] = useState("");
   const [editingValue, setEditingValue] = useState(1.0);
@@ -870,15 +889,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     // Subscribe to all company labour teams in real-time
     const unsubscribe = subscribeLabourTeams((teamsList) => {
       setLabourTeams(teamsList || []);
-      // Auto-select first team if none selected or if selected team no longer exists
-      if (teamsList && teamsList.length > 0) {
-        setSelectedLabourTeamId(prev => {
-          const exists = teamsList.some(t => t.id === prev);
-          return exists ? prev : teamsList[0].id;
-        });
-      } else {
-        setSelectedLabourTeamId("");
-      }
+      // Preserve user-selected team only if it still exists; do NOT auto-select by default
+      setSelectedLabourTeamId(prev => {
+        if (!prev) return "";
+        const exists = (teamsList || []).some(t => t.id === prev);
+        return exists ? prev : "";
+      });
     });
     
     return () => unsubscribe();
@@ -1824,34 +1840,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           await loadDashboardData();
         } catch (err) {
           console.error("Failed to delete progress report:", err);
-          showToast("Failed to delete: " + err.message, "error");
-        } finally {
-          closeConfirmModal();
-        }
-      }
-    });
-  };
-
-  // Delete Site Inspection Photo Handler
-  const handleDeleteSitePhoto = async (photoId) => {
-    const photo = sitePhotos.find(p => p.id === photoId);
-    if (!photo) return;
-    if (photo.engineerId !== currentEngineerId) {
-      showToast("Security error: You can only delete your own records.", "error");
-      return;
-    }
-    showConfirmModal({
-      title: "Delete Site Photo?",
-      message: "Are you sure you want to delete this site photo?",
-      confirmText: "Delete Photo",
-      variant: "danger",
-      onConfirm: async () => {
-        try {
-          await deleteSitePhoto(photoId);
-          showToast("Deleted successfully", "success");
-          await loadDashboardData();
-        } catch (err) {
-          console.error("Failed to delete photo:", err);
           showToast("Failed to delete: " + err.message, "error");
         } finally {
           closeConfirmModal();
@@ -8542,11 +8530,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                 {isLabourSubmitted && (
                   <div style={{
-                    backgroundColor: "#f0fdf4",
-                    color: "#166534",
-                    padding: "16px",
+                    backgroundColor: "#fef2f2",
+                    color: "#991b1b",
+                    padding: "16px 20px",
                     borderRadius: "16px",
-                    border: "1px solid #bbf7d0",
+                    border: "1px solid #fecaca",
                     fontSize: "14px",
                     fontWeight: "700",
                     textAlign: "center",
@@ -8554,12 +8542,14 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     flexDirection: "column",
                     gap: "6px"
                   }}>
-                    <div>🔒 Attendance for "{labourTeams.find(t => t.id === selectedLabourTeamId)?.name || labourTeams.find(t => t.id === selectedLabourTeamId)?.teamName || "Selected Team"}" is submitted and locked.</div>
-                    <div style={{ fontSize: "12px", color: "#15803d", fontWeight: "600" }}>
-                      To record attendance for another team on this date, select a different team from the dropdown above.
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#b91c1c" }}>
+                      🔒 Labour already submitted for this site today
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#7f1d1d", fontWeight: "500" }}>
+                      Workforce attendance has already been recorded and locked at the site level for this date. No duplicate submissions are permitted.
                     </div>
                     {labourLockInfo && (
-                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#15803d", marginTop: "2px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#991b1b", marginTop: "2px" }}>
                         {labourLockInfo.submittedAt && (
                           <span>
                             Submitted: {
@@ -8573,7 +8563,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         )}
                         {labourLockInfo.submittedBy && (
                           <span style={{ marginLeft: labourLockInfo.submittedAt ? "12px" : "0px" }}>
-                            By: {userProfile?.fullName && labourLockInfo.submittedBy === userProfile?.uid ? userProfile.fullName : labourLockInfo.submittedBy}
+                            By: {userProfile?.fullName && (labourLockInfo.submittedBy === userProfile?.uid || labourLockInfo.submittedBy === userProfile?.id) ? "You" : labourLockInfo.submittedBy}
                           </span>
                         )}
                       </div>
@@ -9714,32 +9704,6 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         style={{ height: "120px", objectFit: "cover", width: "100%" }} 
                       />
                     </a>
-                    {photo.engineerId === currentEngineerId && (
-                      <button 
-                        type="button" 
-                        onClick={() => handleDeleteSitePhoto(photo.id)}
-                        style={{
-                          position: "absolute",
-                          top: "8px",
-                          right: "8px",
-                          border: "none",
-                          backgroundColor: "rgba(255, 255, 255, 0.9)",
-                          color: "var(--danger-600)",
-                          borderRadius: "50%",
-                          width: "28px",
-                          height: "28px",
-                          cursor: "pointer",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-                          zIndex: 2
-                        }}
-                        title="Delete Photo"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
                     <div className="mobile-photo-info" style={{ padding: "10px", display: "flex", flexDirection: "column", gap: "2px" }}>
                       <span className="mobile-photo-time" style={{ fontWeight: "700" }}>
                         {photo.createdDate} at {photo.createdTime}

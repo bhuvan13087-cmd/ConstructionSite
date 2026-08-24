@@ -7024,7 +7024,7 @@ body:has(.landing-page-container) {
   font-size: 12.5px;
   text-align: left;
   table-layout: fixed;
-  min-width: 820px;
+  min-width: 980px;
 }
 
 .admin-table th {
@@ -7034,18 +7034,17 @@ body:has(.landing-page-container) {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 10px 14px;
+  padding: 11px 14px;
   border-bottom: 1px solid var(--border-color, #e2e8f0);
   white-space: nowrap;
   vertical-align: middle;
 }
 
 .admin-table td {
-  padding: 10px 14px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--primary-100, #f1f5f9);
   color: var(--primary-900, #0f172a);
   vertical-align: middle;
-  height: 54px;
   box-sizing: border-box;
 }
 
@@ -7062,7 +7061,7 @@ body:has(.landing-page-container) {
   align-items: center;
   justify-content: center;
   gap: 4px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   font-size: 11px;
   font-weight: 700;
   border-radius: 6px;
@@ -7081,22 +7080,23 @@ body:has(.landing-page-container) {
   background-color: #fff7ed;
 }
 
-/* Explicit Table Column Sizing */
-.col-site { width: 24%; }
-.col-engineer { width: 20%; }
-.col-progress { width: 18%; }
-.col-workers { width: 12%; }
-.col-expense { width: 12%; }
-.col-status { width: 12%; text-align: center; }
-.col-action { width: 64px; text-align: right; }
+/* Explicit Table Column Sizing for 8-Column Operations Matrix */
+.col-matrix-site { width: 18%; }
+.col-matrix-engineers { width: 15%; }
+.col-matrix-activity { width: 23%; }
+.col-matrix-progress { width: 14%; }
+.col-matrix-labour { width: 10%; }
+.col-matrix-expense { width: 10%; }
+.col-matrix-status { width: 8%; text-align: center; }
+.col-matrix-action { width: 64px; text-align: right; }
 
-.admin-table th.col-status,
-.admin-table td.col-status {
+.admin-table th.col-matrix-status,
+.admin-table td.col-matrix-status {
   text-align: center;
 }
 
-.admin-table th.col-action,
-.admin-table td.col-action {
+.admin-table th.col-matrix-action,
+.admin-table td.col-matrix-action {
   text-align: right;
 }
 

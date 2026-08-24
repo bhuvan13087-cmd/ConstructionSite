@@ -210,8 +210,11 @@ service cloud.firestore {
     }
 
     match /sitePhotos/{photoId} {
-      // Allow active users to read and write site photos
-      allow read, write: if isActiveUser();
+      // Allow active users to read and upload site photos (permanent production records)
+      allow read: if isActiveUser();
+      allow create: if isActiveUser();
+      // Permanent production records: deletion and updates are strictly restricted to Admins
+      allow update, delete: if isAdmin();
     }
 
     match /siteAssignments/{assignmentId} {

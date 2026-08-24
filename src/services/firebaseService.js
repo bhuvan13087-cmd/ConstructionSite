@@ -1590,9 +1590,9 @@ export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) 
       const recDate = String(data.date || data.attendanceDate || "").trim();
       if (recDate !== cleanDateStr) return false;
 
-      // 3. Ensure engineer/user matches
+      // 3. Ensure engineer/user strictly matches the requested engineerId
       const recUser = String(data.engineerId || data.userId || "").trim();
-      if (recUser && recUser !== cleanEngineerId) return false;
+      if (!recUser || recUser !== cleanEngineerId) return false;
 
       // 4. Canonical Site Match: Must strictly match the requested siteId
       const recSite = String(data.siteId || "").trim();
@@ -1605,14 +1605,13 @@ export async function hasVerifiedAttendanceForDate(siteId, engineerId, dateStr) 
       return isVerified && isNotRejected;
     };
 
-    // Query 1: Deterministic and legacy doc lookups
+    // Query 1: Deterministic engineer-specific doc lookups
     const docIds = [
       `att_${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`,
       `att_${cleanEngineerId}_${cleanSiteId}_${cleanDateStr}`,
       `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}`,
       `att_${cleanEngineerId}_${cleanDateStr}`,
-      `${cleanEngineerId}_${cleanDateStr}`,
-      `${cleanSiteId}_${cleanDateStr}`
+      `${cleanEngineerId}_${cleanDateStr}`
     ];
 
     for (const dId of docIds) {
@@ -1726,8 +1725,7 @@ export async function getTodayAttendance(engineerId, dateStr, siteId = null) {
     cleanSiteId ? `att_${cleanEngineerId}_${cleanSiteId}_${cleanDateStr}` : null,
     cleanSiteId ? `${cleanSiteId}_${cleanEngineerId}_${cleanDateStr}` : null,
     `att_${cleanEngineerId}_${cleanDateStr}`,
-    `${cleanEngineerId}_${cleanDateStr}`,
-    cleanSiteId ? `${cleanSiteId}_${cleanDateStr}` : null
+    `${cleanEngineerId}_${cleanDateStr}`
   ].filter(Boolean);
 
   for (const docId of directDocIds) {
@@ -3497,8 +3495,11 @@ export async function deleteDailyProgressReport(reportId) {
   await batch.commit();
 }
 
-// Delete site inspection photo
-export async function deleteSitePhoto(photoId) {
+// Delete site inspection photo (Permanent production record — Protected from Site Engineer deletion)
+export async function deleteSitePhoto(photoId, requesterRole = null) {
+  if (requesterRole === "site_engineer" || requesterRole === "engineer") {
+    throw new Error("Security Error: Uploaded inspection photos are permanent production records and cannot be deleted by Site Engineers.");
+  }
   const db = getDb();
   const docRef = doc(db, "sitePhotos", photoId);
   const batch = writeBatch(db);
@@ -6005,7 +6006,7 @@ export function subscribeGeneralExpenses(onUpdate) {
   };
 }
 
-// Check daily labour attendance submission status per Site + Date + Team
+// Check daily labour attendance submission status per Site + Date (Site-Level Lock)
 export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null) {
   if (!siteId || !dateStr) return { submitted: false };
   const cleanSiteId = String(siteId).trim();
@@ -6015,7 +6016,23 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
   try {
     const db = getDb();
     
-    // 1. If teamId is specified, check team-level lock in attendance collection: labour_lock_${siteId}_${teamId}_${dateStr}
+    // 1. Primary Site-Level Lock Check (Canonical single source of truth for Site + Date)
+    const siteDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
+    const siteDocSnap = await getDoc(siteDocRef);
+    if (siteDocSnap.exists()) {
+      const data = siteDocSnap.data();
+      if (data.status === "submitted" || data.locked || data.submitted) {
+        return {
+          submitted: true,
+          locked: true,
+          submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
+          submittedBy: data.submittedBy || data.engineerId || data.userId || null,
+          siteId: cleanSiteId
+        };
+      }
+    }
+
+    // 2. Team-level lock check if specified
     if (cleanTeamId) {
       const teamDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`);
       const teamDocSnap = await getDoc(teamDocRef);
@@ -6027,75 +6044,81 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
             locked: true,
             submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
             submittedBy: data.submittedBy || data.engineerId || data.userId || null,
-            teamId: cleanTeamId
+            teamId: cleanTeamId,
+            siteId: cleanSiteId
           };
         }
       }
-
-      // Also check labourMemberAttendance for any submitted/locked record for this specific team
-      const qTeam = query(
-        collection(db, "labourMemberAttendance"),
-        where("siteId", "==", cleanSiteId),
-        where("attendanceDate", "==", cleanDateStr),
-        where("teamId", "==", cleanTeamId)
-      );
-      const qSnap = await getDocs(qTeam);
-      if (!qSnap.empty) {
-        const submittedDoc = qSnap.docs.find(d => {
-          const dt = d.data();
-          return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
-        });
-        if (submittedDoc) {
-          const dt = submittedDoc.data();
-          return {
-            submitted: true,
-            locked: true,
-            submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
-            submittedBy: dt.submittedBy || dt.createdBy || null,
-            teamId: cleanTeamId
-          };
-        }
-      }
-
-      // Fallback query checking "date" field in labourMemberAttendance
-      const qTeamDate = query(
-        collection(db, "labourMemberAttendance"),
-        where("siteId", "==", cleanSiteId),
-        where("date", "==", cleanDateStr),
-        where("teamId", "==", cleanTeamId)
-      );
-      const qSnapDate = await getDocs(qTeamDate);
-      if (!qSnapDate.empty) {
-        const submittedDoc = qSnapDate.docs.find(d => {
-          const dt = d.data();
-          return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
-        });
-        if (submittedDoc) {
-          const dt = submittedDoc.data();
-          return {
-            submitted: true,
-            locked: true,
-            submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
-            submittedBy: dt.submittedBy || dt.createdBy || null,
-            teamId: cleanTeamId
-          };
-        }
-      }
-
-      return { submitted: false };
     }
 
-    // 2. Legacy fallback if no teamId provided: check generic site-date lock
-    const docRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
-    const docSnap = await getDoc(docRef);
-    if (docSnap.exists()) {
-      const data = docSnap.data();
-      if (data.status === "submitted" && (!data.siteId || String(data.siteId).trim() === cleanSiteId) && (!data.date || String(data.date).trim() === cleanDateStr)) {
+    // 3. Check labourMemberAttendance collection for any submitted/locked record on this Site + Date
+    const qAttendanceDate = query(
+      collection(db, "labourMemberAttendance"),
+      where("siteId", "==", cleanSiteId),
+      where("attendanceDate", "==", cleanDateStr)
+    );
+    const qSnap = await getDocs(qAttendanceDate);
+    if (!qSnap.empty) {
+      const submittedDoc = qSnap.docs.find(d => {
+        const dt = d.data();
+        return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
+      });
+      if (submittedDoc) {
+        const dt = submittedDoc.data();
         return {
           submitted: true,
           locked: true,
-          submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
-          submittedBy: data.submittedBy || data.engineerId || data.userId || null
+          submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
+          submittedBy: dt.submittedBy || dt.createdBy || null,
+          siteId: cleanSiteId
+        };
+      }
+    }
+
+    // 4. Fallback query checking "date" field in labourMemberAttendance
+    const qDate = query(
+      collection(db, "labourMemberAttendance"),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr)
+    );
+    const qSnapDate = await getDocs(qDate);
+    if (!qSnapDate.empty) {
+      const submittedDoc = qSnapDate.docs.find(d => {
+        const dt = d.data();
+        return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
+      });
+      if (submittedDoc) {
+        const dt = submittedDoc.data();
+        return {
+          submitted: true,
+          locked: true,
+          submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
+          submittedBy: dt.submittedBy || dt.createdBy || null,
+          siteId: cleanSiteId
+        };
+      }
+    }
+
+    // 5. Fallback query checking siteLabourEntries
+    const qLegacy = query(
+      collection(db, "siteLabourEntries"),
+      where("siteId", "==", cleanSiteId),
+      where("date", "==", cleanDateStr)
+    );
+    const qSnapLegacy = await getDocs(qLegacy);
+    if (!qSnapLegacy.empty) {
+      const submittedDoc = qSnapLegacy.docs.find(d => {
+        const dt = d.data();
+        return dt.status === "submitted" || dt.locked === true || dt.submitted === true;
+      });
+      if (submittedDoc) {
+        const dt = submittedDoc.data();
+        return {
+          submitted: true,
+          locked: true,
+          submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
+          submittedBy: dt.submittedBy || dt.createdBy || null,
+          siteId: cleanSiteId
         };
       }
     }
@@ -6128,14 +6151,14 @@ export async function getLabourLocksForSite(siteId) {
   }
 }
 
-// Submit workforce attendance for site, date, and specific team
+// Submit workforce attendance for site and date (Site-Level Labour Submission & Concurrency Lock)
 export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId = null, attendanceItems = []) {
   if (!siteId || !dateStr) throw new Error("Site ID and Date are required to submit attendance.");
   const cleanSiteId = String(siteId).trim();
   const cleanDateStr = String(dateStr).trim();
   const cleanTeamId = teamId ? String(teamId).trim() : null;
 
-  // Attendance Verification Gate: Verify engineer attendance
+  // 1. Attendance Verification Gate: Verify current engineer's individual attendance
   if (engineerId) {
     const isVerified = await verifyEngineerAttendanceGate(engineerId, cleanSiteId, cleanDateStr);
     if (!isVerified) {
@@ -6143,83 +6166,103 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
     }
   }
 
-  // Duplicate Prevention Check directly against database
-  const statusCheck = await checkLabourSubmissionStatus(cleanSiteId, cleanDateStr, cleanTeamId);
-  if (statusCheck && statusCheck.submitted) {
-    throw new Error("Labour attendance for this team on this date has already been submitted and locked.");
-  }
-
   const db = getDb();
+  const siteLockDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
+  const teamLockDocRef = cleanTeamId ? doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`) : null;
+
+  // 2. Concurrency Guard: Atomic Firestore transaction ensures only ONE submission succeeds if multiple engineers submit simultaneously
+  await runTransaction(db, async (transaction) => {
+    const siteLockSnap = await transaction.get(siteLockDocRef);
+    if (siteLockSnap.exists()) {
+      const data = siteLockSnap.data();
+      if (data.status === "submitted" || data.locked === true || data.submitted === true) {
+        throw new Error("Labour attendance for this site on this date has already been submitted and is locked.");
+      }
+    }
+
+    if (teamLockDocRef) {
+      const teamLockSnap = await transaction.get(teamLockDocRef);
+      if (teamLockSnap.exists()) {
+        const data = teamLockSnap.data();
+        if (data.status === "submitted" || data.locked === true || data.submitted === true) {
+          throw new Error("Labour attendance for this team on this date has already been submitted and is locked.");
+        }
+      }
+    }
+
+    const nowIso = new Date().toISOString();
+    const lockPayload = {
+      type: "labour_attendance_lock",
+      userId: engineerId || "",
+      engineerId: engineerId || "",
+      siteId: cleanSiteId,
+      date: cleanDateStr,
+      attendanceDate: cleanDateStr,
+      teamId: cleanTeamId || "",
+      status: "submitted",
+      locked: true,
+      submitted: true,
+      submittedAt: nowIso,
+      submittedBy: engineerId || "",
+      createdAt: nowIso,
+      updatedAt: nowIso
+    };
+
+    transaction.set(siteLockDocRef, lockPayload, { merge: true });
+    if (teamLockDocRef) {
+      transaction.set(teamLockDocRef, lockPayload, { merge: true });
+    }
+  });
+
+  // 3. Mark all labourMemberAttendance records for this site and date as submitted & locked
   const batch = writeBatch(db);
+  const updatedDocIds = new Set();
 
-  // 1. Create team-specific lock document in attendance collection
-  const lockDocId = cleanTeamId 
-    ? `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`
-    : `labour_lock_${cleanSiteId}_${cleanDateStr}`;
-  const lockDocRef = doc(db, "attendance", lockDocId);
-  
-  batch.set(lockDocRef, {
-    type: "labour_attendance_lock",
-    userId: engineerId || "",
-    engineerId: engineerId || "",
-    siteId: cleanSiteId,
-    date: cleanDateStr,
-    attendanceDate: cleanDateStr,
-    teamId: cleanTeamId || "",
-    status: "submitted",
-    locked: true,
-    submitted: true,
-    submittedAt: serverTimestamp(),
-    submittedBy: engineerId || "",
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
-  }, { merge: true });
-
-  // 2. Mark all labourMemberAttendance records for this site, date, and team as submitted & locked
-  if (cleanTeamId) {
-    const qTeam = query(
+  try {
+    const qSiteAttDate = query(
       collection(db, "labourMemberAttendance"),
       where("siteId", "==", cleanSiteId),
-      where("attendanceDate", "==", cleanDateStr),
-      where("teamId", "==", cleanTeamId)
+      where("attendanceDate", "==", cleanDateStr)
     );
-    const qSnap = await getDocs(qTeam);
-    const updatedIds = new Set();
-    qSnap.forEach(d => {
-      updatedIds.add(d.id);
+    const snap1 = await getDocs(qSiteAttDate);
+    snap1.forEach(d => {
+      updatedDocIds.add(d.id);
       batch.update(d.ref, {
         status: "submitted",
         locked: true,
         submitted: true,
-        submittedAt: serverTimestamp(),
+        submittedAt: new Date().toISOString(),
         submittedBy: engineerId || "",
-        updatedAt: serverTimestamp()
+        updatedAt: new Date().toISOString()
       });
     });
 
-    // Also update any records using "date" field
-    const qTeamDate = query(
+    const qSiteDate = query(
       collection(db, "labourMemberAttendance"),
       where("siteId", "==", cleanSiteId),
-      where("date", "==", cleanDateStr),
-      where("teamId", "==", cleanTeamId)
+      where("date", "==", cleanDateStr)
     );
-    const qSnapDate = await getDocs(qTeamDate);
-    qSnapDate.forEach(d => {
-      if (!updatedIds.has(d.id)) {
+    const snap2 = await getDocs(qSiteDate);
+    snap2.forEach(d => {
+      if (!updatedDocIds.has(d.id)) {
+        updatedDocIds.add(d.id);
         batch.update(d.ref, {
           status: "submitted",
           locked: true,
           submitted: true,
-          submittedAt: serverTimestamp(),
+          submittedAt: new Date().toISOString(),
           submittedBy: engineerId || "",
-          updatedAt: serverTimestamp()
+          updatedAt: new Date().toISOString()
         });
       }
     });
-  }
 
-  await batch.commit();
+    if (updatedDocIds.size > 0) {
+      await batch.commit();
+    }
+  } catch (err) {
+    console.warn("Labour records batch update notice:", err);
+  }
 }
 
 // Check bulk material submission status for site and date (per-record locking replaces day-wide locking)
