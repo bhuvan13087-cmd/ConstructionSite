@@ -1867,7 +1867,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Count-based worker attendance handlers with custom work units & daily wage
   const handleCountChange = async (categoryId, customUnitsVal, increment) => {
     if (isLabourSubmitted) {
-      showToast("Cannot modify count: This team's attendance is submitted and locked.", "error");
+      const isSubByMe = Boolean(userProfile && (labourLockInfo?.submittedBy === currentEngineerId || labourLockInfo?.submittedBy === userProfile?.uid || labourLockInfo?.submittedBy === userProfile?.id));
+      const msg = isSubByMe
+        ? "Cannot modify count: You have already submitted and locked attendance for this date."
+        : `Cannot modify count: Attendance for this site on this date was already submitted by ${labourLockInfo?.submittedByName || "another engineer"}.`;
+      showToast(msg, "error");
       return;
     }
     if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
@@ -1970,7 +1974,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
   const handleWorkUnitsChange = async (categoryId, newUnitsStr) => {
     if (isLabourSubmitted) {
-      showToast("Cannot modify work units: This team's attendance is submitted and locked.", "error");
+      const isSubByMe = Boolean(userProfile && (labourLockInfo?.submittedBy === currentEngineerId || labourLockInfo?.submittedBy === userProfile?.uid || labourLockInfo?.submittedBy === userProfile?.id));
+      const msg = isSubByMe
+        ? "Cannot modify work units: You have already submitted and locked attendance for this date."
+        : `Cannot modify work units: Attendance for this site on this date was already submitted by ${labourLockInfo?.submittedByName || "another engineer"}.`;
+      showToast(msg, "error");
       return;
     }
     if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
@@ -2044,7 +2052,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   // Configure custom duration for a specific worker inside a category
   const handleWorkerCustomDurationChange = async (categoryId, workerIndex, newUnitsStr, customWorkerName = null) => {
     if (isLabourSubmitted) {
-      showToast("Cannot modify duration: This team's attendance is submitted and locked.", "error");
+      const isSubByMe = Boolean(userProfile && (labourLockInfo?.submittedBy === currentEngineerId || labourLockInfo?.submittedBy === userProfile?.uid || labourLockInfo?.submittedBy === userProfile?.id));
+      const msg = isSubByMe
+        ? "Cannot modify duration: You have already submitted and locked attendance for this date."
+        : `Cannot modify duration: Attendance for this site on this date was already submitted by ${labourLockInfo?.submittedByName || "another engineer"}.`;
+      showToast(msg, "error");
       return;
     }
     if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
@@ -2334,7 +2346,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
         setIsLabourLocked(true);
         setLabourLockInfo(freshCheck);
       }
-      showToast(`Attendance for "${teamName}" on this date has already been submitted and locked.`, "warning");
+      const isSubByMe = Boolean(userProfile && (freshCheck.submittedBy === currentEngineerId || freshCheck.submittedBy === userProfile?.uid || freshCheck.submittedBy === userProfile?.id));
+      const msg = isSubByMe
+        ? `Attendance for "${teamName}" on this date has already been submitted and locked by you.`
+        : `Attendance for "${teamName}" on this date was already submitted by ${freshCheck.submittedByName || "another engineer"}.`;
+      showToast(msg, "warning");
       return;
     }
 
@@ -2367,7 +2383,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               setIsLabourLocked(true);
               setLabourLockInfo(reCheck);
             }
-            showToast(`Attendance for "${teamName}" on this date was already submitted and locked.`, "warning");
+            const isSubByMe = Boolean(userProfile && (reCheck.submittedBy === currentEngineerId || reCheck.submittedBy === userProfile?.uid || reCheck.submittedBy === userProfile?.id));
+            const msg = isSubByMe
+              ? `Attendance for "${teamName}" on this date was already submitted and locked by you.`
+              : `Attendance for "${teamName}" on this date was already submitted by ${reCheck.submittedByName || "another engineer"}.`;
+            showToast(msg, "warning");
             closeConfirmModal();
             return;
           }
@@ -2382,7 +2402,8 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             return;
           }
 
-          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows);
+          const currentEngineerName = userProfile?.fullName || userProfile?.name || userProfile?.displayName || "Site Engineer";
+          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows, currentEngineerName);
           showToast(`"${teamName}" attendance submitted and locked successfully.`, "success");
           if (isMountedRef.current) {
             setIsLabourLocked(true);
@@ -8375,6 +8396,18 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     const isSequenceBlocked = !isLabourSubmitted && Boolean(labourDateSequenceStatus && !labourDateSequenceStatus.allowed);
     const isFormDisabled = isLabourSubmitted || isSequenceBlocked;
 
+    const isSubmittedByCurrentEngineer = Boolean(
+      isLabourSubmitted && userProfile && labourLockInfo?.submittedBy &&
+      (labourLockInfo.submittedBy === currentEngineerId ||
+       labourLockInfo.submittedBy === userProfile?.uid ||
+       labourLockInfo.submittedBy === userProfile?.id ||
+       labourLockInfo.submittedBy === userProfile?.engineerId ||
+       labourLockInfo.submittedBy === userProfile?.customId)
+    );
+    const submitterDisplayName = isSubmittedByCurrentEngineer
+      ? "You"
+      : (labourLockInfo?.submittedByName || labourLockInfo?.submittedBy || "Site Engineer");
+
     const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
     const teamCategories = selectedTeam?.categories ? Object.values(selectedTeam.categories) : [];
     
@@ -8585,11 +8618,13 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     flexDirection: "column",
                     gap: "6px"
                   }}>
-                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#b91c1c" }}>
-                      🔒 Labour already submitted for this site today
+                    <div style={{ fontSize: "15px", fontWeight: "850", color: "#b91c1c" }}>
+                      {isSubmittedByCurrentEngineer ? "🔒 Submitted by you" : "🔒 Already Submitted"}
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#7f1d1d", fontWeight: "500" }}>
-                      Workforce attendance has already been recorded and locked at the site level for this date. No duplicate submissions are permitted.
+                      {isSubmittedByCurrentEngineer 
+                        ? "Workforce attendance has been submitted and locked by you for this site and date. Normal editing and resubmission are disabled."
+                        : `Workforce attendance for this site and date has already been submitted by ${submitterDisplayName}. No duplicate submissions are permitted.`}
                     </div>
                     {labourLockInfo && (
                       <div style={{ fontSize: "12px", fontWeight: "600", color: "#991b1b", marginTop: "2px" }}>
@@ -8604,11 +8639,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             }
                           </span>
                         )}
-                        {labourLockInfo.submittedBy && (
-                          <span style={{ marginLeft: labourLockInfo.submittedAt ? "12px" : "0px" }}>
-                            By: {userProfile?.fullName && (labourLockInfo.submittedBy === userProfile?.uid || labourLockInfo.submittedBy === userProfile?.id) ? "You" : labourLockInfo.submittedBy}
-                          </span>
-                        )}
+                        <span style={{ marginLeft: labourLockInfo.submittedAt ? "12px" : "0px", fontWeight: "750" }}>
+                          Submitted by: {isSubmittedByCurrentEngineer ? "You" : submitterDisplayName}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -9016,7 +9049,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           lineHeight: "1.2"
                         }}>
                           {isLabourSubmitted 
-                            ? "🔒 Submitted & Locked" 
+                            ? (isSubmittedByCurrentEngineer ? "🔒 Submitted by you" : `🔒 Submitted by ${submitterDisplayName}`) 
                             : (isSequenceBlocked ? "⚠️ Sequence Blocked" : "🟢 Open & Editable")}
                         </span>
                       </div>

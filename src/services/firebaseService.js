@@ -6195,6 +6195,32 @@ export function subscribeGeneralExpenses(onUpdate) {
   };
 }
 
+// In-memory cache for resolved engineer names
+const engineerNameCache = new Map();
+
+// Helper to resolve an engineer's display name from canonical user profiles
+export async function resolveSubmitterName(engineerId, existingName = null) {
+  if (existingName && typeof existingName === "string" && existingName.trim() && existingName.trim() !== engineerId) {
+    return existingName.trim();
+  }
+  if (!engineerId) return "Site Engineer";
+  const cleanId = String(engineerId).trim();
+  if (engineerNameCache.has(cleanId)) {
+    return engineerNameCache.get(cleanId);
+  }
+  try {
+    const profile = await getUserProfile(cleanId);
+    const resolved = profile?.fullName || profile?.name || profile?.displayName || profile?.email || cleanId;
+    if (resolved) {
+      engineerNameCache.set(cleanId, resolved);
+      return resolved;
+    }
+  } catch (err) {
+    console.error("Failed to resolve engineer name for submitter:", err);
+  }
+  return cleanId;
+}
+
 // Check daily labour attendance submission status per Site + Date (Site-Level Lock)
 export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null) {
   if (!siteId || !dateStr) return { submitted: false };
@@ -6211,11 +6237,15 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
     if (siteDocSnap.exists()) {
       const data = siteDocSnap.data();
       if (data.status === "submitted" || data.locked || data.submitted) {
+        const subId = data.submittedBy || data.engineerId || data.userId || null;
+        const rawName = data.submittedByName || data.engineerName || null;
+        const subName = await resolveSubmitterName(subId, rawName);
         return {
           submitted: true,
           locked: true,
           submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
-          submittedBy: data.submittedBy || data.engineerId || data.userId || null,
+          submittedBy: subId,
+          submittedByName: subName,
           siteId: cleanSiteId
         };
       }
@@ -6228,11 +6258,15 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
       if (teamDocSnap.exists()) {
         const data = teamDocSnap.data();
         if (data.status === "submitted" || data.locked || data.submitted) {
+          const subId = data.submittedBy || data.engineerId || data.userId || null;
+          const rawName = data.submittedByName || data.engineerName || null;
+          const subName = await resolveSubmitterName(subId, rawName);
           return {
             submitted: true,
             locked: true,
             submittedAt: data.submittedAt || data.updatedAt || data.createdAt || null,
-            submittedBy: data.submittedBy || data.engineerId || data.userId || null,
+            submittedBy: subId,
+            submittedByName: subName,
             teamId: cleanTeamId,
             siteId: cleanSiteId
           };
@@ -6254,11 +6288,15 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
       });
       if (submittedDoc) {
         const dt = submittedDoc.data();
+        const subId = dt.submittedBy || dt.createdBy || dt.engineerId || null;
+        const rawName = dt.submittedByName || dt.engineerName || null;
+        const subName = await resolveSubmitterName(subId, rawName);
         return {
           submitted: true,
           locked: true,
           submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
-          submittedBy: dt.submittedBy || dt.createdBy || null,
+          submittedBy: subId,
+          submittedByName: subName,
           siteId: cleanSiteId
         };
       }
@@ -6278,11 +6316,15 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
       });
       if (submittedDoc) {
         const dt = submittedDoc.data();
+        const subId = dt.submittedBy || dt.createdBy || dt.engineerId || null;
+        const rawName = dt.submittedByName || dt.engineerName || null;
+        const subName = await resolveSubmitterName(subId, rawName);
         return {
           submitted: true,
           locked: true,
           submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
-          submittedBy: dt.submittedBy || dt.createdBy || null,
+          submittedBy: subId,
+          submittedByName: subName,
           siteId: cleanSiteId
         };
       }
@@ -6302,11 +6344,15 @@ export async function checkLabourSubmissionStatus(siteId, dateStr, teamId = null
       });
       if (submittedDoc) {
         const dt = submittedDoc.data();
+        const subId = dt.submittedBy || dt.createdBy || dt.engineerId || null;
+        const rawName = dt.submittedByName || dt.engineerName || null;
+        const subName = await resolveSubmitterName(subId, rawName);
         return {
           submitted: true,
           locked: true,
           submittedAt: dt.submittedAt || dt.updatedAt || dt.createdAt || null,
-          submittedBy: dt.submittedBy || dt.createdBy || null,
+          submittedBy: subId,
+          submittedByName: subName,
           siteId: cleanSiteId
         };
       }
@@ -6377,11 +6423,12 @@ export async function checkLabourDateSequenceStatus(siteId, dateStr) {
 }
 
 // Submit workforce attendance for site and date (Site-Level Labour Submission & Concurrency Lock)
-export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId = null, attendanceItems = []) {
+export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId = null, attendanceItems = [], engineerName = null) {
   if (!siteId || !dateStr) throw new Error("Site ID and Date are required to submit attendance.");
   const cleanSiteId = String(siteId).trim();
   const cleanDateStr = String(dateStr).trim();
   const cleanTeamId = teamId ? String(teamId).trim() : null;
+  const cleanEngineerName = engineerName ? String(engineerName).trim() : "";
 
   // 1. Attendance Verification Gate: Verify current engineer's individual attendance
   if (engineerId) {
@@ -6416,7 +6463,11 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
     if (siteLockSnap.exists()) {
       const data = siteLockSnap.data();
       if (data.status === "submitted" || data.locked === true || data.submitted === true) {
-        throw new Error("Labour attendance for this site on this date has already been submitted and is locked.");
+        const existingSubmitter = data.submittedByName || data.engineerName || "";
+        const msg = existingSubmitter 
+          ? `Labour attendance for this site on this date has already been submitted by ${existingSubmitter}.`
+          : "Labour attendance for this site on this date has already been submitted and is locked.";
+        throw new Error(msg);
       }
     }
 
@@ -6425,7 +6476,11 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
       if (teamLockSnap.exists()) {
         const data = teamLockSnap.data();
         if (data.status === "submitted" || data.locked === true || data.submitted === true) {
-          throw new Error("Labour attendance for this team on this date has already been submitted and is locked.");
+          const existingSubmitter = data.submittedByName || data.engineerName || "";
+          const msg = existingSubmitter 
+            ? `Labour attendance for this team on this date has already been submitted by ${existingSubmitter}.`
+            : "Labour attendance for this team on this date has already been submitted and is locked.";
+          throw new Error(msg);
         }
       }
     }
@@ -6435,6 +6490,8 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
       type: "labour_attendance_lock",
       userId: engineerId || "",
       engineerId: engineerId || "",
+      engineerName: cleanEngineerName,
+      submittedByName: cleanEngineerName,
       siteId: cleanSiteId,
       date: cleanDateStr,
       attendanceDate: cleanDateStr,
@@ -6454,7 +6511,7 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
     }
   });
 
-  // 3. Mark all labourMemberAttendance records for this site and date as submitted & locked
+  // 4. Mark all labourMemberAttendance records for this site and date as submitted & locked
   const batch = writeBatch(db);
   const updatedDocIds = new Set();
 
@@ -6473,6 +6530,7 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
         submitted: true,
         submittedAt: new Date().toISOString(),
         submittedBy: engineerId || "",
+        submittedByName: cleanEngineerName,
         updatedAt: new Date().toISOString()
       });
     });
@@ -6492,6 +6550,7 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
           submitted: true,
           submittedAt: new Date().toISOString(),
           submittedBy: engineerId || "",
+          submittedByName: cleanEngineerName,
           updatedAt: new Date().toISOString()
         });
       }
