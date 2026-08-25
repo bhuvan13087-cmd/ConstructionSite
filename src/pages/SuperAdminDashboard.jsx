@@ -614,7 +614,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 1: SUPER ADMIN OWNER COMMAND CENTER
+  // VIEW 1: VISVAS NEXUS OPERATIONS COMMAND (VNOC) ── SUPER ADMIN COMMAND CENTER
   // ══════════════════════════════════════════════════════════════════════════
   const renderDashboardView = () => {
     // 1. Core Computed Quantities
@@ -623,6 +623,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const completedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "completed").length;
     const delayedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "delayed" || isSiteDelayed(s)).length;
     const onHoldSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "on-hold" || (s.status || "").toLowerCase() === "paused").length;
+    const onTrackSitesCount = Math.max(0, activeSitesCount - delayedSitesCount);
     
     // Site Engineers & Attendance Pulse
     const activeEngineersList = engineers.filter(e => (e.status || "active").toLowerCase() === "active");
@@ -639,25 +640,42 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const activeSitesWithAttendanceCount = activeSitesList.filter(s => sitesWithAttendanceSet.has(s.id)).length;
     const activeSitesPendingAttendanceCount = Math.max(0, activeSitesCount - activeSitesWithAttendanceCount);
     
-    // Labour Pulse
-    const sitesWithLabourTodaySet = new Set(
-      (rawLabourAttendance || [])
-        .filter(r => !r.lockedMetadata && (r.attendanceDate === todayDateString || r.date === todayDateString))
-        .map(r => r.siteId)
-    );
-
-    // Today's Expense Sums
+    // Labour Pulse & Civil Trade Breakdown
+    const sitesWithLabourTodaySet = new Set();
     let todayLabourExpense = 0;
+    let masonCount = 0;
+    let barbenderCount = 0;
+    let carpenterCount = 0;
+    let helperCount = 0;
+    let otherTradeCount = 0;
+
     (rawLabourAttendance || []).forEach(r => {
       if (!r || r.lockedMetadata) return;
       const dateField = r.attendanceDate || r.date;
       if (dateField === todayDateString) {
+        if (r.siteId) sitesWithLabourTodaySet.add(r.siteId);
         const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
         const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
         todayLabourExpense += Number(r.totalAmount || (workerCount * rate));
+
+        const cat = (r.categoryName || r.category || "").toLowerCase();
+        if (cat.includes("mason") || cat.includes("kothanar") || cat.includes("brick") || cat.includes("plaster")) {
+          masonCount += workerCount;
+        } else if (cat.includes("bar") || cat.includes("steel") || cat.includes("rebar") || cat.includes("bender")) {
+          barbenderCount += workerCount;
+        } else if (cat.includes("carpenter") || cat.includes("shutter") || cat.includes("centering") || cat.includes("formwork")) {
+          carpenterCount += workerCount;
+        } else if (cat.includes("helper") || cat.includes("mazdoor") || cat.includes("chithal") || cat.includes("coolie") || cat.includes("general")) {
+          helperCount += workerCount;
+        } else {
+          otherTradeCount += workerCount;
+        }
       }
     });
 
+    const totalWorkforceToday = presentCount + todayLabourCount;
+
+    // Today's Materials Expense
     let todayMaterialExpense = 0;
     materials.forEach(m => {
       const mDate = m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
@@ -668,6 +686,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       }
     });
 
+    // Today's General Expenses
     let todayGeneralExpense = 0;
     generalExpenses.forEach(e => {
       if ((e.date || "").startsWith(todayDateString)) {
@@ -745,7 +764,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           type: 'warning',
           category: 'Missing Labour',
           title: `No Labour Force: ${s.siteName}`,
-          message: `No daily worker attendance filed today for "${s.siteName}".`,
+          message: `No daily worker attendance muster filed today for "${s.siteName}".`,
           link: `/superadmin/labour`,
           site: s
         });
@@ -776,7 +795,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           type: 'warning',
           category: 'High Outlay',
           title: `High Outlay: ₹${Number(exp.amount).toLocaleString()}`,
-          message: `Expense for "${exp.description}" logged at ${sites.find(s => s.id === exp.siteId)?.siteName || 'HQ'}.`,
+          message: `Field expense for "${exp.description}" logged at ${sites.find(s => s.id === exp.siteId)?.siteName || 'HQ'}.`,
           link: `/superadmin/finance`
         });
       }
@@ -848,7 +867,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           module: "Labour",
           moduleType: "labour",
           badgeStatus: "info",
-          title: `Labour: ${workerCount} Workers`,
+          title: `Labour: ${workerCount} Workers (${r.categoryName || r.category || "Civil Gang"})`,
           description: `${r.categoryName || r.category || "General Labour"} logged at ${site?.siteName || "Site"} — ₹${total.toLocaleString()}`,
           time: r.createdAt?.seconds ? new Date(r.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
           timestamp: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
@@ -905,7 +924,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           moduleType: "reports",
           badgeStatus: "success",
           title: `DPR: ${dpr.workDescription ? dpr.workDescription.substring(0, 32) + '...' : "Daily Progress Report"}`,
-          description: `Progress filed for ${site?.siteName || "Site"}`,
+          description: `Progress filed for ${site?.siteName || "Site"}${dpr.weather ? ` • Weather: ${dpr.weather}` : ''}`,
           time: dpr.createdAt?.seconds ? new Date(dpr.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
           timestamp: dpr.createdAt?.seconds ? dpr.createdAt.seconds * 1000 : 0,
           siteName: site?.siteName || "Site",
@@ -1280,26 +1299,56 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       return 0;
     });
 
-    // Site-Wise Attendance Summary Table Data
-    const attendanceViewSites = activeSitesList.filter(s => {
-      if (attendanceViewStatusFilter === "completed" && !sitesWithAttendanceSet.has(s.id)) return false;
-      if (attendanceViewStatusFilter === "pending" && sitesWithAttendanceSet.has(s.id)) return false;
-      if (attendanceViewSearch.trim()) {
-        const q = attendanceViewSearch.toLowerCase().trim();
-        return (s.siteName || "").toLowerCase().includes(q) || (s.location || "").toLowerCase().includes(q);
-      }
-      return true;
-    });
-
     return (
       <div className="admin-dashboard-container">
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 1: EXECUTIVE KPI STRIP (CLICK-TO-DRILLDOWN)                   */}
+        {/* LIVE TELEMETRY HEADER                                                 */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          flexWrap: "wrap",
+          gap: "10px",
+          padding: "10px 16px",
+          backgroundColor: "#f8fafc",
+          borderRadius: "8px",
+          border: "1px solid #e2e8f0"
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "50%",
+              backgroundColor: "#22c55e",
+              boxShadow: "0 0 8px rgba(34, 197, 94, 0.6)",
+              display: "inline-block"
+            }} />
+            <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", letterSpacing: "0.3px" }}>
+              VISVAS NEXUS OPERATIONS COMMAND
+            </strong>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>• LIVE FIELD TELEMETRY • {formattedTodayDate}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadStaticData}
+            className="erp-btn-secondary"
+            style={{ fontSize: "11px", padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+            title="Refresh static data tables"
+          >
+            <RefreshCw size={12} />
+            Sync Pulse
+          </button>
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 1: EXECUTIVE TELEMETRY PULSE STRIP (4 MACRO GAUGES)           */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <div className="admin-summary-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
 
-          {/* 1. SITES PULSE CARD */}
+          {/* 1. PORTFOLIO CAPITAL PULSE CARD */}
           <div
             className="admin-summary-card"
             style={{ cursor: "pointer", transition: "all 0.15s ease" }}
@@ -1315,8 +1364,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </span>
             </div>
             <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
-              <div className="admin-summary-value">{overallMetrics.totalSites} Sites</div>
-              <div className="admin-summary-label">Organization Portfolio</div>
+              <div className="admin-summary-value">{formatINR(overallMetrics.totalProjectValue)}</div>
+              <div className="admin-summary-label">Corporate Portfolio Budget ({overallMetrics.totalSites} Sites)</div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
                 <span><strong>{activeSitesCount}</strong> Active</span>
                 <span><strong>{completedSitesCount}</strong> Done</span>
@@ -1325,7 +1374,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             </div>
           </div>
 
-          {/* 2. WORKFORCE PULSE CARD */}
+          {/* 2. ACTIVE CIVIL WORKFORCE PULSE CARD */}
           <div
             className="admin-summary-card"
             style={{ cursor: "pointer", transition: "all 0.15s ease" }}
@@ -1337,21 +1386,21 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <Users size={20} />
               </div>
               <span style={{ fontSize: "10.5px", fontWeight: "800", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "10px" }}>
-                {attendanceRate}% Present
+                {attendanceRate}% Eng Presence
               </span>
             </div>
             <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
-              <div className="admin-summary-value">{presentCount}/{activeEngineersCount} Engineers</div>
-              <div className="admin-summary-label">Workforce &amp; Field Presence</div>
+              <div className="admin-summary-value">{totalWorkforceToday} Total On-Site</div>
+              <div className="admin-summary-label">Active Civil Workforce Today</div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
-                <span><strong>{onSiteCount}</strong> On-Site Now</span>
-                <span style={{ color: pendingEngineersCount > 0 ? "#ea580c" : "inherit" }}><strong>{pendingEngineersCount}</strong> Pending</span>
-                <span><strong>{todayLabourCount}</strong> Workers</span>
+                <span><strong>{presentCount}</strong> Engineers</span>
+                <span><strong>{todayLabourCount}</strong> Labour</span>
+                <span style={{ color: pendingEngineersCount > 0 ? "#ea580c" : "inherit" }}><strong>{pendingEngineersCount}</strong> Unmarked</span>
               </div>
             </div>
           </div>
 
-          {/* 3. FINANCIAL PULSE CARD */}
+          {/* 3. DAILY FINANCIAL OUTLAYS PULSE CARD */}
           <div
             className="admin-summary-card"
             style={{ cursor: "pointer", transition: "all 0.15s ease" }}
@@ -1368,36 +1417,36 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             </div>
             <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
               <div className="admin-summary-value" style={{ fontSize: "16px" }}>{formatINR(todayTotalExpenses)}</div>
-              <div className="admin-summary-label">Today's Expenditure Outlay</div>
+              <div className="admin-summary-label">Today's Combined Outlay</div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
+                <span>Labour: <strong>{formatINR(todayLabourExpense)}</strong></span>
                 <span>Spent: <strong>{formatINR(overallMetrics.totalExpenses)}</strong></span>
-                <span>Owed: <strong style={{ color: "var(--warning-600)" }}>{formatINR(overallMetrics.pendingPayments)}</strong></span>
               </div>
             </div>
           </div>
 
-          {/* 4. OPERATIONS PULSE CARD */}
+          {/* 4. CORPORATE MILESTONE ADHERENCE INDEX CARD */}
           <div
             className="admin-summary-card"
             style={{ cursor: "pointer", transition: "all 0.15s ease" }}
-            onClick={() => openKpiDrilldown("operations_events")}
-            title="Click to inspect today's live operations stream"
+            onClick={() => openKpiDrilldown("operations_delayed")}
+            title="Click to inspect project milestones"
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
               <div className="admin-summary-icon erp-kpi-icon-blue">
                 <Activity size={20} />
               </div>
               <span style={{ fontSize: "10.5px", fontWeight: "800", color: "#2563eb", backgroundColor: "#dbeafe", padding: "2px 8px", borderRadius: "10px" }}>
-                {todayFeedList.length} Events Today
+                {todayFeedList.length} Events Logged
               </span>
             </div>
             <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
-              <div className="admin-summary-value">{sitesWithActivityCount}/{activeSitesCount} Sites</div>
-              <div className="admin-summary-label">Active Operations Today</div>
+              <div className="admin-summary-value">{overallMetrics.overallProgressPercent}% Average</div>
+              <div className="admin-summary-label">Corporate Milestone Adherence</div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
-                <span><strong>{sitesWithActivityCount}</strong> Active</span>
-                <span style={{ color: sitesWithNoActivityCount > 0 ? "#ea580c" : "inherit" }}><strong>{sitesWithNoActivityCount}</strong> No Activity</span>
+                <span><strong>{onTrackSitesCount}</strong> On Track</span>
                 <span style={{ color: delayedSitesCount > 0 ? "#dc2626" : "inherit" }}><strong>{delayedSitesCount}</strong> Delayed</span>
+                <span><strong>{sitesWithActivityCount}</strong> Active Today</span>
               </div>
             </div>
           </div>
@@ -1405,76 +1454,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 2: ORGANIZATION HEALTH OVERVIEW (COMPACT VISUAL GAUGE)       */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-card" style={{ padding: "16px 20px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", marginBottom: "12px" }}>
-            <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>Organization Health &amp; Portfolio Standing</h3>
-              <p className="admin-card-subtitle" style={{ margin: "2px 0 0 0" }}>High-level operational health across {overallMetrics.totalSites} registered sites.</p>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "16px" }}>
-              <div style={{ textAlign: "right" }}>
-                <span style={{ fontSize: "10.5px", textTransform: "uppercase", color: "var(--text-muted)", fontWeight: "800", display: "block" }}>Corporate Execution</span>
-                <strong style={{ fontSize: "16px", color: "var(--primary-950)" }}>{overallMetrics.overallProgressPercent}% Average</strong>
-              </div>
-              <div style={{
-                width: "42px",
-                height: "42px",
-                borderRadius: "50%",
-                background: `conic-gradient(var(--brand-orange) ${overallMetrics.overallProgressPercent}%, #e2e8f0 0)`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center"
-              }}>
-                <div style={{ width: "32px", height: "32px", borderRadius: "50%", backgroundColor: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "10.5px", fontWeight: "900" }}>
-                  {overallMetrics.overallProgressPercent}%
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Health Segment Bar */}
-          <div style={{ display: "flex", height: "10px", borderRadius: "100px", overflow: "hidden", backgroundColor: "#f1f5f9", marginBottom: "12px" }}>
-            {activeSitesCount > 0 && <div style={{ width: `${(activeSitesCount / (overallMetrics.totalSites || 1)) * 100}%`, backgroundColor: "#22c55e" }} title={`Active: ${activeSitesCount}`} />}
-            {completedSitesCount > 0 && <div style={{ width: `${(completedSitesCount / (overallMetrics.totalSites || 1)) * 100}%`, backgroundColor: "#3b82f6" }} title={`Completed: ${completedSitesCount}`} />}
-            {onHoldSitesCount > 0 && <div style={{ width: `${(onHoldSitesCount / (overallMetrics.totalSites || 1)) * 100}%`, backgroundColor: "#94a3b8" }} title={`On Hold: ${onHoldSitesCount}`} />}
-            {delayedSitesCount > 0 && <div style={{ width: `${(delayedSitesCount / (overallMetrics.totalSites || 1)) * 100}%`, backgroundColor: "#ef4444" }} title={`Delayed: ${delayedSitesCount}`} />}
-          </div>
-
-          {/* Quick-Filter Status Buttons */}
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-            {[
-              { id: "all", label: `All Sites (${overallMetrics.totalSites})`, color: "#475569" },
-              { id: "active", label: `Active (${activeSitesCount})`, color: "#16a34a" },
-              { id: "attention", label: `Attention Required (${alerts.length})`, color: "#dc2626" },
-              { id: "delayed", label: `Delayed (${delayedSitesCount})`, color: "#dc2626" },
-              { id: "completed", label: `Completed (${completedSitesCount})`, color: "#2563eb" }
-            ].map(pill => (
-              <button
-                key={pill.id}
-                type="button"
-                onClick={() => setPortfolioStatusFilter(pill.id)}
-                style={{
-                  padding: "4px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid",
-                  borderColor: portfolioStatusFilter === pill.id ? "var(--brand-orange)" : "var(--border-color)",
-                  backgroundColor: portfolioStatusFilter === pill.id ? "#fff7ed" : "#ffffff",
-                  color: portfolioStatusFilter === pill.id ? "var(--brand-orange)" : pill.color,
-                  fontSize: "11.5px",
-                  fontWeight: "700",
-                  cursor: "pointer"
-                }}
-              >
-                {pill.label}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 3: EXECUTIVE EXCEPTION ACTION CENTER (EXCEPTION-FIRST)       */}
+        {/* SECTION 2: OPERATIONAL ANOMALY & EXCEPTION RADAR                      */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {alerts.length > 0 && (
           <div className="admin-card" style={{ borderLeft: "4px solid #ef4444", padding: "16px 20px" }}>
@@ -1482,19 +1462,19 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <AlertTriangle size={18} style={{ color: "#dc2626" }} />
                 <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>
-                  Operational Exceptions ({alerts.length})
+                  Operational Anomaly &amp; Exception Radar ({alerts.length})
                 </h3>
               </div>
 
               {/* Exception Filter Chips */}
               <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
                 {[
-                  { id: "all", label: "All" },
-                  { id: "attendance", label: "Attendance" },
-                  { id: "labour", label: "Labour" },
-                  { id: "delays", label: "Delays" },
-                  { id: "approvals", label: "Approvals" },
-                  { id: "expenses", label: "Outlays" }
+                  { id: "all", label: `All (${alerts.length})` },
+                  { id: "attendance", label: `Attendance (${alerts.filter(a => a.category === "Missing Attendance").length})` },
+                  { id: "labour", label: `Labour (${alerts.filter(a => a.category === "Missing Labour").length})` },
+                  { id: "delays", label: `Delays (${alerts.filter(a => a.category === "Schedule Delay").length})` },
+                  { id: "approvals", label: `Approvals (${alerts.filter(a => a.category === "Pending Approval").length})` },
+                  { id: "expenses", label: `Outlays (${alerts.filter(a => a.category === "High Outlay").length})` }
                 ].map(c => (
                   <button
                     key={c.id}
@@ -1563,7 +1543,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                   onClick={() => setShowAllAlerts(!showAllAlerts)}
                   style={{ background: "none", border: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
                 >
-                  {showAllAlerts ? "Show Less" : `View All ${filteredExceptions.length} Exceptions`}
+                  {showAllAlerts ? "Show Less" : `View All ${filteredExceptions.length} Operational Exceptions`}
                 </button>
               </div>
             )}
@@ -1571,193 +1551,116 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         )}
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 4: ATTENDANCE COMMAND VIEW (OVERVIEW + COMPACT TABLE)        */}
+        {/* SECTION 3: MASTER ATTENDANCE & CIVIL WORKFORCE TRADE BREAKDOWN ROW     */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+        <div className="admin-analytics-grid">
+
+          {/* Left: Master Attendance Command Banner */}
+          <div className="admin-attendance-card" style={{ margin: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
             <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>Attendance Command View</h3>
-              <p className="admin-card-subtitle" style={{ margin: "2px 0 0 0" }}>Site-wise engineer check-in standing for {formattedTodayDate}.</p>
+              <div className="admin-attendance-header-row" style={{ marginBottom: "10px" }}>
+                <div className="admin-attendance-title-group">
+                  <div className="admin-attendance-icon-wrap">
+                    <ClipboardCheck size={20} />
+                  </div>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <h3 className="admin-attendance-title" style={{ fontSize: "13.5px" }}>Field Engineers Presence</h3>
+                      <div className="admin-attendance-live-badge">
+                        <span className="admin-attendance-live-dot" />
+                        Live
+                      </div>
+                    </div>
+                    <p className="admin-attendance-subtitle" style={{ fontSize: "11px" }}>
+                      {presentCount} of {activeEngineersCount} active engineers on site today.
+                    </p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  className="erp-btn-primary"
+                  onClick={() => setShowTodayAttendanceModal(true)}
+                  style={{ fontSize: "11px", padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                >
+                  <ClipboardCheck size={13} />
+                  Ledger ({todayAttendanceList.length})
+                </button>
+              </div>
+
+              <div className="admin-attendance-metrics" style={{ gap: "6px" }}>
+                <div className="admin-attendance-metric-pill present">
+                  <UserCheck size={13} />
+                  <span>{presentCount} Present ({attendanceRate}%)</span>
+                </div>
+                <div className="admin-attendance-metric-pill onsite">
+                  <Clock size={13} />
+                  <span>{onSiteCount} On Site</span>
+                </div>
+                <div className="admin-attendance-metric-pill checkout">
+                  <CheckCircle2 size={13} />
+                  <span>{checkedOutCount} Done</span>
+                </div>
+                <div className="admin-attendance-metric-pill verified">
+                  <ShieldCheck size={13} />
+                  <span>{verifiedCount} Verified</span>
+                </div>
+              </div>
             </div>
-            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                className="erp-btn-primary"
-                onClick={() => setShowTodayAttendanceModal(true)}
-                style={{ fontSize: "11.5px", padding: "5px 12px", display: "inline-flex", alignItems: "center", gap: "5px" }}
-              >
-                <ClipboardCheck size={13} />
-                Full Ledger ({todayAttendanceList.length})
-              </button>
-              <Link
-                to="/superadmin/attendance"
-                className="erp-btn-secondary"
-                style={{ fontSize: "11.5px", padding: "5px 12px", display: "inline-flex", alignItems: "center", gap: "5px", textDecoration: "none" }}
-              >
-                <ExternalLink size={13} />
-                Attendance Monitor
+
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "var(--primary-700)" }}>
+              <span>Sites with Presence: <strong>{activeSitesWithAttendanceCount}/{activeSitesCount}</strong></span>
+              <Link to="/superadmin/attendance" style={{ color: "var(--primary-600)", fontWeight: "700", textDecoration: "none" }}>
+                Full Monitor →
               </Link>
             </div>
           </div>
 
-          {/* Metric Summary Strip */}
-          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", padding: "10px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Expected:</span>
-              <strong style={{ color: "var(--primary-950)" }}>{activeEngineersCount} Engineers</strong>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Present Today:</span>
-              <strong style={{ color: "#16a34a" }}>{presentCount} ({attendanceRate}%)</strong>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Pending:</span>
-              <strong style={{ color: pendingEngineersCount > 0 ? "#ea580c" : "var(--primary-950)" }}>{pendingEngineersCount}</strong>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Sites Completed:</span>
-              <strong style={{ color: "#16a34a" }}>{activeSitesWithAttendanceCount}</strong>
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px" }}>
-              <span style={{ color: "var(--text-muted)" }}>Sites Pending:</span>
-              <strong style={{ color: activeSitesPendingAttendanceCount > 0 ? "#dc2626" : "var(--primary-950)" }}>{activeSitesPendingAttendanceCount}</strong>
-            </div>
-          </div>
-
-          {/* Compact Site-Wise Attendance Table */}
-          <div style={{ maxHeight: "240px", overflowY: "auto", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Site Name</th>
-                  <th>Assigned Engineers</th>
-                  <th>Present</th>
-                  <th>Pending</th>
-                  <th style={{ textAlign: "center" }}>Status</th>
-                  <th style={{ textAlign: "right" }}>Drill Down</th>
-                </tr>
-              </thead>
-              <tbody>
-                {attendanceViewSites.slice(0, 6).map(s => {
-                  const sAtt = todayAttendanceList.filter(r => r.resolvedSiteId === s.id);
-                  const isDone = sAtt.length > 0;
-                  const assignedCount = engineers.filter(e => e.assignedSiteId === s.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(s.id))).length || 1;
-                  return (
-                    <tr key={s.id}>
-                      <td><strong style={{ fontSize: "12.5px" }}>{s.siteName}</strong></td>
-                      <td>{assignedCount} Assigned</td>
-                      <td><strong style={{ color: isDone ? "#16a34a" : "inherit" }}>{sAtt.length}</strong></td>
-                      <td><strong style={{ color: !isDone ? "#dc2626" : "inherit" }}>{!isDone ? assignedCount : 0}</strong></td>
-                      <td style={{ textAlign: "center" }}>
-                        <Badge status={isDone ? "success" : "danger"}>{isDone ? "Marked" : "Missing"}</Badge>
-                      </td>
-                      <td style={{ textAlign: "right" }}>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDashboardAttendanceSiteFilter(s.id);
-                            setShowTodayAttendanceModal(true);
-                          }}
-                          className="erp-btn-secondary"
-                          style={{ fontSize: "11px", padding: "3px 8px" }}
-                        >
-                          Inspect
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 5: OPERATIONS MONITOR & LIVE REAL-TIME FEED                   */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+          {/* Right: Civil Workforce Trade Headcounts */}
+          <div className="admin-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
             <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>Operations Monitor &amp; Live Real-Time Feed</h3>
-              <p className="admin-card-subtitle" style={{ margin: "2px 0 0 0" }}>Live pulse of events and exception detection across active sites today.</p>
+              <div className="admin-card-header" style={{ marginBottom: "10px" }}>
+                <div>
+                  <h3 className="admin-card-title" style={{ fontSize: "13.5px" }}>Civil Workforce Trade Musters</h3>
+                  <p className="admin-card-subtitle" style={{ fontSize: "11px" }}>Today's field labour distribution across specialized crafts</p>
+                </div>
+                <span style={{ fontSize: "12px", fontWeight: "800", color: "#c2410c", backgroundColor: "#ffedd5", padding: "2px 8px", borderRadius: "8px" }}>
+                  {todayLabourCount} Total Workers
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "8px" }}>
+                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🧱 Masons / Karigar</span>
+                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{masonCount}</strong>
+                </div>
+                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🏗️ Barbenders</span>
+                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{barbenderCount}</strong>
+                </div>
+                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🪵 Carpenters</span>
+                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{carpenterCount}</strong>
+                </div>
+                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
+                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🦺 Helpers / Mazdoors</span>
+                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{helperCount}</strong>
+                </div>
+              </div>
             </div>
 
-            {/* Filter Tabs */}
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              {["all", "attendance", "labour", "materials", "expenses", "reports"].map(f => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setDashboardActivityFilter(f)}
-                  style={{
-                    padding: "3px 8px",
-                    borderRadius: "6px",
-                    border: "1px solid",
-                    borderColor: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--border-color)",
-                    backgroundColor: dashboardActivityFilter === f ? "#fff7ed" : "#ffffff",
-                    color: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--primary-700)",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                    textTransform: "capitalize"
-                  }}
-                >
-                  {f === "all" ? `All (${todayFeedList.length})` : `${f} (${todayFeedList.filter(item => item.moduleType === f).length})`}
-                </button>
-              ))}
+            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "var(--primary-700)" }}>
+              <span>Daily Wage Outlay: <strong>{formatINR(todayLabourExpense)}</strong></span>
+              <Link to="/superadmin/labour" style={{ color: "var(--primary-600)", fontWeight: "700", textDecoration: "none" }}>
+                Labour Muster →
+              </Link>
             </div>
           </div>
 
-          {filteredTodayFeed.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)", fontSize: "12.5px" }}>
-              No operations activity recorded for the selected filter today.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "280px", overflowY: "auto" }}>
-              {filteredTodayFeed.map(item => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 12px",
-                    backgroundColor: "#f8fafc",
-                    borderRadius: "6px",
-                    border: "1px solid #e2e8f0",
-                    gap: "10px"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-                    <Badge status={item.badgeStatus} style={{ fontSize: "10px", flexShrink: 0 }}>
-                      {item.module}
-                    </Badge>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.title}
-                      </strong>
-                      <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.description}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", display: "block" }}>
-                      {item.time}
-                    </span>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>
-                      by {item.user}
-                    </span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 6 & 7: FINANCIAL COMMAND & PROJECT PERFORMANCE ROW            */}
+        {/* SECTION 4: FINANCIAL ALLOCATION & MILESTONE SCHEDULE ROW             */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <div className="admin-analytics-grid">
 
@@ -1765,8 +1668,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           <div className="admin-card">
             <div className="admin-card-header">
               <div>
-                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Financial Command View</h3>
-                <p className="admin-card-subtitle">Allocation and corporate outlays</p>
+                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Civil Expense Allocation Tracks</h3>
+                <p className="admin-card-subtitle">Distribution across critical expenditure heads</p>
               </div>
               <button
                 type="button"
@@ -1800,8 +1703,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           <div className="admin-card">
             <div className="admin-card-header">
               <div>
-                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Milestone Schedule &amp; Deadlines</h3>
-                <p className="admin-card-subtitle">Upcoming target completion dates</p>
+                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Corporate Milestone Schedule</h3>
+                <p className="admin-card-subtitle">Upcoming target completion dates &amp; S-curve health</p>
               </div>
               <button
                 type="button"
@@ -1840,14 +1743,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 8: SCALABLE SITE PORTFOLIO (BUILT FOR 500+ SITES)            */}
+        {/* SECTION 5: SCALABLE CIVIL SITE OPERATIONS CONSOLE                    */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <div className="admin-table-card">
           <div className="admin-table-header" style={{ flexWrap: "wrap", gap: "10px" }}>
             <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Site Portfolio &amp; Exception Filter Console</h3>
+              <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Civil Site Portfolio &amp; Operations Console</h3>
               <p className="admin-card-subtitle">
-                Priority-ranked monitoring matrix across all {overallMetrics.totalSites} registered sites.
+                Priority-ranked monitoring matrix across all {overallMetrics.totalSites} registered Visvas projects.
               </p>
             </div>
 
@@ -2171,7 +2074,91 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         </div>
 
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 9: EXECUTIVE SHORTCUTS & GATEWAYS                             */}
+        {/* SECTION 6: REAL-TIME OPERATIONS CHRONO-STREAM & AUDIT LOG            */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
+            <div>
+              <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>Real-Time Operations Chrono-Stream</h3>
+              <p className="admin-card-subtitle" style={{ margin: "2px 0 0 0" }}>Live chronological feed of all field activities logged across Visvas projects today ({todayFeedList.length} events).</p>
+            </div>
+
+            {/* Filter Tabs */}
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {["all", "attendance", "labour", "materials", "expenses", "reports"].map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setDashboardActivityFilter(f)}
+                  style={{
+                    padding: "3px 8px",
+                    borderRadius: "6px",
+                    border: "1px solid",
+                    borderColor: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--border-color)",
+                    backgroundColor: dashboardActivityFilter === f ? "#fff7ed" : "#ffffff",
+                    color: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--primary-700)",
+                    fontSize: "11px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    textTransform: "capitalize"
+                  }}
+                >
+                  {f === "all" ? `All (${todayFeedList.length})` : `${f} (${todayFeedList.filter(item => item.moduleType === f).length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredTodayFeed.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)", fontSize: "12.5px" }}>
+              No operations activity recorded for the selected filter today.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "280px", overflowY: "auto" }}>
+              {filteredTodayFeed.map(item => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "8px 12px",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: "6px",
+                    border: "1px solid #e2e8f0",
+                    gap: "10px"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
+                    <Badge status={item.badgeStatus} style={{ fontSize: "10px", flexShrink: 0 }}>
+                      {item.module}
+                    </Badge>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.title}
+                      </strong>
+                      <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.description}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", display: "block" }}>
+                      {item.time}
+                    </span>
+                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>
+                      by {item.user}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 7: EXECUTIVE GATEWAYS & SPECIALIZED SHORTCUTS                 */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
         <div className="admin-card">
           <div className="admin-card-header" style={{ marginBottom: "10px" }}>
@@ -2233,9 +2220,6 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       </div>
     );
   };
-
-
-
 
   // ══════════════════════════════════════════════════════════════════════════
   // VIEW 2: ALL SITES (GRID & LIST/TABLE VIEW + DEEP-DIVE MONITORING)
