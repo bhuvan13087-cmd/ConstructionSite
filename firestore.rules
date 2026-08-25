@@ -146,10 +146,7 @@ service cloud.firestore {
     }
 
     match /siteEngineers/{userId} {
-      allow read: if isAuthenticated() && (
-        request.auth.uid == userId || 
-        isAdmin()
-      );
+      allow read: if isActiveUser();
       allow create: if isAuthenticated() && (
         request.auth.uid == userId || 
         isAdmin()

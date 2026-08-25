@@ -1523,7 +1523,7 @@ export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords 
     const rSite = String(r.siteId || "").trim();
     if (rSite !== cleanSiteId) return;
 
-    const isSubmitted = r.status === "submitted" || r.locked === true || r.submitted === true;
+    const isSubmitted = r.status === "submitted" || r.status === "no_work" || r.locked === true || r.submitted === true || r.noWork === true || r.isNoWork === true;
     if (isSubmitted) {
       const d = String(r.date || r.attendanceDate || "").trim();
       if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
@@ -1538,7 +1538,7 @@ export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords 
     const rSite = String(r.siteId || "").trim();
     if (rSite !== cleanSiteId) return;
 
-    const isSubmitted = r.status === "submitted" || r.locked === true || r.submitted === true;
+    const isSubmitted = r.status === "submitted" || r.status === "no_work" || r.locked === true || r.submitted === true || r.noWork === true || r.isNoWork === true;
     if (isSubmitted) {
       const d = String(r.attendanceDate || r.date || "").trim();
       if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {

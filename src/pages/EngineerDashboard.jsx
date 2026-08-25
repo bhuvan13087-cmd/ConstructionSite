@@ -60,6 +60,7 @@ import {
   checkLabourSubmissionStatus,
   checkLabourDateSequenceStatus,
   submitLabourAttendance,
+  markLabourNoWork,
   checkMaterialSubmissionStatus,
   saveBulkMaterialEntry,
   updateMaterial,
@@ -70,7 +71,7 @@ import {
   verifyEngineerAttendanceGate,
   subscribeTodayAttendance
 } from "../services/firebaseService.js";
-import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR } from "../services/businessLogic";
+import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR, formatDateDMY } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -2364,9 +2365,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
+    const displayDate = formatDateDMY(labourDate);
+
     showConfirmModal({
       title: `Submit "${teamName}" Attendance?`,
-      message: `You are about to submit ${teamName}'s labour attendance record for ${labourDate}.`,
+      message: `You are about to submit ${teamName}'s labour attendance record for ${displayDate}.`,
       details: "After submission, editing and modifications will be locked for this Team and Date.",
       confirmText: "Submit & Lock",
       cancelText: "Cancel",
@@ -2402,8 +2405,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             return;
           }
 
-          const currentEngineerName = userProfile?.fullName || userProfile?.name || userProfile?.displayName || "Site Engineer";
-          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows, currentEngineerName);
+          const currentEngineerName = userProfile?.fullName || userProfile?.name || userProfile?.displayName || currentUser?.displayName || userProfile?.email || currentUser?.email || "Site Engineer";
+          const currentEngineerEmail = userProfile?.email || currentUser?.email || "";
+          await submitLabourAttendance(activeSiteId, labourDate, currentEngineerId, selectedLabourTeamId, attendanceRows, currentEngineerName, currentEngineerEmail);
           showToast(`"${teamName}" attendance submitted and locked successfully.`, "success");
           if (isMountedRef.current) {
             setIsLabourLocked(true);
@@ -2419,6 +2423,54 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           if (isMountedRef.current) {
             setLabourSubmitting(false);
           }
+          closeConfirmModal();
+        }
+      }
+    });
+  };
+
+  const handlePromptNoWork = async () => {
+    if (!activeSiteId || !labourDate) return;
+    if (isLabourSubmitted) {
+      showToast("This date is already submitted and locked.", "warning");
+      return;
+    }
+
+    // Sequential Date Rule Check
+    const freshSeqCheck = await checkLabourDateSequenceStatus(activeSiteId, labourDate);
+    if (freshSeqCheck && !freshSeqCheck.allowed) {
+      if (isMountedRef.current) {
+        setLabourDateSequenceStatus(freshSeqCheck);
+      }
+      showToast(freshSeqCheck.message || "Please submit the previous pending date first.", "warning");
+      return;
+    }
+
+    const displayDate = formatDateDMY(labourDate);
+
+    showConfirmModal({
+      title: `Mark ${displayDate} as No Work?`,
+      message: `You are about to mark ${displayDate} as a Non-Working Day for this site.`,
+      details: "No workforce attendance will be recorded. The date will be locked, and the next working date will become eligible for entry.",
+      confirmText: "Confirm No Work",
+      cancelText: "Cancel",
+      variant: "lock",
+      onConfirm: async () => {
+        try {
+          const currentEngineerName = userProfile?.fullName || userProfile?.name || userProfile?.displayName || currentUser?.displayName || userProfile?.email || currentUser?.email || "Site Engineer";
+          const currentEngineerEmail = userProfile?.email || currentUser?.email || "";
+          await markLabourNoWork(activeSiteId, labourDate, currentEngineerId, currentEngineerName, "No Work / Non-Working Day", currentEngineerEmail);
+          showToast(`Date ${displayDate} marked as No Work and locked successfully.`, "success");
+          if (isMountedRef.current) {
+            setIsLabourLocked(true);
+          }
+          await fetchLabourLockStatus(selectedLabourTeamId);
+          await loadLockedDates();
+          await loadDashboardData();
+        } catch (err) {
+          console.error("Failed to mark date as No Work:", err);
+          showToast("Failed to mark No Work: " + err.message, "error");
+        } finally {
           closeConfirmModal();
         }
       }
@@ -8377,24 +8429,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
 
   const renderLabourView = () => {
-    // Production Attendance Verification Gate Check
-    const effectiveLabourDate = labourDate || new Date().toISOString().split("T")[0];
-    const isVerified = isAttendanceVerifiedForSiteAndDate(activeSiteId, effectiveLabourDate);
-    if (!isVerified) {
-      const siteObj = assignedSites.find(s => s.id === activeSiteId) || currentSite;
-      return (
-        <AttendanceGateBlockedCard
-          siteName={siteObj?.siteName || "Current Worksite"}
-          dateStr={effectiveLabourDate}
-          sectionTitle="Workforce & Labour Log"
-          onMarkAttendance={() => handleOpenAttendanceGate("labour")}
-          isToday={effectiveLabourDate === new Date().toISOString().split("T")[0]}
-        />
-      );
-    }
-
     const isSequenceBlocked = !isLabourSubmitted && Boolean(labourDateSequenceStatus && !labourDateSequenceStatus.allowed);
     const isFormDisabled = isLabourSubmitted || isSequenceBlocked;
+    const isNoWorkDate = Boolean(labourLockInfo?.isNoWork || labourLockInfo?.noWork || labourLockInfo?.status === "no_work");
 
     const isSubmittedByCurrentEngineer = Boolean(
       isLabourSubmitted && userProfile && labourLockInfo?.submittedBy &&
@@ -8402,11 +8439,15 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
        labourLockInfo.submittedBy === userProfile?.uid ||
        labourLockInfo.submittedBy === userProfile?.id ||
        labourLockInfo.submittedBy === userProfile?.engineerId ||
-       labourLockInfo.submittedBy === userProfile?.customId)
+       labourLockInfo.submittedBy === userProfile?.customId ||
+       (labourLockInfo?.submittedByEmail && userProfile?.email && String(labourLockInfo.submittedByEmail).toLowerCase() === String(userProfile.email).toLowerCase()))
     );
     const submitterDisplayName = isSubmittedByCurrentEngineer
       ? "You"
-      : (labourLockInfo?.submittedByName || labourLockInfo?.submittedBy || "Site Engineer");
+      : (labourLockInfo?.submittedByName || "Site Engineer");
+    const submitterDisplayEmail = isSubmittedByCurrentEngineer
+      ? (userProfile?.email || currentUser?.email || "")
+      : (labourLockInfo?.submittedByEmail || "");
 
     const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
     const teamCategories = selectedTeam?.categories ? Object.values(selectedTeam.categories) : [];
@@ -8500,26 +8541,133 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               flexDirection: "column",
               gap: "8px"
             }}>
-              <label style={{
-                fontSize: "12px",
-                fontWeight: "750",
-                color: "#ea580c",
-                textTransform: "uppercase",
-                letterSpacing: "0.5px"
-              }}>
-                Attendance Date
-              </label>
-              <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                <Calendar size={20} style={{ position: "absolute", left: "12px", color: "#ea580c", pointerEvents: "none" }} />
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <label style={{
+                  fontSize: "12px",
+                  fontWeight: "750",
+                  color: "#ea580c",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px"
+                }}>
+                  Attendance Date
+                </label>
+                {!isLabourSubmitted && !isSequenceBlocked && (
+                  <button
+                    type="button"
+                    onClick={handlePromptNoWork}
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "4px",
+                      padding: "3px 10px",
+                      borderRadius: "8px",
+                      backgroundColor: "#f8fafc",
+                      border: "1px solid #cbd5e1",
+                      color: "#64748b",
+                      fontSize: "11.5px",
+                      fontWeight: "750",
+                      cursor: "pointer",
+                      transition: "all 0.15s ease"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.backgroundColor = "#fef2f2";
+                      e.currentTarget.style.borderColor = "#fca5a5";
+                      e.currentTarget.style.color = "#b91c1c";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.backgroundColor = "#f8fafc";
+                      e.currentTarget.style.borderColor = "#cbd5e1";
+                      e.currentTarget.style.color = "#64748b";
+                    }}
+                    title="Mark this date as a non-working day for this site"
+                  >
+                    <span>🚫</span>
+                    <span>Mark No Work</span>
+                  </button>
+                )}
+              </div>
+              <div 
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  width: "100%",
+                  cursor: "pointer"
+                }}
+                onClick={() => {
+                  const el = document.getElementById("labour-attendance-date-input");
+                  if (el) {
+                    try {
+                      if (typeof el.showPicker === "function") {
+                        el.showPicker();
+                      } else {
+                        el.focus();
+                      }
+                    } catch (err) {
+                      el.focus();
+                    }
+                  }
+                }}
+              >
+                <Calendar size={20} style={{ position: "absolute", left: "14px", color: "#ea580c", pointerEvents: "none", zIndex: 2 }} />
                 <input 
+                  id="labour-attendance-date-input"
                   type="date" 
-                  className="no-native-calendar-icon"
                   value={labourDate} 
                   onChange={(e) => setLabourDate(e.target.value)} 
+                  onClick={(e) => {
+                    try {
+                      if (typeof e.target.showPicker === "function") {
+                        e.target.showPicker();
+                      }
+                    } catch (err) {}
+                  }}
                   style={{
                     width: "100%",
                     height: "48px",
                     padding: "12px 14px 12px 44px",
+                    borderRadius: "12px",
+                    border: "1.5px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    fontSize: "15px",
+                    outline: "none",
+                    color: "#0f172a",
+                    fontWeight: "600",
+                    cursor: "pointer",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Team Selector - Hidden if date is marked No Work */}
+            {!isNoWorkDate && (
+              <div style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "16px",
+                padding: "16px 20px",
+                border: "1px solid #cbd5e1",
+                boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
+                display: "flex",
+                flexDirection: "column",
+                gap: "8px"
+              }}>
+                <label style={{
+                  fontSize: "12px",
+                  fontWeight: "750",
+                  color: "#ea580c",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.5px"
+                }}>
+                  Labour Team
+                </label>
+                <select
+                  value={selectedLabourTeamId}
+                  onChange={(e) => setSelectedLabourTeamId(e.target.value)}
+                  style={{
+                    width: "100%",
+                    height: "48px",
+                    padding: "12px 14px",
                     borderRadius: "12px",
                     border: "1px solid #cbd5e1",
                     backgroundColor: "#ffffff",
@@ -8528,55 +8676,88 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     color: "#0f172a",
                     fontWeight: "600"
                   }}
-                />
+                >
+                  <option value="">-- Select Labour Team --</option>
+                  {labourTeams.map(t => (
+                    <option key={t.id} value={t.id}>{t.teamName}</option>
+                  ))}
+                </select>
               </div>
-            </div>
-
-            {/* Team Selector */}
-            <div style={{
-              backgroundColor: "#ffffff",
-              borderRadius: "16px",
-              padding: "16px 20px",
-              border: "1px solid #cbd5e1",
-              boxShadow: "0px 1px 3px rgba(0,0,0,0.04)",
-              display: "flex",
-              flexDirection: "column",
-              gap: "8px"
-            }}>
-              <label style={{
-                fontSize: "12px",
-                fontWeight: "750",
-                color: "#ea580c",
-                textTransform: "uppercase",
-                letterSpacing: "0.5px"
-              }}>
-                Labour Team
-              </label>
-              <select
-                value={selectedLabourTeamId}
-                onChange={(e) => setSelectedLabourTeamId(e.target.value)}
-                style={{
-                  width: "100%",
-                  height: "48px",
-                  padding: "12px 14px",
-                  borderRadius: "12px",
-                  border: "1px solid #cbd5e1",
-                  backgroundColor: "#ffffff",
-                  fontSize: "15px",
-                  outline: "none",
-                  color: "#0f172a",
-                  fontWeight: "600"
-                }}
-              >
-                <option value="">-- Select Labour Team --</option>
-                {labourTeams.map(t => (
-                  <option key={t.id} value={t.id}>{t.teamName}</option>
-                ))}
-              </select>
-            </div>
+            )}
 
             {/* Categories & Dynamic Rows list */}
-            {!selectedLabourTeamId ? (
+            {isNoWorkDate ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+                <div style={{
+                  backgroundColor: "#f8fafc",
+                  color: "#334155",
+                  padding: "16px 20px",
+                  borderRadius: "16px",
+                  border: "1.5px solid #cbd5e1",
+                  fontSize: "14px",
+                  fontWeight: "700",
+                  textAlign: "center",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "6px"
+                }}>
+                  <div style={{ fontSize: "15px", fontWeight: "850", color: "#0f172a" }}>
+                    {isSubmittedByCurrentEngineer ? "🚫 Marked as No Work by you" : `🚫 Marked as No Work by ${submitterDisplayName}`}
+                  </div>
+                  <div style={{ fontSize: "12.5px", color: "#475569", fontWeight: "500" }}>
+                    {isSubmittedByCurrentEngineer 
+                      ? "This date was confirmed as a Non-Working / No Work day for this site by you. Normal labour entries are locked."
+                      : `This date was confirmed as a Non-Working / No Work day for this site by ${submitterDisplayName}. Normal labour entries are locked.`}
+                  </div>
+                  {labourLockInfo && (
+                    <div style={{ fontSize: "12px", fontWeight: "600", color: "#475569", marginTop: "4px", display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
+                      <div>
+                        <span style={{ fontWeight: "750" }}>
+                          Marked by: {isSubmittedByCurrentEngineer ? "You" : submitterDisplayName}
+                        </span>
+                        {submitterDisplayEmail && !isSubmittedByCurrentEngineer && (
+                          <span style={{ marginLeft: "6px", color: "#64748b", fontWeight: "500" }}>
+                            ({submitterDisplayEmail})
+                          </span>
+                        )}
+                      </div>
+                      {labourLockInfo.submittedAt && (
+                        <span style={{ fontSize: "11.5px", opacity: 0.85 }}>
+                          Marked: {
+                            labourLockInfo.submittedAt?.seconds
+                              ? new Date(labourLockInfo.submittedAt.seconds * 1000).toLocaleString("en-GB")
+                              : (typeof labourLockInfo.submittedAt === "string" || labourLockInfo.submittedAt instanceof Date
+                                ? new Date(labourLockInfo.submittedAt).toLocaleString("en-GB")
+                                : formatDateDMY(labourDate))
+                          }
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{
+                  textAlign: "center",
+                  padding: "36px 20px",
+                  backgroundColor: "#ffffff",
+                  borderRadius: "16px",
+                  border: "1px solid #cbd5e1",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "10px",
+                  boxShadow: "0px 1px 3px rgba(0,0,0,0.04)"
+                }}>
+                  <div style={{ fontSize: "36px" }}>🏖️</div>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#0f172a" }}>
+                    Non-Working Day / No Labour Recorded
+                  </div>
+                  <div style={{ fontSize: "13px", color: "#64748b", maxWidth: "420px", lineHeight: "1.4" }}>
+                    This date has been explicitly marked as No Work for this site. The sequential date rule is satisfied, and the next working date can be submitted normally.
+                  </div>
+                </div>
+              </div>
+            ) : !selectedLabourTeamId ? (
               <div style={{
                 textAlign: "center",
                 padding: "48px 24px",
@@ -8627,21 +8808,28 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         : `Workforce attendance for this site and date has already been submitted by ${submitterDisplayName}. No duplicate submissions are permitted.`}
                     </div>
                     {labourLockInfo && (
-                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#991b1b", marginTop: "2px" }}>
+                      <div style={{ fontSize: "12px", fontWeight: "600", color: "#991b1b", marginTop: "4px", display: "flex", flexDirection: "column", gap: "2px", alignItems: "center" }}>
+                        <div>
+                          <span style={{ fontWeight: "750" }}>
+                            Submitted by: {isSubmittedByCurrentEngineer ? "You" : submitterDisplayName}
+                          </span>
+                          {submitterDisplayEmail && !isSubmittedByCurrentEngineer && (
+                            <span style={{ marginLeft: "6px", color: "#7f1d1d", fontWeight: "500" }}>
+                              ({submitterDisplayEmail})
+                            </span>
+                          )}
+                        </div>
                         {labourLockInfo.submittedAt && (
-                          <span>
+                          <span style={{ fontSize: "11.5px", opacity: 0.85 }}>
                             Submitted: {
                               labourLockInfo.submittedAt?.seconds
-                                ? new Date(labourLockInfo.submittedAt.seconds * 1000).toLocaleString("en-IN")
+                                ? new Date(labourLockInfo.submittedAt.seconds * 1000).toLocaleString("en-GB")
                                 : (typeof labourLockInfo.submittedAt === "string" || labourLockInfo.submittedAt instanceof Date
-                                  ? new Date(labourLockInfo.submittedAt).toLocaleString("en-IN")
-                                  : labourDate)
+                                  ? new Date(labourLockInfo.submittedAt).toLocaleString("en-GB")
+                                  : formatDateDMY(labourDate))
                             }
                           </span>
                         )}
-                        <span style={{ marginLeft: labourLockInfo.submittedAt ? "12px" : "0px", fontWeight: "750" }}>
-                          Submitted by: {isSubmittedByCurrentEngineer ? "You" : submitterDisplayName}
-                        </span>
                       </div>
                     )}
                   </div>
@@ -8666,7 +8854,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     </div>
                     <div style={{ fontSize: "12.5px", color: "#78350f", fontWeight: "500" }}>
                       {labourDateSequenceStatus.requiredDate 
-                        ? `Attendance for previous required date (${labourDateSequenceStatus.requiredDate}) must be submitted and locked before recording attendance for ${labourDate}.`
+                        ? `Attendance for previous required date (${formatDateDMY(labourDateSequenceStatus.requiredDate)}) must be submitted and locked before recording attendance for ${formatDateDMY(labourDate)}.`
                         : (labourDateSequenceStatus.message || "Please submit the previous pending date first.")}
                     </div>
                     {labourDateSequenceStatus.requiredDate && (
@@ -8687,7 +8875,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             transition: "all 0.15s ease"
                           }}
                         >
-                          Switch to Date {labourDateSequenceStatus.requiredDate}
+                          Switch to Date {formatDateDMY(labourDateSequenceStatus.requiredDate)}
                         </button>
                       </div>
                     )}
@@ -9038,9 +9226,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           fontWeight: "750",
                           padding: "4px 10px",
                           borderRadius: "12px",
-                          backgroundColor: isLabourSubmitted ? "#fef2f2" : (isSequenceBlocked ? "#fffbeb" : "#f0fdf4"),
-                          color: isLabourSubmitted ? "#b91c1c" : (isSequenceBlocked ? "#b45309" : "#166534"),
-                          border: isLabourSubmitted ? "1px solid #fca5a5" : (isSequenceBlocked ? "1px solid #fde68a" : "1px solid #bbf7d0"),
+                          backgroundColor: isLabourSubmitted ? (isNoWorkDate ? "#f8fafc" : "#fef2f2") : (isSequenceBlocked ? "#fffbeb" : "#f0fdf4"),
+                          color: isLabourSubmitted ? (isNoWorkDate ? "#334155" : "#b91c1c") : (isSequenceBlocked ? "#b45309" : "#166534"),
+                          border: isLabourSubmitted ? (isNoWorkDate ? "1px solid #cbd5e1" : "1px solid #fca5a5") : (isSequenceBlocked ? "1px solid #fde68a" : "1px solid #bbf7d0"),
                           display: "flex",
                           alignItems: "center",
                           gap: "6px",
@@ -9049,7 +9237,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           lineHeight: "1.2"
                         }}>
                           {isLabourSubmitted 
-                            ? (isSubmittedByCurrentEngineer ? "🔒 Submitted by you" : `🔒 Submitted by ${submitterDisplayName}`) 
+                            ? (isNoWorkDate
+                                ? (isSubmittedByCurrentEngineer ? "🚫 No Work (You)" : `🚫 No Work (${submitterDisplayName})`)
+                                : (isSubmittedByCurrentEngineer ? "🔒 Submitted by you" : `🔒 Submitted by ${submitterDisplayName}`)) 
                             : (isSequenceBlocked ? "⚠️ Sequence Blocked" : "🟢 Open & Editable")}
                         </span>
                       </div>
