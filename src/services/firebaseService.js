@@ -21,6 +21,7 @@ import {
 import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth } from "../firebase/config.js";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
+import { evaluateLabourDateSequence } from "./businessLogic.js";
 
 // Lazy getter for the Firestore database instance
 function getDb() {
@@ -5936,6 +5937,15 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
     }
   }
 
+  // Sequential Date Rule: Prevent modifying records for dates blocked by previous pending dates
+  if (recordData.siteId && attDate) {
+    const siteLocks = await getLabourLocksForSite(recordData.siteId);
+    const seq = evaluateLabourDateSequence(recordData.siteId, attDate, siteLocks);
+    if (!seq.allowed && seq.status !== "editable") {
+      throw new Error(seq.message || "Please submit the previous pending date first.");
+    }
+  }
+
   const workerCount = Number(recordData.workerCount) || 0;
   const customWorkUnits = Number(recordData.customWorkUnits !== undefined ? recordData.customWorkUnits : (recordData.units !== undefined ? recordData.units : (recordData.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
   const dailyWage = Number(recordData.dailyWage !== undefined ? recordData.dailyWage : (recordData.wage || 0)) || 0;
@@ -6008,6 +6018,14 @@ export async function deleteLabourAttendanceRecord(recordId) {
     const existing = docSnap.data();
     if (existing.locked || existing.status === "submitted" || existing.submitted) {
       throw new Error("Cannot delete: This team's attendance is submitted and locked.");
+    }
+    const attDate = existing.attendanceDate || existing.date;
+    if (existing.siteId && attDate) {
+      const siteLocks = await getLabourLocksForSite(existing.siteId);
+      const seq = evaluateLabourDateSequence(existing.siteId, attDate, siteLocks);
+      if (!seq.allowed && seq.status !== "editable") {
+        throw new Error(seq.message || "Please submit the previous pending date first.");
+      }
     }
   }
   await deleteDoc(docRef);
@@ -6322,6 +6340,42 @@ export async function getLabourLocksForSite(siteId) {
   }
 }
 
+// Check date sequence status and lock status for Labour Attendance on a Site + Date
+export async function checkLabourDateSequenceStatus(siteId, dateStr) {
+  if (!siteId || !dateStr) {
+    return { allowed: false, status: "invalid", message: "Site ID and Date are required." };
+  }
+  const cleanSiteId = String(siteId).trim();
+  const cleanDateStr = String(dateStr).trim();
+  const db = getDb();
+
+  try {
+    // 1. Fetch site locks from canonical attendance collection
+    const locks = await getLabourLocksForSite(cleanSiteId);
+
+    // 2. Fetch existing draft/unsubmitted records for site
+    const qDrafts = query(
+      collection(db, "labourMemberAttendance"),
+      where("siteId", "==", cleanSiteId)
+    );
+    const draftSnap = await getDocs(qDrafts);
+    const draftRecords = [];
+    draftSnap.forEach(d => {
+      draftRecords.push({ id: d.id, ...d.data() });
+    });
+
+    // 3. Evaluate sequence status using canonical business logic
+    return evaluateLabourDateSequence(cleanSiteId, cleanDateStr, locks, draftRecords);
+  } catch (err) {
+    console.error("Error checking labour date sequence status:", err);
+    return {
+      allowed: true, // Fallback gracefully if query fails
+      status: "editable",
+      error: err.message
+    };
+  }
+}
+
 // Submit workforce attendance for site and date (Site-Level Labour Submission & Concurrency Lock)
 export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId = null, attendanceItems = []) {
   if (!siteId || !dateStr) throw new Error("Site ID and Date are required to submit attendance.");
@@ -6341,7 +6395,22 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
   const siteLockDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
   const teamLockDocRef = cleanTeamId ? doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanTeamId}_${cleanDateStr}`) : null;
 
-  // 2. Concurrency Guard: Atomic Firestore transaction ensures only ONE submission succeeds if multiple engineers submit simultaneously
+  // 2. Sequential Date Validation against canonical site locks before submission
+  const locks = await getLabourLocksForSite(cleanSiteId);
+  const qDrafts = query(
+    collection(db, "labourMemberAttendance"),
+    where("siteId", "==", cleanSiteId)
+  );
+  const draftSnap = await getDocs(qDrafts);
+  const draftRecords = [];
+  draftSnap.forEach(d => draftRecords.push({ id: d.id, ...d.data() }));
+
+  const seqResult = evaluateLabourDateSequence(cleanSiteId, cleanDateStr, locks, draftRecords);
+  if (!seqResult.allowed) {
+    throw new Error(seqResult.message || "Please submit the previous pending date first.");
+  }
+
+  // 3. Concurrency Guard: Atomic Firestore transaction ensures only ONE submission succeeds if multiple engineers submit simultaneously
   await runTransaction(db, async (transaction) => {
     const siteLockSnap = await transaction.get(siteLockDocRef);
     if (siteLockSnap.exists()) {

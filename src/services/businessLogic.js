@@ -1437,4 +1437,220 @@ export function computeSitePendingItemsSummary(siteId, materials = [], transfers
   };
 }
 
+/**
+ * Safely adds/subtracts days to a YYYY-MM-DD string using UTC math to avoid timezone shifts.
+ * @param {string} dateStr - Date string in YYYY-MM-DD format
+ * @param {number} numDays - Number of days to add (positive) or subtract (negative)
+ * @returns {string} - Resulting YYYY-MM-DD date string
+ */
+export function addDaysUTC(dateStr, numDays) {
+  if (!dateStr || typeof dateStr !== "string") return "";
+  const parts = dateStr.trim().split("-");
+  if (parts.length !== 3) return "";
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  if (isNaN(y) || isNaN(m) || isNaN(d)) return "";
+  
+  const date = new Date(Date.UTC(y, m - 1, d));
+  date.setUTCDate(date.getUTCDate() + numDays);
+  
+  const resY = date.getUTCFullYear();
+  const resM = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const resD = String(date.getUTCDate()).padStart(2, "0");
+  return `${resY}-${resM}-${resD}`;
+}
+
+/**
+ * Calculates day difference between two YYYY-MM-DD strings (dateStr2 - dateStr1).
+ * @param {string} dateStr1 - Start date string
+ * @param {string} dateStr2 - End date string
+ * @returns {number} - Difference in calendar days
+ */
+export function getDaysDiffUTC(dateStr1, dateStr2) {
+  if (!dateStr1 || !dateStr2) return 0;
+  const p1 = String(dateStr1).trim().split("-");
+  const p2 = String(dateStr2).trim().split("-");
+  if (p1.length !== 3 || p2.length !== 3) return 0;
+  const t1 = Date.UTC(parseInt(p1[0], 10), parseInt(p1[1], 10) - 1, parseInt(p1[2], 10));
+  const t2 = Date.UTC(parseInt(p2[0], 10), parseInt(p2[1], 10) - 1, parseInt(p2[2], 10));
+  return Math.round((t2 - t1) / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Evaluates the sequential date state and locking rule for Labour Attendance on a specific site.
+ * 
+ * Rules:
+ * 1. Site-specific: Only locks and drafts for this specific siteId are evaluated.
+ * 2. Permanent Lock: Once a date is submitted, it is locked permanently (allowed = false, status = "locked").
+ * 3. Strict Sequence:
+ *    - If historical locked dates exist for this site, let D_max = max(lockedDates).
+ *    - The next valid date is D_next = D_max + 1 day.
+ *    - If targetDateStr === D_next -> allowed = true, status = "editable".
+ *    - If targetDateStr > D_next -> allowed = false, status = "blocked_pending_previous", requiredDate = D_next,
+ *      message = "Please submit the previous pending date first."
+ *    - If targetDateStr < D_max and targetDateStr not in lockedDates -> allowed = false, status = "blocked_skipped",
+ *      requiredDate = D_next, message = "Please submit the previous pending date first."
+ * 4. Initial Site Entry:
+ *    - If no locked dates exist yet for this site:
+ *      - If unsubmitted draft records exist on earlier dates, the earliest draft date is the required pending date.
+ *      - Otherwise, the selected date is allowed as the initial sequence anchor.
+ *
+ * @param {string} siteId - Canonical site ID
+ * @param {string} targetDateStr - Target date string (YYYY-MM-DD)
+ * @param {Array} lockedRecords - Array of canonical lock documents from attendance collection
+ * @param {Array} [draftRecords] - Array of existing labourMemberAttendance records for site
+ * @returns {object} - Sequence evaluation result
+ */
+export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords = [], draftRecords = []) {
+  if (!siteId || !targetDateStr) {
+    return {
+      allowed: false,
+      status: "invalid",
+      message: "Site ID and Attendance Date are required.",
+      siteId: siteId || "",
+      targetDate: targetDateStr || ""
+    };
+  }
+
+  const cleanSiteId = String(siteId).trim();
+  const cleanTargetDate = String(targetDateStr).trim();
+
+  // 1. Extract and sanitize unique locked dates for this specific site
+  const lockedDatesSet = new Set();
+  (lockedRecords || []).forEach(r => {
+    if (!r) return;
+    const rSite = String(r.siteId || "").trim();
+    if (rSite !== cleanSiteId) return;
+
+    const isSubmitted = r.status === "submitted" || r.locked === true || r.submitted === true;
+    if (isSubmitted) {
+      const d = String(r.date || r.attendanceDate || "").trim();
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        lockedDatesSet.add(d);
+      }
+    }
+  });
+
+  // Also extract any submitted/locked records from draftRecords (labourMemberAttendance)
+  (draftRecords || []).forEach(r => {
+    if (!r) return;
+    const rSite = String(r.siteId || "").trim();
+    if (rSite !== cleanSiteId) return;
+
+    const isSubmitted = r.status === "submitted" || r.locked === true || r.submitted === true;
+    if (isSubmitted) {
+      const d = String(r.attendanceDate || r.date || "").trim();
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) {
+        lockedDatesSet.add(d);
+      }
+    }
+  });
+
+  // Case 1: Target date is already locked
+  if (lockedDatesSet.has(cleanTargetDate)) {
+    return {
+      allowed: false,
+      status: "locked",
+      locked: true,
+      submitted: true,
+      message: "Labour attendance for this site on this date has already been submitted and is locked.",
+      siteId: cleanSiteId,
+      targetDate: cleanTargetDate
+    };
+  }
+
+  const sortedLockedDates = Array.from(lockedDatesSet).sort();
+
+  // Case 2: Site has previous locked dates
+  if (sortedLockedDates.length > 0) {
+    const latestLockedDate = sortedLockedDates[sortedLockedDates.length - 1];
+    const nextRequiredDate = addDaysUTC(latestLockedDate, 1);
+
+    if (cleanTargetDate === nextRequiredDate) {
+      return {
+        allowed: true,
+        status: "editable",
+        locked: false,
+        submitted: false,
+        latestLockedDate,
+        nextRequiredDate,
+        siteId: cleanSiteId,
+        targetDate: cleanTargetDate
+      };
+    }
+
+    if (cleanTargetDate > nextRequiredDate) {
+      return {
+        allowed: false,
+        status: "blocked_pending_previous",
+        locked: false,
+        submitted: false,
+        requiredDate: nextRequiredDate,
+        latestLockedDate,
+        message: "Please submit the previous pending date first.",
+        siteId: cleanSiteId,
+        targetDate: cleanTargetDate
+      };
+    }
+
+    // cleanTargetDate < latestLockedDate and not in lockedDatesSet (skipped date)
+    return {
+      allowed: false,
+      status: "blocked_skipped",
+      locked: false,
+      submitted: false,
+      requiredDate: nextRequiredDate,
+      latestLockedDate,
+      message: "Please submit the previous pending date first.",
+      siteId: cleanSiteId,
+      targetDate: cleanTargetDate
+    };
+  }
+
+  // Case 3: Site has NO previous locked dates
+  // Check if unsubmitted draft records exist on an earlier date
+  const unsubmittedDraftDates = new Set();
+  (draftRecords || []).forEach(r => {
+    if (!r) return;
+    const rSite = String(r.siteId || "").trim();
+    if (rSite !== cleanSiteId) return;
+
+    const isSubmitted = r.status === "submitted" || r.locked === true || r.submitted === true;
+    if (!isSubmitted) {
+      const d = String(r.attendanceDate || r.date || "").trim();
+      if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && d !== cleanTargetDate) {
+        unsubmittedDraftDates.add(d);
+      }
+    }
+  });
+
+  const sortedDraftDates = Array.from(unsubmittedDraftDates).sort();
+  if (sortedDraftDates.length > 0) {
+    const earliestDraftDate = sortedDraftDates[0];
+    if (earliestDraftDate < cleanTargetDate) {
+      return {
+        allowed: false,
+        status: "blocked_pending_previous",
+        locked: false,
+        submitted: false,
+        requiredDate: earliestDraftDate,
+        message: "Please submit the previous pending date first.",
+        siteId: cleanSiteId,
+        targetDate: cleanTargetDate
+      };
+    }
+  }
+
+  return {
+    allowed: true,
+    status: "editable",
+    locked: false,
+    submitted: false,
+    siteId: cleanSiteId,
+    targetDate: cleanTargetDate
+  };
+}
+
+
 

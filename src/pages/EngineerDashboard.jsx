@@ -58,6 +58,7 @@ import {
   getLabourLocksForSite,
   getAttendanceForSite,
   checkLabourSubmissionStatus,
+  checkLabourDateSequenceStatus,
   submitLabourAttendance,
   checkMaterialSubmissionStatus,
   saveBulkMaterialEntry,
@@ -493,11 +494,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const [labourTeams, setLabourTeams] = useState([]);
   const [selectedLabourTeamId, setSelectedLabourTeamId] = useState("");
   
-  // Workforce submit and lock states (Site-Level Lock)
+  // Workforce submit and lock states (Site-Level Lock & Sequential Date Enforcement)
   const [lockedDates, setLockedDates] = useState(new Set());
   const [labourSubmitting, setLabourSubmitting] = useState(false);
   const [isLabourLocked, setIsLabourLocked] = useState(false);
   const [labourLockInfo, setLabourLockInfo] = useState(null);
+  const [labourDateSequenceStatus, setLabourDateSequenceStatus] = useState({ allowed: true, status: "editable" });
   const isLabourSubmitted = isLabourLocked;
   const [attendanceRows, setAttendanceRows] = useState([]);
   const [labourHistoryRecords, setLabourHistoryRecords] = useState([]);
@@ -508,21 +510,27 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     if (!activeSiteId || !labourDate) {
       setIsLabourLocked(false);
       setLabourLockInfo(null);
+      setLabourDateSequenceStatus({ allowed: true, status: "editable" });
       return { submitted: false };
     }
     try {
-      const lockStatus = await checkLabourSubmissionStatus(activeSiteId, labourDate, teamId);
-      const isSubmitted = Boolean(lockStatus && lockStatus.submitted);
+      const [lockStatus, seqStatus] = await Promise.all([
+        checkLabourSubmissionStatus(activeSiteId, labourDate, teamId),
+        checkLabourDateSequenceStatus(activeSiteId, labourDate)
+      ]);
+      const isSubmitted = Boolean(lockStatus && lockStatus.submitted) || Boolean(seqStatus && seqStatus.status === "locked");
       if (isMountedRef.current) {
         setIsLabourLocked(isSubmitted);
         setLabourLockInfo(isSubmitted ? lockStatus : null);
+        setLabourDateSequenceStatus(seqStatus || { allowed: !isSubmitted, status: isSubmitted ? "locked" : "editable" });
       }
       return lockStatus;
     } catch (err) {
-      console.error("Error checking labour submission status:", err);
+      console.error("Error checking labour submission and sequence status:", err);
       if (isMountedRef.current) {
         setIsLabourLocked(false);
         setLabourLockInfo(null);
+        setLabourDateSequenceStatus({ allowed: true, status: "editable" });
       }
       return { submitted: false };
     }
@@ -1862,6 +1870,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot modify count: This team's attendance is submitted and locked.", "error");
       return;
     }
+    if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
+      showToast(labourDateSequenceStatus.message || "Please submit the previous pending date first.", "warning");
+      return;
+    }
 
     const key = `${categoryId}`;
     if (savingRecordKeys[key]) return; // Synchronous guard per category
@@ -1961,6 +1973,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       showToast("Cannot modify work units: This team's attendance is submitted and locked.", "error");
       return;
     }
+    if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
+      showToast(labourDateSequenceStatus.message || "Please submit the previous pending date first.", "warning");
+      return;
+    }
     const units = Math.max(0.01, Number(newUnitsStr) || 1.0);
     setWorkUnitsSelections(prev => ({ ...prev, [categoryId]: newUnitsStr }));
 
@@ -2029,6 +2045,10 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
   const handleWorkerCustomDurationChange = async (categoryId, workerIndex, newUnitsStr, customWorkerName = null) => {
     if (isLabourSubmitted) {
       showToast("Cannot modify duration: This team's attendance is submitted and locked.", "error");
+      return;
+    }
+    if (labourDateSequenceStatus && !labourDateSequenceStatus.allowed) {
+      showToast(labourDateSequenceStatus.message || "Please submit the previous pending date first.", "warning");
       return;
     }
     const newUnit = Math.max(0.01, Number(newUnitsStr) || 1.0);
@@ -2318,6 +2338,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       return;
     }
 
+    // Sequential Date Rule Check
+    const freshSeqCheck = await checkLabourDateSequenceStatus(activeSiteId, labourDate);
+    if (freshSeqCheck && !freshSeqCheck.allowed) {
+      if (isMountedRef.current) {
+        setLabourDateSequenceStatus(freshSeqCheck);
+      }
+      showToast(freshSeqCheck.message || "Please submit the previous pending date first.", "warning");
+      return;
+    }
+
     showConfirmModal({
       title: `Submit "${teamName}" Attendance?`,
       message: `You are about to submit ${teamName}'s labour attendance record for ${labourDate}.`,
@@ -2338,6 +2368,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               setLabourLockInfo(reCheck);
             }
             showToast(`Attendance for "${teamName}" on this date was already submitted and locked.`, "warning");
+            closeConfirmModal();
+            return;
+          }
+
+          const reSeqCheck = await checkLabourDateSequenceStatus(activeSiteId, labourDate);
+          if (reSeqCheck && !reSeqCheck.allowed) {
+            if (isMountedRef.current) {
+              setLabourDateSequenceStatus(reSeqCheck);
+            }
+            showToast(reSeqCheck.message || "Please submit the previous pending date first.", "warning");
             closeConfirmModal();
             return;
           }
@@ -8332,6 +8372,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
       );
     }
 
+    const isSequenceBlocked = !isLabourSubmitted && Boolean(labourDateSequenceStatus && !labourDateSequenceStatus.allowed);
+    const isFormDisabled = isLabourSubmitted || isSequenceBlocked;
+
     const selectedTeam = labourTeams.find(t => t.id === selectedLabourTeamId);
     const teamCategories = selectedTeam?.categories ? Object.values(selectedTeam.categories) : [];
     
@@ -8570,6 +8613,54 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                     )}
                   </div>
                 )}
+
+                {isSequenceBlocked && (
+                  <div style={{
+                    backgroundColor: "#fffbeb",
+                    color: "#92400e",
+                    padding: "16px 20px",
+                    borderRadius: "16px",
+                    border: "1px solid #fde68a",
+                    fontSize: "14px",
+                    fontWeight: "700",
+                    textAlign: "center",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "6px"
+                  }}>
+                    <div style={{ fontSize: "14px", fontWeight: "800", color: "#b45309" }}>
+                      ⚠️ Please submit the previous pending date first
+                    </div>
+                    <div style={{ fontSize: "12.5px", color: "#78350f", fontWeight: "500" }}>
+                      {labourDateSequenceStatus.requiredDate 
+                        ? `Attendance for previous required date (${labourDateSequenceStatus.requiredDate}) must be submitted and locked before recording attendance for ${labourDate}.`
+                        : (labourDateSequenceStatus.message || "Please submit the previous pending date first.")}
+                    </div>
+                    {labourDateSequenceStatus.requiredDate && (
+                      <div style={{ marginTop: "6px" }}>
+                        <button
+                          type="button"
+                          onClick={() => setLabourDate(labourDateSequenceStatus.requiredDate)}
+                          style={{
+                            padding: "6px 16px",
+                            borderRadius: "10px",
+                            backgroundColor: "#ea580c",
+                            color: "#ffffff",
+                            border: "none",
+                            fontSize: "12.5px",
+                            fontWeight: "750",
+                            cursor: "pointer",
+                            boxShadow: "0 1px 3px rgba(234,88,12,0.3)",
+                            transition: "all 0.15s ease"
+                          }}
+                        >
+                          Switch to Date {labourDateSequenceStatus.requiredDate}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {teamCategories.map(cat => {
                   const record = attendanceRows.find(r => r.categoryId === cat.id);
                   const count = record ? record.workerCount : 0;
@@ -8638,16 +8729,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <button
                             type="button"
                             onClick={() => handleCountChange(cat.id, currentUnitsStr, -1)}
-                            disabled={count <= 0 || isSaving || isLabourSubmitted}
+                            disabled={count <= 0 || isSaving || isFormDisabled}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: (count <= 0 || isLabourSubmitted) ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
-                              backgroundColor: (count <= 0 || isLabourSubmitted) ? "#f1f5f9" : "#fff7ed",
-                              color: (count <= 0 || isLabourSubmitted) ? "#94a3b8" : "#ea580c",
+                              border: (count <= 0 || isFormDisabled) ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
+                              backgroundColor: (count <= 0 || isFormDisabled) ? "#f1f5f9" : "#fff7ed",
+                              color: (count <= 0 || isFormDisabled) ? "#94a3b8" : "#ea580c",
                               fontWeight: "900",
-                              cursor: (count <= 0 || isLabourSubmitted) ? "not-allowed" : "pointer",
+                              cursor: (count <= 0 || isFormDisabled) ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
@@ -8662,16 +8753,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           <button
                             type="button"
                             onClick={() => handleCountChange(cat.id, currentUnitsStr, 1)}
-                            disabled={isSaving || isLabourSubmitted}
+                            disabled={isSaving || isFormDisabled}
                             style={{
                               width: "40px",
                               height: "40px",
                               borderRadius: "50%",
-                              border: isLabourSubmitted ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
-                              backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ea580c",
-                              color: isLabourSubmitted ? "#94a3b8" : "#ffffff",
+                              border: isFormDisabled ? "1px solid #cbd5e1" : "1.5px solid #ea580c",
+                              backgroundColor: isFormDisabled ? "#f1f5f9" : "#ea580c",
+                              color: isFormDisabled ? "#94a3b8" : "#ffffff",
                               fontWeight: "900",
-                              cursor: isLabourSubmitted ? "not-allowed" : "pointer",
+                              cursor: isFormDisabled ? "not-allowed" : "pointer",
                               fontSize: "20px",
                               display: "flex",
                               alignItems: "center",
@@ -8714,7 +8805,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                               placeholder="1.0"
                               value={currentUnitsStr}
                               onChange={(e) => handleWorkUnitsChange(cat.id, e.target.value)}
-                              disabled={isLabourSubmitted}
+                              disabled={isFormDisabled}
                               style={{
                                 width: "72px",
                                 height: "36px",
@@ -8725,7 +8816,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 fontSize: "14px",
                                 fontWeight: "800",
                                 textAlign: "center",
-                                backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
+                                backgroundColor: isFormDisabled ? "#f1f5f9" : "#ffffff",
                                 outline: "none"
                               }}
                             />
@@ -8749,92 +8840,64 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           paddingTop: "10px",
                           display: "flex",
                           flexDirection: "column",
-                          gap: "10px"
+                          gap: "8px"
                         }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                            <button
-                              type="button"
-                              onClick={() => toggleExpandWorkerCategory(cat.id)}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: "6px",
-                                background: "none",
-                                border: "none",
-                                color: hasCustomEntries ? "#c2410c" : "#64748b",
-                                fontSize: "12.5px",
-                                fontWeight: "750",
-                                cursor: "pointer",
-                                padding: "2px 0"
-                              }}
-                            >
-                              <Users size={14} />
-                              <span>Individual Worker / Custom Durations</span>
-                              {hasCustomEntries && (
-                                <span style={{ marginLeft: "4px", fontSize: "10.5px", backgroundColor: "#ffedd5", color: "#c2410c", padding: "1px 6px", borderRadius: "6px", fontWeight: "800" }}>
-                                  {record.workerEntries.length} Configured
-                                </span>
-                              )}
-                              {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                            </button>
-
-                            <span style={{ fontSize: "11px", color: "#64748b" }}>
-                              {count} {count === 1 ? "worker" : "workers"}
+                          <div
+                            onClick={() => toggleExpandWorkerCategory(cat.id)}
+                            style={{
+                              display: "flex",
+                              justifyContent: "space-between",
+                              alignItems: "center",
+                              cursor: "pointer",
+                              userSelect: "none"
+                            }}
+                          >
+                            <span style={{ fontSize: "12.5px", fontWeight: "750", color: "#475569" }}>
+                              Worker-Level Customization ({count} {count === 1 ? "worker" : "workers"})
+                            </span>
+                            <span style={{ fontSize: "12px", color: "#ea580c", fontWeight: "800" }}>
+                              {isExpanded ? "▲ Hide" : "▼ Specify Individual Durations"}
                             </span>
                           </div>
 
                           {isExpanded && (
                             <div style={{
-                              backgroundColor: "#f8fafc",
-                              border: "1px solid #e2e8f0",
-                              borderRadius: "10px",
-                              padding: "12px",
                               display: "flex",
                               flexDirection: "column",
-                              gap: "8px"
+                              gap: "8px",
+                              backgroundColor: "#f8fafc",
+                              padding: "12px",
+                              borderRadius: "12px",
+                              border: "1px solid #e2e8f0"
                             }}>
-                              <div style={{
-                                display: "grid",
-                                gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
-                                gap: "8px",
-                                fontSize: "11px",
-                                fontWeight: "750",
-                                color: "#64748b",
-                                textTransform: "uppercase",
-                                borderBottom: "1px solid #e2e8f0",
-                                paddingBottom: "6px"
-                              }}>
-                                <span>Worker</span>
-                                <span style={{ textAlign: "center" }}>Duration</span>
-                                <span style={{ textAlign: "right" }}>Rate</span>
-                                <span style={{ textAlign: "right" }}>Amount</span>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 64px 64px 72px", gap: "6px", fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", paddingBottom: "4px", borderBottom: "1px solid #e2e8f0" }}>
+                                <span>Worker Name</span>
+                                <span style={{ textAlign: "center" }}>Units</span>
+                                <span style={{ textAlign: "right" }}>Wage</span>
+                                <span style={{ textAlign: "right" }}>Subtotal</span>
                               </div>
 
                               {Array.from({ length: count }).map((_, idx) => {
-                                const registeredMembers = cat.members ? (Array.isArray(cat.members) ? cat.members : Object.values(cat.members)) : [];
-                                const memberObj = registeredMembers[idx];
-                                const existingEntry = (record?.workerEntries || [])[idx];
-                                const workerName = existingEntry?.workerName || memberObj?.name || `${cat.name} ${idx + 1}`;
-                                const workerUnits = existingEntry?.customWorkUnits !== undefined ? Number(existingEntry.customWorkUnits) : currentUnits;
-                                const workerWage = existingEntry?.dailyWage !== undefined ? Number(existingEntry.dailyWage) : dailyWage;
-                                const workerAmount = workerUnits * workerWage;
+                                const workerEntry = (record?.workerEntries || [])[idx];
+                                const workerName = workerEntry?.workerName || `${cat.name} ${idx + 1}`;
+                                const workerUnits = workerEntry?.customWorkUnits !== undefined ? workerEntry.customWorkUnits : currentUnits;
+                                const workerWage = workerEntry?.dailyWage !== undefined ? workerEntry.dailyWage : dailyWage;
+                                const workerAmount = workerEntry?.calculatedAmount !== undefined ? workerEntry.calculatedAmount : (workerUnits * workerWage);
 
                                 return (
                                   <div key={idx} style={{
                                     display: "grid",
-                                    gridTemplateColumns: "2fr 1.2fr 1fr 1.2fr",
-                                    gap: "8px",
-                                    alignItems: "center",
-                                    padding: "5px 0",
-                                    borderBottom: idx < count - 1 ? "1px solid #f1f5f9" : "none"
+                                    gridTemplateColumns: "1fr 64px 64px 72px",
+                                    gap: "6px",
+                                    alignItems: "center"
                                   }}>
-                                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: "6px", overflow: "hidden" }}>
                                       <div style={{
-                                        width: "20px",
-                                        height: "20px",
+                                        width: "18px",
+                                        height: "18px",
                                         borderRadius: "50%",
-                                        backgroundColor: "#e2e8f0",
-                                        color: "#475569",
+                                        backgroundColor: "#ea580c",
+                                        color: "#ffffff",
                                         display: "flex",
                                         alignItems: "center",
                                         justifyContent: "center",
@@ -8844,42 +8907,33 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                       }}>
                                         {idx + 1}
                                       </div>
-                                      <span style={{ fontSize: "12.5px", fontWeight: "700", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={workerName}>
+                                      <span style={{ fontSize: "12px", fontWeight: "700", color: "#1e293b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                                         {workerName}
                                       </span>
                                     </div>
-
-                                    <div style={{ display: "flex", justifyContent: "center" }}>
-                                      <input
-                                        type="number"
-                                        step="any"
-                                        min="0.01"
-                                        value={workerUnits}
-                                        onChange={(e) => handleWorkerCustomDurationChange(cat.id, idx, e.target.value, workerName)}
-                                        disabled={isLabourSubmitted}
-                                        style={{
-                                          width: "60px",
-                                          height: "30px",
-                                          boxSizing: "border-box",
-                                          padding: "4px 6px",
-                                          borderRadius: "6px",
-                                          border: "1px solid #cbd5e1",
-                                          fontSize: "12px",
-                                          fontWeight: "800",
-                                          textAlign: "center",
-                                          backgroundColor: isLabourSubmitted ? "#f1f5f9" : "#ffffff",
-                                          outline: "none"
-                                        }}
-                                      />
-                                    </div>
-
-                                    <div style={{ textAlign: "right", fontSize: "12px", color: "#64748b", fontWeight: "600" }}>
-                                      ₹{workerWage.toLocaleString("en-IN")}
-                                    </div>
-
-                                    <div style={{ textAlign: "right", fontSize: "13px", fontWeight: "800", color: "#0f172a" }}>
-                                      ₹{workerAmount.toLocaleString("en-IN")}
-                                    </div>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      min="0.01"
+                                      value={workerUnits}
+                                      onChange={(e) => handleWorkerCustomDurationChange(cat.id, idx, e.target.value, workerName)}
+                                      disabled={isFormDisabled}
+                                      style={{
+                                        width: "60px",
+                                        height: "30px",
+                                        boxSizing: "border-box",
+                                        padding: "4px 6px",
+                                        borderRadius: "6px",
+                                        border: "1px solid #cbd5e1",
+                                        fontSize: "12px",
+                                        fontWeight: "800",
+                                        textAlign: "center",
+                                        backgroundColor: isFormDisabled ? "#f1f5f9" : "#ffffff",
+                                        outline: "none"
+                                      }}
+                                    />
+                                    <span style={{ fontSize: "12px", color: "#64748b", textAlign: "right" }}>₹{workerWage.toLocaleString("en-IN")}</span>
+                                    <span style={{ fontSize: "13px", fontWeight: "800", textAlign: "right" }}>₹{workerAmount.toLocaleString("en-IN")}</span>
                                   </div>
                                 );
                               })}
@@ -8951,9 +9005,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           fontWeight: "750",
                           padding: "4px 10px",
                           borderRadius: "12px",
-                          backgroundColor: isLabourSubmitted ? "#fef2f2" : "#f0fdf4",
-                          color: isLabourSubmitted ? "#b91c1c" : "#166534",
-                          border: isLabourSubmitted ? "1px solid #fca5a5" : "1px solid #bbf7d0",
+                          backgroundColor: isLabourSubmitted ? "#fef2f2" : (isSequenceBlocked ? "#fffbeb" : "#f0fdf4"),
+                          color: isLabourSubmitted ? "#b91c1c" : (isSequenceBlocked ? "#b45309" : "#166534"),
+                          border: isLabourSubmitted ? "1px solid #fca5a5" : (isSequenceBlocked ? "1px solid #fde68a" : "1px solid #bbf7d0"),
                           display: "flex",
                           alignItems: "center",
                           gap: "6px",
@@ -8961,7 +9015,9 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                           flexShrink: 0,
                           lineHeight: "1.2"
                         }}>
-                          {isLabourSubmitted ? "🔒 Submitted & Locked" : "🟢 Open & Editable"}
+                          {isLabourSubmitted 
+                            ? "🔒 Submitted & Locked" 
+                            : (isSequenceBlocked ? "⚠️ Sequence Blocked" : "🟢 Open & Editable")}
                         </span>
                       </div>
 
@@ -9013,23 +9069,23 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   <button
                     type="button"
                     onClick={handleLabourSubmit}
-                    disabled={labourSubmitting || attendanceRows.length === 0}
+                    disabled={labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked}
                     style={{
                       width: "100%",
                       padding: "14px 16px",
                       borderRadius: "14px",
-                      backgroundColor: (labourSubmitting || attendanceRows.length === 0) ? "#f1f5f9" : "#ea580c",
-                      color: (labourSubmitting || attendanceRows.length === 0) ? "#94a3b8" : "#ffffff",
-                      border: (labourSubmitting || attendanceRows.length === 0) ? "1px solid #cbd5e1" : "none",
+                      backgroundColor: (labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked) ? "#f1f5f9" : "#ea580c",
+                      color: (labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked) ? "#94a3b8" : "#ffffff",
+                      border: (labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked) ? "1px solid #cbd5e1" : "none",
                       fontSize: "16px",
                       fontWeight: "750",
-                      cursor: (labourSubmitting || attendanceRows.length === 0) ? "not-allowed" : "pointer",
+                      cursor: (labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked) ? "not-allowed" : "pointer",
                       marginTop: "16px",
-                      boxShadow: (labourSubmitting || attendanceRows.length === 0) ? "none" : "0px 2px 6px rgba(234,88,12,0.25)",
+                      boxShadow: (labourSubmitting || attendanceRows.length === 0 || isSequenceBlocked) ? "none" : "0px 2px 6px rgba(234,88,12,0.25)",
                       transition: "all 0.2s ease"
                     }}
                   >
-                    {labourSubmitting ? "Submitting..." : "Submit Attendance"}
+                    {labourSubmitting ? "Submitting..." : (isSequenceBlocked ? "Please submit the previous pending date first" : "Submit Attendance")}
                   </button>
                 )}
               </div>
