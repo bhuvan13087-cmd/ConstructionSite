@@ -70,7 +70,7 @@ export default function AppRoutes() {
 
       {/* Protected Super Admin Area */}
       <Route element={<ProtectedRoute allowedRoles={["super_admin", "superadmin"]} />}>
-        <Route path="/superadmin" element={<ErrorBoundary><AdminDashboard /></ErrorBoundary>} />
+        <Route path="/superadmin" element={<ErrorBoundary><SuperAdminDashboard tab="dashboard" /></ErrorBoundary>} />
         <Route path="/superadmin/sites" element={<ErrorBoundary><Sites /></ErrorBoundary>} />
         <Route path="/superadmin/engineers" element={<ErrorBoundary><SiteEngineers /></ErrorBoundary>} />
         <Route path="/superadmin/admins" element={<ErrorBoundary><SuperAdminDashboard tab="admins" /></ErrorBoundary>} />

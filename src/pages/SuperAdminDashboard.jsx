@@ -6,6 +6,7 @@ import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
+import Modal from "../components/common/Modal";
 import ConfirmationModal from "../components/common/ConfirmationModal";
 import { useAuth } from "../context/AuthContext";
 import {
@@ -76,7 +77,9 @@ import {
   LayoutGrid,
   List,
   Camera,
-  Maximize2
+  Maximize2,
+  Sparkles,
+  RefreshCw
 } from "lucide-react";
 import { Link } from "react-router-dom";
 
@@ -103,6 +106,17 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const [rawLabourAttendance, setRawLabourAttendance] = useState([]);
   const [rawTeams, setRawTeams] = useState([]);
   const [assignments, setAssignments] = useState([]);
+
+  // ── Executive Command Dashboard Specific States ──
+  const [showTodayAttendanceModal, setShowTodayAttendanceModal] = useState(false);
+  const [selectedInspectSite, setSelectedInspectSite] = useState(null);
+  const [selectedInspectRecord, setSelectedInspectRecord] = useState(null);
+  const [dashboardSearchQuery, setDashboardSearchQuery] = useState("");
+  const [dashboardActivityFilter, setDashboardActivityFilter] = useState("all");
+  const [dashboardAttendanceSearch, setDashboardAttendanceSearch] = useState("");
+  const [dashboardAttendanceSiteFilter, setDashboardAttendanceSiteFilter] = useState("");
+  const [dashboardAttendanceStatusFilter, setDashboardAttendanceStatusFilter] = useState("all"); // 'all' | 'onsite' | 'checkout'
+  const [siteModalActiveTab, setSiteModalActiveTab] = useState("engineers");
 
   // ── All Sites View States ──
   const [sitesViewMode, setSitesViewMode] = useState(() => {
@@ -472,6 +486,36 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
   }, [allDeduplicatedAttendance, todayDateString]);
 
+  const formattedTodayDate = useMemo(() => {
+    try {
+      return new Date().toLocaleDateString("en-IN", { 
+        timeZone: "Asia/Kolkata", 
+        weekday: "long", 
+        day: "numeric", 
+        month: "short", 
+        year: "numeric" 
+      });
+    } catch (e) {
+      return new Date().toDateString();
+    }
+  }, []);
+
+  const filteredDashboardAttendance = useMemo(() => {
+    return todayAttendanceList.filter(rec => {
+      if (dashboardAttendanceStatusFilter === "onsite" && rec.isCheckedOut) return false;
+      if (dashboardAttendanceStatusFilter === "checkout" && !rec.isCheckedOut) return false;
+      if (dashboardAttendanceSiteFilter && rec.resolvedSiteId !== dashboardAttendanceSiteFilter) return false;
+      if (dashboardAttendanceSearch.trim()) {
+        const q = dashboardAttendanceSearch.toLowerCase().trim();
+        const mName = (rec.engineerName || "").toLowerCase().includes(q);
+        const mSite = (rec.siteName || "").toLowerCase().includes(q);
+        const mEmail = (rec.engineerEmail || "").toLowerCase().includes(q);
+        if (!mName && !mSite && !mEmail) return false;
+      }
+      return true;
+    });
+  }, [todayAttendanceList, dashboardAttendanceStatusFilter, dashboardAttendanceSiteFilter, dashboardAttendanceSearch]);
+
   // Today's Labour Count Total
   const todayLabourCount = useMemo(() => {
     let count = 0;
@@ -562,61 +606,166 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 1: EXECUTIVE DASHBOARD
+  // VIEW 1: EXECUTIVE COMMAND DASHBOARD (SUPER ADMIN HIGH-LEVEL MONITORING)
   // ══════════════════════════════════════════════════════════════════════════
   const renderDashboardView = () => {
-    const pendingDocs = documents.filter(d => (d.status || '').toLowerCase() === 'uploaded' || (d.status || '').toLowerCase() === 'pending' || !d.status);
+    // 1. Core Computed Quantities
+    const activeSitesList = sites.filter(s => (s.status || "active").toLowerCase() === "active" || (s.status || "").toLowerCase() === "running");
+    const activeSitesCount = activeSitesList.length;
+    const completedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "completed").length;
+    const delayedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "delayed" || isSiteDelayed(s)).length;
+    const onHoldSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "on-hold" || (s.status || "").toLowerCase() === "paused").length;
+    
+    // Site Engineers & Attendance Pulse
+    const activeEngineersList = engineers.filter(e => (e.status || "active").toLowerCase() === "active");
+    const activeEngineersCount = activeEngineersList.length;
+    const presentEngineersSet = new Set(todayAttendanceList.map(r => r.resolvedEngineerId || r.engineerName));
+    const presentCount = presentEngineersSet.size;
+    const onSiteCount = todayAttendanceList.filter(r => !r.isCheckedOut).length;
+    const checkedOutCount = todayAttendanceList.filter(r => r.isCheckedOut).length;
+    const verifiedCount = todayAttendanceList.filter(r => r.isVerified).length;
+    const attendanceRate = activeEngineersCount > 0 ? Math.round((presentCount / activeEngineersCount) * 100) : 0;
+    
+    const sitesWithAttendanceSet = new Set(todayAttendanceList.map(r => r.resolvedSiteId));
+    const activeSitesWithAttendanceCount = activeSitesList.filter(s => sitesWithAttendanceSet.has(s.id)).length;
+    
+    // Labour Pulse
+    const sitesWithLabourTodaySet = new Set(
+      (rawLabourAttendance || [])
+        .filter(r => !r.lockedMetadata && (r.attendanceDate === todayDateString || r.date === todayDateString))
+        .map(r => r.siteId)
+    );
+
+    // Today's Expense Sums
+    let todayLabourExpense = 0;
+    (rawLabourAttendance || []).forEach(r => {
+      if (!r || r.lockedMetadata) return;
+      const dateField = r.attendanceDate || r.date;
+      if (dateField === todayDateString) {
+        const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+        todayLabourExpense += Number(r.totalAmount || (workerCount * rate));
+      }
+    });
+
+    let todayMaterialExpense = 0;
+    materials.forEach(m => {
+      const mDate = m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+      if (mDate === todayDateString) {
+        const qty = Number(m.quantity || m.currentStock) || 0;
+        const rate = Number(m.unitRate || m.rate) || 0;
+        todayMaterialExpense += Number(m.totalCost) || (qty * rate);
+      }
+    });
+
+    let todayGeneralExpense = 0;
+    generalExpenses.forEach(e => {
+      if ((e.date || "").startsWith(todayDateString)) {
+        todayGeneralExpense += Number(e.amount) || 0;
+      }
+    });
+
+    const todayTotalExpenses = todayLabourExpense + todayMaterialExpense + todayGeneralExpense;
+
+    // Financial Health
+    const netPosition = overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses;
+    const isProfit = netPosition >= 0;
+
+    // 2. Expense Category Breakdown for Analytics Chart
+    const expenseBreakdown = {
+      "Material": 0,
+      "Labour": 0,
+      "General": 0,
+      "Fuel & Equipment": 0
+    };
+    materials.forEach(m => {
+      const qty = Number(m.quantity || m.currentStock) || 0;
+      const rate = Number(m.unitRate || m.rate) || 0;
+      expenseBreakdown["Material"] += Number(m.totalCost) || (qty * rate);
+    });
+    (rawLabourAttendance || []).forEach(r => {
+      if (!r || r.lockedMetadata) return;
+      const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+      const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+      expenseBreakdown["Labour"] += Number(r.totalAmount || (workerCount * rate));
+    });
+    generalExpenses.forEach(e => {
+      const cat = (e.category || "General").trim();
+      const amt = Number(e.amount) || 0;
+      if (cat.toLowerCase().includes("fuel") || cat.toLowerCase().includes("equipment") || cat.toLowerCase().includes("machinery")) {
+        expenseBreakdown["Fuel & Equipment"] += amt;
+      } else if (cat.toLowerCase().includes("material")) {
+        expenseBreakdown["Material"] += amt;
+      } else if (cat.toLowerCase().includes("labour") || cat.toLowerCase().includes("worker")) {
+        expenseBreakdown["Labour"] += amt;
+      } else {
+        expenseBreakdown["General"] += amt;
+      }
+    });
+    const totalCategorizedExpenses = Object.values(expenseBreakdown).reduce((a, b) => a + b, 0) || 1;
+
+    // 3. Upcoming Deadlines
+    const upcomingDeadlinesList = sites
+      .filter(s => s.expectedEndDate && (s.status || "").toLowerCase() !== "completed")
+      .sort((a, b) => (a.expectedEndDate || "").localeCompare(b.expectedEndDate || ""))
+      .slice(0, 4);
+
+    // 4. Executive Decision Alerts (Safe derived data only)
     const alerts = [];
     const nowMs = Date.now();
-    
-    generalExpenses.forEach(exp => {
-      if (Number(exp.amount) >= 100000) {
+
+    activeSitesList.forEach(s => {
+      if (!sitesWithAttendanceSet.has(s.id)) {
         alerts.push({
-          id: `alert_sa_high_${exp.id}`,
+          id: `alert_sa_att_${s.id}`,
+          type: 'danger',
+          category: 'Missing Attendance',
+          title: `No Attendance Logged: ${s.siteName}`,
+          message: `Active project "${s.siteName}" has zero field engineer check-ins recorded today.`,
+          link: `/superadmin/attendance`
+        });
+      }
+    });
+
+    activeSitesList.forEach(s => {
+      if (!sitesWithLabourTodaySet.has(s.id)) {
+        alerts.push({
+          id: `alert_sa_lab_${s.id}`,
           type: 'warning',
-          category: 'Payment Alert',
-          title: 'High-Value Field Payment Logged',
-          message: `General expense of ₹${exp.amount} for "${exp.description}" has been logged at site ${sites.find(s => s.id === exp.siteId)?.siteName || 'Site'}.`
+          category: 'Missing Labour',
+          title: `No Labour Force Logged: ${s.siteName}`,
+          message: `No daily worker attendance filed today for active project "${s.siteName}".`,
+          link: `/superadmin/labour`
         });
       }
     });
 
     sites.forEach(site => {
       if (site.status === 'Delayed' || isSiteDelayed(site)) {
+        const planned = calculatePlannedProgress(site.startDate, site.expectedEndDate);
+        const prog = site.progress !== undefined ? Number(site.progress) : 0;
+        const gap = Math.max(0, planned - prog);
         alerts.push({
           id: `alert_sa_delay_${site.id}`,
           type: 'danger',
-          category: 'Schedule Alert',
-          title: 'Project Schedule Delayed Milestone',
-          message: `Site execution status for "${site.siteName}" is delayed.`
+          category: 'Schedule Delay',
+          title: `Milestone Delayed: ${site.siteName}`,
+          message: `Progress is ${prog}% vs planned target ${planned}% (-${gap}% gap). Expected: ${formatDateDMY(site.expectedEndDate)}.`,
+          link: `/superadmin/progress`
         });
       }
     });
 
-    sites.forEach(site => {
-      if ((site.status || '').toLowerCase() === 'active') {
-        const updates = systemActivities.filter(a => a.siteId === site.id && a.moduleType === 'Progress');
-        let lastUpdatedMs = 0;
-        if (updates.length > 0) {
-          const latestUpdate = updates[0];
-          lastUpdatedMs = latestUpdate.createdAt?.seconds 
-            ? latestUpdate.createdAt.seconds * 1000 
-            : (latestUpdate.createdAt ? new Date(latestUpdate.createdAt).getTime() : 0);
-        } else {
-          lastUpdatedMs = site.createdAt?.seconds 
-            ? site.createdAt.seconds * 1000 
-            : (site.createdAt ? new Date(site.createdAt).getTime() : 0);
-        }
-        const diffHours = (nowMs - lastUpdatedMs) / (1000 * 60 * 60);
-        if (diffHours >= 48) {
-          alerts.push({
-            id: `alert_sa_dpr_${site.id}`,
-            type: 'danger',
-            category: 'Progress Alert',
-            title: 'Missing Daily Progress Update',
-            message: `No Daily Progress Report submitted in the last 48 hours for active site "${site.siteName}".`
-          });
-        }
+    generalExpenses.forEach(exp => {
+      if (Number(exp.amount) >= 100000) {
+        alerts.push({
+          id: `alert_sa_high_${exp.id}`,
+          type: 'warning',
+          category: 'Payment Alert',
+          title: `High-Value Field Payment: ₹${Number(exp.amount).toLocaleString()}`,
+          message: `Expense for "${exp.description}" has been logged at ${sites.find(s => s.id === exp.siteId)?.siteName || 'Site'}.`,
+          link: `/superadmin/finance`
+        });
       }
     });
 
@@ -625,29 +774,178 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         const createdMs = a.createdAt?.seconds 
           ? a.createdAt.seconds * 1000 
           : (a.createdAt ? new Date(a.createdAt).getTime() : nowMs);
-        const diffDays = (nowMs - createdMs) / (1000 * 60 * 60 * 24);
-        if (diffDays >= 3) {
+        const diffHours = (nowMs - createdMs) / (1000 * 60 * 60);
+        if (diffHours >= 48) {
           alerts.push({
             id: `alert_sa_app_${a.id}`,
             type: 'warning',
-            category: 'Approvals Alert',
-            title: 'Long Pending Approval',
-            message: `${a.type} request from ${a.requestedBy} for ${a.siteName} has been pending for over 3 days.`
+            category: 'Pending Approval',
+            title: `Awaiting Sign-off: ${a.type} Request`,
+            message: `${a.type} request from ${a.requestedBy || 'Engineer'} for ${a.siteName || 'Site'} has been pending over 48 hours.`,
+            link: `/superadmin/approvals`
           });
         }
       }
     });
 
-    const netPosition = overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses;
-    const isProfit = netPosition >= 0;
+    // 5. Today's Real-Time Operations Activity Feed (Live Chronological Stream)
+    const todayFeedList = [];
+    
+    todayAttendanceList.forEach(rec => {
+      todayFeedList.push({
+        id: `att_in_${rec.id}`,
+        module: "Attendance",
+        moduleType: "attendance",
+        badgeStatus: "success",
+        title: `${rec.engineerName} Checked In`,
+        description: `Logged on-site presence at ${rec.siteName} (${rec.isVerified ? "GPS Verified" : "Pending GPS"})`,
+        time: rec.checkInTimeFormatted,
+        timestamp: rec.checkInTime?.seconds ? rec.checkInTime.seconds * 1000 : (rec.timestamp?.seconds ? rec.timestamp.seconds * 1000 : 0),
+        siteName: rec.siteName,
+        user: rec.engineerName,
+        photoUrl: rec.photoUrl
+      });
+      if (rec.isCheckedOut && rec.checkOutTimeFormatted) {
+        todayFeedList.push({
+          id: `att_out_${rec.id}`,
+          module: "Attendance",
+          moduleType: "attendance",
+          badgeStatus: "default",
+          title: `${rec.engineerName} Checked Out`,
+          description: `Checked out from ${rec.siteName}`,
+          time: rec.checkOutTimeFormatted,
+          timestamp: rec.checkOutTime?.seconds ? rec.checkOutTime.seconds * 1000 : 0,
+          siteName: rec.siteName,
+          user: rec.engineerName,
+          photoUrl: rec.checkOutPhotoUrl
+        });
+      }
+    });
+
+    (rawLabourAttendance || []).forEach(r => {
+      if (!r || r.lockedMetadata) return;
+      const dateField = r.attendanceDate || r.date;
+      if (dateField === todayDateString) {
+        const site = sites.find(s => s.id === r.siteId);
+        const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+        const total = Number(r.totalAmount || (workerCount * rate));
+        todayFeedList.push({
+          id: `lab_${r.id}`,
+          module: "Labour",
+          moduleType: "labour",
+          badgeStatus: "info",
+          title: `Labour Workforce Logged: ${workerCount} Workers`,
+          description: `${r.categoryName || r.category || "General Labour"} added at ${site?.siteName || "Site"} — ₹${total.toLocaleString()}`,
+          time: r.createdAt?.seconds ? new Date(r.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
+          siteName: site?.siteName || "Site",
+          user: r.recordedByName || r.engineerName || "Site Engineer"
+        });
+      }
+    });
+
+    materials.forEach(m => {
+      const mDate = m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+      if (mDate === todayDateString) {
+        const site = sites.find(s => s.id === m.siteId);
+        todayFeedList.push({
+          id: `mat_${m.id}`,
+          module: "Materials",
+          moduleType: "materials",
+          badgeStatus: "info",
+          title: `Material Received: ${m.materialName || m.name || "Item"}`,
+          description: `${m.quantity || 0} ${m.unit || "units"} added at ${site?.siteName || "Site"}`,
+          time: m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: m.createdAt?.seconds ? m.createdAt.seconds * 1000 : 0,
+          siteName: site?.siteName || "Site",
+          user: m.engineerName || m.recordedByName || "Site Engineer"
+        });
+      }
+    });
+
+    generalExpenses.forEach(exp => {
+      if ((exp.date || "").startsWith(todayDateString)) {
+        const site = sites.find(s => s.id === exp.siteId);
+        todayFeedList.push({
+          id: `exp_${exp.id}`,
+          module: "Expenses",
+          moduleType: "expenses",
+          badgeStatus: "warning",
+          title: `Expense Logged: ₹${Number(exp.amount || 0).toLocaleString()}`,
+          description: `"${exp.description}" (${exp.category || "General"}) at ${site?.siteName || "Site"}`,
+          time: exp.createdAt?.seconds ? new Date(exp.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: exp.createdAt?.seconds ? exp.createdAt.seconds * 1000 : 0,
+          siteName: site?.siteName || "Site",
+          user: exp.recordedByName || "Administrator"
+        });
+      }
+    });
+
+    allDprs.forEach(dpr => {
+      const dDate = dpr.date || (dpr.createdAt?.seconds ? new Date(dpr.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+      if (dDate === todayDateString) {
+        const site = sites.find(s => s.id === dpr.siteId);
+        todayFeedList.push({
+          id: `dpr_${dpr.id}`,
+          module: "Reports",
+          moduleType: "reports",
+          badgeStatus: "success",
+          title: `DPR Submitted: ${dpr.workDescription ? dpr.workDescription.substring(0, 36) + '...' : "Daily Progress Report"}`,
+          description: `Progress updated for ${site?.siteName || "Site"}${dpr.weather ? ` • Weather: ${dpr.weather}` : ''}`,
+          time: dpr.createdAt?.seconds ? new Date(dpr.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: dpr.createdAt?.seconds ? dpr.createdAt.seconds * 1000 : 0,
+          siteName: site?.siteName || "Site",
+          user: dpr.submittedByName || dpr.engineerName || "Site Engineer"
+        });
+      }
+    });
+
+    systemActivities.forEach(act => {
+      const actDate = act.createdAt?.seconds ? new Date(act.createdAt.seconds * 1000).toISOString().split("T")[0] : "";
+      if (actDate === todayDateString && !todayFeedList.some(item => item.id.includes(act.id))) {
+        todayFeedList.push({
+          id: `act_${act.id}`,
+          module: act.moduleType || "General",
+          moduleType: (act.moduleType || "general").toLowerCase(),
+          badgeStatus: "info",
+          title: act.description || act.actionType || "System event",
+          description: `Module: ${act.moduleType} at ${act.siteName || "Enterprise"}`,
+          time: act.createdAt?.seconds ? new Date(act.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: act.createdAt?.seconds ? act.createdAt.seconds * 1000 : 0,
+          siteName: act.siteName || "Enterprise",
+          user: act.userName || "System"
+        });
+      }
+    });
+
+    todayFeedList.sort((a, b) => b.timestamp - a.timestamp);
+
+    const filteredTodayFeed = todayFeedList.filter(item => {
+      if (dashboardActivityFilter === "all") return true;
+      return item.moduleType === dashboardActivityFilter;
+    });
+
+    // 6. Active Projects Operations Matrix Filtering
+    const filteredActiveSites = activeSitesList.filter(site => {
+      if (!dashboardSearchQuery.trim()) return true;
+      const q = dashboardSearchQuery.toLowerCase().trim();
+      return (
+        (site.siteName || "").toLowerCase().includes(q) ||
+        (site.clientName || "").toLowerCase().includes(q) ||
+        (site.location || "").toLowerCase().includes(q)
+      );
+    });
 
     return (
       <div className="admin-dashboard-container">
 
-        {/* ── 10 REAL-TIME SYSTEM-WIDE KPI CARDS ── */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 1: TOP EXECUTIVE COMMAND METRIC CARDS (10 UNIFIED CARDS)    */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
         <div className="admin-summary-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
 
-          {/* KPI 1: Total Sites */}
+          {/* Card 1: Sites Pulse */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-orange">
               <Building2 size={20} />
@@ -655,99 +953,111 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             <div className="admin-summary-info">
               <div className="admin-summary-value">{overallMetrics.totalSites}</div>
               <div className="admin-summary-label">Total Sites</div>
-              <span style={{ fontSize: "10.5px", color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} Active</span>
-            </div>
-          </div>
-
-          {/* KPI 2: Delayed Sites */}
-          <div className="admin-summary-card" style={overallMetrics.delayedSites > 0 ? { borderColor: "#fecaca" } : {}}>
-            <div className={`admin-summary-icon ${overallMetrics.delayedSites > 0 ? "erp-kpi-icon-red" : "erp-kpi-icon-green"}`}>
-              <AlertTriangle size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value" style={{ color: overallMetrics.delayedSites > 0 ? "#dc2626" : "var(--primary-950)" }}>
-                {overallMetrics.delayedSites}
-              </div>
-              <div className="admin-summary-label">Delayed Sites</div>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>
-                {overallMetrics.delayedSites > 0 ? "Requires Attention" : "On Track"}
+              <span style={{ fontSize: "10.5px", color: "var(--success-600)", fontWeight: "700" }}>
+                {activeSitesCount} Active • {completedSitesCount} Done
               </span>
             </div>
           </div>
 
-          {/* KPI 3: Site Engineers */}
+          {/* Card 2: Running Projects */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-blue">
+              <Activity size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{activeSitesCount}</div>
+              <div className="admin-summary-label">Running Projects</div>
+              <span style={{ fontSize: "10.5px", color: delayedSitesCount > 0 ? "#dc2626" : "var(--text-muted)", fontWeight: "600" }}>
+                {delayedSitesCount > 0 ? `${delayedSitesCount} Delayed` : "All on Track"}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 3: Site Engineers */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
               <Users size={20} />
             </div>
             <div className="admin-summary-info">
               <div className="admin-summary-value">{engineers.length}</div>
               <div className="admin-summary-label">Site Engineers</div>
-              <span style={{ fontSize: "10.5px", color: "#1d4ed8", fontWeight: "700" }}>{engineers.filter(e => e.status === "active").length} Active</span>
+              <span style={{ fontSize: "10.5px", color: "#a855f7", fontWeight: "700" }}>
+                {activeEngineersCount} Active • {presentCount} Present
+              </span>
             </div>
           </div>
 
-          {/* KPI 4: Total Admins */}
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-purple">
-              <ShieldCheck size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{admins.length || 1}</div>
-              <div className="admin-summary-label">Total Admins</div>
-              <span style={{ fontSize: "10.5px", color: "#a855f7", fontWeight: "700" }}>Company Administrators</span>
-            </div>
-          </div>
-
-          {/* KPI 5: Today's Attendance */}
-          <div className="admin-summary-card" style={todayAttendanceList.length > 0 ? { borderColor: "#bbf7d0" } : {}}>
-            <div className="admin-summary-icon erp-kpi-icon-green">
-              <ClipboardCheck size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{todayAttendanceList.length}</div>
-              <div className="admin-summary-label">Today's Attendance</div>
-              <span style={{ fontSize: "10.5px", color: "#16a34a", fontWeight: "700" }}>{todayAttendanceList.filter(r => !r.isCheckedOut).length} On-Site Now</span>
-            </div>
-          </div>
-
-          {/* KPI 6: Today's Workers */}
+          {/* Card 4: Today's Labour Force */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-orange">
               <Briefcase size={20} />
             </div>
             <div className="admin-summary-info">
               <div className="admin-summary-value">{todayLabourCount}</div>
-              <div className="admin-summary-label">Today's Workers</div>
-              <span style={{ fontSize: "10.5px", color: "#c2410c", fontWeight: "700" }}>Field Labour Force</span>
+              <div className="admin-summary-label">Today's Labour</div>
+              <span style={{ fontSize: "10.5px", color: "#c2410c", fontWeight: "700" }}>
+                Across {sitesWithLabourTodaySet.size} Active Sites
+              </span>
             </div>
           </div>
 
-          {/* KPI 7: Client Payments Received */}
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-teal">
-              <TrendingUp size={20} />
+          {/* Card 5: Today's Attendance */}
+          <div className="admin-summary-card" style={todayAttendanceList.length > 0 ? { borderColor: "#bbf7d0" } : {}}>
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <UserCheck size={20} />
             </div>
             <div className="admin-summary-info">
-              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</div>
-              <div className="admin-summary-label">Received (Client)</div>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>Budget: {formatINR(overallMetrics.totalProjectValue)}</span>
+              <div className="admin-summary-value">{presentCount}/{activeEngineersCount}</div>
+              <div className="admin-summary-label">Today's Attendance</div>
+              <span style={{ fontSize: "10.5px", color: "#16a34a", fontWeight: "700" }}>
+                {attendanceRate}% • {onSiteCount} On-Site
+              </span>
             </div>
           </div>
 
-          {/* KPI 8: Total Spent */}
+          {/* Card 6: Today's Total Expenses */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-orange">
               <DollarSign size={20} />
             </div>
             <div className="admin-summary-info">
-              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalExpenses)}</div>
-              <div className="admin-summary-label">Total Spent</div>
-              <span style={{ fontSize: "10.5px", color: "var(--warning-600)", fontWeight: "600" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
+              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(todayTotalExpenses)}</div>
+              <div className="admin-summary-label">Today's Expenses</div>
+              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>
+                Labour + Mat + Gen
+              </span>
             </div>
           </div>
 
-          {/* KPI 9: Net Cash Position */}
+          {/* Card 7: Corporate Budget Portfolio */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <TrendingUp size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalProjectValue)}</div>
+              <div className="admin-summary-label">Portfolio Budget</div>
+              <span style={{ fontSize: "10.5px", color: "#0d9488", fontWeight: "700" }}>
+                Total Contract Value
+              </span>
+            </div>
+          </div>
+
+          {/* Card 8: Total Spent */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-slate">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalExpenses)}</div>
+              <div className="admin-summary-label">Total Spent</div>
+              <span style={{ fontSize: "10.5px", color: "var(--warning-600)", fontWeight: "600" }}>
+                Owed: {formatINR(overallMetrics.pendingPayments)}
+              </span>
+            </div>
+          </div>
+
+          {/* Card 9: Net Cash Position */}
           <div className="admin-summary-card" style={{ borderColor: isProfit ? "#bbf7d0" : "#fecaca", backgroundColor: isProfit ? "#f0fdf4" : "#fef2f2" }}>
             <div className={`admin-summary-icon ${isProfit ? "erp-kpi-icon-green" : "erp-kpi-icon-red"}`}>
               {isProfit ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
@@ -756,14 +1066,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               <div className="admin-summary-value" style={{ fontSize: "14px", color: isProfit ? "#16a34a" : "#dc2626" }}>
                 {isProfit ? "+" : ""}{formatINR(netPosition)}
               </div>
-              <div className="admin-summary-label">Net Cash Position</div>
+              <div className="admin-summary-label">Net Position</div>
               <span style={{ fontSize: "10.5px", color: isProfit ? "#16a34a" : "#dc2626", fontWeight: "700" }}>
-                {isProfit ? "Profit Margin" : "Deficit"}
+                {isProfit ? "Cash Surplus" : "Cash Deficit"}
               </span>
             </div>
           </div>
 
-          {/* KPI 10: Material Stock */}
+          {/* Card 10: Material Stock Items */}
           <div className="admin-summary-card">
             <div className="admin-summary-icon erp-kpi-icon-slate">
               <Package size={20} />
@@ -771,145 +1081,659 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             <div className="admin-summary-info">
               <div className="admin-summary-value">{materials.length}</div>
               <div className="admin-summary-label">Material Items</div>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>Total Tracked</span>
+              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>
+                Tracked Stock Lines
+              </span>
             </div>
           </div>
 
         </div>
 
-        {/* ── TODAY'S OPERATIONS FEED & PROGRESS ── */}
-        <div className="admin-analytics-grid">
-
-          <Card title="Corporate Work Progress & Milestone Standing">
-            <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 0" }}>
-              <div style={{
-                position: "relative",
-                width: "130px",
-                height: "130px",
-                borderRadius: "50%",
-                background: `conic-gradient(var(--primary-600) ${overallMetrics.overallProgressPercent}%, var(--primary-100) 0)`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                boxShadow: "0 4px 6px -1px rgba(0,0,0,0.08)"
-              }}>
-                <div style={{ width: "100px", height: "100px", borderRadius: "50%", backgroundColor: "#ffffff", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center" }}>
-                  <span style={{ fontSize: "26px", fontWeight: "900", color: "var(--primary-900)" }}>{overallMetrics.overallProgressPercent}%</span>
-                  <span style={{ fontSize: "9px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", letterSpacing: "0.5px" }}>Corporate Avg</span>
-                </div>
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 2: EXECUTIVE DECISION ALERTS / ATTENTION CENTER              */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {alerts.length > 0 && (
+          <div className="admin-card" style={{ borderLeft: "4px solid #ef4444", padding: "16px 20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <AlertTriangle size={18} style={{ color: "#dc2626" }} />
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>
+                  Executive Attention Alerts ({alerts.length})
+                </h3>
               </div>
-              <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Total Projects</span>
-                  <span style={{ fontWeight: "700" }}>{overallMetrics.totalSites} sites</span>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#dc2626", backgroundColor: "#fee2e2", padding: "2px 8px", borderRadius: "10px" }}>
+                Action Required
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "10px" }}>
+              {(showAllAlerts ? alerts : alerts.slice(0, 4)).map(alert => (
+                <div 
+                  key={alert.id} 
+                  style={{ 
+                    padding: "10px 12px", 
+                    borderRadius: "8px", 
+                    backgroundColor: alert.type === "danger" ? "#fef2f2" : "#fffbeb",
+                    border: `1px solid ${alert.type === "danger" ? "#fecaca" : "#fef3c7"}`,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ 
+                      fontSize: "10px", 
+                      fontWeight: "800", 
+                      textTransform: "uppercase", 
+                      letterSpacing: "0.4px",
+                      color: alert.type === "danger" ? "#b91c1c" : "#b45309"
+                    }}>
+                      [{alert.category}]
+                    </span>
+                    {alert.link && (
+                      <Link to={alert.link} style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none" }}>
+                        Review →
+                      </Link>
+                    )}
+                  </div>
+                  <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{alert.title}</strong>
+                  <p style={{ margin: 0, fontSize: "11.5px", color: "var(--primary-700)", lineHeight: "1.4" }}>{alert.message}</p>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Total Budget</span>
-                  <span style={{ fontWeight: "700", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalProjectValue)}</span>
+              ))}
+            </div>
+
+            {alerts.length > 4 && (
+              <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid var(--border-color)", textAlign: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setShowAllAlerts(!showAllAlerts)}
+                  style={{ background: "none", border: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
+                >
+                  {showAllAlerts ? "Show Less" : `View All ${alerts.length} Operations Alerts`}
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 3: REAL-TIME ATTENDANCE COMMAND BANNER                        */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-attendance-card">
+          <div className="admin-attendance-header-row">
+            <div className="admin-attendance-title-group">
+              <div className="admin-attendance-icon-wrap">
+                <ClipboardCheck size={22} />
+              </div>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <h3 className="admin-attendance-title">Master Attendance &amp; Field Presence Command</h3>
+                  <div className="admin-attendance-live-badge">
+                    <span className="admin-attendance-live-dot" />
+                    Live Real-Time Sync
+                  </div>
                 </div>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px" }}>
-                  <span style={{ color: "var(--text-muted)" }}>Pending Approvals</span>
-                  <span style={{ fontWeight: "700", color: allApprovalRequests.length > 0 ? "var(--warning-600)" : "var(--success-600)" }}>{allApprovalRequests.length}</span>
-                </div>
+                <p className="admin-attendance-subtitle">
+                  Real-time synchronization across all active sites for {formattedTodayDate}.
+                </p>
               </div>
             </div>
-          </Card>
 
-          <Card title="Today's Engineer Attendance Live Status" subtitle="Real-time check-ins and field presence logged today.">
-            {todayAttendanceList.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)" }}>
-                <UserCheck size={28} style={{ color: "var(--primary-300)", marginBottom: "6px" }} />
-                <p style={{ margin: 0, fontSize: "12.5px" }}>No engineer attendance recorded yet today.</p>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+              <button
+                type="button"
+                className="erp-btn-primary"
+                onClick={() => setShowTodayAttendanceModal(true)}
+                style={{ fontSize: "12px", padding: "6px 14px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <ClipboardCheck size={14} />
+                Attendance Ledger ({todayAttendanceList.length})
+              </button>
+              <Link
+                to="/superadmin/attendance"
+                className="erp-btn-secondary"
+                style={{ fontSize: "12px", padding: "6px 14px", display: "inline-flex", alignItems: "center", gap: "6px", textDecoration: "none" }}
+              >
+                <ExternalLink size={14} />
+                Full Attendance Monitor
+              </Link>
+            </div>
+          </div>
+
+          <div className="admin-attendance-metrics">
+            <div className="admin-attendance-metric-pill present">
+              <UserCheck size={14} />
+              <span>Present: {presentCount}/{activeEngineersCount} ({attendanceRate}%)</span>
+            </div>
+            <div className="admin-attendance-metric-pill onsite">
+              <Clock size={14} />
+              <span>On-Site Now: {onSiteCount}</span>
+            </div>
+            <div className="admin-attendance-metric-pill checkout">
+              <CheckCircle2 size={14} />
+              <span>Checked Out: {checkedOutCount}</span>
+            </div>
+            <div className="admin-attendance-metric-pill verified">
+              <ShieldCheck size={14} />
+              <span>GPS Verified: {verifiedCount}</span>
+            </div>
+            <div className="admin-attendance-metric-pill" style={{ backgroundColor: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0" }}>
+              <Building2 size={14} />
+              <span>Sites Active: {activeSitesWithAttendanceCount}/{activeSitesCount}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 4: 3-CARD HIGH-LEVEL ANALYTICS & INSIGHTS ROW                */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-analytics-grid">
+
+          {/* Analytics Card 1: Construction Site Lifecycle Standing */}
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <div>
+                <h3 className="admin-card-title">Construction Projects Status</h3>
+                <p className="admin-card-subtitle">Organization portfolio lifecycle overview</p>
               </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px", maxHeight: "300px", overflowY: "auto" }}>
-                {todayAttendanceList.slice(0, 8).map(rec => (
-                  <div key={rec.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "8px" }}>
-                    <div>
-                      <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>{rec.engineerName}</strong>
-                      <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>{rec.siteName}</span>
+            </div>
+            <div className="admin-status-grid">
+              <div className="admin-status-box running">
+                <span className="admin-status-count">{activeSitesCount}</span>
+                <span className="admin-status-name">Running / Active</span>
+              </div>
+              <div className="admin-status-box completed">
+                <span className="admin-status-count">{completedSitesCount}</span>
+                <span className="admin-status-name">Completed</span>
+              </div>
+              <div className="admin-status-box on-hold">
+                <span className="admin-status-count">{onHoldSitesCount}</span>
+                <span className="admin-status-name">On Hold / Paused</span>
+              </div>
+              <div className="admin-status-box delayed">
+                <span className="admin-status-count">{delayedSitesCount}</span>
+                <span className="admin-status-name">Delayed Milestone</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Analytics Card 2: Corporate Expense Category Breakdown */}
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <div>
+                <h3 className="admin-card-title">Expense Allocation Breakdown</h3>
+                <p className="admin-card-subtitle">Distribution across critical expenditure heads</p>
+              </div>
+            </div>
+            <div className="admin-expense-list">
+              {Object.entries(expenseBreakdown).map(([category, amount]) => {
+                const pct = Math.round((amount / totalCategorizedExpenses) * 100);
+                const colorClass = category === "Material" ? "material" : category === "Labour" ? "labor" : category === "Fuel & Equipment" ? "equipment" : "others";
+                return (
+                  <div key={category} className="admin-expense-item">
+                    <div className="admin-expense-meta">
+                      <span className="admin-expense-cat">{category}</span>
+                      <span className="admin-expense-pct">{pct}% • {formatINR(amount)}</span>
                     </div>
-                    <div style={{ textAlign: "right" }}>
-                      <span style={{
-                        fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "12px",
-                        backgroundColor: rec.isCheckedOut ? "#f1f5f9" : "#dcfce7",
-                        color: rec.isCheckedOut ? "#475569" : "#15803d"
-                      }}>
-                        {rec.isCheckedOut ? "Checked Out" : "On Site"}
-                      </span>
-                      <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginTop: "2px" }}>
-                        In: {rec.checkInTimeFormatted}
-                      </span>
+                    <div className="admin-progress-track">
+                      <div className={`admin-progress-fill ${colorClass}`} style={{ width: `${pct}%` }} />
                     </div>
                   </div>
-                ))}
-              </div>
-            )}
-          </Card>
+                );
+              })}
+            </div>
+          </div>
 
-          <Card title="Pending Approvals &amp; Requisitions">
-            {allApprovalRequests.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)" }}>
-                <CheckCircle2 size={28} style={{ color: "var(--success-500)", marginBottom: "6px" }} />
-                <p style={{ margin: 0, fontSize: "12.5px" }}>All clear! No pending requests.</p>
+          {/* Analytics Card 3: Corporate Progress Standing & Milestone Schedule */}
+          <div className="admin-card">
+            <div className="admin-card-header">
+              <div>
+                <h3 className="admin-card-title">Corporate Milestone Schedule</h3>
+                <p className="admin-card-subtitle">Upcoming target completions &amp; progress</p>
               </div>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {allApprovalRequests.slice(0, 3).map(req => (
-                  <div key={req.id} style={{ padding: "10px 12px", border: "1px solid var(--border-color)", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "6px", backgroundColor: "#fafafa" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <Badge status={req.type === "Leave" ? "warning" : req.type === "Location" ? "pending" : "success"}>{req.type}</Badge>
-                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }} className="font-mono">{req.requestDate}</span>
-                    </div>
-                    <span style={{ fontSize: "12px", fontWeight: "700" }}>{req.employeeName}</span>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{req.details}</span>
-                    <div style={{ display: "flex", gap: "6px" }}>
-                      <button onClick={() => handleApproveRequest(req)} style={{ flex: 1, padding: "4px", backgroundColor: "var(--success-600)", color: "#fff", border: "none", borderRadius: "4px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Approve</button>
-                      <button onClick={() => handleRejectRequest(req)} style={{ flex: 1, padding: "4px", backgroundColor: "transparent", color: "var(--danger-600)", border: "1px solid var(--danger-200)", borderRadius: "4px", fontSize: "11px", fontWeight: "700", cursor: "pointer" }}>Reject</button>
-                    </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {/* Circular Gauge / Summary Bar */}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                <div>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "800", display: "block" }}>
+                    Corporate Average Execution
+                  </span>
+                  <span style={{ fontSize: "20px", fontWeight: "900", color: "var(--primary-950)" }}>
+                    {overallMetrics.overallProgressPercent}% Complete
+                  </span>
+                </div>
+                <div style={{
+                  width: "48px",
+                  height: "48px",
+                  borderRadius: "50%",
+                  background: `conic-gradient(var(--primary-600) ${overallMetrics.overallProgressPercent}%, #e2e8f0 0)`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center"
+                }}>
+                  <div style={{ width: "36px", height: "36px", borderRadius: "50%", backgroundColor: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: "800" }}>
+                    {overallMetrics.overallProgressPercent}%
                   </div>
-                ))}
-                {allApprovalRequests.length > 3 && (
-                  <Link to="/superadmin/approvals" style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "700", textAlign: "center", display: "block" }}>
-                    + {allApprovalRequests.length - 3} more
-                  </Link>
+                </div>
+              </div>
+
+              {/* Upcoming Deadlines */}
+              <div className="admin-deadlines-list">
+                {upcomingDeadlinesList.length === 0 ? (
+                  <div style={{ textAlign: "center", padding: "16px", color: "var(--text-muted)", fontSize: "12px" }}>
+                    No upcoming deadlines recorded.
+                  </div>
+                ) : (
+                  upcomingDeadlinesList.map(site => {
+                    const daysLeft = Math.ceil((new Date(site.expectedEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+                    const isUrgent = daysLeft <= 14;
+                    return (
+                      <div key={site.id} className="admin-deadline-item" style={{ padding: "6px 0" }}>
+                        <div className="admin-deadline-info">
+                          <span className="admin-deadline-name" style={{ fontSize: "12.5px" }}>{site.siteName}</span>
+                          <span className="admin-deadline-date" style={{ fontSize: "11px" }}>Target: {formatDateDMY(site.expectedEndDate)}</span>
+                        </div>
+                        <span className={`admin-deadline-badge ${isUrgent ? "urgent" : "normal"}`} style={{ fontSize: "10.5px" }}>
+                          {daysLeft > 0 ? `${daysLeft} days left` : "Overdue"}
+                        </span>
+                      </div>
+                    );
+                  })
                 )}
               </div>
-            )}
-          </Card>
+            </div>
+          </div>
 
         </div>
 
-        {/* ── ALERTS & NOTIFICATIONS ── */}
-        {alerts.length > 0 && (
-          <Card title="System-Wide Operations Alerts" style={{ borderLeft: "4px solid var(--danger-500)" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              {(showAllAlerts ? alerts : alerts.slice(0, 4)).map(alert => (
-                <div key={alert.id} className={`dash-alert-row ${alert.type}`}>
-                  <AlertTriangle size={14} style={{ color: alert.type === "danger" ? "var(--danger-600)" : "var(--warning-600)", flexShrink: 0, marginTop: "2px" }} />
-                  <div>
-                    <span className="dash-alert-title">[{alert.category}] {alert.title}</span>
-                    <p className="dash-alert-msg">{alert.message}</p>
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 5: ACTIVE PROJECTS OPERATIONS COMMAND MATRIX                 */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-table-card">
+          <div className="admin-table-header">
+            <div>
+              <h3 className="admin-card-title">Active Projects Operations Matrix</h3>
+              <p className="admin-card-subtitle">
+                Live monitoring of engineer presence, daily labour force, materials, expenses, and execution progress across active sites.
+              </p>
+            </div>
+
+            <div className="sites-actions-group">
+              <div className="sites-search-wrapper" style={{ minWidth: "220px" }}>
+                <Search size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+                <input
+                  type="text"
+                  placeholder="Search active site, client, location..."
+                  value={dashboardSearchQuery}
+                  onChange={(e) => setDashboardSearchQuery(e.target.value)}
+                  style={{ width: "100%", height: "36px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12px", boxSizing: "border-box" }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Site &amp; Client</th>
+                  <th>Assigned Engineers &amp; Presence</th>
+                  <th>Today's Activity Pulse</th>
+                  <th>Today's Labour</th>
+                  <th>Today's Expenses</th>
+                  <th>Execution Progress</th>
+                  <th style={{ textAlign: "center" }}>Status</th>
+                  <th style={{ textAlign: "right" }}>Inspect</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredActiveSites.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: "center", padding: "36px", color: "var(--text-muted)" }}>
+                      No active construction sites match the search filter.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredActiveSites.map(site => {
+                    // 1. Engineers assigned
+                    const assignedEngList = engineers.filter(e => {
+                      if (e.assignedSiteId === site.id) return true;
+                      if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
+                      if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
+                      return false;
+                    });
+
+                    // 2. Today's attendance for this site
+                    const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
+                    const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
+
+                    // 3. Today's labour for this site
+                    let siteLabourCount = 0;
+                    let siteLabourAmount = 0;
+                    (rawLabourAttendance || []).forEach(r => {
+                      if (!r || r.lockedMetadata || r.siteId !== site.id) return;
+                      const d = r.attendanceDate || r.date;
+                      if (d === todayDateString) {
+                        const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+                        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+                        siteLabourCount += count;
+                        siteLabourAmount += Number(r.totalAmount || (count * rate));
+                      }
+                    });
+
+                    // 4. Today's materials for this site
+                    let siteMaterialCount = 0;
+                    let siteMaterialCost = 0;
+                    materials.forEach(m => {
+                      if (m.siteId !== site.id) return;
+                      const d = m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+                      if (d === todayDateString) {
+                        siteMaterialCount += 1;
+                        siteMaterialCost += Number(m.totalCost) || 0;
+                      }
+                    });
+
+                    // 5. Today's general expenses for this site
+                    let siteGeneralExpense = 0;
+                    generalExpenses.forEach(e => {
+                      if (e.siteId === site.id && (e.date || "").startsWith(todayDateString)) {
+                        siteGeneralExpense += Number(e.amount) || 0;
+                      }
+                    });
+
+                    const siteTotalExpenseToday = siteLabourAmount + siteMaterialCost + siteGeneralExpense;
+
+                    // 6. Today's DPR
+                    const hasDprToday = allDprs.some(d => {
+                      if (d.siteId !== site.id) return false;
+                      const dDate = d.date || (d.createdAt?.seconds ? new Date(d.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
+                      return dDate === todayDateString;
+                    });
+
+                    // 7. Progress & Milestone Standing
+                    const progVal = site.progress !== undefined ? Number(site.progress) : 0;
+                    const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
+
+                    return (
+                      <tr key={site.id}>
+                        {/* Site Name & Client */}
+                        <td>
+                          <strong style={{ fontSize: "13px", fontWeight: "700", color: "var(--primary-950)", display: "block" }}>
+                            {site.siteName}
+                          </strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px", marginTop: "2px" }}>
+                            <MapPin size={10} style={{ color: "#94a3b8" }} />
+                            {site.location || site.clientName || "Construction Project"}
+                          </span>
+                        </td>
+
+                        {/* Assigned Engineers */}
+                        <td>
+                          {assignedEngList.length > 0 ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
+                              {assignedEngList.map((eng, idx) => {
+                                const isPresent = sitePresentEngSet.has(eng.id) || sitePresentEngSet.has(eng.uid) || sitePresentEngSet.has(eng.name);
+                                return (
+                                  <div key={idx} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11.5px" }}>
+                                    <span style={{
+                                      width: "6px",
+                                      height: "6px",
+                                      borderRadius: "50%",
+                                      backgroundColor: isPresent ? "#16a34a" : "#cbd5e1",
+                                      flexShrink: 0
+                                    }} />
+                                    <span style={{ fontWeight: isPresent ? "700" : "500", color: isPresent ? "var(--primary-950)" : "var(--primary-700)" }}>
+                                      {eng.fullName || eng.name}
+                                    </span>
+                                    {isPresent && (
+                                      <span style={{ fontSize: "9px", fontWeight: "800", color: "#15803d", backgroundColor: "#dcfce7", padding: "1px 4px", borderRadius: "3px" }}>
+                                        Present
+                                      </span>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: "11.5px", color: "#94a3b8", fontStyle: "italic" }}>No Assigned Engineer</span>
+                          )}
+                        </td>
+
+                        {/* Today's Activity Pulse */}
+                        <td>
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                            {siteTodayAttendance.length > 0 && (
+                              <Badge status="success" style={{ fontSize: "10px", padding: "1px 6px" }}>Attendance ({siteTodayAttendance.length})</Badge>
+                            )}
+                            {siteLabourCount > 0 && (
+                              <Badge status="info" style={{ fontSize: "10px", padding: "1px 6px" }}>Labour ({siteLabourCount})</Badge>
+                            )}
+                            {siteMaterialCount > 0 && (
+                              <Badge status="pending" style={{ fontSize: "10px", padding: "1px 6px" }}>Materials ({siteMaterialCount})</Badge>
+                            )}
+                            {siteGeneralExpense > 0 && (
+                              <Badge status="warning" style={{ fontSize: "10px", padding: "1px 6px" }}>Expense Logged</Badge>
+                            )}
+                            {hasDprToday && (
+                              <Badge status="success" style={{ fontSize: "10px", padding: "1px 6px" }}>DPR Filed</Badge>
+                            )}
+                            {siteTodayAttendance.length === 0 && siteLabourCount === 0 && siteMaterialCount === 0 && siteGeneralExpense === 0 && !hasDprToday && (
+                              <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>No activity logged today</span>
+                            )}
+                          </div>
+                        </td>
+
+                        {/* Today's Labour */}
+                        <td>
+                          <span style={{ fontSize: "12px", fontWeight: siteLabourCount > 0 ? "700" : "500", color: siteLabourCount > 0 ? "var(--primary-950)" : "var(--primary-500)" }}>
+                            {siteLabourCount > 0 ? `${siteLabourCount} Workers` : "0 Workers"}
+                          </span>
+                        </td>
+
+                        {/* Today's Expenses */}
+                        <td>
+                          <span style={{ fontSize: "12px", fontWeight: siteTotalExpenseToday > 0 ? "700" : "500", color: siteTotalExpenseToday > 0 ? "var(--primary-950)" : "var(--primary-500)" }}>
+                            {formatINR(siteTotalExpenseToday)}
+                          </span>
+                        </td>
+
+                        {/* Live Progress */}
+                        <td>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%" }}>
+                            <div style={{ flex: 1, height: "7px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                              <div style={{
+                                width: `${progVal}%`,
+                                height: "100%",
+                                backgroundColor: isDelayed ? "#dc2626" : (progVal >= 80 ? "#16a34a" : (progVal >= 40 ? "#2563eb" : "#f97316")),
+                                borderRadius: "100px"
+                              }} />
+                            </div>
+                            <span style={{ fontSize: "11.5px", fontWeight: "800", color: "var(--primary-950)", minWidth: "32px", textAlign: "right" }}>
+                              {progVal}%
+                            </span>
+                          </div>
+                        </td>
+
+                        {/* Status */}
+                        <td style={{ textAlign: "center" }}>
+                          <Badge status={isDelayed ? "danger" : (site.status || "active")} />
+                        </td>
+
+                        {/* Action: Inspect Details */}
+                        <td style={{ textAlign: "right" }}>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedInspectSite(site)}
+                            className="erp-btn-secondary"
+                            style={{ fontSize: "11.5px", padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                          >
+                            <Eye size={12} />
+                            Inspect
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 6: TODAY'S REAL-TIME ACTIVITY STREAM (LIVE AUDIT FEED)       */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-card">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "14px" }}>
+            <div>
+              <h3 className="admin-card-title">Today's Real-Time Operations Activity Stream</h3>
+              <p className="admin-card-subtitle">
+                Chronological live feed of field submissions, check-ins, labour logs, materials, and expenses recorded today ({todayFeedList.length} events).
+              </p>
+            </div>
+
+            {/* Filter Tabs */}
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              {["all", "attendance", "labour", "materials", "expenses", "reports"].map(f => (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setDashboardActivityFilter(f)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: "6px",
+                    border: "1px solid",
+                    borderColor: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--border-color)",
+                    backgroundColor: dashboardActivityFilter === f ? "#fff7ed" : "#ffffff",
+                    color: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--primary-700)",
+                    fontSize: "11.5px",
+                    fontWeight: "700",
+                    cursor: "pointer",
+                    textTransform: "capitalize"
+                  }}
+                >
+                  {f === "all" ? `All Events (${todayFeedList.length})` : `${f} (${todayFeedList.filter(item => item.moduleType === f).length})`}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {filteredTodayFeed.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "36px 20px", color: "var(--text-muted)" }}>
+              <Clock size={28} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
+              <p style={{ margin: 0, fontSize: "13px", fontWeight: "600" }}>No operations activity recorded for the selected filter today.</p>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "360px", overflowY: "auto" }}>
+              {filteredTodayFeed.map(item => (
+                <div
+                  key={item.id}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    padding: "10px 14px",
+                    backgroundColor: "#f8fafc",
+                    borderRadius: "8px",
+                    border: "1px solid #e2e8f0",
+                    gap: "12px"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", minWidth: 0, flex: 1 }}>
+                    <Badge status={item.badgeStatus} style={{ fontSize: "10.5px", flexShrink: 0 }}>
+                      {item.module}
+                    </Badge>
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.title}
+                      </strong>
+                      <span style={{ fontSize: "11.5px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {item.description}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", display: "block" }}>
+                      {item.time}
+                    </span>
+                    <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>
+                      by {item.user}
+                    </span>
                   </div>
                 </div>
               ))}
             </div>
-            {alerts.length > 4 && (
-              <div style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px", textAlign: "center" }}>
-                <button
-                  onClick={() => setShowAllAlerts(!showAllAlerts)}
-                  style={{ background: "none", border: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
+          )}
+        </div>
+
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        {/* SECTION 7: EXECUTIVE QUICK-ACCESS MODULE SHORTCUTS                   */}
+        {/* ══════════════════════════════════════════════════════════════════════ */}
+        <div className="admin-card">
+          <div className="admin-card-header" style={{ marginBottom: "12px" }}>
+            <div>
+              <h3 className="admin-card-title">Executive Shortcuts &amp; Department Gateways</h3>
+              <p className="admin-card-subtitle">Direct quick-access into deep-dive operational ledgers and management tables</p>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "10px" }}>
+            {[
+              { to: "/superadmin/sites", label: "All Sites Operations", icon: Building2, desc: `${overallMetrics.totalSites} Sites Portfolio` },
+              { to: "/superadmin/engineers", label: "Engineers Directory", icon: Users, desc: `${engineers.length} Registered Engineers` },
+              { to: "/superadmin/attendance", label: "Attendance Monitor", icon: ClipboardCheck, desc: `${presentCount} Present Today` },
+              { to: "/superadmin/labour", label: "Daily Labour Ledger", icon: Briefcase, desc: `${todayLabourCount} Workers Today` },
+              { to: "/superadmin/materials", label: "Materials Stock", icon: Package, desc: `${materials.length} Inventory Items` },
+              { to: "/superadmin/payments", label: "Corporate Payments", icon: DollarSign, desc: "Vendor & Client Ledger" },
+              { to: "/superadmin/payroll", label: "Worker Payouts", icon: FileText, desc: "Wages & Attendance" },
+              { to: "/superadmin/finance", label: "Financial Ledger", icon: TrendingUp, desc: formatINR(overallMetrics.totalExpenses) },
+              { to: "/superadmin/reports", label: "Reports & Analytics", icon: Layers, desc: "DPRs & Site Insights" },
+              { to: "/superadmin/admins", label: "Admin Accounts", icon: ShieldCheck, desc: `${admins.length || 1} Admins Oversight` },
+              { to: "/superadmin/activity", label: "System Audit Trail", icon: Activity, desc: "Chronological Logs" }
+            ].map(item => {
+              const IconComponent = item.icon;
+              return (
+                <Link
+                  key={item.to}
+                  to={item.to}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    padding: "12px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid var(--border-color)",
+                    backgroundColor: "#ffffff",
+                    textDecoration: "none",
+                    transition: "all 0.15s ease"
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.borderColor = "var(--brand-orange)";
+                    e.currentTarget.style.boxShadow = "0 2px 8px rgba(234, 88, 12, 0.1)";
+                    e.currentTarget.style.transform = "translateY(-1px)";
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.borderColor = "var(--border-color)";
+                    e.currentTarget.style.boxShadow = "none";
+                    e.currentTarget.style.transform = "none";
+                  }}
                 >
-                  {showAllAlerts ? "Show Less" : `View All Alerts (${alerts.length})`}
-                </button>
-              </div>
-            )}
-          </Card>
-        )}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                    <IconComponent size={16} style={{ color: "var(--brand-orange)" }} />
+                    <strong style={{ fontSize: "12.5px", color: "var(--primary-950)" }}>{item.label}</strong>
+                  </div>
+                  <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{item.desc}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
 
       </div>
     );
   };
+
 
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2792,6 +3616,356 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       {tab === "activity" && renderActivityView()}
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
+
+      {/* ── 1. EXPANDED TODAY ATTENDANCE MODAL ── */}
+      <Modal
+        isOpen={showTodayAttendanceModal}
+        onClose={() => setShowTodayAttendanceModal(false)}
+        title={`Today's Attendance Master Ledger — (${formattedTodayDate})`}
+        maxWidth="1100px"
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+          {/* Header Summary */}
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: "12px",
+            padding: "12px 16px",
+            backgroundColor: "#f8fafc",
+            borderRadius: "8px",
+            border: "1px solid #e2e8f0"
+          }}>
+            <div className="admin-attendance-metrics" style={{ flexWrap: "wrap" }}>
+              <div className="admin-attendance-metric-pill present">
+                <UserCheck size={14} />
+                <span>Present: {todayAttendanceList.length}/{engineers.filter(e => e.status === "active").length}</span>
+              </div>
+              <div className="admin-attendance-metric-pill onsite">
+                <Clock size={14} />
+                <span>On-Site Now: {todayAttendanceList.filter(r => !r.isCheckedOut).length}</span>
+              </div>
+              <div className="admin-attendance-metric-pill checkout">
+                <CheckCircle2 size={14} />
+                <span>Checked Out: {todayAttendanceList.filter(r => r.isCheckedOut).length}</span>
+              </div>
+              <div className="admin-attendance-metric-pill verified">
+                <ShieldCheck size={14} />
+                <span>GPS Verified: {todayAttendanceList.filter(r => r.isVerified).length}</span>
+              </div>
+            </div>
+
+            <div className="admin-attendance-live-badge">
+              <span className="admin-attendance-live-dot" />
+              Live Real-Time Sync
+            </div>
+          </div>
+
+          {/* Controls Bar */}
+          <div className="admin-attendance-controls-bar" style={{ margin: 0 }}>
+            <div className="admin-attendance-search-group">
+              <div className="admin-attendance-search-input-wrap">
+                <Search size={14} className="admin-attendance-search-icon" />
+                <input 
+                  type="text"
+                  placeholder="Search engineer name, email or site..."
+                  value={dashboardAttendanceSearch}
+                  onChange={(e) => setDashboardAttendanceSearch(e.target.value)}
+                  className="admin-attendance-search-input"
+                />
+              </div>
+
+              <select
+                value={dashboardAttendanceSiteFilter}
+                onChange={(e) => setDashboardAttendanceSiteFilter(e.target.value)}
+                className="admin-attendance-select"
+              >
+                <option value="">All Sites ({sites.length})</option>
+                {sites.map(s => (
+                  <option key={s.id} value={s.id}>{s.siteName}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="admin-attendance-tabs">
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${dashboardAttendanceStatusFilter === "all" ? "active" : ""}`}
+                onClick={() => setDashboardAttendanceStatusFilter("all")}
+              >
+                All Checked-In ({todayAttendanceList.length})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${dashboardAttendanceStatusFilter === "onsite" ? "active" : ""}`}
+                onClick={() => setDashboardAttendanceStatusFilter("onsite")}
+              >
+                On-Site Now ({todayAttendanceList.filter(r => !r.isCheckedOut).length})
+              </button>
+              <button 
+                type="button"
+                className={`admin-attendance-tab-btn ${dashboardAttendanceStatusFilter === "checkout" ? "active" : ""}`}
+                onClick={() => setDashboardAttendanceStatusFilter("checkout")}
+              >
+                Checked Out ({todayAttendanceList.filter(r => r.isCheckedOut).length})
+              </button>
+            </div>
+          </div>
+
+          {/* Table */}
+          <div className="admin-attendance-table-wrap" style={{ maxHeight: "60vh", overflowY: "auto", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+            {filteredDashboardAttendance.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "36px", color: "var(--text-muted)" }}>
+                No attendance records match the selected filters.
+              </div>
+            ) : (
+              <table className="admin-attendance-table">
+                <thead>
+                  <tr>
+                    <th>Engineer</th>
+                    <th>Assigned Site</th>
+                    <th>Check-In Time</th>
+                    <th>Check-Out / Status</th>
+                    <th>GPS Coordinates &amp; Verification</th>
+                    <th style={{ textAlign: "center" }}>Photo Proof</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredDashboardAttendance.map(rec => (
+                    <tr key={rec.id}>
+                      <td>
+                        <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>{rec.engineerName}</strong>
+                        <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{rec.engineerEmail || rec.engineerPhone || "Site Engineer"}</span>
+                      </td>
+                      <td>
+                        <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>{rec.siteName}</strong>
+                      </td>
+                      <td>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "#15803d" }}>{rec.checkInTimeFormatted}</span>
+                      </td>
+                      <td>
+                        <span style={{
+                          fontSize: "11px",
+                          fontWeight: "750",
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          backgroundColor: rec.isCheckedOut ? "#f1f5f9" : "#dcfce7",
+                          color: rec.isCheckedOut ? "#475569" : "#15803d"
+                        }}>
+                          {rec.isCheckedOut ? `Checked Out (${rec.checkOutTimeFormatted || "Done"})` : "On Site"}
+                        </span>
+                      </td>
+                      <td>
+                        {rec.latitude && rec.longitude ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "2px", fontSize: "11px" }}>
+                            <span className="font-mono" style={{ color: "var(--primary-700)" }}>{Number(rec.latitude).toFixed(5)}, {Number(rec.longitude).toFixed(5)}</span>
+                            <span style={{ color: rec.isVerified ? "#15803d" : "#ea580c", fontWeight: "600" }}>
+                              {rec.isVerified ? "✓ Verified Location" : "Location Pending"}
+                            </span>
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>GPS Logged</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        {rec.photoUrl ? (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPreviewImage({ url: rec.photoUrl, title: `Check-in Photo — ${rec.engineerName}` })}
+                            style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                          >
+                            <img src={rec.photoUrl} alt="Check-in Proof" style={{ width: "34px", height: "34px", borderRadius: "6px", objectFit: "cover", border: "1px solid #cbd5e1" }} />
+                          </button>
+                        ) : (
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+      </Modal>
+
+      {/* ── 2. SITE OPERATIONS SUPERVISION DETAIL MODAL ── */}
+      {selectedInspectSite && (
+        <Modal
+          isOpen={!!selectedInspectSite}
+          onClose={() => setSelectedInspectSite(null)}
+          title={`Operations Deep-Dive: ${selectedInspectSite.siteName}`}
+          maxWidth="960px"
+        >
+          <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+            {/* Top Site Metadata Banner */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", padding: "12px 16px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+              <div>
+                <strong style={{ fontSize: "14px", color: "var(--primary-950)", display: "block" }}>{selectedInspectSite.siteName}</strong>
+                <span style={{ fontSize: "12px", color: "var(--primary-600)" }}>Client: {selectedInspectSite.clientName || "Corporate Client"} • Location: {selectedInspectSite.location || "N/A"}</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "700" }}>Budget: {formatINR(selectedInspectSite.budget || selectedInspectSite.projectValue || 0)}</span>
+                <Badge status={selectedInspectSite.status || "active"} />
+              </div>
+            </div>
+
+            {/* Sub-Tabs */}
+            <div style={{ display: "flex", gap: "8px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+              {[
+                { id: "engineers", label: "Assigned Engineers & Presence" },
+                { id: "labour", label: "Today's Labour Force" },
+                { id: "materials", label: "Material Stock" },
+                { id: "progress", label: "Progress & DPRs" }
+              ].map(tabItem => (
+                <button
+                  key={tabItem.id}
+                  type="button"
+                  onClick={() => setSiteModalActiveTab(tabItem.id)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: "6px",
+                    border: "none",
+                    backgroundColor: siteModalActiveTab === tabItem.id ? "var(--brand-orange)" : "transparent",
+                    color: siteModalActiveTab === tabItem.id ? "#fff" : "var(--primary-700)",
+                    fontSize: "12px",
+                    fontWeight: "700",
+                    cursor: "pointer"
+                  }}
+                >
+                  {tabItem.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab 1: Engineers */}
+            {siteModalActiveTab === "engineers" && (
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Engineers Assigned to Site</h4>
+                {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No engineers currently assigned to this site.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).map(eng => {
+                      const todayRec = todayAttendanceList.find(r => r.resolvedSiteId === selectedInspectSite.id && (r.resolvedEngineerId === eng.id || r.resolvedEngineerId === eng.uid));
+                      return (
+                        <div key={eng.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                          <div>
+                            <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{eng.fullName || eng.name}</strong>
+                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{eng.email} • {eng.phoneNumber || eng.phone || ""}</span>
+                          </div>
+                          <div>
+                            {todayRec ? (
+                              <span style={{ fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "10px", backgroundColor: todayRec.isCheckedOut ? "#f1f5f9" : "#dcfce7", color: todayRec.isCheckedOut ? "#475569" : "#15803d" }}>
+                                {todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.checkInTimeFormatted})`}
+                              </span>
+                            ) : (
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Not Checked In Today</span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 2: Labour */}
+            {siteModalActiveTab === "labour" && (
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Today's Field Workforce Attendance</h4>
+                {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No labour attendance logged for this site today.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).map(r => (
+                      <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div>
+                          <strong style={{ fontSize: "12.5px" }}>{r.categoryName || r.category || "General Labour"}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{r.workerCount || 1} Workers @ ₹{r.dailyWage || r.rate || 0}/day</span>
+                        </div>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
+                          {formatINR(r.totalAmount || ((r.workerCount || 1) * (r.dailyWage || r.rate || 0)))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 3: Materials */}
+            {siteModalActiveTab === "materials" && (
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Material Stock at Site</h4>
+                {materials.filter(m => m.siteId === selectedInspectSite.id).length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No material stock records registered for this site.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "250px", overflowY: "auto" }}>
+                    {materials.filter(m => m.siteId === selectedInspectSite.id).map(m => (
+                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div>
+                          <strong style={{ fontSize: "12.5px" }}>{m.materialName || m.name}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>Stock: {m.quantity || m.currentStock || 0} {m.unit || "units"}</span>
+                        </div>
+                        <span style={{ fontSize: "12px", fontWeight: "700" }}>
+                          {formatINR(m.totalCost || 0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 4: Progress & DPRs */}
+            {siteModalActiveTab === "progress" && (
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Recent Daily Progress Reports</h4>
+                {allDprs.filter(d => d.siteId === selectedInspectSite.id).length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No DPRs submitted for this site.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "250px", overflowY: "auto" }}>
+                    {allDprs.filter(d => d.siteId === selectedInspectSite.id).slice(0, 5).map(d => (
+                      <div key={d.id} style={{ padding: "10px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
+                          <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{d.date || "DPR Report"}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>By {d.submittedByName || d.engineerName || "Engineer"}</span>
+                        </div>
+                        <p style={{ margin: 0, fontSize: "11.5px", color: "var(--primary-700)" }}>{d.workDescription || d.description || "Progress report logged."}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
+
+      {/* ── 3. PHOTO PROOF LIGHTBOX MODAL ── */}
+      {selectedPreviewImage && (
+        <ConfirmationModal
+          isOpen={!!selectedPreviewImage}
+          onClose={() => setSelectedPreviewImage(null)}
+          title={selectedPreviewImage.title || "Photo Proof"}
+          message=""
+          confirmText="Close"
+          variant="info"
+          onConfirm={() => setSelectedPreviewImage(null)}
+          details={
+            <div style={{ textAlign: "center" }}>
+              <img
+                src={selectedPreviewImage.url}
+                alt={selectedPreviewImage.title}
+                style={{ maxWidth: "100%", maxHeight: "500px", borderRadius: "8px", objectFit: "contain" }}
+              />
+            </div>
+          }
+        />
+      )}
 
       <Loading show={dataLoading} text="Updating database record..." />
     </Layout>
