@@ -5838,6 +5838,17 @@ export async function deleteLabourMemberFromCategory(teamId, categoryId, memberI
 }
 
 export async function saveLabourMemberAttendance(siteId, engineerId, dateStr, attendanceList) {
+  const todayStr = new Date().toISOString().split("T")[0];
+  if (dateStr > todayStr) {
+    throw new Error("Future Date Error: Workforce attendance cannot be recorded for future dates.");
+  }
+  if (dateStr === todayStr && engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, siteId, dateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Today's verified site attendance is required before recording workforce attendance for today (${dateStr}).`);
+    }
+  }
+
   const db = getDb();
   const batch = writeBatch(db);
   
@@ -5921,6 +5932,17 @@ export async function saveLabourAttendanceRecord(recordId, recordData) {
 
   const engId = recordData.createdBy || recordData.engineerId;
   const attDate = recordData.attendanceDate || recordData.date;
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  if (attDate > todayStr) {
+    throw new Error("Future Date Error: Workforce attendance cannot be recorded for future dates.");
+  }
+  if (attDate === todayStr && engId && recordData.siteId) {
+    const isVerified = await verifyEngineerAttendanceGate(engId, recordData.siteId, attDate);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Today's verified site attendance is required before recording workforce attendance for today (${attDate}).`);
+    }
+  }
 
   // Sequential Date Rule: Prevent modifying records for dates blocked by previous pending dates
   if (recordData.siteId && attDate) {
@@ -6526,6 +6548,20 @@ export async function submitLabourAttendance(siteId, dateStr, engineerId, teamId
   const cleanTeamId = teamId ? String(teamId).trim() : null;
   const cleanEngineerName = engineerName ? String(engineerName).trim() : "";
   const cleanEngineerEmail = engineerEmail ? String(engineerEmail).trim() : "";
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // 1. Future Date Guard: Block future dates completely
+  if (cleanDateStr > todayStr) {
+    throw new Error("Future Date Error: Workforce attendance cannot be submitted for future dates.");
+  }
+
+  // 2. Attendance Verification Gate: Applies strictly to TODAY
+  if (cleanDateStr === todayStr && engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, cleanSiteId, cleanDateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Today's verified site attendance is required before submitting workforce attendance for today (${cleanDateStr}).`);
+    }
+  }
 
   const db = getDb();
   const siteLockDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);
@@ -6664,6 +6700,20 @@ export async function markLabourNoWork(siteId, dateStr, engineerId, engineerName
   const cleanDateStr = String(dateStr).trim();
   const cleanEngineerName = engineerName ? String(engineerName).trim() : "";
   const cleanEngineerEmail = engineerEmail ? String(engineerEmail).trim() : "";
+  const todayStr = new Date().toISOString().split("T")[0];
+
+  // 1. Future Date Guard: Block future dates completely
+  if (cleanDateStr > todayStr) {
+    throw new Error("Future Date Error: Non-working day cannot be marked for future dates.");
+  }
+
+  // 2. Attendance Verification Gate: Applies strictly to TODAY
+  if (cleanDateStr === todayStr && engineerId) {
+    const isVerified = await verifyEngineerAttendanceGate(engineerId, cleanSiteId, cleanDateStr);
+    if (!isVerified) {
+      throw new Error(`Attendance Verification Gate: Today's verified site attendance is required before marking today as No Work (${cleanDateStr}).`);
+    }
+  }
 
   const db = getDb();
   const siteLockDocRef = doc(db, "attendance", `labour_lock_${cleanSiteId}_${cleanDateStr}`);

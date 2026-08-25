@@ -1502,7 +1502,7 @@ export function getDaysDiffUTC(dateStr1, dateStr2) {
  * @param {Array} [draftRecords] - Array of existing labourMemberAttendance records for site
  * @returns {object} - Sequence evaluation result
  */
-export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords = [], draftRecords = []) {
+export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords = [], draftRecords = [], customTodayStr = null) {
   if (!siteId || !targetDateStr) {
     return {
       allowed: false,
@@ -1515,6 +1515,18 @@ export function evaluateLabourDateSequence(siteId, targetDateStr, lockedRecords 
 
   const cleanSiteId = String(siteId).trim();
   const cleanTargetDate = String(targetDateStr).trim();
+  const todayStr = customTodayStr || new Date().toISOString().split("T")[0];
+
+  // Block future dates
+  if (cleanTargetDate > todayStr) {
+    return {
+      allowed: false,
+      status: "blocked_future_date",
+      message: "Labour attendance cannot be recorded or submitted for future dates.",
+      siteId: cleanSiteId,
+      targetDate: cleanTargetDate
+    };
+  }
 
   // 1. Extract and sanitize unique locked dates for this specific site
   const lockedDatesSet = new Set();

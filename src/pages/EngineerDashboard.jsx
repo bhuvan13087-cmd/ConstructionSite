@@ -8429,6 +8429,77 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
 
 
   const renderLabourView = () => {
+    const todayStr = new Date().toISOString().split("T")[0];
+    const effectiveLabourDate = labourDate || todayStr;
+
+    // 1. Future Date Check - Completely blocked
+    if (effectiveLabourDate > todayStr) {
+      return (
+        <div style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: "16px",
+          maxWidth: "600px",
+          margin: "0 auto",
+          padding: "20px 4px"
+        }}>
+          <div style={{
+            textAlign: "center",
+            padding: "36px 20px",
+            backgroundColor: "#fef2f2",
+            borderRadius: "16px",
+            border: "1.5px solid #fecaca",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: "10px"
+          }}>
+            <div style={{ fontSize: "36px" }}>⛔</div>
+            <div style={{ fontSize: "16px", fontWeight: "800", color: "#991b1b" }}>
+              Future Date Entry Restricted
+            </div>
+            <div style={{ fontSize: "13px", color: "#7f1d1d", maxWidth: "420px", lineHeight: "1.4" }}>
+              Workforce attendance cannot be recorded or submitted for future dates ({formatDateDMY(effectiveLabourDate)}). Please select today ({formatDateDMY(todayStr)}) or a previous working date.
+            </div>
+            <button
+              type="button"
+              onClick={() => setLabourDate(todayStr)}
+              style={{
+                marginTop: "8px",
+                padding: "8px 20px",
+                borderRadius: "10px",
+                backgroundColor: "#ea580c",
+                color: "#ffffff",
+                border: "none",
+                fontSize: "13px",
+                fontWeight: "750",
+                cursor: "pointer"
+              }}
+            >
+              Switch to Today ({formatDateDMY(todayStr)})
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    // 2. Today's Date Check - Attendance Gateway Check applies strictly to TODAY
+    if (effectiveLabourDate === todayStr) {
+      const isVerified = isAttendanceVerifiedForSiteAndDate(activeSiteId, todayStr);
+      if (!isVerified) {
+        const siteObj = assignedSites.find(s => s.id === activeSiteId) || currentSite;
+        return (
+          <AttendanceGateBlockedCard
+            siteName={siteObj?.siteName || "Current Worksite"}
+            dateStr={todayStr}
+            sectionTitle="Workforce & Labour Log"
+            onMarkAttendance={() => handleOpenAttendanceGate("labour")}
+            isToday={true}
+          />
+        );
+      }
+    }
+
     const isSequenceBlocked = !isLabourSubmitted && Boolean(labourDateSequenceStatus && !labourDateSequenceStatus.allowed);
     const isFormDisabled = isLabourSubmitted || isSequenceBlocked;
     const isNoWorkDate = Boolean(labourLockInfo?.isNoWork || labourLockInfo?.noWork || labourLockInfo?.status === "no_work");
@@ -8614,7 +8685,16 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   id="labour-attendance-date-input"
                   type="date" 
                   value={labourDate} 
-                  onChange={(e) => setLabourDate(e.target.value)} 
+                  max={todayStr}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    if (val > todayStr) {
+                      showToast("Future dates are not allowed for labour entry.", "warning");
+                      setLabourDate(todayStr);
+                      return;
+                    }
+                    setLabourDate(val);
+                  }}
                   onClick={(e) => {
                     try {
                       if (typeof e.target.showPicker === "function") {
