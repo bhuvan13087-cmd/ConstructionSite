@@ -4599,13 +4599,13 @@ export function subscribeMaterialsDetailed(siteId, onUpdate) {
   }
 
   return onSnapshot(q, (snapshot) => {
-    const list = [];
+    const map = new Map();
     snapshot.forEach(d => {
       const data = d.data();
       if (d.id.startsWith("lock_") || d.id === "__material_master__" || data.type === "material_lock" || data.type === "labour_attendance_lock") {
         return;
       }
-      list.push({
+      map.set(d.id, {
         id: d.id,
         ...data,
         receivedQuantity: Number(data.receivedQuantity) || Number(data.quantity) || (data.materialType === "customer_amount_only" || data.type === "customer_amount_only" ? 1 : 0),
@@ -4617,9 +4617,10 @@ export function subscribeMaterialsDetailed(siteId, onUpdate) {
       });
     });
     
+    const list = Array.from(map.values());
     list.sort((a, b) => {
-      const dateA = a.createdTime?.seconds ? new Date(a.createdTime.seconds * 1000) : new Date(a.purchaseDate || 0);
-      const dateB = b.createdTime?.seconds ? new Date(b.createdTime.seconds * 1000) : new Date(b.purchaseDate || 0);
+      const dateA = a.createdTime?.seconds ? new Date(a.createdTime.seconds * 1000) : new Date(a.purchaseDate || a.date || a.deliveryDate || 0);
+      const dateB = b.createdTime?.seconds ? new Date(b.createdTime.seconds * 1000) : new Date(b.purchaseDate || b.date || b.deliveryDate || 0);
       return dateB - dateA;
     });
 
@@ -6083,12 +6084,13 @@ export function subscribeAllLabourAttendance(onUpdate) {
   const db = getDb();
   const q = query(collection(db, "labourMemberAttendance"));
   return onSnapshot(q, (snapshot) => {
-    const list = [];
+    const map = new Map();
     snapshot.forEach(docSnap => {
-      list.push({ id: docSnap.id, ...docSnap.data() });
+      map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
     });
+    const list = Array.from(map.values());
     // Sort by attendanceDate descending
-    list.sort((a, b) => (b.attendanceDate || "").localeCompare(a.attendanceDate || ""));
+    list.sort((a, b) => (b.attendanceDate || b.date || "").localeCompare(a.attendanceDate || a.date || ""));
     onUpdate(list);
   }, (err) => {
     console.error("All labour attendance subscription failed:", err);
@@ -6152,13 +6154,92 @@ export async function savePayrollStatus(key, statusData) {
     currentStatuses = snap.data().statuses || {};
   }
   
+  const existing = currentStatuses[key] || {};
+  const effectiveAmount = Number(statusData.amount !== undefined ? statusData.amount : (existing.amount || 0));
+  let paidAmount = statusData.paidAmount !== undefined 
+    ? Number(statusData.paidAmount) 
+    : (statusData.status === "Paid" ? effectiveAmount : (statusData.status === "Pending" ? 0 : Number(existing.paidAmount || 0)));
+  let pendingAmount = Math.max(0, effectiveAmount - paidAmount);
+  let status = statusData.status || (pendingAmount === 0 && effectiveAmount > 0 ? "Paid" : (paidAmount > 0 ? "Partial" : "Pending"));
+
   currentStatuses[key] = {
-    ...currentStatuses[key],
+    ...existing,
     ...statusData,
+    amount: effectiveAmount,
+    paidAmount,
+    pendingAmount,
+    status,
     updatedAt: new Date().toISOString()
   };
   
   await setDoc(docRef, { statuses: currentStatuses }, { merge: true });
+}
+
+// Record payment transaction (supporting partial payments, total paid, pending calculation, and payment history)
+export async function recordWorkerPayoutPayment(key, paymentEntry, totalPayable = null) {
+  const db = getDb();
+  const docRef = doc(db, "users", "payroll_status_global");
+  
+  await runTransaction(db, async (transaction) => {
+    const snap = await transaction.get(docRef);
+    let currentStatuses = {};
+    if (snap.exists()) {
+      currentStatuses = snap.data().statuses || {};
+    }
+    
+    const existing = currentStatuses[key] || {};
+    const effectivePayable = Number(totalPayable !== null ? totalPayable : (existing.amount || existing.totalAmount || 0));
+    const previousPaid = Number(existing.paidAmount !== undefined ? existing.paidAmount : (existing.status === "Paid" ? effectivePayable : 0)) || 0;
+    const paymentAmount = Number(paymentEntry.amount) || 0;
+
+    if (paymentAmount <= 0) {
+      throw new Error("Payment amount must be greater than 0.");
+    }
+    
+    const newPaidAmount = previousPaid + paymentAmount;
+    if (effectivePayable > 0 && newPaidAmount > effectivePayable + 0.01) {
+      throw new Error(`Payment amount (₹${paymentAmount.toLocaleString("en-IN")}) exceeds remaining pending amount (₹${Math.max(0, effectivePayable - previousPaid).toLocaleString("en-IN")}).`);
+    }
+
+    const remainingPending = Math.max(0, effectivePayable - newPaidAmount);
+    const newStatus = remainingPending === 0 ? "Paid" : (newPaidAmount > 0 ? "Partial" : "Pending");
+    
+    const newPaymentRecord = {
+      id: `pay_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+      amount: paymentAmount,
+      date: paymentEntry.paymentDate || paymentEntry.date || new Date().toISOString().split("T")[0],
+      method: paymentEntry.paymentMethod || paymentEntry.method || "Cash",
+      reference: paymentEntry.reference || "",
+      notes: paymentEntry.notes || "",
+      recordedAt: new Date().toISOString(),
+      recordedBy: paymentEntry.recordedBy || ""
+    };
+
+    const existingPayments = Array.isArray(existing.payments) ? existing.payments : (existing.paymentDate ? [{
+      id: `pay_legacy_${key}`,
+      amount: previousPaid,
+      date: existing.paymentDate,
+      method: existing.paymentMethod || "Cash",
+      notes: existing.notes || "",
+      recordedAt: existing.updatedAt || new Date().toISOString()
+    }] : []);
+
+    currentStatuses[key] = {
+      ...existing,
+      amount: effectivePayable,
+      totalAmount: effectivePayable,
+      paidAmount: newPaidAmount,
+      pendingAmount: remainingPending,
+      status: newStatus,
+      paymentDate: newPaymentRecord.date,
+      paymentMethod: newPaymentRecord.method,
+      notes: paymentEntry.notes || existing.notes || "",
+      payments: [...existingPayments, newPaymentRecord],
+      updatedAt: new Date().toISOString()
+    };
+
+    transaction.set(docRef, { statuses: currentStatuses }, { merge: true });
+  });
 }
 
 // Real-time subscription to all general expenses (merging primary expenses/general and users/__site_expenses__)

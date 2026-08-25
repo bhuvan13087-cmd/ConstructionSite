@@ -25,7 +25,8 @@ import {
   Activity,
   Briefcase,
   ShieldCheck,
-  Clock
+  Clock,
+  CreditCard
 } from "lucide-react";
 import Button from "../common/Button";
 import CivilEngineerLogo from "../common/CivilEngineerLogo";
@@ -288,13 +289,17 @@ export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse
                 <Package size={18} />
                 <span>Material Stock</span>
               </NavLink>
-              <NavLink to="/superadmin/finance" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
-                <DollarSign size={18} />
-                <span>Site Expenses</span>
+              <NavLink to="/superadmin/payments" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
+                <CreditCard size={18} />
+                <span>Payments Dashboard</span>
               </NavLink>
               <NavLink to="/superadmin/payroll" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
                 <FileText size={18} />
                 <span>Worker Payouts</span>
+              </NavLink>
+              <NavLink to="/superadmin/finance" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
+                <DollarSign size={18} />
+                <span>Site Expenses</span>
               </NavLink>
 
               <NavGroupTitle>Governance &amp; Reports</NavGroupTitle>
@@ -350,8 +355,8 @@ export default function Sidebar({ isOpen, onClose, isCollapsed, onToggleCollapse
             </NavLink>
             <NavGroupTitle>Money &amp; Accounts</NavGroupTitle>
             <NavLink to="/admin/payments" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
-              <DollarSign size={18} />
-              <span>Site Expenses</span>
+              <CreditCard size={18} />
+              <span>Payments Dashboard</span>
             </NavLink>
             <NavLink to="/admin/payroll" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`} onClick={onClose}>
               <FileText size={18} />

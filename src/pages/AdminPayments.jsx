@@ -1,1238 +1,1921 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import Layout from "../components/layout/Layout";
 import Card from "../components/common/Card";
 import Button from "../components/common/Button";
 import Badge from "../components/common/Badge";
 import Loading from "../components/common/Loading";
 import Modal from "../components/common/Modal";
+import ViewToggle from "../components/common/ViewToggle";
 import { useAuth } from "../context/AuthContext";
 import {
   getSites,
-  getMaterialsDetailed,
-  getLabourDailyCountsSummary,
-  getLabourPayments,
-  getLabourMaster,
-  getGeneralExpenses,
-  subscribeGeneralExpenses,
-  saveGeneralExpense,
-  approveGeneralExpense,
-  logGeneralExpensePayment,
-  saveLabourPayment,
+  getLabourTeams,
+  subscribeAllLabourAttendance,
+  subscribePayrollStatuses,
+  subscribeMaterialsDetailed,
+  recordWorkerPayoutPayment,
   logMaterialPayment
 } from "../services/firebaseService";
+import { formatINR, formatDateDMY } from "../services/businessLogic";
 import {
-  getSiteExpenseLedger,
-  formatINR
-} from "../services/businessLogic";
-import {
-  DollarSign,
-  TrendingUp,
-  TrendingDown,
-  AlertCircle,
-  Clock,
-  Printer,
-  Plus,
-  X,
   CreditCard,
-  Layers,
+  Building2,
   Users,
-  MapPin,
-  Clipboard,
-  Calendar,
-  Check,
   Package,
-  FileText,
+  Calendar,
   Search,
-  Filter,
-  Eye,
-  ArrowUpDown,
-  ChevronLeft,
+  CheckCircle2,
+  Clock,
+  ArrowLeft,
   ChevronRight,
-  Truck,
-  Building2
+  History,
+  Printer,
+  DollarSign,
+  MapPin,
+  X,
+  Filter,
+  Layers,
+  ArrowUpDown
 } from "lucide-react";
 
 export default function AdminPayments() {
   const { userProfile } = useAuth();
-  const [activeTab, setActiveTab] = useState("overview"); // overview, pending, payments, reports
+
+  // Loading & Submitting State
   const [loading, setLoading] = useState(true);
-  
-  // Datasets
-  const [sites, setSites] = useState([]);
-  const [selectedSiteId, setSelectedSiteId] = useState("");
-  const [materials, setMaterials] = useState([]);
-  const [labourHistory, setLabourHistory] = useState([]);
-  const [labourPayments, setLabourPayments] = useState([]);
-  const [labourMaster, setLabourMaster] = useState({});
-  const [generalExpenses, setGeneralExpenses] = useState([]);
+  const [submitting, setSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
 
-  // Filter, Search, Date Range & Pagination States
-  const [searchQuery, setSearchQuery] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState("All"); // All, Labour, Material, Transport, Other
-  const [fromDate, setFromDate] = useState("");
-  const [toDate, setToDate] = useState("");
-  const [sortBy, setSortBy] = useState("date-desc"); // date-desc, date-asc, amount-desc, amount-asc
-  const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 10;
+  // Canonical Datasets (Single Source of Truth)
+  const [sites, setSites] = useState([]);
+  const [teams, setTeams] = useState([]);
+  const [labourAttendance, setLabourAttendance] = useState([]);
+  const [payrollStatuses, setPayrollStatuses] = useState({});
+  const [materials, setMaterials] = useState([]);
 
-  // Modals state
-  const [showAddExpenseModal, setShowAddExpenseModal] = useState(false);
-  const [newExpense, setNewExpense] = useState({ category: "Site Expense", amount: "", date: new Date().toISOString().split("T")[0], description: "", notes: "" });
-  const [selectedExpenseDetail, setSelectedExpenseDetail] = useState(null);
+  // Level 1: Site Overview View Mode ("grid" | "normal")
+  const [viewMode, setViewMode] = useState("grid");
+  const [siteSearchQuery, setSiteSearchQuery] = useState("");
+  const [siteStatusFilter, setSiteStatusFilter] = useState("All"); // "All" | "Fully Paid" | "Partially Paid" | "Unpaid"
 
-  // Payout state
-  const [payoutType, setPayoutType] = useState("material");
-  const [selectedMaterialId, setSelectedMaterialId] = useState("");
-  const [selectedGeneralExpenseId, setSelectedGeneralExpenseId] = useState("");
-  const [payoutAmount, setPayoutAmount] = useState("");
-  const [payoutDate, setPayoutDate] = useState(new Date().toISOString().split("T")[0]);
-  const [payoutRef, setPayoutRef] = useState("");
-  const [payoutNotes, setPayoutNotes] = useState("");
+  // Level 2: Selected Site ID (null = Overview, string = Detail)
+  const [selectedSiteId, setSelectedSiteId] = useState(null);
 
-  const showToast = (message, type = "info") => {
+  // Level 2: Category Tab ("Labor" | "Materials")
+  const [activeCategoryTab, setActiveCategoryTab] = useState("Labor");
+
+  // Level 2: Date Range Filter (From Date / To Date)
+  const getFirstDayOfCurrentMonth = () => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split("T")[0];
+  };
+  const getTodayStr = () => new Date().toISOString().split("T")[0];
+
+  const [fromDate, setFromDate] = useState(() => getFirstDayOfCurrentMonth());
+  const [toDate, setToDate] = useState(() => getTodayStr());
+
+  // Level 2: Table Search & Status Filters
+  const [detailSearchQuery, setDetailSearchQuery] = useState("");
+  const [detailStatusFilter, setDetailStatusFilter] = useState("All");
+
+  // Payment Recording Modal State
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [paymentTarget, setPaymentTarget] = useState(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payDate, setPayDate] = useState(() => getTodayStr());
+  const [payMethod, setPayMethod] = useState("Cash"); // "Cash" | "UPI" | "Cheque" | "Bank Transfer"
+  const [payReference, setPayReference] = useState("");
+  const [payNotes, setPayNotes] = useState("");
+  const [paymentError, setPaymentError] = useState("");
+
+  // Payment History Drawer/Modal State
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [historyTarget, setHistoryTarget] = useState(null);
+
+  const showToastMsg = (message, type = "info") => {
     setToast({ show: true, message, type });
     setTimeout(() => {
       setToast(prev => ({ ...prev, show: false }));
     }, 4000);
   };
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [fetchedSites, fetchedLabourPayments, fetchedLabourMaster, fetchedAllMaterials] = await Promise.all([
-        getSites(),
-        getLabourPayments(),
-        getLabourMaster(),
-        getMaterialsDetailed(null)
-      ]);
-
-      setSites(fetchedSites);
-      setLabourPayments(fetchedLabourPayments);
-      setLabourMaster(fetchedLabourMaster);
-      setMaterials(fetchedAllMaterials);
-
-      if (fetchedSites.length > 0) {
-        setSelectedSiteId(prev => prev || fetchedSites[0].id);
+  // Safe Date String Extractor (supporting Firestore Timestamps, Strings, Dates)
+  const extractDateStr = (val) => {
+    if (!val) return "";
+    if (typeof val === "string") {
+      if (val.includes("T")) return val.split("T")[0];
+      const trimmed = val.trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) return trimmed;
+      return trimmed;
+    }
+    if (val && typeof val === "object") {
+      if (typeof val.seconds === "number") {
+        return new Date(val.seconds * 1000).toISOString().split("T")[0];
       }
-    } catch (err) {
-      console.error("Failed to load payments ledger data:", err);
-      showToast(`Database read error: ${err.message}`, "error");
-    } finally {
-      setLoading(false);
+      if (typeof val.toDate === "function") {
+        try {
+          return val.toDate().toISOString().split("T")[0];
+        } catch (e) {}
+      }
+      if (val instanceof Date && !isNaN(val.getTime())) {
+        return val.toISOString().split("T")[0];
+      }
+    }
+    if (typeof val === "number" && !isNaN(val)) {
+      return new Date(val).toISOString().split("T")[0];
+    }
+    return "";
+  };
+
+  // Date Range Matcher
+  const isDateInRange = (rawDate) => {
+    const d = extractDateStr(rawDate);
+    if (!d) return true;
+    if (fromDate && d < fromDate) return false;
+    if (toDate && d > toDate) return false;
+    return true;
+  };
+
+  // Date Quick Presets
+  const applyPreset = (preset) => {
+    const today = getTodayStr();
+    if (preset === "today") {
+      setFromDate(today);
+      setToDate(today);
+    } else if (preset === "this_week") {
+      const d = new Date();
+      const day = d.getDay();
+      const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+      const start = new Date(d.setDate(diff)).toISOString().split("T")[0];
+      setFromDate(start);
+      setToDate(today);
+    } else if (preset === "this_month") {
+      setFromDate(getFirstDayOfCurrentMonth());
+      setToDate(today);
+    } else if (preset === "last_30") {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      setFromDate(d.toISOString().split("T")[0]);
+      setToDate(today);
+    } else if (preset === "all") {
+      setFromDate("");
+      setToDate("");
     }
   };
 
+  // Load initial reference data
   useEffect(() => {
-    loadData();
-    const unsub = subscribeGeneralExpenses((expensesList) => {
-      if (expensesList && Array.isArray(expensesList)) {
-        setGeneralExpenses(expensesList);
+    let isMounted = true;
+    const fetchBase = async () => {
+      try {
+        setLoading(true);
+        const [fetchedSites, fetchedTeams] = await Promise.all([
+          getSites(),
+          getLabourTeams()
+        ]);
+        if (!isMounted) return;
+        setSites(fetchedSites || []);
+        setTeams(fetchedTeams || []);
+      } catch (err) {
+        console.error("Failed to load payments base data:", err);
+        showToastMsg("Error loading base datasets: " + err.message, "error");
+      } finally {
+        if (isMounted) setLoading(false);
       }
-    });
+    };
+    fetchBase();
+    return () => { isMounted = false; };
+  }, []);
+
+  // Real-time subscriptions to canonical Firestore datasets
+  useEffect(() => {
+    const unsubLabour = subscribeAllLabourAttendance(setLabourAttendance);
+    const unsubPayroll = subscribePayrollStatuses(setPayrollStatuses);
+    const unsubMaterials = subscribeMaterialsDetailed(null, setMaterials);
+
     return () => {
-      if (typeof unsub === "function") unsub();
+      if (typeof unsubLabour === "function") unsubLabour();
+      if (typeof unsubPayroll === "function") unsubPayroll();
+      if (typeof unsubMaterials === "function") unsubMaterials();
     };
   }, []);
 
-  useEffect(() => {
-    const reloadSiteData = async () => {
-      if (!selectedSiteId || selectedSiteId === "all") return;
-      try {
-        const lh = await getLabourDailyCountsSummary(selectedSiteId);
-        setLabourHistory(lh);
-      } catch (err) {
-        console.error("Failed to reload site details:", err);
-      }
+  // ─────────────────────────────────────────────────────────────
+  // CANONICAL STATUS RESOLUTION (Database-Verified, Zero Hardcoding)
+  // ─────────────────────────────────────────────────────────────
+
+  // Resolve material payment status strictly from canonical data
+  const resolveMaterialRecord = (m) => {
+    const totalPayable = Number(
+      m.totalAmount !== undefined 
+        ? m.totalAmount 
+        : (m.totalCost !== undefined 
+            ? m.totalCost 
+            : (Number(m.quantity || 0) * Number(m.unitPrice || m.rate || m.unitCost || 0)))
+    ) || 0;
+
+    let verifiedPaid = 0;
+    if (Array.isArray(m.paymentHistory) && m.paymentHistory.length > 0) {
+      verifiedPaid = m.paymentHistory.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    } else if (m.paidAmount !== undefined && m.paidAmount !== null && Number(m.paidAmount) > 0) {
+      verifiedPaid = Number(m.paidAmount);
+    }
+
+    verifiedPaid = Math.min(totalPayable, verifiedPaid);
+    const pendingAmount = Math.max(0, totalPayable - verifiedPaid);
+
+    let status = "Unpaid";
+    if (totalPayable > 0 && pendingAmount === 0 && verifiedPaid >= totalPayable) {
+      status = "Fully Paid";
+    } else if (verifiedPaid > 0 && pendingAmount > 0) {
+      status = "Partially Paid";
+    } else {
+      status = "Unpaid";
+    }
+
+    return {
+      totalPayable,
+      paidAmount: verifiedPaid,
+      pendingAmount,
+      status,
+      payments: Array.isArray(m.paymentHistory) ? m.paymentHistory : []
     };
-    reloadSiteData();
-  }, [selectedSiteId]);
+  };
 
-  // Reset pagination on filter changes
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [searchQuery, categoryFilter, fromDate, toDate, sortBy, selectedSiteId]);
+  // Resolve single labour attendance record status strictly from canonical data
+  const resolveLabourAttendanceRecord = (r) => {
+    const count = Number(r.workerCount) || 1;
+    const customUnits = Number(
+      r.customWorkUnits !== undefined 
+        ? r.customWorkUnits 
+        : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
+    ) || 1.0;
+    const wage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : 0));
+    const totalPayable = Number(
+      r.calculatedAmount !== undefined 
+        ? r.calculatedAmount 
+        : (r.totalAmount !== undefined ? r.totalAmount : (count * customUnits * wage))
+    ) || 0;
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
+    const dateStr = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || "";
+    const specificStatusKey = `labour_rec_${r.id}`;
+    const legacyGroupKey = `labour_${r.teamId}_${r.categoryId}_day_${dateStr}`;
+    const monthKey = dateStr.slice(0, 7);
+    const legacyMonthKey = `labour_${r.teamId}_${r.categoryId}_month_${monthKey}`;
 
-  const handleAddExpense = async (e) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    if (!newExpense.amount || !newExpense.description.trim()) return;
-    setIsSubmitting(true);
-    try {
-      await saveGeneralExpense({
-        siteId: selectedSiteId,
-        category: newExpense.category,
-        amount: Number(newExpense.amount),
-        date: newExpense.date,
-        description: newExpense.description.trim(),
-        notes: newExpense.notes.trim(),
-        createdBy: "Admin",
-        status: "Approved"
+    const statusObj = payrollStatuses[specificStatusKey] || payrollStatuses[legacyGroupKey] || payrollStatuses[legacyMonthKey] || {};
+
+    let verifiedPaid = 0;
+    if (Array.isArray(statusObj.payments) && statusObj.payments.length > 0) {
+      verifiedPaid = statusObj.payments.reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    } else if (statusObj.paidAmount !== undefined && statusObj.paidAmount !== null && Number(statusObj.paidAmount) > 0) {
+      verifiedPaid = Number(statusObj.paidAmount);
+    } else if (statusObj.status === "Paid" && statusObj.amount && Number(statusObj.amount) > 0) {
+      verifiedPaid = Number(statusObj.amount);
+    }
+
+    verifiedPaid = Math.min(totalPayable, verifiedPaid);
+    const pendingAmount = Math.max(0, totalPayable - verifiedPaid);
+
+    let status = "Unpaid";
+    if (totalPayable > 0 && pendingAmount === 0 && verifiedPaid >= totalPayable) {
+      status = "Fully Paid";
+    } else if (verifiedPaid > 0 && pendingAmount > 0) {
+      status = "Partially Paid";
+    } else {
+      status = "Unpaid";
+    }
+
+    return {
+      rawKey: specificStatusKey,
+      statusObj,
+      totalPayable,
+      paidAmount: verifiedPaid,
+      pendingAmount,
+      status,
+      payments: Array.isArray(statusObj.payments) ? statusObj.payments : []
+    };
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // 1. SITE-WISE SUMMARY CALCULATION (LEVEL 1: MAIN OVERVIEW)
+  // ─────────────────────────────────────────────────────────────
+  const siteSummaries = useMemo(() => {
+    const siteMap = new Map();
+
+    sites.forEach(site => {
+      if (!site || !site.id) return;
+
+      // 1. Calculate Site Labour Obligations
+      const siteLabourRecords = labourAttendance.filter(r => r.siteId === site.id);
+      let siteLabourPayable = 0;
+      let siteLabourPaid = 0;
+
+      siteLabourRecords.forEach(r => {
+        const res = resolveLabourAttendanceRecord(r);
+        siteLabourPayable += res.totalPayable;
+        siteLabourPaid += res.paidAmount;
       });
-      showToast("Site expense logged successfully!", "success");
-      setShowAddExpenseModal(false);
-      setNewExpense({ category: "Site Expense", amount: "", date: new Date().toISOString().split("T")[0], description: "", notes: "" });
-      await loadData();
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
-  const handleApproveExpense = async (expenseId) => {
-    if (isSubmitting) return;
-    setIsSubmitting(true);
-    try {
-      await approveGeneralExpense(expenseId);
-      showToast("General expense requisition approved!", "success");
-      await loadData();
-    } catch (err) {
-      showToast(`Failed: ${err.message}`, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handlePayoutSubmit = async (e) => {
-    e.preventDefault();
-    if (isSubmitting) return;
-    if (!payoutAmount || Number(payoutAmount) <= 0) return;
-    
-    setIsSubmitting(true);
-    try {
-      const amt = Number(payoutAmount);
-      if (payoutType === "material") {
-        if (!selectedMaterialId) {
-          showToast("Please select a pending material invoice", "error");
-          setIsSubmitting(false);
-          return;
-        }
-        await logMaterialPayment(selectedMaterialId, {
-          amount: amt,
-          date: payoutDate,
-          reference: payoutRef,
-          notes: payoutNotes
-        });
-      } else if (payoutType === "labour") {
-        await saveLabourPayment({
-          siteId: selectedSiteId,
-          amount: amt,
-          date: payoutDate,
-          reference: payoutRef,
-          notes: payoutNotes,
-          loggedBy: "admin"
-        }, userProfile?.uid || userProfile?.id || null);
-      } else {
-        if (!selectedGeneralExpenseId) {
-          showToast("Please select an approved site expense invoice", "error");
-          setIsSubmitting(false);
-          return;
-        }
-        await logGeneralExpensePayment(selectedGeneralExpenseId, {
-          amount: amt,
-          date: payoutDate,
-          reference: payoutRef,
-          notes: payoutNotes
-        });
+      const siteLabourPending = Math.max(0, siteLabourPayable - siteLabourPaid);
+      let siteLabourStatus = "Unpaid";
+      if (siteLabourPayable > 0 && siteLabourPending === 0 && siteLabourPaid >= siteLabourPayable) {
+        siteLabourStatus = "Fully Paid";
+      } else if (siteLabourPaid > 0 && siteLabourPending > 0) {
+        siteLabourStatus = "Partially Paid";
       }
 
-      showToast("Payment disbursement recorded successfully!", "success");
-      setShowPayoutModal(false);
-      setPayoutAmount("");
-      setPayoutRef("");
-      setPayoutNotes("");
-      await loadData();
-    } catch (err) {
-      showToast(`Payment failed: ${err.message}`, "error");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
+      // 2. Calculate Site Material Obligations
+      const siteMaterials = materials.filter(m => m.siteId === site.id);
+      let siteMaterialPayable = 0;
+      let siteMaterialPaid = 0;
 
-  const activeSite = sites.find(s => s.id === selectedSiteId);
-  const ledger = activeSite ? getSiteExpenseLedger(activeSite, materials, labourHistory, generalExpenses, labourPayments, labourMaster.categories) : null;
-  const pendingGeneralExpenseRequests = generalExpenses.filter(g => g.status === "Pending" || g.status === "pending");
+      siteMaterials.forEach(m => {
+        const res = resolveMaterialRecord(m);
+        siteMaterialPayable += res.totalPayable;
+        siteMaterialPaid += res.paidAmount;
+      });
 
-  // Compile full expense list for table
-  const allSiteExpenses = useMemo(() => {
-    if (!ledger || !ledger.expensesList) return [];
-    
-    return ledger.expensesList.map(item => {
-      let normCategory = "Other";
-      const catLower = (item.category || "").toLowerCase();
-      if (catLower.includes("labour")) normCategory = "Labour";
-      else if (catLower.includes("material")) normCategory = "Material";
-      else if (catLower.includes("transport") || catLower.includes("fuel") || catLower.includes("vehicle")) normCategory = "Transport";
-      else if (catLower.includes("site") || catLower.includes("general")) normCategory = "Other";
+      const siteMaterialPending = Math.max(0, siteMaterialPayable - siteMaterialPaid);
+      let siteMaterialStatus = "Unpaid";
+      if (siteMaterialPayable > 0 && siteMaterialPending === 0 && siteMaterialPaid >= siteMaterialPayable) {
+        siteMaterialStatus = "Fully Paid";
+      } else if (siteMaterialPaid > 0 && siteMaterialPending > 0) {
+        siteMaterialStatus = "Partially Paid";
+      }
 
-      return {
-        id: item.id || Math.random().toString(),
-        date: item.date || "--",
-        category: item.category || "Site Expense",
-        normCategory: normCategory,
-        name: item.name || "Expense Entry",
-        description: item.description || "--",
-        amount: item.amount || 0,
-        addedBy: item.createdBy || item.loggedBy || "Site Admin",
-        status: item.status || "Approved",
-        rawItem: item
-      };
+      // 3. Overall Site Totals
+      const totalPayable = siteLabourPayable + siteMaterialPayable;
+      const totalPaid = siteLabourPaid + siteMaterialPaid;
+      const totalPending = Math.max(0, totalPayable - totalPaid);
+
+      let overallStatus = "Unpaid";
+      if (totalPayable > 0 && totalPending === 0 && totalPaid >= totalPayable) {
+        overallStatus = "Fully Paid";
+      } else if (totalPaid > 0 && totalPending > 0) {
+        overallStatus = "Partially Paid";
+      }
+
+      const completionRate = totalPayable > 0 ? Math.min(100, Math.round((totalPaid / totalPayable) * 100)) : 100;
+
+      siteMap.set(site.id, {
+        siteId: site.id,
+        siteName: site.siteName || "Site " + site.id,
+        location: site.location || site.address || "Active Worksites",
+        totalPayable,
+        totalPaid,
+        totalPending,
+        overallStatus,
+        completionRate,
+        labour: {
+          payable: siteLabourPayable,
+          paid: siteLabourPaid,
+          pending: siteLabourPending,
+          status: siteLabourStatus,
+          recordsCount: siteLabourRecords.length
+        },
+        materials: {
+          payable: siteMaterialPayable,
+          paid: siteMaterialPaid,
+          pending: siteMaterialPending,
+          status: siteMaterialStatus,
+          recordsCount: siteMaterials.length
+        }
+      });
     });
-  }, [ledger]);
 
-  // Filtered & sorted expense rows
-  const filteredExpenses = useMemo(() => {
-    return allSiteExpenses.filter(item => {
-      // Category filter
-      if (categoryFilter !== "All") {
-        if (categoryFilter === "Labour" && item.normCategory !== "Labour") return false;
-        if (categoryFilter === "Material" && item.normCategory !== "Material") return false;
-        if (categoryFilter === "Transport" && item.normCategory !== "Transport") return false;
-        if (categoryFilter === "Other" && (item.normCategory === "Labour" || item.normCategory === "Material" || item.normCategory === "Transport")) return false;
+    return Array.from(siteMap.values());
+  }, [sites, labourAttendance, materials, payrollStatuses]);
+
+  // Filtered Site Summaries for Level 1
+  const filteredSites = useMemo(() => {
+    return siteSummaries.filter(site => {
+      if (siteStatusFilter !== "All") {
+        if (siteStatusFilter === "Unpaid" && site.overallStatus !== "Unpaid" && site.overallStatus !== "Pending") return false;
+        if (siteStatusFilter === "Partially Paid" && site.overallStatus !== "Partially Paid") return false;
+        if (siteStatusFilter === "Fully Paid" && site.overallStatus !== "Fully Paid") return false;
       }
-
-      // Search Query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchName = item.name.toLowerCase().includes(q);
-        const matchDesc = item.description.toLowerCase().includes(q);
-        const matchCat = item.category.toLowerCase().includes(q);
-        const matchAddedBy = item.addedBy.toLowerCase().includes(q);
-        if (!matchName && !matchDesc && !matchCat && !matchAddedBy) return false;
+      if (siteSearchQuery.trim()) {
+        const q = siteSearchQuery.toLowerCase().trim();
+        const matchName = site.siteName.toLowerCase().includes(q);
+        const matchLoc = site.location.toLowerCase().includes(q);
+        if (!matchName && !matchLoc) return false;
       }
-
-      // Date Range Filter
-      if (fromDate && item.date !== "--" && item.date < fromDate) return false;
-      if (toDate && item.date !== "--" && item.date > toDate) return false;
-
       return true;
-    }).sort((a, b) => {
-      if (sortBy === "date-desc") return (b.date || "").localeCompare(a.date || "");
-      if (sortBy === "date-asc") return (a.date || "").localeCompare(b.date || "");
-      if (sortBy === "amount-desc") return b.amount - a.amount;
-      if (sortBy === "amount-asc") return a.amount - b.amount;
-      return 0;
     });
-  }, [allSiteExpenses, categoryFilter, searchQuery, fromDate, toDate, sortBy]);
+  }, [siteSummaries, siteStatusFilter, siteSearchQuery]);
 
-  // Pagination calculation
-  const totalPages = Math.ceil(filteredExpenses.length / pageSize) || 1;
-  const paginatedExpenses = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredExpenses.slice(start, start + pageSize);
-  }, [filteredExpenses, currentPage, pageSize]);
+  // Global KPI Summary across All Sites
+  const globalKpis = useMemo(() => {
+    const totalPayable = siteSummaries.reduce((sum, s) => sum + s.totalPayable, 0);
+    const totalPaid = siteSummaries.reduce((sum, s) => sum + s.totalPaid, 0);
+    const totalPending = Math.max(0, totalPayable - totalPaid);
+    const completionRate = totalPayable > 0 ? Math.min(100, Math.round((totalPaid / totalPayable) * 100)) : 100;
 
-  // Compact 4 KPI Card Metrics
-  const totalExpenseVal = ledger?.totalExpenses || 0;
-  const labourExpenseVal = ledger?.labourExpenseTotal || 0;
-  const materialExpenseVal = ledger?.materialExpenseTotal || 0;
-  const otherExpenseVal = (ledger?.siteExpenseTotal || 0) + (ledger?.otherExpenseTotal || 0);
+    const fullyPaidSites = siteSummaries.filter(s => s.overallStatus === "Fully Paid").length;
+    const partialSites = siteSummaries.filter(s => s.overallStatus === "Partially Paid").length;
+    const unpaidSites = siteSummaries.filter(s => s.overallStatus === "Unpaid" || s.overallStatus === "Pending").length;
+
+    return {
+      totalPayable,
+      totalPaid,
+      totalPending,
+      completionRate,
+      totalSitesCount: siteSummaries.length,
+      fullyPaidSites,
+      partialSites,
+      unpaidSites
+    };
+  }, [siteSummaries]);
+
+  // Selected Site Object for Level 2 Detail View
+  const currentSelectedSite = useMemo(() => {
+    if (!selectedSiteId) return null;
+    return siteSummaries.find(s => s.siteId === selectedSiteId) || sites.find(s => s.id === selectedSiteId) || null;
+  }, [selectedSiteId, siteSummaries, sites]);
+
+  // ─────────────────────────────────────────────────────────────
+  // 2. SITE DETAIL: LABOR CATEGORY RECORDS (DUPLICATE-SAFE)
+  // ─────────────────────────────────────────────────────────────
+  const currentSiteLabourRows = useMemo(() => {
+    if (!selectedSiteId) return [];
+
+    const siteRecords = labourAttendance.filter(r => {
+      if (r.siteId !== selectedSiteId) return false;
+      const rDate = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || extractDateStr(r.createdAt) || "";
+      if (!isDateInRange(rDate)) return false;
+      return true;
+    });
+
+    const uniqueMap = new Map();
+
+    siteRecords.forEach(r => {
+      if (!r || !r.id) return;
+      if (uniqueMap.has(r.id)) return;
+
+      const teamObj = teams.find(t => t.id === r.teamId);
+      const categoryObj = teamObj?.categories?.[r.categoryId];
+      const categoryName = categoryObj ? categoryObj.name : (r.categoryName || r.categoryId || "Labour");
+      const baseWage = categoryObj ? Number(categoryObj.baseWage) || 0 : (Number(r.dailyWage) || 0);
+
+      const count = Number(r.workerCount) || 1;
+      const customUnits = Number(
+        r.customWorkUnits !== undefined 
+          ? r.customWorkUnits 
+          : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
+      ) || 1.0;
+      const effectiveDailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : baseWage));
+
+      const paymentRes = resolveLabourAttendanceRecord(r);
+      const dateStr = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || "";
+
+      uniqueMap.set(r.id, {
+        id: r.id,
+        rawKey: paymentRes.rawKey,
+        type: "Labor",
+        workerName: categoryName,
+        teamName: teamObj?.teamName || r.teamName || "Labour Team",
+        dateLabel: dateStr ? formatDateDMY(dateStr) : "Attendance Log",
+        rawDate: dateStr,
+        workerCount: count,
+        workUnits: customUnits,
+        applicableRate: effectiveDailyWage,
+        totalPayable: paymentRes.totalPayable,
+        paidAmount: paymentRes.paidAmount,
+        pendingAmount: paymentRes.pendingAmount,
+        status: paymentRes.status,
+        payments: paymentRes.payments,
+        rawType: "labour",
+        rawRecord: r
+      });
+    });
+
+    const rows = Array.from(uniqueMap.values());
+    rows.sort((a, b) => (b.rawDate || "").localeCompare(a.rawDate || ""));
+
+    return rows.filter(row => {
+      if (detailStatusFilter !== "All") {
+        if (detailStatusFilter === "Unpaid" && row.status !== "Unpaid" && row.status !== "Pending") return false;
+        if (detailStatusFilter === "Partially Paid" && row.status !== "Partially Paid") return false;
+        if (detailStatusFilter === "Fully Paid" && row.status !== "Fully Paid") return false;
+      }
+      if (detailSearchQuery.trim()) {
+        const q = detailSearchQuery.toLowerCase().trim();
+        return row.workerName.toLowerCase().includes(q) || row.teamName.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [selectedSiteId, labourAttendance, teams, payrollStatuses, fromDate, toDate, detailStatusFilter, detailSearchQuery]);
+
+  // ─────────────────────────────────────────────────────────────
+  // 3. SITE DETAIL: MATERIALS CATEGORY RECORDS (DUPLICATE-SAFE)
+  // ─────────────────────────────────────────────────────────────
+  const currentSiteMaterialRows = useMemo(() => {
+    if (!selectedSiteId) return [];
+
+    const siteMaterials = materials.filter(m => {
+      if (m.siteId !== selectedSiteId) return false;
+      const matDate = extractDateStr(m.deliveryDate) || extractDateStr(m.date) || extractDateStr(m.orderDate) || extractDateStr(m.createdAt) || "";
+      if (!isDateInRange(matDate)) return false;
+      return true;
+    });
+
+    const uniqueMap = new Map();
+
+    siteMaterials.forEach(m => {
+      if (!m || !m.id) return;
+      if (uniqueMap.has(m.id)) return;
+
+      const matRes = resolveMaterialRecord(m);
+      const matDate = extractDateStr(m.deliveryDate) || extractDateStr(m.date) || extractDateStr(m.orderDate) || extractDateStr(m.createdAt) || "";
+
+      uniqueMap.set(m.id, {
+        id: m.id,
+        rawKey: m.id,
+        type: "Materials",
+        materialName: m.materialName || m.name || "Material Item",
+        supplierName: m.supplierName || m.vendor || "Material Supplier",
+        deliveryDate: matDate ? formatDateDMY(matDate) : "Order Log",
+        rawDate: matDate,
+        quantityText: `${m.quantity || m.receivedQuantity || 0} ${m.unit || "Units"}`,
+        unitRate: Number(m.unitPrice || m.rate || m.unitCost || 0),
+        totalPayable: matRes.totalPayable,
+        paidAmount: matRes.paidAmount,
+        pendingAmount: matRes.pendingAmount,
+        status: matRes.status,
+        payments: matRes.payments,
+        rawType: "material",
+        materialId: m.id,
+        rawRecord: m
+      });
+    });
+
+    const rows = Array.from(uniqueMap.values());
+    rows.sort((a, b) => (b.rawDate || "").localeCompare(a.rawDate || ""));
+
+    return rows.filter(row => {
+      if (detailStatusFilter !== "All") {
+        if (detailStatusFilter === "Unpaid" && row.status !== "Unpaid" && row.status !== "Pending") return false;
+        if (detailStatusFilter === "Partially Paid" && row.status !== "Partially Paid") return false;
+        if (detailStatusFilter === "Fully Paid" && row.status !== "Fully Paid") return false;
+      }
+      if (detailSearchQuery.trim()) {
+        const q = detailSearchQuery.toLowerCase().trim();
+        return row.materialName.toLowerCase().includes(q) || row.supplierName.toLowerCase().includes(q);
+      }
+      return true;
+    });
+  }, [selectedSiteId, materials, fromDate, toDate, detailStatusFilter, detailSearchQuery]);
+
+  // Site Category Summary Totals
+  const siteCategoryKpis = useMemo(() => {
+    const list = activeCategoryTab === "Labor" ? currentSiteLabourRows : currentSiteMaterialRows;
+    const payable = list.reduce((sum, r) => sum + r.totalPayable, 0);
+    const paid = list.reduce((sum, r) => sum + r.paidAmount, 0);
+    const pending = Math.max(0, payable - paid);
+
+    let status = "Unpaid";
+    if (payable > 0 && pending === 0 && paid >= payable) status = "Fully Paid";
+    else if (paid > 0 && pending > 0) status = "Partially Paid";
+
+    return { payable, paid, pending, status, count: list.length };
+  }, [activeCategoryTab, currentSiteLabourRows, currentSiteMaterialRows]);
+
+  // ─────────────────────────────────────────────────────────────
+  // 4. PAYMENT ACTION (IDEMPOTENT & MULTI-USER SAFE)
+  // ─────────────────────────────────────────────────────────────
+  const handleOpenPaymentModal = (row) => {
+    setPaymentTarget(row);
+    setPayAmount(row.pendingAmount > 0 ? String(row.pendingAmount) : "");
+    setPayDate(getTodayStr());
+    setPayMethod("Cash");
+    setPayReference("");
+    setPayNotes("");
+    setPaymentError("");
+    setShowPaymentModal(true);
+  };
+
+  const handleOpenHistoryModal = (row) => {
+    setHistoryTarget(row);
+    setShowHistoryModal(true);
+  };
+
+  const handleExecutePayment = async (e) => {
+    e.preventDefault();
+    if (!paymentTarget) return;
+    if (isSubmittingRef.current || submitting) return;
+
+    const numericAmount = Number(payAmount);
+    if (!numericAmount || isNaN(numericAmount) || numericAmount <= 0) {
+      setPaymentError("Please enter a valid payment amount greater than ₹0.");
+      return;
+    }
+
+    if (numericAmount > paymentTarget.pendingAmount + 0.01) {
+      setPaymentError(`Payment amount (₹${numericAmount.toLocaleString("en-IN")}) exceeds remaining pending amount (₹${paymentTarget.pendingAmount.toLocaleString("en-IN")}).`);
+      return;
+    }
+
+    isSubmittingRef.current = true;
+    setSubmitting(true);
+    setPaymentError("");
+
+    try {
+      if (paymentTarget.rawType === "material") {
+        await logMaterialPayment(paymentTarget.materialId, {
+          amount: numericAmount,
+          date: payDate,
+          method: payMethod,
+          reference: payReference,
+          notes: payNotes,
+          recordedBy: userProfile?.fullName || userProfile?.name || "Admin"
+        });
+        showToastMsg(`Material payment of ₹${numericAmount.toLocaleString("en-IN")} recorded successfully.`, "success");
+      } else {
+        await recordWorkerPayoutPayment(
+          paymentTarget.rawKey,
+          {
+            amount: numericAmount,
+            paymentDate: payDate,
+            paymentMethod: payMethod,
+            reference: payReference,
+            notes: payNotes,
+            recordedBy: userProfile?.fullName || userProfile?.name || "Admin"
+          },
+          paymentTarget.totalPayable
+        );
+        showToastMsg(`Labour payment of ₹${numericAmount.toLocaleString("en-IN")} recorded successfully.`, "success");
+      }
+
+      setShowPaymentModal(false);
+      setPaymentTarget(null);
+    } catch (err) {
+      console.error("Payment submission failed:", err);
+      setPaymentError("Payment recording failed: " + err.message);
+      showToastMsg("Payment error: " + err.message, "error");
+    } finally {
+      isSubmittingRef.current = false;
+      setSubmitting(false);
+    }
+  };
+
+  const renderStatusBadge = (status) => {
+    const norm = (status || "").toLowerCase().trim();
+    if (norm === "fully paid" || norm === "paid") {
+      return <Badge status="approved">Fully Paid</Badge>;
+    }
+    if (norm === "partially paid" || norm === "partial") {
+      return <Badge status="warning">Partially Paid</Badge>;
+    }
+    return <Badge status="pending">Unpaid</Badge>;
+  };
 
   return (
-    <Layout 
-      title="Site Expense Management" 
-      description="Enterprise site-wise cost accounting, expenditure tracking, and payout auditing console."
+    <Layout
+      title="Payments Dashboard"
+      description="Manage worksite payment obligations, verified payment settlements, and disbursement records."
     >
-      {toast.show && (
-        <div id="toast-container" className="toast-container">
-          <div className={`toast toast-${toast.type}`}>
-            <span className="toast-message">{toast.message}</span>
-          </div>
-        </div>
-      )}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {/* LEVEL 1: SITE-WISE PAYMENTS OVERVIEW                        */}
+      {/* ═══════════════════════════════════════════════════════════ */}
+      {!selectedSiteId ? (
+        <>
+          {/* Header Card with Native Filter Bar */}
+          <div className="card" style={{ marginBottom: "20px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>
+                    Site-wise Payments
+                  </h2>
+                  <span style={{ backgroundColor: "#fff7ed", color: "#c2410c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
+                    {filteredSites.length} Worksites
+                  </span>
+                </div>
+                <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748b" }}>
+                  High-level overview of payment obligations and verified disbursements across all active worksites.
+                </p>
+              </div>
 
-      {/* ── 1. PAGE HEADER (SITE METADATA, FILTERS & ACTION) ── */}
-      <div style={{
-        background: "#ffffff",
-        border: "1px solid #e2e8f0",
-        borderRadius: "12px",
-        padding: "20px 24px",
-        marginBottom: "20px",
-        boxShadow: "0 2px 8px rgba(0,0,0,0.04)"
-      }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0, letterSpacing: "-0.3px" }}>Site Expense Management</h2>
-              {activeSite && (
-                <span style={{ backgroundColor: "#fff7ed", color: "#c2410c", fontSize: "11px", fontWeight: "700", padding: "3px 10px", borderRadius: "12px", border: "1px solid #ffedd5" }}>
-                  {activeSite.siteName}
-                </span>
-              )}
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {/* ViewToggle Component */}
+                <ViewToggle viewMode={viewMode} onChange={setViewMode} />
+
+                {/* Print Button */}
+                <Button onClick={() => window.print()} variant="outline" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Printer size={16} />
+                  <span>Print Ledger</span>
+                </Button>
+              </div>
             </div>
-            <p style={{ margin: "4px 0 0 0", fontSize: "13px", color: "#64748b" }}>
-              {activeSite ? `Client: ${activeSite.clientName || "Direct Site"} • Location: ${activeSite.location || "On-site"}` : "Select a site to view expense ledger"}
-            </p>
-          </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-            <Button onClick={() => setShowAddExpenseModal(true)} variant="primary" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Plus size={16} />
-              <span>Log Expense</span>
-            </Button>
-            <Button onClick={() => window.print()} variant="outline" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-              <Printer size={16} />
-              <span>Print Statement</span>
-            </Button>
-          </div>
-        </div>
-
-        {/* Header Controls Bar (Site Selector, Date Range, Search) */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px", marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #f1f5f9" }}>
-          
-          {/* Site Selector */}
-          <div>
-            <label htmlFor="exp-site-select" style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Construction Site</label>
-            <div style={{ position: "relative" }}>
-              <MapPin size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
-              <select
-                id="exp-site-select"
-                value={selectedSiteId}
-                onChange={(e) => setSelectedSiteId(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "9px 12px 9px 36px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5e1",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "600",
-                  color: "#0f172a",
-                  outline: "none"
-                }}
-              >
-                {sites.map(site => (
-                  <option key={site.id} value={site.id}>{site.siteName}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* From Date */}
-          <div>
-            <label htmlFor="exp-from-date" style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>From Date</label>
-            <input
-              id="exp-from-date"
-              type="date"
-              value={fromDate}
-              onChange={(e) => setFromDate(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "500",
-                color: "#0f172a",
-                outline: "none"
-              }}
-            />
-          </div>
-
-          {/* To Date */}
-          <div>
-            <label htmlFor="exp-to-date" style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>To Date</label>
-            <input
-              id="exp-to-date"
-              type="date"
-              value={toDate}
-              onChange={(e) => setToDate(e.target.value)}
-              style={{
-                width: "100%",
-                padding: "9px 12px",
-                borderRadius: "8px",
-                border: "1px solid #cbd5e1",
-                backgroundColor: "#ffffff",
-                fontSize: "13px",
-                fontWeight: "500",
-                color: "#0f172a",
-                outline: "none"
-              }}
-            />
-          </div>
-
-          {/* Search Bar */}
-          <div>
-            <label htmlFor="exp-search-input" style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Search Expense</label>
-            <div style={{ position: "relative" }}>
-              <Search size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
-              <input
-                id="exp-search-input"
-                type="text"
-                placeholder="Search description, category..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                style={{
-                  width: "100%",
-                  padding: "9px 12px 9px 36px",
-                  borderRadius: "8px",
-                  border: "1px solid #cbd5e1",
-                  backgroundColor: "#ffffff",
-                  fontSize: "13px",
-                  fontWeight: "500",
-                  color: "#0f172a",
-                  outline: "none"
-                }}
-              />
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* ── 2. COMPACT SUMMARY KPI CARDS (EXACTLY 4 COMPACT CARDS) ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "16px", marginBottom: "20px" }}>
-        
-        {/* Card 1: Total Expense */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <DollarSign size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(totalExpenseVal)}</div>
-          <span style={{ fontSize: "11px", color: "#64748b", marginTop: "4px", display: "block" }}>All site expenses combined</span>
-        </div>
-
-        {/* Card 2: Labour Expense */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Labour Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#ea580c", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Users size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(labourExpenseVal)}</div>
-          <span style={{ fontSize: "11px", color: "#ea580c", marginTop: "4px", display: "block", fontWeight: "600" }}>Daily wages &amp; attendance</span>
-        </div>
-
-        {/* Card 3: Material Expense */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Material Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#fff7ed", color: "#9333ea", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Package size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(materialExpenseVal)}</div>
-          <span style={{ fontSize: "11px", color: "#9333ea", marginTop: "4px", display: "block", fontWeight: "600" }}>Materials &amp; deliveries</span>
-        </div>
-
-        {/* Card 4: Other Expense */}
-        <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "16px", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-            <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Other Expense</span>
-            <div style={{ width: "30px", height: "30px", borderRadius: "6px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Layers size={16} />
-            </div>
-          </div>
-          <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a" }}>{formatINR(otherExpenseVal)}</div>
-          <span style={{ fontSize: "11px", color: "#16a34a", marginTop: "4px", display: "block", fontWeight: "600" }}>Transport, fuel &amp; overheads</span>
-        </div>
-
-      </div>
-
-      {/* ── 3. NAVIGATION TABS (EXPENDITURE LEDGER, REQUISITIONS, PAYOUT LOG, REPORTS) ── */}
-      <div style={{ display: "flex", gap: "8px", borderBottom: "1px solid #e2e8f0", paddingBottom: "0", marginBottom: "20px" }}>
-        {[
-          { id: "overview", label: "Expenditure Ledger", icon: Clipboard },
-          { id: "pending", label: `Pending Requisitions (${pendingGeneralExpenseRequests.length})`, icon: Clock },
-          { id: "payments", label: "Record Payout Log", icon: CreditCard },
-          { id: "reports", label: "Financial Reports", icon: FileText }
-        ].map(t => {
-          const ActiveIcon = t.icon;
-          const isActive = activeTab === t.id;
-          return (
-            <button
-              key={t.id}
-              onClick={() => setActiveTab(t.id)}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-                padding: "10px 18px",
-                border: "none",
-                backgroundColor: "transparent",
-                borderBottom: isActive ? "3px solid #f97316" : "3px solid transparent",
-                color: isActive ? "#f97316" : "#64748b",
-                fontWeight: isActive ? "700" : "600",
-                fontSize: "13px",
-                cursor: "pointer",
-                transition: "all 0.2s"
-              }}
-            >
-              <ActiveIcon size={16} />
-              <span>{t.label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* ── 4. TAB CONTENT ── */}
-      
-      {/* TAB 1: EXPENDITURE LEDGER TABLE (MAIN LISTING VIEW) */}
-      {activeTab === "overview" && (
-        <Card noPadding style={{ border: "1px solid #e2e8f0", borderRadius: "12px", overflow: "hidden", boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-          
-          {/* Controls Bar: Category Pills & Sort Dropdown */}
-          <div style={{ padding: "16px 20px", borderBottom: "1px solid #f1f5f9", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", background: "#f8fafc" }}>
-            
-            {/* Category Filter Pills (All, Labour, Material, Transport, Other) */}
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-              <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", marginRight: "6px" }}>Category:</span>
-              {["All", "Labour", "Material", "Transport", "Other"].map(cat => {
-                const isSel = categoryFilter === cat;
-                return (
-                  <button
-                    key={cat}
-                    onClick={() => setCategoryFilter(cat)}
+            {/* Filter Controls Bar */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "14px", marginTop: "18px", paddingTop: "16px", borderTop: "1px solid #f1f5f9" }}>
+              {/* Search Worksite */}
+              <div>
+                <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>
+                  Search Worksite
+                </label>
+                <div style={{ position: "relative" }}>
+                  <Search size={16} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+                  <input
+                    type="text"
+                    placeholder="Search by site name or location..."
+                    value={siteSearchQuery}
+                    onChange={(e) => setSiteSearchQuery(e.target.value)}
                     style={{
-                      padding: "5px 14px",
-                      borderRadius: "20px",
-                      fontSize: "12px",
-                      fontWeight: isSel ? "700" : "600",
-                      border: isSel ? "1px solid #f97316" : "1px solid #cbd5e1",
-                      backgroundColor: isSel ? "#fff7ed" : "#ffffff",
-                      color: isSel ? "#ea580c" : "#475569",
+                      width: "100%",
+                      padding: "9px 12px 9px 36px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      backgroundColor: "#ffffff",
+                      fontSize: "13px",
+                      fontWeight: "500",
+                      color: "#0f172a",
+                      outline: "none",
+                      boxSizing: "border-box"
+                    }}
+                  />
+                </div>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label style={{ fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>
+                  Payment Status
+                </label>
+                <select
+                  value={siteStatusFilter}
+                  onChange={(e) => setSiteStatusFilter(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    backgroundColor: "#ffffff",
+                    fontSize: "13px",
+                    fontWeight: "600",
+                    color: "#0f172a",
+                    outline: "none"
+                  }}
+                >
+                  <option value="All">All Worksites</option>
+                  <option value="Unpaid">Unpaid Only</option>
+                  <option value="Partially Paid">Partially Paid Only</option>
+                  <option value="Fully Paid">Fully Paid Only</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Global KPI Summary Cards */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+            gap: "16px",
+            marginBottom: "20px"
+          }}>
+            {/* Total Payable */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Total Payable (All Sites)
+              </span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", marginTop: "4px" }}>
+                ₹{globalKpis.totalPayable.toLocaleString("en-IN")}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                Across {globalKpis.totalSitesCount} active project worksites
+              </div>
+            </div>
+
+            {/* Total Paid */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#16a34a", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Total Paid (Verified)
+              </span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: "#15803d", marginTop: "4px" }}>
+                ₹{globalKpis.totalPaid.toLocaleString("en-IN")}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                <span style={{ fontWeight: "700", color: "#16a34a" }}>{globalKpis.fullyPaidSites}</span> fully settled ({globalKpis.partialSites} partial)
+              </div>
+            </div>
+
+            {/* Total Pending */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Total Pending
+              </span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: "#c2410c", marginTop: "4px" }}>
+                ₹{globalKpis.totalPending.toLocaleString("en-IN")}
+              </div>
+              <div style={{ fontSize: "12px", color: "#64748b", marginTop: "6px" }}>
+                <span style={{ fontWeight: "700", color: "#c2410c" }}>{globalKpis.unpaidSites + globalKpis.partialSites}</span> sites awaiting settlement
+              </div>
+            </div>
+
+            {/* Settlement Progress */}
+            <div className="card" style={{ padding: "18px 20px" }}>
+              <span style={{ fontSize: "11.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                Settlement Rate
+              </span>
+              <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", marginTop: "4px" }}>
+                {globalKpis.completionRate}%
+              </div>
+              <div style={{ width: "100%", height: "6px", backgroundColor: "#f1f5f9", borderRadius: "99px", marginTop: "8px", overflow: "hidden" }}>
+                <div style={{
+                  width: `${globalKpis.completionRate}%`,
+                  height: "100%",
+                  backgroundColor: globalKpis.completionRate === 100 ? "#16a34a" : "#ea580c",
+                  borderRadius: "99px"
+                }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Sites Container: Grid View vs List View */}
+          {loading ? (
+            <div className="card" style={{ padding: "40px", textAlign: "center" }}>
+              <Loading show={true} text="Loading worksite payment obligations..." />
+            </div>
+          ) : filteredSites.length === 0 ? (
+            <div className="card" style={{ padding: "48px 20px", textAlign: "center", color: "#64748b" }}>
+              <Building2 size={36} color="#94a3b8" style={{ marginBottom: "8px" }} />
+              <div style={{ fontSize: "15px", fontWeight: "750", color: "#1e293b" }}>No worksites found</div>
+              <div style={{ fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                No worksites match the active filter criteria.
+              </div>
+            </div>
+          ) : viewMode === "grid" ? (
+            /* Grid View */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "16px" }}>
+              {filteredSites.map(site => {
+                const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+                return (
+                  <div
+                    key={site.siteId}
+                    className="card"
+                    onClick={() => {
+                      setSelectedSiteId(site.siteId);
+                      setActiveCategoryTab("Labor");
+                      setDetailStatusFilter("All");
+                      setDetailSearchQuery("");
+                    }}
+                    style={{
                       cursor: "pointer",
-                      transition: "all 0.15s ease"
+                      padding: "18px",
+                      transition: "transform 0.15s ease, box-shadow 0.15s ease",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: "14px"
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.boxShadow = "0 6px 18px rgba(0,0,0,0.06)";
+                      e.currentTarget.style.transform = "translateY(-2px)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.boxShadow = "";
+                      e.currentTarget.style.transform = "none";
                     }}
                   >
-                    {cat}
-                  </button>
+                    <div>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "9px",
+                            backgroundColor: "#fff7ed",
+                            border: "1.5px solid #ffedd5",
+                            color: "#c2410c",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            fontWeight: "800",
+                            fontSize: "12px",
+                            flexShrink: 0
+                          }}>
+                            {initials}
+                          </div>
+                          <div>
+                            <h3 style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a", margin: 0 }}>
+                              {site.siteName}
+                            </h3>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "12px", color: "#64748b", marginTop: "2px" }}>
+                              <MapPin size={12} color="#ea580c" />
+                              <span>{site.location}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <div>
+                          {renderStatusBadge(site.overallStatus)}
+                        </div>
+                      </div>
+
+                      {/* Financial Metrics Summary Box */}
+                      <div style={{
+                        display: "grid",
+                        gridTemplateColumns: "1fr 1fr 1fr",
+                        gap: "8px",
+                        backgroundColor: "#f8fafc",
+                        borderRadius: "8px",
+                        padding: "10px",
+                        marginTop: "12px",
+                        textAlign: "center",
+                        border: "1px solid #f1f5f9"
+                      }}>
+                        <div>
+                          <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Payable</span>
+                          <div style={{ fontSize: "13.5px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                            ₹{site.totalPayable.toLocaleString("en-IN")}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#16a34a", textTransform: "uppercase" }}>Paid</span>
+                          <div style={{ fontSize: "13.5px", fontWeight: "800", color: "#15803d", marginTop: "2px" }}>
+                            ₹{site.totalPaid.toLocaleString("en-IN")}
+                          </div>
+                        </div>
+                        <div>
+                          <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#ea580c", textTransform: "uppercase" }}>Pending</span>
+                          <div style={{ fontSize: "13.5px", fontWeight: "800", color: site.totalPending > 0 ? "#c2410c" : "#16a34a", marginTop: "2px" }}>
+                            ₹{site.totalPending.toLocaleString("en-IN")}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Category Quick Preview */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "10px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#475569" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <Users size={12} color="#2563eb" /> <strong>Labor:</strong> ₹{site.labour.payable.toLocaleString("en-IN")}
+                          </span>
+                          <span style={{ color: site.labour.pending > 0 ? "#c2410c" : "#16a34a", fontWeight: "700" }}>
+                            {site.labour.pending > 0 ? `₹${site.labour.pending.toLocaleString("en-IN")} pending` : "Settled"}
+                          </span>
+                        </div>
+
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", color: "#475569" }}>
+                          <span style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+                            <Package size={12} color="#16a34a" /> <strong>Materials:</strong> ₹{site.materials.payable.toLocaleString("en-IN")}
+                          </span>
+                          <span style={{ color: site.materials.pending > 0 ? "#c2410c" : "#16a34a", fontWeight: "700" }}>
+                            {site.materials.pending > 0 ? `₹${site.materials.pending.toLocaleString("en-IN")} pending` : "Settled"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Footer */}
+                    <div style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      paddingTop: "10px",
+                      borderTop: "1px solid #f1f5f9",
+                      color: "#ea580c",
+                      fontSize: "12px",
+                      fontWeight: "750"
+                    }}>
+                      <span>View Payments Detail</span>
+                      <ChevronRight size={15} />
+                    </div>
+                  </div>
                 );
               })}
             </div>
-
-            {/* Sort Controls */}
-            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-              <ArrowUpDown size={14} style={{ color: "#64748b" }} />
-              <span style={{ fontSize: "12px", fontWeight: "600", color: "#64748b" }}>Sort By:</span>
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                style={{
-                  padding: "5px 10px",
-                  borderRadius: "6px",
-                  border: "1px solid #cbd5e1",
-                  backgroundColor: "#ffffff",
-                  fontSize: "12px",
-                  fontWeight: "600",
-                  color: "#0f172a",
-                  outline: "none"
-                }}
-              >
-                <option value="date-desc">Date (Newest First)</option>
-                <option value="date-asc">Date (Oldest First)</option>
-                <option value="amount-desc">Amount (High to Low)</option>
-                <option value="amount-asc">Amount (Low to High)</option>
-              </select>
-            </div>
-
-          </div>
-
-          {/* Table Area */}
-          {loading ? (
-            <div style={{ padding: "40px", textAlign: "center" }}>
-              <Loading text="Loading site expense ledger..." />
-            </div>
-          ) : filteredExpenses.length === 0 ? (
-            <div style={{ padding: "48px 24px", textAlign: "center", color: "#64748b" }}>
-              <Layers size={36} style={{ color: "#94a3b8", marginBottom: "10px" }} />
-              <h4 style={{ margin: "0 0 4px 0", fontSize: "15px", fontWeight: "700", color: "#1e293b" }}>No Expenses Found</h4>
-              <p style={{ margin: 0, fontSize: "13px" }}>No site expense records match your current filters or date range.</p>
-            </div>
           ) : (
-            <>
+            /* List / Table View */
+            <div className="table-card">
               <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0, width: "100%", borderCollapse: "collapse" }}>
+                <table className="table" style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
                   <thead>
-                    <tr style={{ background: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
-                      <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Date</th>
-                      <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Category</th>
-                      <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Description</th>
-                      <th style={{ padding: "12px 16px", textAlign: "right", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Amount</th>
-                      <th style={{ padding: "12px 16px", textAlign: "left", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Added By</th>
-                      <th style={{ padding: "12px 16px", textAlign: "center", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Status</th>
-                      <th style={{ padding: "12px 16px", textAlign: "center", fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Action</th>
+                    <tr style={{ background: "var(--primary-50, #f8fafc)", borderBottom: "1px solid var(--border-color, #e2e8f0)" }}>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Worksite Name</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Location</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Total Payable</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Total Paid</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Total Pending</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Overall Status</th>
+                      <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Action</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {paginatedExpenses.map((exp, idx) => {
-                      const isEven = idx % 2 === 0;
-                      
-                      // Badge color mapping
-                      let catBadgeBg = "#f1f5f9";
-                      let catBadgeFg = "#475569";
-                      if (exp.normCategory === "Labour") { catBadgeBg = "#fff7ed"; catBadgeFg = "#c2410c"; }
-                      else if (exp.normCategory === "Material") { catBadgeBg = "#fff7ed"; catBadgeFg = "#ea580c"; }
-                      else if (exp.normCategory === "Transport") { catBadgeBg = "#fff7ed"; catBadgeFg = "#c2410c"; }
-
-                      return (
-                        <tr 
-                          key={exp.id || idx} 
-                          style={{ 
-                            backgroundColor: isEven ? "#ffffff" : "#f8fafc",
-                            borderBottom: "1px solid #f1f5f9",
-                            transition: "background-color 0.15s ease"
-                          }}
-                        >
-                          <td style={{ padding: "12px 16px", fontSize: "12.5px", fontWeight: "600", color: "#334155", fontFamily: "monospace" }}>
-                            {exp.date}
-                          </td>
-                          <td style={{ padding: "12px 16px" }}>
-                            <span style={{ 
-                              backgroundColor: catBadgeBg, 
-                              color: catBadgeFg, 
-                              fontSize: "11px", 
-                              fontWeight: "700", 
-                              padding: "3px 8px", 
-                              borderRadius: "4px",
-                              display: "inline-block"
-                            }}>
-                              {exp.category}
-                            </span>
-                          </td>
-                          <td style={{ padding: "12px 16px" }}>
-                            <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a" }}>{exp.name}</div>
-                            <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>{exp.description}</div>
-                          </td>
-                          <td style={{ padding: "12px 16px", textAlign: "right", fontSize: "13.5px", fontWeight: "800", color: "#0f172a" }}>
-                            {formatINR(exp.amount)}
-                          </td>
-                          <td style={{ padding: "12px 16px", fontSize: "12.5px", fontWeight: "600", color: "#475569" }}>
-                            {exp.addedBy}
-                          </td>
-                          <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                            <Badge status={exp.status === "Approved" || exp.status === "approved" ? "success" : "pending"}>
-                              {exp.status}
-                            </Badge>
-                          </td>
-                          <td style={{ padding: "12px 16px", textAlign: "center" }}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedExpenseDetail(exp)}
-                              style={{
-                                border: "1px solid #cbd5e1",
-                                backgroundColor: "#ffffff",
-                                borderRadius: "6px",
-                                padding: "5px 10px",
-                                fontSize: "12px",
-                                fontWeight: "600",
-                                color: "#334155",
-                                cursor: "pointer",
-                                display: "inline-flex",
-                                alignItems: "center",
-                                gap: "4px"
-                              }}
-                              title="View Details"
-                            >
-                              <Eye size={14} />
-                              <span>View</span>
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Table Footer Pagination Controls */}
-              <div style={{ padding: "12px 20px", borderTop: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", background: "#f8fafc" }}>
-                <span style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "500" }}>
-                  Showing {filteredExpenses.length > 0 ? (currentPage - 1) * pageSize + 1 : 0} to {Math.min(currentPage * pageSize, filteredExpenses.length)} of {filteredExpenses.length} expenses
-                </span>
-
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <button
-                    type="button"
-                    disabled={currentPage === 1}
-                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      backgroundColor: currentPage === 1 ? "#f1f5f9" : "#ffffff",
-                      color: currentPage === 1 ? "#94a3b8" : "#334155",
-                      fontSize: "12px",
-                      fontWeight: "600",
-                      cursor: currentPage === 1 ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px"
-                    }}
-                  >
-                    <ChevronLeft size={14} />
-                    <span>Previous</span>
-                  </button>
-
-                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#0f172a", padding: "0 8px" }}>
-                    Page {currentPage} of {totalPages}
-                  </span>
-
-                  <button
-                    type="button"
-                    disabled={currentPage >= totalPages}
-                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                    style={{
-                      padding: "6px 12px",
-                      borderRadius: "6px",
-                      border: "1px solid #cbd5e1",
-                      backgroundColor: currentPage >= totalPages ? "#f1f5f9" : "#ffffff",
-                      color: currentPage >= totalPages ? "#94a3b8" : "#334155",
-                      fontSize: "12px",
-                      fontWeight: "600",
-                      cursor: currentPage >= totalPages ? "not-allowed" : "pointer",
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "4px"
-                    }}
-                  >
-                    <span>Next</span>
-                    <ChevronRight size={14} />
-                  </button>
-                </div>
-              </div>
-            </>
-          )}
-
-        </Card>
-      )}
-
-      {/* TAB 2: PENDING REQUISITIONS */}
-      {activeTab === "pending" && (
-        <Card title="Pending Field Requisition Queue" subtitle="Review requests submitted by field engineers.">
-          {pendingGeneralExpenseRequests.length === 0 ? (
-            <p style={{ color: "#64748b", fontStyle: "italic", textAlign: "center", padding: "32px" }}>No pending engineer requests.</p>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0, width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th>Site Name</th>
-                    <th>Category</th>
-                    <th>Amount</th>
-                    <th>Date</th>
-                    <th>Description / Reason</th>
-                    <th style={{ textAlign: "right" }}>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingGeneralExpenseRequests.map(req => (
-                    <tr key={req.id}>
-                      <td style={{ fontWeight: "700" }}>{sites.find(s => s.id === req.siteId)?.siteName || "Unknown"}</td>
-                      <td><Badge status="pending">{req.category}</Badge></td>
-                      <td style={{ fontWeight: "700" }}>{formatINR(req.amount)}</td>
-                      <td className="font-mono">{req.date}</td>
-                      <td>{req.description}</td>
-                      <td style={{ textAlign: "right" }}>
-                        <Button 
-                          variant="primary" 
-                          size="sm" 
-                          onClick={() => handleApproveExpense(req.id)}
-                        >
-                          Approve
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      )}
-
-      {/* TAB 3: RECORD PAYOUT LOG */}
-      {activeTab === "payments" && ledger && (
-        <Card title="Record Payout Log Entry" subtitle="Authorize cash payout reference tags against material bills, labour payroll, or site bills.">
-          <form onSubmit={handlePayoutSubmit} style={{ display: "flex", flexDirection: "column", gap: "20px", maxWidth: "600px" }}>
-            
-            <div className="form-group">
-              <label style={{ fontSize: "12px", fontWeight: "700", color: "#475569", textTransform: "uppercase" }}>Choose Payout Category / Target</label>
-              <div style={{ display: "flex", gap: "12px", marginTop: "8px" }}>
-                {[
-                  { id: "material", label: "Material Supplier", icon: Package },
-                  { id: "labour", label: "Labour Payroll", icon: Users },
-                  { id: "general", label: "General Site Bill", icon: Layers }
-                ].map(opt => {
-                  const OptIcon = opt.icon;
-                  const isSel = payoutType === opt.id;
-                  return (
-                    <button
-                      type="button"
-                      key={opt.id}
-                      onClick={() => { setPayoutType(opt.id); setPayoutAmount(""); }}
-                      style={{
-                        flex: 1,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "8px",
-                        padding: "12px",
-                        borderRadius: "8px",
-                        border: isSel ? "2px solid #f97316" : "1px solid #cbd5e1",
-                        backgroundColor: isSel ? "#fff7ed" : "#ffffff",
-                        color: isSel ? "#ea580c" : "#475569",
-                        fontWeight: "700",
-                        fontSize: "13px",
-                        cursor: "pointer",
-                        transition: "all 0.2s"
-                      }}
-                    >
-                      <OptIcon size={16} />
-                      <span>{opt.label}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Dynamic target selector dropdown */}
-            {payoutType === "material" && (
-              <div className="form-group">
-                <label htmlFor="payout-target-mat">Select Pending Material Invoice Batch</label>
-                <select
-                  id="payout-target-mat"
-                  value={selectedMaterialId}
-                  onChange={(e) => {
-                    setSelectedMaterialId(e.target.value);
-                    const m = materials.find(x => x.id === e.target.value);
-                    if (m) {
-                      const proc = getSiteExpenseLedger(activeSite, materials, labourHistory, generalExpenses, labourPayments, labourMaster.categories).expensesList.find(el => el.id === m.id);
-                      const paid = m.paidAmount || 0;
-                      const total = proc ? proc.amount : 0;
-                      setPayoutAmount(Math.max(0, total - paid).toString());
-                    }
-                  }}
-                  required
-                  style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                >
-                  <option value="">-- Choose Invoice Batch --</option>
-                  {materials
-                    .filter(m => m.siteId === selectedSiteId && (m.status === "approved" || m.status === "Approved"))
-                    .map(m => {
-                      const paid = Number(m.paidAmount) || 0;
-                      const total = m.totalAmount || 0;
-                      const bal = Math.max(0, total - paid);
-                      if (bal <= 0) return null;
-                      return (
-                        <option key={m.id} value={m.id}>
-                          {m.materialName} (Supplier: {m.supplierName}) • Unpaid Balance: {formatINR(bal)}
-                        </option>
-                      );
-                    }).filter(Boolean)}
-                </select>
-              </div>
-            )}
-
-            {payoutType === "general" && (
-              <div className="form-group">
-                <label htmlFor="payout-target-gen">Select Unpaid Site Bill / Expense</label>
-                <select
-                  id="payout-target-gen"
-                  value={selectedGeneralExpenseId}
-                  onChange={(e) => {
-                    setSelectedGeneralExpenseId(e.target.value);
-                    const g = generalExpenses.find(x => x.id === e.target.value);
-                    if (g) {
-                      setPayoutAmount(Math.max(0, g.amount - (g.paidAmount || 0)).toString());
-                    }
-                  }}
-                  required
-                  style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                >
-                  <option value="">-- Choose Site Bill --</option>
-                  {generalExpenses
-                    .filter(g => g.siteId === selectedSiteId && (g.status === "approved" || g.status === "Approved"))
-                    .map(g => {
-                      const bal = g.amount - (g.paidAmount || 0);
-                      if (bal <= 0) return null;
-                      return (
-                        <option key={g.id} value={g.id}>
-                          {g.description} ({g.category}) • Unpaid Balance: {formatINR(bal)}
-                        </option>
-                      );
-                    }).filter(Boolean)}
-                </select>
-              </div>
-            )}
-
-            <div className="form-group">
-              <label htmlFor="pay-amount-in">Payout Amount (₹) <span style={{ color: "#ef4444" }}>*</span></label>
-              <input
-                id="pay-amount-in"
-                type="number"
-                placeholder="e.g. 50000"
-                value={payoutAmount}
-                onChange={(e) => setPayoutAmount(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="pay-date-in">Payment Date</label>
-              <input
-                id="pay-date-in"
-                type="date"
-                value={payoutDate}
-                onChange={(e) => setPayoutDate(e.target.value)}
-                required
-                style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="pay-ref-in">Transaction Reference (UPI ID / Check # / Cash details)</label>
-              <input
-                id="pay-ref-in"
-                type="text"
-                placeholder="e.g. UPI txn-92931, Check #1034"
-                value={payoutRef}
-                onChange={(e) => setPayoutRef(e.target.value)}
-                style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
-            </div>
-
-            <div className="form-group">
-              <label htmlFor="pay-notes-in">Payment Notes / Remarks</label>
-              <input
-                id="pay-notes-in"
-                type="text"
-                placeholder="e.g. Paid part salary, or clearing steel delivery bill"
-                value={payoutNotes}
-                onChange={(e) => setPayoutNotes(e.target.value)}
-                style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-              />
-            </div>
-
-            <Button type="submit" variant="primary" style={{ marginTop: "10px" }}>Log Payment Entry</Button>
-          </form>
-        </Card>
-      )}
-
-      {/* TAB 4: FINANCIAL REPORTS */}
-      {activeTab === "reports" && ledger && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
-          
-          <Card title="Accrued Cost Category Breakdown Report">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0, width: "100%" }}>
-                <thead>
-                  <tr>
-                    <th>Expense Category</th>
-                    <th style={{ textAlign: "right" }}>Total Cost Accrued</th>
-                    <th style={{ textAlign: "right" }}>Total Paid Out</th>
-                    <th style={{ textAlign: "right" }}>Outstanding Dues</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[
-                    { cat: "Material Expense", cost: ledger.materialExpenseTotal, paid: ledger.materialPaidTotal },
-                    { cat: "Labour Expense", cost: ledger.labourExpenseTotal, paid: ledger.labourPaidTotal },
-                    { cat: "Site Expense", cost: ledger.siteExpenseTotal, paid: ledger.generalPaidTotal },
-                    { cat: "Other Expense", cost: ledger.otherExpenseTotal, paid: 0 }
-                  ].map((item, index) => (
-                    <tr key={index}>
-                      <td style={{ fontWeight: "700" }}>{item.cat}</td>
-                      <td style={{ textAlign: "right", fontWeight: "700" }}>{formatINR(item.cost)}</td>
-                      <td style={{ textAlign: "right", color: "#16a34a" }}>{formatINR(item.paid)}</td>
-                      <td style={{ textAlign: "right", color: "#dc2626", fontWeight: "700" }}>{formatINR(Math.max(0, item.cost - item.paid))}</td>
-                    </tr>
-                  ))}
-                  <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800" }}>
-                    <td>TOTAL NET COST</td>
-                    <td style={{ textAlign: "right" }}>{formatINR(ledger.totalExpenses)}</td>
-                    <td style={{ textAlign: "right" }}>{formatINR(ledger.totalPayments)}</td>
-                    <td style={{ textAlign: "right", color: "#dc2626" }}>{formatINR(ledger.pendingPayments)}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
-
-          <Card title="Supplier & Labor Payout History Log">
-            {ledger.paymentsHistory.length === 0 ? (
-              <p style={{ color: "#64748b", fontStyle: "italic", textAlign: "center", padding: "20px" }}>No payouts registered yet.</p>
-            ) : (
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0, width: "100%" }}>
-                  <thead>
-                    <tr>
-                      <th>Date</th>
-                      <th>Payment Category</th>
-                      <th>Target Description</th>
-                      <th>Reference #</th>
-                      <th>Remarks / Notes</th>
-                      <th style={{ textAlign: "right" }}>Amount Paid</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ledger.paymentsHistory.map((p, idx) => (
-                      <tr key={idx}>
-                        <td className="font-mono">{p.date}</td>
-                        <td><Badge status="success">{p.category}</Badge></td>
-                        <td style={{ fontWeight: "700" }}>{p.name}</td>
-                        <td className="font-mono">{p.reference || "--"}</td>
-                        <td>{p.notes || "--"}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", color: "#16a34a" }}>{formatINR(p.amount)}</td>
+                    {filteredSites.map(site => (
+                      <tr
+                        key={site.siteId}
+                        onClick={() => {
+                          setSelectedSiteId(site.siteId);
+                          setActiveCategoryTab("Labor");
+                          setDetailStatusFilter("All");
+                          setDetailSearchQuery("");
+                        }}
+                        style={{
+                          borderBottom: "1px solid #f1f5f9",
+                          cursor: "pointer",
+                          transition: "background-color 0.12s ease"
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                        onMouseLeave={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+                      >
+                        <td style={{ padding: "12px 16px", fontWeight: "700", color: "#0f172a" }}>
+                          {site.siteName}
+                        </td>
+                        <td style={{ padding: "12px 16px", color: "#64748b" }}>
+                          {site.location}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: "700", color: "#0f172a" }}>
+                          ₹{site.totalPayable.toLocaleString("en-IN")}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: "700", color: "#16a34a" }}>
+                          ₹{site.totalPaid.toLocaleString("en-IN")}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: "800", color: site.totalPending > 0 ? "#c2410c" : "#16a34a" }}>
+                          ₹{site.totalPending.toLocaleString("en-IN")}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                          {renderStatusBadge(site.overallStatus)}
+                        </td>
+                        <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                          <Button size="small" variant="primary" style={{ padding: "5px 12px", fontSize: "12px" }}>
+                            <span>View Detail</span>
+                            <ChevronRight size={13} style={{ marginLeft: "4px" }} />
+                          </Button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-            )}
-          </Card>
-        </div>
-      )}
-
-      {/* ── 5. MODAL: ADD SITE EXPENSE ── */}
-      {showAddExpenseModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content" style={{ maxWidth: "450px" }}>
-            <div className="modal-header">
-              <h3>Log General Site Expense</h3>
-              <button className="modal-close" onClick={() => setShowAddExpenseModal(false)} type="button"><X size={18} /></button>
             </div>
-            <form onSubmit={handleAddExpense}>
-              <div className="modal-body" style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                
-                <div className="form-group">
-                  <label htmlFor="exp-category">Expense Category</label>
-                  <select
-                    id="exp-category"
-                    value={newExpense.category}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, category: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff" }}
-                  >
-                    <option value="Site Expense">Site Expense (fuel, water, transport)</option>
-                    <option value="Other Expense">Other Expense (fees, emergency bills)</option>
-                  </select>
+          )}
+        </>
+      ) : (
+        /* ═══════════════════════════════════════════════════════════ */
+        /* LEVEL 2: SITE PAYMENTS DETAIL (DATE RANGE + LABOR/MATERIALS) */
+        /* ═══════════════════════════════════════════════════════════ */
+        <>
+          {/* Site Detail Header Card */}
+          <div className="card" style={{ marginBottom: "20px" }}>
+            {/* Back Navigation */}
+            <div style={{ marginBottom: "14px" }}>
+              <Button
+                variant="outline"
+                size="small"
+                onClick={() => setSelectedSiteId(null)}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                <ArrowLeft size={14} />
+                <span>Back to All Worksites</span>
+              </Button>
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <h2 style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", margin: 0 }}>
+                    {currentSelectedSite?.siteName} — Payments Detail
+                  </h2>
+                  {currentSelectedSite && renderStatusBadge(currentSelectedSite.overallStatus)}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13px", color: "#64748b", marginTop: "4px" }}>
+                  <MapPin size={13} color="#ea580c" />
+                  <span>{currentSelectedSite?.location}</span>
+                </div>
+              </div>
+
+              <Button onClick={() => window.print()} variant="outline" style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                <Printer size={16} />
+                <span>Print Site Ledger</span>
+              </Button>
+            </div>
+
+            {/* ── DATE RANGE FILTER SECTION ── */}
+            <div style={{
+              marginTop: "18px",
+              paddingTop: "16px",
+              borderTop: "1px solid #f1f5f9",
+              display: "flex",
+              flexDirection: "column",
+              gap: "10px"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <Calendar size={15} color="#ea580c" />
+                  <span style={{ fontSize: "12px", fontWeight: "800", color: "#0f172a", textTransform: "uppercase" }}>Filter Date Range</span>
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="exp-desc">Description / Particulars</label>
-                  <input
-                    id="exp-desc"
-                    type="text"
-                    placeholder="e.g. Tanker water delivery, diesel for JCB"
-                    value={newExpense.description}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, description: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
+                {/* Quick Presets */}
+                <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+                  {[
+                    { key: "today", label: "Today" },
+                    { key: "this_week", label: "This Week" },
+                    { key: "this_month", label: "This Month" },
+                    { key: "last_30", label: "Last 30 Days" },
+                    { key: "all", label: "All Dates" }
+                  ].map(btn => (
+                    <button
+                      key={btn.key}
+                      type="button"
+                      onClick={() => applyPreset(btn.key)}
+                      style={{
+                        padding: "4px 9px",
+                        fontSize: "11.5px",
+                        fontWeight: "700",
+                        backgroundColor: "#f8fafc",
+                        border: "1px solid #cbd5e1",
+                        borderRadius: "6px",
+                        color: "#475569",
+                        cursor: "pointer"
+                      }}
+                    >
+                      {btn.label}
+                    </button>
+                  ))}
                 </div>
+              </div>
 
-                <div className="form-group">
-                  <label htmlFor="exp-amt">Amount (₹)</label>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>From:</span>
                   <input
-                    id="exp-amt"
-                    type="number"
-                    placeholder="e.g. 2500"
-                    value={newExpense.amount}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, amount: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="exp-date">Date</label>
-                  <input
-                    id="exp-date"
                     type="date"
-                    value={newExpense.date}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, date: e.target.value }))}
-                    required
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                    value={fromDate}
+                    onChange={(e) => setFromDate(e.target.value)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
                   />
                 </div>
 
-                <div className="form-group">
-                  <label htmlFor="exp-notes">Additional Notes</label>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                  <span style={{ fontSize: "12px", fontWeight: "700", color: "#475569" }}>To:</span>
                   <input
-                    id="exp-notes"
-                    type="text"
-                    placeholder="e.g. Invoice #29381 from supplier"
-                    value={newExpense.notes}
-                    onChange={(e) => setNewExpense(prev => ({ ...prev, notes: e.target.value }))}
-                    style={{ width: "100%", padding: "10px", marginTop: "4px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
+                    type="date"
+                    value={toDate}
+                    onChange={(e) => setToDate(e.target.value)}
+                    style={{
+                      padding: "7px 10px",
+                      borderRadius: "8px",
+                      border: "1px solid #cbd5e1",
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#0f172a",
+                      outline: "none"
+                    }}
                   />
                 </div>
+
+                {(fromDate || toDate) && (
+                  <Button
+                    variant="outline"
+                    size="small"
+                    onClick={() => { setFromDate(""); setToDate(""); }}
+                    style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "5px 9px", fontSize: "11.5px" }}
+                  >
+                    <X size={13} /> Clear
+                  </Button>
+                )}
               </div>
-              <div className="modal-footer">
-                <Button type="button" variant="secondary" onClick={() => setShowAddExpenseModal(false)}>Cancel</Button>
-                <Button type="submit" variant="primary">Log Expense</Button>
-              </div>
-            </form>
+            </div>
           </div>
-        </div>
+
+          {/* Category Navigation Tabs: Labor vs Materials */}
+          <div style={{
+            display: "flex",
+            gap: "8px",
+            marginBottom: "16px"
+          }}>
+            <button
+              type="button"
+              onClick={() => setActiveCategoryTab("Labor")}
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                padding: "10px 16px",
+                borderRadius: "10px",
+                border: activeCategoryTab === "Labor" ? "1.5px solid #ea580c" : "1px solid #e2e8f0",
+                backgroundColor: activeCategoryTab === "Labor" ? "#fff7ed" : "#ffffff",
+                color: activeCategoryTab === "Labor" ? "#c2410c" : "#475569",
+                fontSize: "13px",
+                fontWeight: activeCategoryTab === "Labor" ? "800" : "600",
+                cursor: "pointer",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <Users size={16} color={activeCategoryTab === "Labor" ? "#ea580c" : "#64748b"} />
+              <span>Labor</span>
+              <span style={{
+                fontSize: "11px",
+                fontWeight: "800",
+                padding: "2px 7px",
+                borderRadius: "6px",
+                backgroundColor: activeCategoryTab === "Labor" ? "#ea580c" : "#f1f5f9",
+                color: activeCategoryTab === "Labor" ? "#ffffff" : "#64748b"
+              }}>
+                {currentSiteLabourRows.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveCategoryTab("Materials")}
+              style={{
+                flex: 1,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                padding: "10px 16px",
+                borderRadius: "10px",
+                border: activeCategoryTab === "Materials" ? "1.5px solid #ea580c" : "1px solid #e2e8f0",
+                backgroundColor: activeCategoryTab === "Materials" ? "#fff7ed" : "#ffffff",
+                color: activeCategoryTab === "Materials" ? "#c2410c" : "#475569",
+                fontSize: "13px",
+                fontWeight: activeCategoryTab === "Materials" ? "800" : "600",
+                cursor: "pointer",
+                transition: "all 0.15s ease"
+              }}
+            >
+              <Package size={16} color={activeCategoryTab === "Materials" ? "#ea580c" : "#64748b"} />
+              <span>Materials</span>
+              <span style={{
+                fontSize: "11px",
+                fontWeight: "800",
+                padding: "2px 7px",
+                borderRadius: "6px",
+                backgroundColor: activeCategoryTab === "Materials" ? "#ea580c" : "#f1f5f9",
+                color: activeCategoryTab === "Materials" ? "#ffffff" : "#64748b"
+              }}>
+                {currentSiteMaterialRows.length}
+              </span>
+            </button>
+          </div>
+
+          {/* Category Summary KPI Cards */}
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+            gap: "14px",
+            marginBottom: "20px"
+          }}>
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>
+                {activeCategoryTab} Payable
+              </span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: "#0f172a", marginTop: "3px" }}>
+                ₹{siteCategoryKpis.payable.toLocaleString("en-IN")}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#16a34a", textTransform: "uppercase" }}>
+                {activeCategoryTab} Paid
+              </span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: "#15803d", marginTop: "3px" }}>
+                ₹{siteCategoryKpis.paid.toLocaleString("en-IN")}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "16px 18px" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#ea580c", textTransform: "uppercase" }}>
+                {activeCategoryTab} Pending
+              </span>
+              <div style={{ fontSize: "20px", fontWeight: "800", color: siteCategoryKpis.pending > 0 ? "#c2410c" : "#16a34a", marginTop: "3px" }}>
+                ₹{siteCategoryKpis.pending.toLocaleString("en-IN")}
+              </div>
+            </div>
+
+            <div className="card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>
+                {activeCategoryTab} Status
+              </span>
+              <div style={{ marginTop: "4px" }}>
+                {renderStatusBadge(siteCategoryKpis.status)}
+              </div>
+            </div>
+          </div>
+
+          {/* Category Records Table (Duplicate-Safe) */}
+          <div className="table-card">
+            {/* Search & Status Filters */}
+            <div style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              flexWrap: "wrap",
+              gap: "12px",
+              padding: "16px 20px",
+              borderBottom: "1px solid #f1f5f9"
+            }}>
+              <div style={{ position: "relative", minWidth: "240px", flex: 1, maxWidth: "380px" }}>
+                <Search size={15} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "#94a3b8" }} />
+                <input
+                  type="text"
+                  placeholder={`Search ${activeCategoryTab === "Labor" ? "mason / worker / team..." : "material / supplier..."}`}
+                  value={detailSearchQuery}
+                  onChange={(e) => setDetailSearchQuery(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 12px 8px 34px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12.5px",
+                    fontWeight: "500",
+                    outline: "none",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "12px", fontWeight: "700", color: "#64748b" }}>Status:</span>
+                <select
+                  value={detailStatusFilter}
+                  onChange={(e) => setDetailStatusFilter(e.target.value)}
+                  style={{
+                    padding: "6px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12px",
+                    fontWeight: "600",
+                    color: "#0f172a",
+                    outline: "none"
+                  }}
+                >
+                  <option value="All">All Records</option>
+                  <option value="Unpaid">Unpaid Only</option>
+                  <option value="Partially Paid">Partially Paid Only</option>
+                  <option value="Fully Paid">Fully Paid Only</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Data Table */}
+            <div style={{ overflowX: "auto" }}>
+              <table className="table" style={{ width: "100%", borderCollapse: "collapse", textAlign: "left", fontSize: "13px" }}>
+                <thead>
+                  <tr style={{ background: "var(--primary-50, #f8fafc)", borderBottom: "1px solid var(--border-color, #e2e8f0)" }}>
+                    {activeCategoryTab === "Labor" ? (
+                      <>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Worker / Mason</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Team</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Date</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Count</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Rate (₹)</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Payable</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Paid</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Pending</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Status</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Actions</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Material</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Supplier / Vendor</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Delivery Date</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569" }}>Quantity</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Rate (₹)</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Total Amount</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Paid Amount</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "right" }}>Pending</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Status</th>
+                        <th style={{ padding: "12px 16px", fontWeight: "700", color: "#475569", textAlign: "center" }}>Actions</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeCategoryTab === "Labor" ? (
+                    currentSiteLabourRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                          <Users size={32} color="#94a3b8" style={{ marginBottom: "6px" }} />
+                          <div style={{ fontWeight: "700", color: "#1e293b" }}>No Labour records found</div>
+                          <div style={{ fontSize: "12px", marginTop: "2px" }}>No workforce attendance records match the selected date range.</div>
+                        </td>
+                      </tr>
+                    ) : (
+                      currentSiteLabourRows.map(row => (
+                        <tr key={row.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", fontWeight: "700", color: "#0f172a" }}>
+                            {row.workerName}
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", color: "#475569" }}>
+                            {row.teamName}
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", color: "#334155", fontWeight: "600" }}>
+                            {row.dateLabel}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle", fontWeight: "700" }}>
+                            {row.workerCount}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", color: "#475569" }}>
+                            ₹{row.applicableRate.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "700", color: "#0f172a" }}>
+                            ₹{row.totalPayable.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "700", color: "#16a34a" }}>
+                            ₹{row.paidAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "800", color: row.pendingAmount > 0 ? "#c2410c" : "#16a34a" }}>
+                            ₹{row.pendingAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle" }}>
+                            {renderStatusBadge(row.status)}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                              {row.pendingAmount > 0 ? (
+                                <Button
+                                  size="small"
+                                  variant="primary"
+                                  onClick={() => handleOpenPaymentModal(row)}
+                                  style={{ padding: "5px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                >
+                                  <CreditCard size={13} />
+                                  <span>Pay</span>
+                                </Button>
+                              ) : (
+                                <span style={{ fontSize: "12px", fontWeight: "600", color: "#16a34a" }}>Settled</span>
+                              )}
+
+                              {row.payments && row.payments.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenHistoryModal(row)}
+                                  title="View Disbursement History"
+                                  style={{
+                                    padding: "5px 8px",
+                                    backgroundColor: "#f8fafc",
+                                    border: "1px solid #cbd5e1",
+                                    borderRadius: "6px",
+                                    color: "#475569",
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  <History size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )
+                  ) : (
+                    currentSiteMaterialRows.length === 0 ? (
+                      <tr>
+                        <td colSpan={10} style={{ textAlign: "center", padding: "40px", color: "#64748b" }}>
+                          <Package size={32} color="#94a3b8" style={{ marginBottom: "6px" }} />
+                          <div style={{ fontWeight: "700", color: "#1e293b" }}>No Material records found</div>
+                          <div style={{ fontSize: "12px", marginTop: "2px" }}>No material orders match the selected date range.</div>
+                        </td>
+                      </tr>
+                    ) : (
+                      currentSiteMaterialRows.map(row => (
+                        <tr key={row.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", fontWeight: "700", color: "#0f172a" }}>
+                            {row.materialName}
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", color: "#475569" }}>
+                            {row.supplierName}
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", color: "#334155", fontWeight: "600" }}>
+                            {row.deliveryDate}
+                          </td>
+                          <td style={{ padding: "12px 16px", verticalAlign: "middle", fontWeight: "600" }}>
+                            {row.quantityText}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", color: "#475569" }}>
+                            ₹{row.unitRate.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "700", color: "#0f172a" }}>
+                            ₹{row.totalPayable.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "700", color: "#16a34a" }}>
+                            ₹{row.paidAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "right", verticalAlign: "middle", fontWeight: "800", color: row.pendingAmount > 0 ? "#c2410c" : "#16a34a" }}>
+                            ₹{row.pendingAmount.toLocaleString("en-IN")}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle" }}>
+                            {renderStatusBadge(row.status)}
+                          </td>
+                          <td style={{ padding: "12px 16px", textAlign: "center", verticalAlign: "middle" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px" }}>
+                              {row.pendingAmount > 0 ? (
+                                <Button
+                                  size="small"
+                                  variant="primary"
+                                  onClick={() => handleOpenPaymentModal(row)}
+                                  style={{ padding: "5px 12px", fontSize: "12px", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                                >
+                                  <CreditCard size={13} />
+                                  <span>Pay</span>
+                                </Button>
+                              ) : (
+                                <span style={{ fontSize: "12px", fontWeight: "600", color: "#16a34a" }}>Settled</span>
+                              )}
+
+                              {row.payments && row.payments.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenHistoryModal(row)}
+                                  title="View Disbursement History"
+                                  style={{
+                                    padding: "5px 8px",
+                                    backgroundColor: "#f8fafc",
+                                    border: "1px solid #cbd5e1",
+                                    borderRadius: "6px",
+                                    color: "#475569",
+                                    cursor: "pointer"
+                                  }}
+                                >
+                                  <History size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
 
-      {/* ── 6. MODAL: EXPENSE DETAIL VIEW ── */}
-      {selectedExpenseDetail && (
+      {/* ── PAYMENT MODAL (IDEMPOTENT & MULTI-USER SAFE) ── */}
+      {showPaymentModal && paymentTarget && (
         <Modal
-          isOpen={!!selectedExpenseDetail}
-          onClose={() => setSelectedExpenseDetail(null)}
-          title="Expense Entry Details"
-          size="sm"
+          isOpen={showPaymentModal}
+          onClose={() => !submitting && setShowPaymentModal(false)}
+          title={`Disburse Payment for ${paymentTarget.rawType === "labour" ? `${paymentTarget.workerName} (${paymentTarget.teamName})` : `${paymentTarget.materialName} (${paymentTarget.supplierName})`}`}
+          maxWidth="520px"
+        >
+          <form onSubmit={handleExecutePayment} style={{ display: "flex", flexDirection: "column", gap: "16px", padding: "4px 0" }}>
+            {/* Obligation Summary Banner */}
+            <div style={{
+              backgroundColor: "#f8fafc",
+              border: "1px solid #e2e8f0",
+              borderRadius: "8px",
+              padding: "12px 14px",
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: "8px",
+              textAlign: "center"
+            }}>
+              <div>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Obligation</span>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>
+                  ₹{paymentTarget.totalPayable.toLocaleString("en-IN")}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#16a34a", textTransform: "uppercase" }}>Already Paid</span>
+                <div style={{ fontSize: "14px", fontWeight: "800", color: "#16a34a", marginTop: "2px" }}>
+                  ₹{paymentTarget.paidAmount.toLocaleString("en-IN")}
+                </div>
+              </div>
+              <div>
+                <span style={{ fontSize: "10.5px", fontWeight: "700", color: "#ea580c", textTransform: "uppercase" }}>Remaining Pending</span>
+                <div style={{ fontSize: "14px", fontWeight: "850", color: "#c2410c", marginTop: "2px" }}>
+                  ₹{paymentTarget.pendingAmount.toLocaleString("en-IN")}
+                </div>
+              </div>
+            </div>
+
+            {/* Quick Amount Suggestion Chips */}
+            <div>
+              <label style={{ display: "block", fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
+                Payment Amount (₹) <span style={{ color: "#ef4444" }}>*</span>
+              </label>
+              <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setPayAmount(String(paymentTarget.pendingAmount))}
+                  style={{
+                    flex: 1,
+                    padding: "5px 8px",
+                    backgroundColor: "#fff7ed",
+                    border: "1px solid #ffedd5",
+                    borderRadius: "6px",
+                    color: "#c2410c",
+                    fontSize: "11.5px",
+                    fontWeight: "750",
+                    cursor: "pointer"
+                  }}
+                >
+                  Pay Full: ₹{paymentTarget.pendingAmount.toLocaleString("en-IN")}
+                </button>
+                {paymentTarget.pendingAmount > 100 && (
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(String(Math.round(paymentTarget.pendingAmount / 2)))}
+                    style={{
+                      flex: 1,
+                      padding: "5px 8px",
+                      backgroundColor: "#f8fafc",
+                      border: "1px solid #cbd5e1",
+                      borderRadius: "6px",
+                      color: "#475569",
+                      fontSize: "11.5px",
+                      fontWeight: "700",
+                      cursor: "pointer"
+                    }}
+                  >
+                    Pay 50%: ₹{Math.round(paymentTarget.pendingAmount / 2).toLocaleString("en-IN")}
+                  </button>
+                )}
+              </div>
+
+              <input
+                type="number"
+                min="1"
+                max={paymentTarget.pendingAmount}
+                step="any"
+                required
+                value={payAmount}
+                onChange={(e) => {
+                  setPayAmount(e.target.value);
+                  setPaymentError("");
+                }}
+                placeholder="Enter amount in ₹"
+                style={{
+                  width: "100%",
+                  padding: "9px 12px",
+                  borderRadius: "8px",
+                  border: paymentError ? "1.5px solid #ef4444" : "1px solid #cbd5e1",
+                  fontSize: "15px",
+                  fontWeight: "750",
+                  color: "#0f172a",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }}
+              />
+              {paymentError && (
+                <div style={{ color: "#ef4444", fontSize: "11.5px", fontWeight: "600", marginTop: "4px" }}>
+                  {paymentError}
+                </div>
+              )}
+            </div>
+
+            {/* Payment Date & Method (Cash / UPI / Cheque) */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
+                  Payment Date <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12.5px",
+                    fontWeight: "600",
+                    outline: "none",
+                    boxSizing: "border-box"
+                  }}
+                />
+              </div>
+
+              <div>
+                <label style={{ display: "block", fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
+                  Payment Method <span style={{ color: "#ef4444" }}>*</span>
+                </label>
+                <select
+                  value={payMethod}
+                  onChange={(e) => setPayMethod(e.target.value)}
+                  style={{
+                    width: "100%",
+                    padding: "8px 10px",
+                    borderRadius: "8px",
+                    border: "1px solid #cbd5e1",
+                    fontSize: "12.5px",
+                    fontWeight: "600",
+                    outline: "none",
+                    backgroundColor: "#ffffff",
+                    boxSizing: "border-box"
+                  }}
+                >
+                  <option value="Cash">Cash</option>
+                  <option value="UPI">UPI</option>
+                  <option value="Cheque">Cheque</option>
+                  <option value="Bank Transfer">Bank Transfer / NEFT</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Reference / Transaction ID (Optional) */}
+            <div>
+              <label style={{ display: "block", fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
+                Reference / Transaction ID (Optional)
+              </label>
+              <input
+                type="text"
+                value={payReference}
+                onChange={(e) => setPayReference(e.target.value)}
+                placeholder="e.g. UPI Transaction ID / Cheque Reference #"
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "12.5px",
+                  fontWeight: "500",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {/* Remarks / Notes (Optional) */}
+            <div>
+              <label style={{ display: "block", fontSize: "11.5px", fontWeight: "700", color: "#475569", textTransform: "uppercase", marginBottom: "6px" }}>
+                Remarks / Notes (Optional)
+              </label>
+              <input
+                type="text"
+                value={payNotes}
+                onChange={(e) => setPayNotes(e.target.value)}
+                placeholder="e.g. Weekly wage disbursement"
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "12.5px",
+                  fontWeight: "500",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {/* Modal Actions */}
+            <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", marginTop: "8px" }}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={submitting}
+                onClick={() => setShowPaymentModal(false)}
+              >
+                Cancel
+              </Button>
+
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={submitting}
+                style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}
+              >
+                {submitting ? (
+                  <>
+                    <div style={{
+                      width: "14px",
+                      height: "14px",
+                      border: "2px solid #ffffff",
+                      borderTopColor: "transparent",
+                      borderRadius: "50%",
+                      animation: "spin 0.6s linear infinite"
+                    }} />
+                    <span>Processing...</span>
+                  </>
+                ) : (
+                  <>
+                    <CheckCircle2 size={15} />
+                    <span>Confirm Payment</span>
+                  </>
+                )}
+              </Button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* ── PAYMENT AUDIT / HISTORY MODAL ── */}
+      {showHistoryModal && historyTarget && (
+        <Modal
+          isOpen={showHistoryModal}
+          onClose={() => setShowHistoryModal(false)}
+          title={`Payment History — ${historyTarget.rawType === "labour" ? `${historyTarget.workerName} (${historyTarget.teamName})` : `${historyTarget.materialName} (${historyTarget.supplierName})`}`}
+          maxWidth="560px"
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "14px", padding: "4px 0" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderBottom: "1px solid #f1f5f9", paddingBottom: "12px" }}>
+            <div style={{
+              backgroundColor: "#f8fafc",
+              padding: "12px 14px",
+              borderRadius: "8px",
+              border: "1px solid #e2e8f0",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center"
+            }}>
               <div>
-                <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Category</span>
-                <div style={{ fontSize: "14px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>{selectedExpenseDetail.category}</div>
+                <div style={{ fontSize: "11.5px", color: "#64748b", fontWeight: "600" }}>Total Obligation: ₹{historyTarget.totalPayable.toLocaleString("en-IN")}</div>
+                <div style={{ fontSize: "13.5px", fontWeight: "800", color: "#0f172a" }}>Paid to Date: ₹{historyTarget.paidAmount.toLocaleString("en-IN")}</div>
               </div>
-              <div style={{ textAlign: "right" }}>
-                <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Amount</span>
-                <div style={{ fontSize: "18px", fontWeight: "800", color: "#ea580c", marginTop: "2px" }}>{formatINR(selectedExpenseDetail.amount)}</div>
+              <div>
+                {renderStatusBadge(historyTarget.status)}
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Date</span>
-                <div style={{ fontSize: "13px", fontWeight: "600", color: "#0f172a", fontFamily: "monospace" }}>{selectedExpenseDetail.date}</div>
-              </div>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Status</span>
-                <div><Badge status={selectedExpenseDetail.status === "Approved" || selectedExpenseDetail.status === "approved" ? "success" : "pending"}>{selectedExpenseDetail.status}</Badge></div>
-              </div>
+            <div style={{ fontSize: "12.5px", fontWeight: "750", color: "#334155" }}>
+              Disbursement Log ({historyTarget.payments?.length || 0} Transactions)
             </div>
 
-            <div>
-              <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Description / Item Name</span>
-              <div style={{ fontSize: "13px", fontWeight: "700", color: "#0f172a", marginTop: "2px" }}>{selectedExpenseDetail.name}</div>
-              <div style={{ fontSize: "12px", color: "#475569", marginTop: "4px", backgroundColor: "#f8fafc", padding: "8px 12px", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                {selectedExpenseDetail.description || "No additional particulars."}
+            {(!historyTarget.payments || historyTarget.payments.length === 0) ? (
+              <div style={{ textAlign: "center", padding: "24px", color: "#64748b", fontSize: "13px" }}>
+                No transaction records available.
               </div>
-            </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "300px", overflowY: "auto" }}>
+                {historyTarget.payments.map((p, idx) => (
+                  <div
+                    key={p.id || idx}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: "8px",
+                      padding: "10px 12px",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center"
+                    }}
+                  >
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "13.5px", fontWeight: "800", color: "#15803d" }}>
+                          ₹{Number(p.amount || 0).toLocaleString("en-IN")}
+                        </span>
+                        <span style={{
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          padding: "2px 6px",
+                          borderRadius: "4px",
+                          backgroundColor: "#f1f5f9",
+                          color: "#475569"
+                        }}>
+                          {p.method || p.paymentMethod || "Cash"}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: "#64748b", marginTop: "2px" }}>
+                        Disbursed on {formatDateDMY(p.date || p.paymentDate)} {p.reference ? `• Ref: ${p.reference}` : ""}
+                      </div>
+                      {p.notes && (
+                        <div style={{ fontSize: "11px", color: "#475569", marginTop: "2px", fontStyle: "italic" }}>
+                          "{p.notes}"
+                        </div>
+                      )}
+                    </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Added By</span>
-                <div style={{ fontSize: "13px", fontWeight: "600", color: "#0f172a" }}>{selectedExpenseDetail.addedBy}</div>
+                    <div style={{ textAlign: "right", fontSize: "11px", color: "#94a3b8" }}>
+                      {p.recordedAt ? (typeof p.recordedAt === "string" ? new Date(p.recordedAt).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' }) : (p.recordedAt?.seconds ? new Date(p.recordedAt.seconds * 1000).toLocaleTimeString("en-GB", { hour: '2-digit', minute: '2-digit' }) : "")) : ""}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <div>
-                <span style={{ fontSize: "11px", fontWeight: "600", color: "#64748b" }}>Site Name</span>
-                <div style={{ fontSize: "13px", fontWeight: "600", color: "#0f172a" }}>{activeSite?.siteName || "Selected Site"}</div>
-              </div>
-            </div>
+            )}
 
-            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "12px" }}>
-              <Button variant="primary" onClick={() => setSelectedExpenseDetail(null)}>Close</Button>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginTop: "8px" }}>
+              <Button
+                variant="outline"
+                size="small"
+                onClick={() => setShowHistoryModal(false)}
+              >
+                Close
+              </Button>
             </div>
           </div>
         </Modal>
       )}
 
+      {/* Inline Spinner Animation */}
+      <style>{`
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
     </Layout>
   );
 }

@@ -81,6 +81,7 @@ export default function AppRoutes() {
         <Route path="/superadmin/expenses" element={<ErrorBoundary><SuperAdminDashboard tab="finance" /></ErrorBoundary>} />
         <Route path="/superadmin/progress" element={<ErrorBoundary><SuperAdminDashboard tab="progress" /></ErrorBoundary>} />
         <Route path="/superadmin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
+        <Route path="/superadmin/payments" element={<ErrorBoundary><AdminPayments /></ErrorBoundary>} />
         <Route path="/superadmin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
         <Route path="/superadmin/approvals" element={<ErrorBoundary><SuperAdminDashboard tab="approvals" /></ErrorBoundary>} />
         <Route path="/superadmin/activity" element={<ErrorBoundary><SuperAdminDashboard tab="activity" /></ErrorBoundary>} />
