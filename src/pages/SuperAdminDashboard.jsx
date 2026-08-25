@@ -1350,8 +1350,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
           {/* 1. PORTFOLIO CAPITAL PULSE CARD */}
           <div
-            className="admin-summary-card"
-            style={{ cursor: "pointer", transition: "all 0.15s ease" }}
+            className="superadmin-macro-card"
             onClick={() => openKpiDrilldown("sites_total")}
             title="Click to inspect all organization sites"
           >
@@ -1363,10 +1362,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 {alerts.length > 0 ? `${alerts.length} Attention` : "Healthy"}
               </span>
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
+            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
               <div className="admin-summary-value">{formatINR(overallMetrics.totalProjectValue)}</div>
               <div className="admin-summary-label">Corporate Portfolio Budget ({overallMetrics.totalSites} Sites)</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
                 <span><strong>{activeSitesCount}</strong> Active</span>
                 <span><strong>{completedSitesCount}</strong> Done</span>
                 <span style={{ color: delayedSitesCount > 0 ? "#dc2626" : "inherit" }}><strong>{delayedSitesCount}</strong> Delayed</span>
@@ -1376,8 +1375,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
           {/* 2. ACTIVE CIVIL WORKFORCE PULSE CARD */}
           <div
-            className="admin-summary-card"
-            style={{ cursor: "pointer", transition: "all 0.15s ease" }}
+            className="superadmin-macro-card"
             onClick={() => openKpiDrilldown("workforce_present")}
             title="Click to inspect today's field presence"
           >
@@ -1389,10 +1387,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 {attendanceRate}% Eng Presence
               </span>
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
+            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
               <div className="admin-summary-value">{totalWorkforceToday} Total On-Site</div>
               <div className="admin-summary-label">Active Civil Workforce Today</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
                 <span><strong>{presentCount}</strong> Engineers</span>
                 <span><strong>{todayLabourCount}</strong> Labour</span>
                 <span style={{ color: pendingEngineersCount > 0 ? "#ea580c" : "inherit" }}><strong>{pendingEngineersCount}</strong> Unmarked</span>
@@ -1402,8 +1400,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
           {/* 3. DAILY FINANCIAL OUTLAYS PULSE CARD */}
           <div
-            className="admin-summary-card"
-            style={{ cursor: "pointer", transition: "all 0.15s ease" }}
+            className="superadmin-macro-card"
             onClick={() => openKpiDrilldown("finance_today")}
             title="Click to inspect today's expenditure outlays"
           >
@@ -1415,10 +1412,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 {isProfit ? "Surplus" : "Deficit"}
               </span>
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
-              <div className="admin-summary-value" style={{ fontSize: "16px" }}>{formatINR(todayTotalExpenses)}</div>
+            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
+              <div className="admin-summary-value">{formatINR(todayTotalExpenses)}</div>
               <div className="admin-summary-label">Today's Combined Outlay</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
                 <span>Labour: <strong>{formatINR(todayLabourExpense)}</strong></span>
                 <span>Spent: <strong>{formatINR(overallMetrics.totalExpenses)}</strong></span>
               </div>
@@ -1427,8 +1424,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
           {/* 4. CORPORATE MILESTONE ADHERENCE INDEX CARD */}
           <div
-            className="admin-summary-card"
-            style={{ cursor: "pointer", transition: "all 0.15s ease" }}
+            className="superadmin-macro-card"
             onClick={() => openKpiDrilldown("operations_delayed")}
             title="Click to inspect project milestones"
           >
@@ -1440,10 +1436,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 {todayFeedList.length} Events Logged
               </span>
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "8px", width: "100%" }}>
+            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
               <div className="admin-summary-value">{overallMetrics.overallProgressPercent}% Average</div>
               <div className="admin-summary-label">Corporate Milestone Adherence</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginTop: "6px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "4px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
                 <span><strong>{onTrackSitesCount}</strong> On Track</span>
                 <span style={{ color: delayedSitesCount > 0 ? "#dc2626" : "inherit" }}><strong>{delayedSitesCount}</strong> Delayed</span>
                 <span><strong>{sitesWithActivityCount}</strong> Active Today</span>
@@ -1553,7 +1549,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 3: MASTER ATTENDANCE & CIVIL WORKFORCE TRADE BREAKDOWN ROW     */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-analytics-grid">
+        <div className="admin-middle-grid">
 
           {/* Left: Master Attendance Command Banner */}
           <div className="admin-attendance-card" style={{ margin: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
@@ -1662,7 +1658,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         {/* ══════════════════════════════════════════════════════════════════════ */}
         {/* SECTION 4: FINANCIAL ALLOCATION & MILESTONE SCHEDULE ROW             */}
         {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-analytics-grid">
+        <div className="admin-middle-grid">
 
           {/* Financial Command View */}
           <div className="admin-card">
