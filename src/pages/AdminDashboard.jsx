@@ -796,8 +796,8 @@ export default function AdminDashboard() {
           </div>
 
           {/* KPI 3: Today's Engineer Attendance (Single Source of Truth) */}
-          <div className="admin-summary-card" style={{ borderColor: presentCount > 0 ? "#bbf7d0" : "var(--border-color)" }}>
-            <div className="admin-summary-icon" style={{ backgroundColor: "#f0fdf4", color: "#16a34a" }}>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
               <UserCheck size={20} />
             </div>
             <div className="admin-summary-info">

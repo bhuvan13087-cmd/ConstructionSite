@@ -6697,10 +6697,10 @@ body:has(.landing-page-container) {
 
 .admin-summary-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 14px 16px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 1px 4px -1px rgba(15, 23, 42, 0.05);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -6712,14 +6712,14 @@ body:has(.landing-page-container) {
 }
 
 .admin-summary-card:hover {
-  border-color: var(--brand-orange-border, #fed7aa);
-  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.08);
+  border-color: #fdba74;
+  box-shadow: 0 6px 16px -2px rgba(249, 115, 22, 0.12), 0 2px 6px -1px rgba(15, 23, 42, 0.06);
   transform: translateY(-1px);
 }
 
 .admin-summary-icon {
-  width: 40px;
-  height: 40px;
+  width: 42px;
+  height: 42px;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -6737,9 +6737,9 @@ body:has(.landing-page-container) {
 }
 
 .admin-summary-value {
-  font-size: 19px;
+  font-size: 20px;
   font-weight: 800;
-  color: var(--primary-950, #0f172a);
+  color: #0f172a;
   line-height: 1.2;
   font-family: var(--font-family-title, inherit);
   white-space: nowrap;
@@ -6752,11 +6752,11 @@ body:has(.landing-page-container) {
 }
 
 .admin-summary-label {
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--primary-600, #475569);
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #475569;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.4px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -6788,10 +6788,10 @@ body:has(.landing-page-container) {
 
 .admin-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 18px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 1px 4px -1px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -6802,10 +6802,10 @@ body:has(.landing-page-container) {
 
 .admin-deadlines-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
   padding: 18px 20px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 1px 4px -1px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   justify-content: flex-start;
@@ -6823,17 +6823,17 @@ body:has(.landing-page-container) {
 
 .admin-card-title {
   margin: 0;
-  font-size: 14px;
+  font-size: 14.5px;
   font-weight: 800;
-  color: var(--primary-950, #0f172a);
+  color: #0f172a;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
 .admin-card-subtitle {
-  font-size: 11.5px;
-  color: var(--primary-600, #475569);
+  font-size: 12px;
+  color: #475569;
   font-weight: 600;
 }
 
@@ -6846,43 +6846,43 @@ body:has(.landing-page-container) {
 }
 
 .admin-status-box {
-  padding: 12px 6px;
+  padding: 12px 8px;
   border-radius: 8px;
   text-align: center;
   display: flex;
   flex-direction: column;
   justify-content: center;
   align-items: center;
-  min-height: 72px;
+  min-height: 74px;
   box-sizing: border-box;
 }
 
 .admin-status-box.running {
   background-color: #f0fdf4;
-  border: 1px solid #bbf7d0;
+  border: 1px solid #86efac;
 }
-.admin-status-box.running .status-num { color: #16a34a; }
-.admin-status-box.running .status-lbl { color: #15803d; }
+.admin-status-box.running .status-num { color: #15803d; }
+.admin-status-box.running .status-lbl { color: #166534; }
 
 .admin-status-box.completed {
   background-color: #eff6ff;
-  border: 1px solid #bfdbfe;
+  border: 1px solid #93c5fd;
 }
-.admin-status-box.completed .status-num { color: #2563eb; }
-.admin-status-box.completed .status-lbl { color: #1d4ed8; }
+.admin-status-box.completed .status-num { color: #1d4ed8; }
+.admin-status-box.completed .status-lbl { color: #1e40af; }
 
 .admin-status-box.on-hold {
-  background-color: #fef3c7;
-  border: 1px solid #fde68a;
+  background-color: #fffbeb;
+  border: 1px solid #fcd34d;
 }
-.admin-status-box.on-hold .status-num { color: #d97706; }
+.admin-status-box.on-hold .status-num { color: #b45309; }
 .admin-status-box.on-hold .status-lbl { color: #92400e; }
 
 .admin-status-box.delayed {
   background-color: #fef2f2;
-  border: 1px solid #fecaca;
+  border: 1px solid #fca5a5;
 }
-.admin-status-box.delayed .status-num { color: #ef4444; }
+.admin-status-box.delayed .status-num { color: #b91c1c; }
 .admin-status-box.delayed .status-lbl { color: #991b1b; }
 
 .admin-status-box .status-num {
@@ -6918,23 +6918,23 @@ body:has(.landing-page-container) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: 12.5px;
 }
 
 .admin-expense-cat {
-  font-weight: 600;
-  color: var(--primary-800, #1e293b);
+  font-weight: 700;
+  color: #1e293b;
 }
 
 .admin-expense-val {
-  font-weight: 700;
-  color: var(--primary-950, #0f172a);
+  font-weight: 800;
+  color: #0f172a;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 .admin-progress-track {
-  height: 6px;
+  height: 8px;
   background-color: #e2e8f0;
   border-radius: 100px;
   overflow: hidden;
@@ -6959,10 +6959,10 @@ body:has(.landing-page-container) {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 12px;
+  padding: 10px 12px;
   background-color: #f8fafc;
   border-radius: 8px;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   gap: 12px;
   min-height: 48px;
   box-sizing: border-box;
@@ -6994,9 +6994,9 @@ body:has(.landing-page-container) {
 
 .admin-table-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 1px 4px -1px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -7006,7 +7006,7 @@ body:has(.landing-page-container) {
 
 .admin-table-header {
   padding: 14px 18px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  border-bottom: 1px solid #e2e8f0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -7032,21 +7032,21 @@ body:has(.landing-page-container) {
 
 .admin-table th {
   background-color: #f8fafc;
-  color: var(--primary-700, #334155);
-  font-weight: 700;
-  font-size: 11px;
+  color: #1e293b;
+  font-weight: 750;
+  font-size: 11.5px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--border-color, #e2e8f0);
+  padding: 12px 14px;
+  border-bottom: 1px solid #e2e8f0;
   white-space: nowrap;
   vertical-align: middle;
 }
 
 .admin-table td {
   padding: 12px 14px;
-  border-bottom: 1px solid var(--primary-100, #f1f5f9);
-  color: var(--primary-900, #0f172a);
+  border-bottom: 1px solid #f1f5f9;
+  color: #0f172a;
   vertical-align: middle;
   box-sizing: border-box;
 }
@@ -7065,12 +7065,12 @@ body:has(.landing-page-container) {
   justify-content: center;
   gap: 4px;
   padding: 5px 12px;
-  font-size: 11px;
+  font-size: 11.5px;
   font-weight: 700;
   border-radius: 6px;
   background: #ffffff;
   border: 1px solid #cbd5e1;
-  color: var(--primary-800, #1e293b);
+  color: #1e293b;
   text-decoration: none;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -7078,8 +7078,8 @@ body:has(.landing-page-container) {
 }
 
 .admin-action-btn:hover {
-  border-color: var(--brand-orange, #f97316);
-  color: var(--brand-orange, #f97316);
+  border-color: #f97316;
+  color: #ea580c;
   background-color: #fff7ed;
 }
 
@@ -7129,19 +7129,19 @@ body:has(.landing-page-container) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .admin-summary-card {
-    padding: 10px 12px;
+    padding: 12px 14px;
     gap: 10px;
-    min-height: 70px;
+    min-height: 72px;
   }
   .admin-summary-icon {
-    width: 36px;
-    height: 36px;
+    width: 38px;
+    height: 38px;
   }
   .admin-summary-value {
-    font-size: 17px;
+    font-size: 18px;
   }
   .admin-summary-label {
-    font-size: 10px;
+    font-size: 10.5px;
   }
 }
 
@@ -7157,9 +7157,9 @@ body:has(.landing-page-container) {
 
 .admin-attendance-card {
   background: #ffffff;
-  border: 1px solid var(--border-color, #e2e8f0);
+  border: 1px solid #e2e8f0;
   border-radius: 12px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow: 0 2px 6px -1px rgba(15, 23, 42, 0.08), 0 1px 4px -1px rgba(15, 23, 42, 0.05);
   display: flex;
   flex-direction: column;
   overflow: hidden;
