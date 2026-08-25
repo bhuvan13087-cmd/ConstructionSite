@@ -1130,10 +1130,10 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
           id: l.id || `labour_${l.memberId || l.categoryId}_${l.date || l.attendanceDate}`,
           type: "Expense",
           category: "Labour Expense",
-          name: `${l.memberName || l.categoryName || 'Worker'} (${count * customUnits} units)`,
+          name: `${l.memberName || l.categoryName || 'Worker'} (${count * customUnits} ${count * customUnits === 1 ? 'day' : 'days'})`,
           date: l.date || l.attendanceDate,
           amount: cost,
-          description: `Labour Attendance: ${count} worker(s) x ${customUnits} unit(s) @ ₹${wage}/unit`,
+          description: `Labour Attendance: ${count} worker(s) x ${customUnits} day(s) @ ₹${wage}/day`,
           status: "Approved"
         });
       }

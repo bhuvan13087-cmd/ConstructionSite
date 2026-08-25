@@ -1171,7 +1171,7 @@ export default function PayrollSummary() {
 
               <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "8px", padding: "12px" }}>
                 <span style={{ fontSize: "11px", fontWeight: "700", color: "#64748b", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>Attendance Breakdown</span>
-                <div style={{ fontSize: "12.5px", fontWeight: "700", color: "#0f172a" }}>Units: {selectedWorkerDetail.workingDaysText}</div>
+                <div style={{ fontSize: "12.5px", fontWeight: "700", color: "#0f172a" }}>Days: {selectedWorkerDetail.workingDaysText}</div>
                 <div style={{ fontSize: "12px", color: "#64748b", marginTop: "4px" }}>
                   Full Days: {selectedWorkerDetail.fullDays} • Half Days: {selectedWorkerDetail.halfDays}
                 </div>

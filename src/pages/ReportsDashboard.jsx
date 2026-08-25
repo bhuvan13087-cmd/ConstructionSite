@@ -3087,7 +3087,7 @@ export default function ReportsDashboard() {
                           <tr style={{ backgroundColor: "#ffffff", borderBottom: "1px solid var(--border-color)" }}>
                             <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Category</th>
                             <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Workers</th>
-                            <th style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Unit / Duration</th>
+                            <th style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Days</th>
                             <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Rate</th>
                             <th style={{ textAlign: "left", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Calculation</th>
                             <th style={{ textAlign: "right", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>Amount</th>
@@ -3100,7 +3100,7 @@ export default function ReportsDashboard() {
                               <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontWeight: "600", fontSize: "13px" }}>{cat.workerCount}</td>
                               <td style={{ textAlign: "center", padding: "10px 16px", fontSize: "12px", color: "#475569" }}>
                                 <span style={{ backgroundColor: "#f8fafc", padding: "2px 8px", borderRadius: "4px", border: "1px solid #e2e8f0", fontWeight: "700" }}>
-                                  {cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Unit" : "Units"}
+                                  {cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Day" : "Days"}
                                 </span>
                               </td>
                               <td style={{ textAlign: "right", padding: "10px 16px", fontFamily: "monospace", fontSize: "13px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
@@ -4337,7 +4337,7 @@ export default function ReportsDashboard() {
                           <tr>
                             <th style={{ padding: "5px 8px", textAlign: "left", width: "25%", fontSize: "10px" }}>Category</th>
                             <th style={{ padding: "5px 8px", textAlign: "right", width: "10%", fontSize: "10px" }}>Workers</th>
-                            <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Duration</th>
+                            <th style={{ padding: "5px 8px", textAlign: "center", width: "12%", fontSize: "10px" }}>Days</th>
                             <th style={{ padding: "5px 8px", textAlign: "right", width: "15%", fontSize: "10px" }}>Rate</th>
                             <th style={{ padding: "5px 8px", textAlign: "left", width: "20%", fontSize: "10px" }}>Calculation</th>
                             <th style={{ padding: "5px 8px", textAlign: "right", width: "18%", fontSize: "10px" }}>Amount</th>
@@ -4348,7 +4348,7 @@ export default function ReportsDashboard() {
                             <tr key={cIdx}>
                               <td style={{ padding: "5px 8px", fontWeight: "600", fontSize: "10px" }}>{cat.categoryName}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>{cat.workerCount}</td>
-                              <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Unit" : "Units"}</td>
+                              <td style={{ padding: "5px 8px", textAlign: "center", fontSize: "10px" }}>{cat.customWorkUnits} {cat.customWorkUnits === 1 ? "Day" : "Days"}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontSize: "10px" }}>₹{cat.dailyWage.toLocaleString("en-IN")}</td>
                               <td style={{ padding: "5px 8px", textAlign: "left", fontSize: "9.5px", fontFamily: "monospace" }}>{cat.calculationStr}</td>
                               <td style={{ padding: "5px 8px", textAlign: "right", fontWeight: "700", fontSize: "10px" }}>

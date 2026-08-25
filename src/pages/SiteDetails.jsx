@@ -2683,7 +2683,7 @@ export default function SiteDetails({ siteId, onBack }) {
                     <tr style={{ backgroundColor: "#f8fafc", borderBottom: "1px solid #e2e8f0" }}>
                       <th style={{ textAlign: "left", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Labour / Worker</th>
                       <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Quantity</th>
-                      <th style={{ textAlign: "center", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Unit / Duration</th>
+                      <th style={{ textAlign: "center", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Days</th>
                       <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Rate</th>
                       <th style={{ textAlign: "right", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Effective Rate</th>
                       <th style={{ textAlign: "left", padding: "12px 16px", fontSize: "12px", fontWeight: "750", color: "#475569" }}>Calculation</th>
@@ -2732,7 +2732,7 @@ export default function SiteDetails({ siteId, onBack }) {
                           ? "Custom Durations"
                           : (customUnits !== 1.0 
                               ? `${customUnits} days` 
-                              : (row.attendanceType ? `${customUnits} unit` : "1 day"));
+                              : "1 day");
                         const rateLabel = customUnits !== 1.0 
                           ? `₹${baseRate.toLocaleString("en-IN")}/day` 
                           : (baseRate > 0 ? `₹${baseRate.toLocaleString("en-IN")}` : "--");

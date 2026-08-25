@@ -1745,7 +1745,7 @@ export default function AdminLabour() {
 
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: "#f8fafc", padding: "6px 10px", borderRadius: "6px", fontSize: "11.5px" }}>
                       <span style={{ color: "#64748b" }}>Worker Count</span>
-                      <strong style={{ color: "#0f172a" }}>{workerCount} workers ({record.customWorkUnits || record.units || 1.0} units)</strong>
+                      <strong style={{ color: "#0f172a" }}>{workerCount} workers (Days: {record.customWorkUnits || record.units || 1.0})</strong>
                     </div>
 
                     {(record.calculatedAmount !== undefined || record.totalAmount !== undefined) && (

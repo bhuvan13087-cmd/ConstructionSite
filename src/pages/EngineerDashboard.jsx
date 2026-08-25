@@ -9173,7 +9173,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                             }}>
                               <div style={{ display: "grid", gridTemplateColumns: "1fr 64px 64px 72px", gap: "6px", fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", paddingBottom: "4px", borderBottom: "1px solid #e2e8f0" }}>
                                 <span>Worker Name</span>
-                                <span style={{ textAlign: "center" }}>Units</span>
+                                <span style={{ textAlign: "center" }}>Days</span>
                                 <span style={{ textAlign: "right" }}>Wage</span>
                                 <span style={{ textAlign: "right" }}>Subtotal</span>
                               </div>
@@ -9337,12 +9337,12 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                         </div>
 
                         <div style={{ backgroundColor: "#f8fafc", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #e2e8f0" }}>
-                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>Avg Work Units</span>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#475569", textTransform: "uppercase", letterSpacing: "0.5px" }}>Avg Days</span>
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#0f172a", marginTop: "2px" }}>{avgUnits}</div>
                         </div>
 
                         <div style={{ backgroundColor: "#fefce8", padding: "12px", borderRadius: "12px", textAlign: "center", border: "1px solid #fef9c3" }}>
-                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Work Units Sum</span>
+                          <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Days</span>
                           <div style={{ fontSize: "20px", fontWeight: "900", color: "#854d0e", marginTop: "2px" }}>{totalWorkUnits.toFixed(2)}</div>
                         </div>
                       </div>
@@ -9560,7 +9560,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
             flexDirection: "column",
             gap: "4px"
           }}>
-            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Work Units</span>
+            <span style={{ fontSize: "11px", fontWeight: "750", color: "#ca8a04", textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Days</span>
             <span style={{ fontSize: "22px", fontWeight: "900", color: "#854d0e" }}>{grandTotalWorkUnits.toFixed(2)}</span>
           </div>
 
@@ -9857,7 +9857,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                                 color: "#c2410c",
                                 border: "1px solid #ffedd5"
                               }}>
-                                {units} Work Unit(s)
+                                Days: {units}
                               </span>
                               {recordLocked && (
                                 <span style={{
