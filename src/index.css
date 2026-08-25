@@ -6473,6 +6473,9 @@ body:has(.landing-page-container) {
 .erp-kpi-icon-slate { background: #f1f5f9; color: #334155; }
 .erp-kpi-icon-green { background: #f0fdf4; color: #16a34a; }
 .erp-kpi-icon-blue { background: #eff6ff; color: #2563eb; }
+.erp-kpi-icon-purple { background: #fdf4ff; color: #a855f7; }
+.erp-kpi-icon-red { background: #fef2f2; color: #dc2626; }
+.erp-kpi-icon-teal { background: #ecfdf5; color: #059669; }
 
 .erp-kpi-val {
   font-size: 22px;

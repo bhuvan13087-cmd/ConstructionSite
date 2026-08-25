@@ -642,129 +642,143 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const isProfit = netPosition >= 0;
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
+      <div className="admin-dashboard-container">
 
         {/* ── 10 REAL-TIME SYSTEM-WIDE KPI CARDS ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "14px" }}>
-          
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#f1f5f9", color: "var(--primary-900)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="admin-summary-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))" }}>
+
+          {/* KPI 1: Total Sites */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
               <Building2 size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Total Sites</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{overallMetrics.totalSites}</strong>
-              <span style={{ fontSize: "10.5px", color: "var(--success-600)", fontWeight: "700", display: "block" }}>{overallMetrics.activeSites} Active</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{overallMetrics.totalSites}</div>
+              <div className="admin-summary-label">Total Sites</div>
+              <span style={{ fontSize: "10.5px", color: "var(--success-600)", fontWeight: "700" }}>{overallMetrics.activeSites} Active</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: overallMetrics.delayedSites > 0 ? "#fef2f2" : "#f0fdf4", color: overallMetrics.delayedSites > 0 ? "#dc2626" : "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 2: Delayed Sites */}
+          <div className="admin-summary-card" style={overallMetrics.delayedSites > 0 ? { borderColor: "#fecaca" } : {}}>
+            <div className={`admin-summary-icon ${overallMetrics.delayedSites > 0 ? "erp-kpi-icon-red" : "erp-kpi-icon-green"}`}>
               <AlertTriangle size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Delayed Sites</span>
-              <strong style={{ fontSize: "18px", color: overallMetrics.delayedSites > 0 ? "#dc2626" : "var(--primary-950)" }}>{overallMetrics.delayedSites}</strong>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>{overallMetrics.delayedSites > 0 ? "Requires Attention" : "On Track"}</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ color: overallMetrics.delayedSites > 0 ? "#dc2626" : "var(--primary-950)" }}>
+                {overallMetrics.delayedSites}
+              </div>
+              <div className="admin-summary-label">Delayed Sites</div>
+              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>
+                {overallMetrics.delayedSites > 0 ? "Requires Attention" : "On Track"}
+              </span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#eff6ff", color: "#1d4ed8", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 3: Site Engineers */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-blue">
               <Users size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Site Engineers</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{engineers.length}</strong>
-              <span style={{ fontSize: "10.5px", color: "#1d4ed8", fontWeight: "700", display: "block" }}>{engineers.filter(e => e.status === "active").length} Active</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{engineers.length}</div>
+              <div className="admin-summary-label">Site Engineers</div>
+              <span style={{ fontSize: "10.5px", color: "#1d4ed8", fontWeight: "700" }}>{engineers.filter(e => e.status === "active").length} Active</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#fdf4ff", color: "#a855f7", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 4: Total Admins */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
               <ShieldCheck size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Total Admins</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{admins.length || 1}</strong>
-              <span style={{ fontSize: "10.5px", color: "#a855f7", fontWeight: "700", display: "block" }}>Company Administrators</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{admins.length || 1}</div>
+              <div className="admin-summary-label">Total Admins</div>
+              <span style={{ fontSize: "10.5px", color: "#a855f7", fontWeight: "700" }}>Company Administrators</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#f0fdf4", color: "#16a34a", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 5: Today's Attendance */}
+          <div className="admin-summary-card" style={todayAttendanceList.length > 0 ? { borderColor: "#bbf7d0" } : {}}>
+            <div className="admin-summary-icon erp-kpi-icon-green">
               <ClipboardCheck size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Today's Attendance</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{todayAttendanceList.length}</strong>
-              <span style={{ fontSize: "10.5px", color: "#16a34a", fontWeight: "700", display: "block" }}>{todayAttendanceList.filter(r => !r.isCheckedOut).length} On-Site Now</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{todayAttendanceList.length}</div>
+              <div className="admin-summary-label">Today's Attendance</div>
+              <span style={{ fontSize: "10.5px", color: "#16a34a", fontWeight: "700" }}>{todayAttendanceList.filter(r => !r.isCheckedOut).length} On-Site Now</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#fff7ed", color: "#c2410c", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 6: Today's Workers */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
               <Briefcase size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Today's Workers</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{todayLabourCount}</strong>
-              <span style={{ fontSize: "10.5px", color: "#c2410c", fontWeight: "700", display: "block" }}>Field Labour Force</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{todayLabourCount}</div>
+              <div className="admin-summary-label">Today's Workers</div>
+              <span style={{ fontSize: "10.5px", color: "#c2410c", fontWeight: "700" }}>Field Labour Force</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#ecfdf5", color: "#059669", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 7: Client Payments Received */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
               <TrendingUp size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Received (Client)</span>
-              <strong style={{ fontSize: "16px", color: "var(--primary-950)", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</strong>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Budget: {formatINR(overallMetrics.totalProjectValue)}</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</div>
+              <div className="admin-summary-label">Received (Client)</div>
+              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>Budget: {formatINR(overallMetrics.totalProjectValue)}</span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#fff7ed", color: "#f97316", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 8: Total Spent */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
               <DollarSign size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Total Spent</span>
-              <strong style={{ fontSize: "16px", color: "var(--primary-950)", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalExpenses)}</strong>
-              <span style={{ fontSize: "10.5px", color: "var(--warning-700)", fontWeight: "600", display: "block" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "14px" }}>{formatINR(overallMetrics.totalExpenses)}</div>
+              <div className="admin-summary-label">Total Spent</div>
+              <span style={{ fontSize: "10.5px", color: "var(--warning-600)", fontWeight: "600" }}>Owed: {formatINR(overallMetrics.pendingPayments)}</span>
             </div>
           </div>
 
-          <div style={{ background: isProfit ? "#f0fdf4" : "#fef2f2", border: `1px solid ${isProfit ? "#bbf7d0" : "#fecaca"}`, borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: isProfit ? "#dcfce7" : "#fee2e2", color: isProfit ? "#16a34a" : "#dc2626", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 9: Net Cash Position */}
+          <div className="admin-summary-card" style={{ borderColor: isProfit ? "#bbf7d0" : "#fecaca", backgroundColor: isProfit ? "#f0fdf4" : "#fef2f2" }}>
+            <div className={`admin-summary-icon ${isProfit ? "erp-kpi-icon-green" : "erp-kpi-icon-red"}`}>
               {isProfit ? <TrendingUp size={20} /> : <TrendingDown size={20} />}
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Net Cash Position</span>
-              <strong style={{ fontSize: "16px", color: isProfit ? "#16a34a" : "#dc2626", fontFamily: "monospace" }}>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "14px", color: isProfit ? "#16a34a" : "#dc2626" }}>
                 {isProfit ? "+" : ""}{formatINR(netPosition)}
-              </strong>
-              <span style={{ fontSize: "10.5px", color: isProfit ? "#16a34a" : "#dc2626", fontWeight: "700", display: "block" }}>
+              </div>
+              <div className="admin-summary-label">Net Cash Position</div>
+              <span style={{ fontSize: "10.5px", color: isProfit ? "#16a34a" : "#dc2626", fontWeight: "700" }}>
                 {isProfit ? "Profit Margin" : "Deficit"}
               </span>
             </div>
           </div>
 
-          <div style={{ background: "#fff", border: "1px solid var(--border-color)", borderRadius: "12px", padding: "14px 16px", display: "flex", alignItems: "center", gap: "12px" }}>
-            <div style={{ width: "42px", height: "42px", borderRadius: "10px", backgroundColor: "#f8fafc", color: "var(--accent-600)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* KPI 10: Material Stock */}
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-slate">
               <Package size={20} />
             </div>
-            <div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "600", display: "block" }}>Material Stock</span>
-              <strong style={{ fontSize: "18px", color: "var(--primary-950)" }}>{materials.length} Items</strong>
-              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Total Tracked</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{materials.length}</div>
+              <div className="admin-summary-label">Material Items</div>
+              <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>Total Tracked</span>
             </div>
           </div>
 
         </div>
 
         {/* ── TODAY'S OPERATIONS FEED & PROGRESS ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "20px" }}>
+        <div className="admin-analytics-grid">
 
           <Card title="Corporate Work Progress & Milestone Standing">
             <div style={{ display: "flex", flexDirection: "column", alignItems: "center", padding: "12px 0" }}>
@@ -817,10 +831,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                     </div>
                     <div style={{ textAlign: "right" }}>
                       <span style={{
-                        fontSize: "11px",
-                        fontWeight: "750",
-                        padding: "2px 8px",
-                        borderRadius: "12px",
+                        fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "12px",
                         backgroundColor: rec.isCheckedOut ? "#f1f5f9" : "#dcfce7",
                         color: rec.isCheckedOut ? "#475569" : "#15803d"
                       }}>
@@ -885,7 +896,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             </div>
             {alerts.length > 4 && (
               <div style={{ marginTop: "12px", borderTop: "1px solid var(--border-color)", paddingTop: "10px", textAlign: "center" }}>
-                <button 
+                <button
                   onClick={() => setShowAllAlerts(!showAllAlerts)}
                   style={{ background: "none", border: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
                 >
@@ -899,6 +910,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       </div>
     );
   };
+
 
   // ══════════════════════════════════════════════════════════════════════════
   // VIEW 2: ALL SITES (GRID & LIST/TABLE VIEW + DEEP-DIVE MONITORING)
