@@ -1851,9 +1851,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </p>
             </div>
 
-            {/* Filter Bar Controls */}
-            <div className="sites-actions-group" style={{ flexWrap: "wrap" }}>
-              <div className="sites-search-wrapper" style={{ minWidth: "180px" }}>
+            {/* Filter Bar Controls & View Switcher */}
+            <div className="sites-actions-group" style={{ flexWrap: "wrap", gap: "8px" }}>
+              <div className="sites-search-wrapper" style={{ minWidth: "170px" }}>
                 <Search size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
                 <input
                   type="text"
@@ -1886,154 +1886,282 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <option value="budget">Sort: Budget Size</option>
                 <option value="name">Sort: Name</option>
               </select>
+
+              {/* Grid / Table View Switcher */}
+              <div style={{ display: "flex", border: "1px solid var(--border-color)", borderRadius: "6px", overflow: "hidden" }}>
+                <button
+                  type="button"
+                  onClick={() => handleToggleViewMode("grid")}
+                  style={{
+                    padding: "6px 9px",
+                    border: "none",
+                    backgroundColor: sitesViewMode === "grid" ? "var(--brand-orange)" : "#ffffff",
+                    color: sitesViewMode === "grid" ? "#ffffff" : "var(--primary-700)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                  title="Grid View"
+                >
+                  <LayoutGrid size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleViewMode("table")}
+                  style={{
+                    padding: "6px 9px",
+                    border: "none",
+                    backgroundColor: sitesViewMode === "table" ? "var(--brand-orange)" : "#ffffff",
+                    color: sitesViewMode === "table" ? "#ffffff" : "var(--primary-700)",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center"
+                  }}
+                  title="Table / List View"
+                >
+                  <List size={14} />
+                </button>
+              </div>
             </div>
           </div>
 
-          <div className="admin-table-scroll">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Site &amp; Client</th>
-                  <th>Assigned Engineers</th>
-                  <th>Today's Activity</th>
-                  <th>Labour</th>
-                  <th>Today's Outlay</th>
-                  <th>Progress</th>
-                  <th style={{ textAlign: "center" }}>Status</th>
-                  <th style={{ textAlign: "right" }}>Inspect</th>
-                </tr>
-              </thead>
-              <tbody>
-                {portfolioSites.length === 0 ? (
-                  <tr>
-                    <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
-                      No construction sites match the selected filter criteria.
-                    </td>
-                  </tr>
-                ) : (
-                  portfolioSites.slice(0, 15).map(site => {
-                    // Assigned engineers
-                    const assignedEngList = engineers.filter(e => {
-                      if (e.assignedSiteId === site.id) return true;
-                      if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
-                      if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
-                      return false;
-                    });
+          {sitesViewMode === "grid" ? (
+            /* ── GRID VIEW ── */
+            <div style={{ padding: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
+              {portfolioSites.length === 0 ? (
+                <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
+                  No construction sites match the selected filter criteria.
+                </div>
+              ) : (
+                portfolioSites.slice(0, 15).map(site => {
+                  const assignedEngList = engineers.filter(e => {
+                    if (e.assignedSiteId === site.id) return true;
+                    if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
+                    if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
+                    return false;
+                  });
+                  const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
+                  const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
+                  
+                  let siteLabourCount = 0;
+                  (rawLabourAttendance || []).forEach(r => {
+                    if (!r || r.lockedMetadata || r.siteId !== site.id) return;
+                    if ((r.attendanceDate || r.date) === todayDateString) {
+                      siteLabourCount += Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+                    }
+                  });
 
-                    // Today's presence
-                    const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
-                    const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
+                  const progVal = site.progress !== undefined ? Number(site.progress) : 0;
+                  const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
 
-                    // Today's labour
-                    let siteLabourCount = 0;
-                    let siteLabourAmount = 0;
-                    (rawLabourAttendance || []).forEach(r => {
-                      if (!r || r.lockedMetadata || r.siteId !== site.id) return;
-                      const d = r.attendanceDate || r.date;
-                      if (d === todayDateString) {
-                        const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-                        siteLabourCount += count;
-                        siteLabourAmount += Number(r.totalAmount || (count * rate));
-                      }
-                    });
-
-                    // Today's expenses
-                    let siteGeneralExpense = 0;
-                    generalExpenses.forEach(e => {
-                      if (e.siteId === site.id && (e.date || "").startsWith(todayDateString)) {
-                        siteGeneralExpense += Number(e.amount) || 0;
-                      }
-                    });
-
-                    const progVal = site.progress !== undefined ? Number(site.progress) : 0;
-                    const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
-
-                    return (
-                      <tr key={site.id}>
-                        <td>
-                          <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
-                            {site.siteName}
-                          </strong>
+                  return (
+                    <div
+                      key={site.id}
+                      style={{
+                        padding: "12px 14px",
+                        backgroundColor: "#f8fafc",
+                        borderRadius: "8px",
+                        border: "1px solid #e2e8f0",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "8px",
+                        transition: "all 0.15s ease"
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                        <div>
+                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>{site.siteName}</strong>
                           <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
                             <MapPin size={10} style={{ color: "#94a3b8" }} />
                             {site.location || site.clientName || "N/A"}
                           </span>
-                        </td>
+                        </div>
+                        <Badge status={isDelayed ? "danger" : (site.status || "active")} style={{ fontSize: "10px" }} />
+                      </div>
 
-                        <td>
-                          {assignedEngList.length > 0 ? (
-                            <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                              {assignedEngList.slice(0, 2).map((eng, idx) => {
-                                const isPresent = sitePresentEngSet.has(eng.id) || sitePresentEngSet.has(eng.uid) || sitePresentEngSet.has(eng.name);
-                                return (
-                                  <div key={idx} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" }}>
-                                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: isPresent ? "#16a34a" : "#cbd5e1" }} />
-                                    <span style={{ fontWeight: isPresent ? "700" : "500" }}>{eng.fullName || eng.name}</span>
-                                  </div>
-                                );
-                              })}
-                              {assignedEngList.length > 2 && (
-                                <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>+{assignedEngList.length - 2} more</span>
+                      {/* Presence and Labour info */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", backgroundColor: "#fff", padding: "6px 8px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
+                        <span style={{ color: "var(--primary-700)" }}>
+                          <strong>{assignedEngList.filter(e => sitePresentEngSet.has(e.id) || sitePresentEngSet.has(e.uid) || sitePresentEngSet.has(e.name)).length}/{assignedEngList.length || 0}</strong> Eng Present
+                        </span>
+                        <span style={{ color: "var(--primary-700)" }}>
+                          <strong>{siteLabourCount}</strong> Labour Today
+                        </span>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginBottom: "3px" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Execution Progress</span>
+                          <strong style={{ color: isDelayed ? "#dc2626" : "var(--primary-950)" }}>{progVal}%</strong>
+                        </div>
+                        <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                          <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: isDelayed ? "#dc2626" : "#16a34a", borderRadius: "100px" }} />
+                        </div>
+                      </div>
+
+                      {/* Inspect Button */}
+                      <button
+                        type="button"
+                        onClick={() => setSelectedInspectSite(site)}
+                        className="erp-btn-secondary"
+                        style={{ width: "100%", fontSize: "11.5px", padding: "5px", justifyContent: "center", marginTop: "2px" }}
+                      >
+                        Inspect Site Operations →
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          ) : (
+            /* ── TABLE VIEW ── */
+            <div className="admin-table-scroll">
+              <table className="admin-table">
+                <thead>
+                  <tr>
+                    <th>Site &amp; Client</th>
+                    <th>Assigned Engineers</th>
+                    <th>Today's Activity</th>
+                    <th>Labour</th>
+                    <th>Today's Outlay</th>
+                    <th>Progress</th>
+                    <th style={{ textAlign: "center" }}>Status</th>
+                    <th style={{ textAlign: "right" }}>Inspect</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portfolioSites.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
+                        No construction sites match the selected filter criteria.
+                      </td>
+                    </tr>
+                  ) : (
+                    portfolioSites.slice(0, 15).map(site => {
+                      // Assigned engineers
+                      const assignedEngList = engineers.filter(e => {
+                        if (e.assignedSiteId === site.id) return true;
+                        if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
+                        if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
+                        return false;
+                      });
+
+                      // Today's presence
+                      const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
+                      const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
+
+                      // Today's labour
+                      let siteLabourCount = 0;
+                      let siteLabourAmount = 0;
+                      (rawLabourAttendance || []).forEach(r => {
+                        if (!r || r.lockedMetadata || r.siteId !== site.id) return;
+                        const d = r.attendanceDate || r.date;
+                        if (d === todayDateString) {
+                          const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+                          const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+                          siteLabourCount += count;
+                          siteLabourAmount += Number(r.totalAmount || (count * rate));
+                        }
+                      });
+
+                      // Today's expenses
+                      let siteGeneralExpense = 0;
+                      generalExpenses.forEach(e => {
+                        if (e.siteId === site.id && (e.date || "").startsWith(todayDateString)) {
+                          siteGeneralExpense += Number(e.amount) || 0;
+                        }
+                      });
+
+                      const progVal = site.progress !== undefined ? Number(site.progress) : 0;
+                      const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
+
+                      return (
+                        <tr key={site.id}>
+                          <td>
+                            <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
+                              {site.siteName}
+                            </strong>
+                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
+                              <MapPin size={10} style={{ color: "#94a3b8" }} />
+                              {site.location || site.clientName || "N/A"}
+                            </span>
+                          </td>
+
+                          <td>
+                            {assignedEngList.length > 0 ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                {assignedEngList.slice(0, 2).map((eng, idx) => {
+                                  const isPresent = sitePresentEngSet.has(eng.id) || sitePresentEngSet.has(eng.uid) || sitePresentEngSet.has(eng.name);
+                                  return (
+                                    <div key={idx} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" }}>
+                                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: isPresent ? "#16a34a" : "#cbd5e1" }} />
+                                      <span style={{ fontWeight: isPresent ? "700" : "500" }}>{eng.fullName || eng.name}</span>
+                                    </div>
+                                  );
+                                })}
+                                {assignedEngList.length > 2 && (
+                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>+{assignedEngList.length - 2} more</span>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
+                            )}
+                          </td>
+
+                          <td>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
+                              {siteTodayAttendance.length > 0 && <Badge status="success" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Att ({siteTodayAttendance.length})</Badge>}
+                              {siteLabourCount > 0 && <Badge status="info" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Lab ({siteLabourCount})</Badge>}
+                              {siteTodayAttendance.length === 0 && siteLabourCount === 0 && (
+                                <span style={{ fontSize: "11px", color: "#94a3b8" }}>No activity</span>
                               )}
                             </div>
-                          ) : (
-                            <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
-                          )}
-                        </td>
+                          </td>
 
-                        <td>
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
-                            {siteTodayAttendance.length > 0 && <Badge status="success" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Att ({siteTodayAttendance.length})</Badge>}
-                            {siteLabourCount > 0 && <Badge status="info" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Lab ({siteLabourCount})</Badge>}
-                            {siteTodayAttendance.length === 0 && siteLabourCount === 0 && (
-                              <span style={{ fontSize: "11px", color: "#94a3b8" }}>No activity</span>
-                            )}
-                          </div>
-                        </td>
+                          <td>
+                            <span style={{ fontSize: "11.5px", fontWeight: siteLabourCount > 0 ? "700" : "500" }}>
+                              {siteLabourCount > 0 ? `${siteLabourCount} W` : "0"}
+                            </span>
+                          </td>
 
-                        <td>
-                          <span style={{ fontSize: "11.5px", fontWeight: siteLabourCount > 0 ? "700" : "500" }}>
-                            {siteLabourCount > 0 ? `${siteLabourCount} W` : "0"}
-                          </span>
-                        </td>
+                          <td>
+                            <span style={{ fontSize: "11.5px", fontWeight: (siteLabourAmount + siteGeneralExpense) > 0 ? "700" : "500" }}>
+                              {formatINR(siteLabourAmount + siteGeneralExpense)}
+                            </span>
+                          </td>
 
-                        <td>
-                          <span style={{ fontSize: "11.5px", fontWeight: (siteLabourAmount + siteGeneralExpense) > 0 ? "700" : "500" }}>
-                            {formatINR(siteLabourAmount + siteGeneralExpense)}
-                          </span>
-                        </td>
-
-                        <td>
-                          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                            <div style={{ width: "45px", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                              <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: isDelayed ? "#dc2626" : "#16a34a", borderRadius: "100px" }} />
+                          <td>
+                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                              <div style={{ width: "45px", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
+                                <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: isDelayed ? "#dc2626" : "#16a34a", borderRadius: "100px" }} />
+                              </div>
+                              <span style={{ fontSize: "11px", fontWeight: "800" }}>{progVal}%</span>
                             </div>
-                            <span style={{ fontSize: "11px", fontWeight: "800" }}>{progVal}%</span>
-                          </div>
-                        </td>
+                          </td>
 
-                        <td style={{ textAlign: "center" }}>
-                          <Badge status={isDelayed ? "danger" : (site.status || "active")} />
-                        </td>
+                          <td style={{ textAlign: "center" }}>
+                            <Badge status={isDelayed ? "danger" : (site.status || "active")} />
+                          </td>
 
-                        <td style={{ textAlign: "right" }}>
-                          <button
-                            type="button"
-                            onClick={() => setSelectedInspectSite(site)}
-                            className="erp-btn-secondary"
-                            style={{ fontSize: "11px", padding: "3px 8px" }}
-                          >
-                            Inspect
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+                          <td style={{ textAlign: "right" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedInspectSite(site)}
+                              className="erp-btn-secondary"
+                              style={{ fontSize: "11px", padding: "3px 8px" }}
+                            >
+                              Inspect
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           {portfolioSites.length > 15 && (
             <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-color)", textAlign: "center", fontSize: "11.5px", color: "var(--text-muted)" }}>
@@ -4185,26 +4313,29 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             </div>
 
             {/* Sub-Tabs */}
-            <div style={{ display: "flex", gap: "8px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
+            <div style={{ display: "flex", gap: "6px", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px", overflowX: "auto" }}>
               {[
-                { id: "engineers", label: "Assigned Engineers & Presence" },
-                { id: "labour", label: "Today's Labour Force" },
-                { id: "materials", label: "Material Stock" },
-                { id: "progress", label: "Progress & DPRs" }
+                { id: "overview", label: "Overview & Specs" },
+                { id: "engineers", label: "Engineers & Attendance" },
+                { id: "labour", label: "Workforce & Labour" },
+                { id: "materials", label: "Materials & Stock" },
+                { id: "expenses", label: "Financials & Expenses" },
+                { id: "progress", label: "DPRs & Site Photos" }
               ].map(tabItem => (
                 <button
                   key={tabItem.id}
                   type="button"
                   onClick={() => setSiteModalActiveTab(tabItem.id)}
                   style={{
-                    padding: "6px 12px",
+                    padding: "5px 12px",
                     borderRadius: "6px",
                     border: "none",
                     backgroundColor: siteModalActiveTab === tabItem.id ? "var(--brand-orange)" : "transparent",
                     color: siteModalActiveTab === tabItem.id ? "#fff" : "var(--primary-700)",
                     fontSize: "12px",
                     fontWeight: "700",
-                    cursor: "pointer"
+                    cursor: "pointer",
+                    whiteSpace: "nowrap"
                   }}
                 >
                   {tabItem.label}
@@ -4212,10 +4343,53 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               ))}
             </div>
 
-            {/* Tab 1: Engineers */}
+            {/* Tab 1: Overview & Specs */}
+            {siteModalActiveTab === "overview" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "10px" }}>
+                  <div style={{ padding: "10px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Contract Budget</span>
+                    <strong style={{ fontSize: "14px", color: "var(--primary-950)" }}>{formatINR(selectedInspectSite.budget || selectedInspectSite.projectValue || 0)}</strong>
+                  </div>
+                  <div style={{ padding: "10px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Execution Progress</span>
+                    <strong style={{ fontSize: "14px", color: "#16a34a" }}>{selectedInspectSite.progress || 0}% Complete</strong>
+                  </div>
+                  <div style={{ padding: "10px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Target Completion</span>
+                    <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{formatDateDMY(selectedInspectSite.expectedEndDate)}</strong>
+                  </div>
+                  <div style={{ padding: "10px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block" }}>Site Geofence Location</span>
+                    <strong style={{ fontSize: "12px", color: "var(--primary-950)", fontFamily: "monospace" }}>
+                      {selectedInspectSite.latitude && selectedInspectSite.longitude 
+                        ? `${Number(selectedInspectSite.latitude).toFixed(4)}, ${Number(selectedInspectSite.longitude).toFixed(4)}` 
+                        : "Coords Configured"}
+                    </strong>
+                  </div>
+                </div>
+
+                <div style={{ padding: "10px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                  <span style={{ fontSize: "11px", color: "var(--text-muted)", display: "block", marginBottom: "4px" }}>Assigned Site Engineers</span>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                    {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).length === 0 ? (
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>No engineers assigned</span>
+                    ) : (
+                      engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).map(e => (
+                        <span key={e.id} style={{ fontSize: "11.5px", padding: "3px 8px", backgroundColor: "#e2e8f0", borderRadius: "4px", fontWeight: "600" }}>
+                          👤 {e.fullName || e.name} ({e.phoneNumber || e.phone || "Engineer"})
+                        </span>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 2: Engineers & Attendance */}
             {siteModalActiveTab === "engineers" && (
               <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Engineers Assigned to Site</h4>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Engineers Assigned to Site &amp; Today's Presence</h4>
                 {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).length === 0 ? (
                   <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No engineers currently assigned to this site.</p>
                 ) : (
@@ -4228,11 +4402,22 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                             <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{eng.fullName || eng.name}</strong>
                             <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{eng.email} • {eng.phoneNumber || eng.phone || ""}</span>
                           </div>
-                          <div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                             {todayRec ? (
-                              <span style={{ fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "10px", backgroundColor: todayRec.isCheckedOut ? "#f1f5f9" : "#dcfce7", color: todayRec.isCheckedOut ? "#475569" : "#15803d" }}>
-                                {todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.checkInTimeFormatted})`}
-                              </span>
+                              <>
+                                <span style={{ fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "10px", backgroundColor: todayRec.isCheckedOut ? "#f1f5f9" : "#dcfce7", color: todayRec.isCheckedOut ? "#475569" : "#15803d" }}>
+                                  {todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.checkInTimeFormatted})`}
+                                </span>
+                                {todayRec.photoUrl && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setSelectedPreviewImage({ url: todayRec.photoUrl, title: `Check-in Selfie — ${eng.fullName || eng.name}` })}
+                                    style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                                  >
+                                    <img src={todayRec.photoUrl} alt="Selfie Proof" style={{ width: "30px", height: "30px", borderRadius: "4px", objectFit: "cover" }} />
+                                  </button>
+                                )}
+                              </>
                             ) : (
                               <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Not Checked In Today</span>
                             )}
@@ -4245,10 +4430,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             )}
 
-            {/* Tab 2: Labour */}
+            {/* Tab 3: Labour */}
             {siteModalActiveTab === "labour" && (
               <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Today's Field Workforce Attendance</h4>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Today's Civil Field Workforce Attendance</h4>
                 {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).length === 0 ? (
                   <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No labour attendance logged for this site today.</p>
                 ) : (
@@ -4256,7 +4441,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                     {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).map(r => (
                       <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                         <div>
-                          <strong style={{ fontSize: "12.5px" }}>{r.categoryName || r.category || "General Labour"}</strong>
+                          <strong style={{ fontSize: "12.5px" }}>{r.categoryName || r.category || "General Civil Labour"}</strong>
                           <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{r.workerCount || 1} Workers @ ₹{r.dailyWage || r.rate || 0}/day</span>
                         </div>
                         <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
@@ -4269,10 +4454,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             )}
 
-            {/* Tab 3: Materials */}
+            {/* Tab 4: Materials */}
             {siteModalActiveTab === "materials" && (
               <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Material Stock at Site</h4>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Material Stock at Site (Cement, Steel, Sand, Aggregates)</h4>
                 {materials.filter(m => m.siteId === selectedInspectSite.id).length === 0 ? (
                   <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No material stock records registered for this site.</p>
                 ) : (
@@ -4293,10 +4478,34 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             )}
 
-            {/* Tab 4: Progress & DPRs */}
+            {/* Tab 5: Financials & Expenses */}
+            {siteModalActiveTab === "expenses" && (
+              <div>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Site Financial Ledger &amp; Outlays</h4>
+                {generalExpenses.filter(e => e.siteId === selectedInspectSite.id).length === 0 ? (
+                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No general expenses recorded for this site.</p>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "250px", overflowY: "auto" }}>
+                    {generalExpenses.filter(e => e.siteId === selectedInspectSite.id).map(e => (
+                      <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                        <div>
+                          <strong style={{ fontSize: "12.5px" }}>{e.description}</strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{e.category || "General"} • {formatDateDMY(e.date)}</span>
+                        </div>
+                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
+                          {formatINR(e.amount || 0)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Tab 6: Progress & DPRs */}
             {siteModalActiveTab === "progress" && (
               <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Recent Daily Progress Reports</h4>
+                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Daily Progress Reports &amp; Field Photos</h4>
                 {allDprs.filter(d => d.siteId === selectedInspectSite.id).length === 0 ? (
                   <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No DPRs submitted for this site.</p>
                 ) : (
@@ -4304,10 +4513,21 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                     {allDprs.filter(d => d.siteId === selectedInspectSite.id).slice(0, 5).map(d => (
                       <div key={d.id} style={{ padding: "10px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
                         <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-                          <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{d.date || "DPR Report"}</strong>
+                          <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{d.date || "DPR Report"}{d.weather ? ` (${d.weather})` : ""}</strong>
                           <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>By {d.submittedByName || d.engineerName || "Engineer"}</span>
                         </div>
                         <p style={{ margin: 0, fontSize: "11.5px", color: "var(--primary-700)" }}>{d.workDescription || d.description || "Progress report logged."}</p>
+                        {d.photoUrl && (
+                          <div style={{ marginTop: "6px" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPreviewImage({ url: d.photoUrl, title: `DPR Photo — ${d.date}` })}
+                              style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                            >
+                              <img src={d.photoUrl} alt="DPR Photo" style={{ width: "45px", height: "45px", borderRadius: "4px", objectFit: "cover" }} />
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
