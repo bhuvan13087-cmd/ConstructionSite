@@ -2077,6 +2077,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
+  // ══════════════════════════════════════════════════════════════════════════
   // VIEW 4: ADMIN ACCOUNTS MONITORING
   // ══════════════════════════════════════════════════════════════════════════
   const renderAdminsView = () => {
@@ -2088,33 +2089,68 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       return true;
     });
 
+    const superAdminCount = admins.filter(a => a.role === "super_admin" || a.role === "superadmin").length;
+    const siteAdminCount = admins.length - superAdminCount;
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
+              <ShieldCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{admins.length || 1}</div>
+              <div className="admin-summary-label">Total Administrators</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <ShieldCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{superAdminCount || 1}</div>
+              <div className="admin-summary-label">Super Admins</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-blue">
+              <Users size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{siteAdminCount}</div>
+              <div className="admin-summary-label">Site Administrators</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar */}
+        <div className="sites-toolbar-container">
           <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Administrator Accounts ({filteredAdmins.length})
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Administrator Accounts Directory ({filteredAdmins.length})
             </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Master directory of authorized company administrators and management personnel.
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Authorized company administrators, management personnel, and role assignments.
             </p>
           </div>
 
-          <div style={{ position: "relative", minWidth: "220px" }}>
-            <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)" }} />
+          <div className="sites-search-wrapper" style={{ maxWidth: "340px" }}>
+            <Search size={15} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
             <input
               type="text"
               placeholder="Search admin name, email..."
               value={adminSearchQuery}
               onChange={(e) => setAdminSearchQuery(e.target.value)}
-              style={{ width: "100%", height: "36px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              style={{ width: "100%", height: "40px", paddingLeft: "36px", paddingRight: "12px", borderRadius: "10px", border: "1.5px solid var(--border-color)", fontSize: "13px", boxSizing: "border-box", outline: "none", backgroundColor: "#fff" }}
             />
           </div>
         </div>
 
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>Admin Name</th>
@@ -2127,7 +2163,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </thead>
               <tbody>
                 {filteredAdmins.length === 0 ? (
-                  <tr><td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No administrator accounts found.</td></tr>
+                  <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No administrator accounts found.</td></tr>
                 ) : (
                   filteredAdmins.map(adm => {
                     const admId = adm.id || adm.uid;
@@ -2138,23 +2174,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                         <td style={{ fontWeight: "700" }}>{adm.fullName || adm.name || "Administrator"}</td>
                         <td>{adm.email || "—"}</td>
                         <td>
-                          <span style={{
-                            fontSize: "11px",
-                            fontWeight: "800",
-                            padding: "3px 8px",
-                            borderRadius: "12px",
-                            backgroundColor: adm.role === "super_admin" || adm.role === "superadmin" ? "#fdf4ff" : "#eff6ff",
-                            color: adm.role === "super_admin" || adm.role === "superadmin" ? "#a855f7" : "#1d4ed8",
-                            border: `1px solid ${adm.role === "super_admin" || adm.role === "superadmin" ? "#f0abfc" : "#bfdbfe"}`,
-                            textTransform: "uppercase"
-                          }}>
+                          <Badge status={adm.role === "super_admin" || adm.role === "superadmin" ? "warning" : "info"}>
                             {adm.role === "super_admin" || adm.role === "superadmin" ? "Super Admin" : "Administrator"}
-                          </span>
+                          </Badge>
                         </td>
                         <td><Badge status={adm.status || "active"} /></td>
                         <td>{managedSitesCount > 0 ? `${managedSitesCount} Sites` : "Enterprise / Global"}</td>
-                        <td style={{ fontFamily: "monospace", fontSize: "11px", color: "#64748b" }}>
-                          {adm.id ? `${adm.id.substring(0, 10)}...` : "—"}
+                        <td style={{ fontFamily: "monospace", fontSize: "11.5px", color: "var(--primary-600)" }}>
+                          {adm.id ? `${adm.id.substring(0, 12)}...` : "—"}
                         </td>
                       </tr>
                     );
@@ -2163,7 +2190,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </tbody>
             </table>
           </div>
-        </Card>
+        </div>
       </div>
     );
   };
@@ -2186,30 +2213,78 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       return true;
     });
 
+    const onSiteCount = filteredAttendance.filter(r => !r.isCheckedOut).length;
+    const checkedOutCount = filteredAttendance.filter(r => r.isCheckedOut).length;
+    const verifiedCount = filteredAttendance.filter(r => r.isVerified).length;
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <ClipboardCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{filteredAttendance.length}</div>
+              <div className="admin-summary-label">Total Records</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <UserCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{onSiteCount}</div>
+              <div className="admin-summary-label">On Site Now</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-slate">
+              <Clock size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{checkedOutCount}</div>
+              <div className="admin-summary-label">Checked Out</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <ShieldCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{verifiedCount}</div>
+              <div className="admin-summary-label">GPS Verified</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
           <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
               Master Engineer Attendance Monitor ({filteredAttendance.length})
             </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Complete audit ledger of field engineer check-ins, check-outs, photo proofs, and geofence locations.
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Audit ledger of field engineer check-ins, check-outs, photo proofs, and geofence locations.
             </p>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="Search engineer, site..."
-              value={attendanceSearchQuery}
-              onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-              style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}
-            />
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search engineer, site..."
+                value={attendanceSearchQuery}
+                onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
             <select
               value={attendanceSiteFilter}
               onChange={(e) => setAttendanceSiteFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
             >
               <option value="">All Sites</option>
               {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
@@ -2217,7 +2292,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             <select
               value={attendanceStatusFilter}
               onChange={(e) => setAttendanceStatusFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
             >
               <option value="all">All Status</option>
               <option value="onsite">On Site</option>
@@ -2227,13 +2302,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               type="date"
               value={attendanceDateFilter}
               onChange={(e) => setAttendanceDateFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
             />
             {attendanceDateFilter && (
               <button
                 type="button"
                 onClick={() => setAttendanceDateFilter("")}
-                style={{ height: "36px", padding: "0 8px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc", fontSize: "12px", cursor: "pointer" }}
+                className="btn btn-outline"
+                style={{ height: "38px", padding: "0 10px", fontSize: "12px" }}
               >
                 Clear Date
               </button>
@@ -2241,9 +2317,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
         </div>
 
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>Engineer</th>
@@ -2258,7 +2334,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </thead>
               <tbody>
                 {filteredAttendance.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No attendance records found.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No attendance records found.</td></tr>
                 ) : (
                   filteredAttendance.map(rec => (
                     <tr key={rec.id}>
@@ -2268,19 +2344,12 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                       <td className="font-mono">{rec.checkInTimeFormatted}</td>
                       <td className="font-mono">{rec.checkOutTimeFormatted || "—"}</td>
                       <td>
-                        <span style={{
-                          fontSize: "11px",
-                          fontWeight: "750",
-                          padding: "2px 8px",
-                          borderRadius: "12px",
-                          backgroundColor: rec.isCheckedOut ? "#f1f5f9" : "#dcfce7",
-                          color: rec.isCheckedOut ? "#475569" : "#15803d"
-                        }}>
+                        <Badge status={rec.isCheckedOut ? "default" : "success"}>
                           {rec.isCheckedOut ? "Checked Out" : "On Site"}
-                        </span>
+                        </Badge>
                       </td>
                       <td>
-                        <span style={{ fontSize: "11px", color: rec.isVerified ? "#16a34a" : "#ca8a04", fontWeight: "700" }}>
+                        <span style={{ fontSize: "11.5px", color: rec.isVerified ? "#16a34a" : "#ca8a04", fontWeight: "700" }}>
                           {rec.isVerified ? "✓ Verified GPS" : "Pending"}
                         </span>
                       </td>
@@ -2289,9 +2358,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                           <button
                             type="button"
                             onClick={() => setSelectedPreviewImage({ url: rec.photoUrl, title: `Attendance: ${rec.engineerName}` })}
-                            style={{ border: "none", background: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
+                            style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
                           >
-                            <ImageIcon size={13} /> View
+                            <Eye size={13} /> View
                           </button>
                         ) : "—"}
                       </td>
@@ -2301,200 +2370,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </tbody>
             </table>
           </div>
-        </Card>
-      </div>
-    );
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 6: DAILY LABOUR MONITORING
-  // ══════════════════════════════════════════════════════════════════════════
-  const renderLabourView = () => {
-    const filteredLabour = (rawLabourAttendance || []).filter(r => {
-      if (!r || r.lockedMetadata) return false;
-      if (labourSiteFilter && r.siteId !== labourSiteFilter) return false;
-      if (labourSearchQuery.trim()) {
-        const q = labourSearchQuery.toLowerCase().trim();
-        const matchSite = (sites.find(s => s.id === r.siteId)?.siteName || "").toLowerCase().includes(q);
-        const matchCat = (r.categoryName || r.category || "").toLowerCase().includes(q);
-        const matchTeam = (r.teamName || "").toLowerCase().includes(q);
-        if (!matchSite && !matchCat && !matchTeam) return false;
-      }
-      return true;
-    });
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Daily Workforce &amp; Labour Ledger ({filteredLabour.length})
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Real-time daily worker counts, wage categories, and labour attendance across all construction sites.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="Search category, team..."
-              value={labourSearchQuery}
-              onChange={(e) => setLabourSearchQuery(e.target.value)}
-              style={{ height: "36px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}
-            />
-            <select
-              value={labourSiteFilter}
-              onChange={(e) => setLabourSiteFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
-            >
-              <option value="">All Sites</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
-            </select>
-          </div>
         </div>
-
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
-              <thead>
-                <tr>
-                  <th>Project Site</th>
-                  <th>Attendance Date</th>
-                  <th>Labour Category / Team</th>
-                  <th style={{ textAlign: "right" }}>Worker Count</th>
-                  <th style={{ textAlign: "right" }}>Rate / Day</th>
-                  <th style={{ textAlign: "right" }}>Calculated Amount</th>
-                  <th>Recorded By</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredLabour.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No labour attendance records found.</td></tr>
-                ) : (
-                  filteredLabour.map(r => {
-                    const siteName = sites.find(s => s.id === r.siteId)?.siteName || "General Site";
-                    const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                    const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-                    const amount = Number(r.totalAmount || (workerCount * rate));
-
-                    return (
-                      <tr key={r.id}>
-                        <td style={{ fontWeight: "700" }}>{siteName}</td>
-                        <td className="font-mono">{formatDateDMY(r.attendanceDate || r.date)}</td>
-                        <td>{r.categoryName || r.category || r.teamName || "General Labour"}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700" }}>{workerCount}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(rate)}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace" }}>{formatINR(amount)}</td>
-                        <td>{r.recordedByName || r.engineerName || "Site Engineer"}</td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
-      </div>
-    );
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 7: MATERIAL STOCK INVENTORY
-  // ══════════════════════════════════════════════════════════════════════════
-  const renderMaterialsView = () => {
-    const filteredMaterials = materials.filter(m => {
-      if (materialSiteFilter && m.siteId !== materialSiteFilter) return false;
-      if (materialSearchQuery.trim()) {
-        const q = materialSearchQuery.toLowerCase().trim();
-        const matchName = (m.materialName || m.name || "").toLowerCase().includes(q);
-        const matchCat = (m.category || "").toLowerCase().includes(q);
-        const matchSite = (sites.find(s => s.id === m.siteId)?.siteName || "").toLowerCase().includes(q);
-        if (!matchName && !matchCat && !matchSite) return false;
-      }
-      return true;
-    });
-
-    const totalStockValue = filteredMaterials.reduce((acc, m) => {
-      const qty = Number(m.quantity || m.currentStock) || 0;
-      const rate = Number(m.unitRate || m.rate) || 0;
-      return acc + (Number(m.totalCost) || (qty * rate));
-    }, 0);
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Material Stock &amp; Inventory ({filteredMaterials.length} Items)
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Centralized monitoring of construction materials, inventory levels, and stock valuations across all sites.
-            </p>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="Search material, category..."
-              value={materialSearchQuery}
-              onChange={(e) => setMaterialSearchQuery(e.target.value)}
-              style={{ height: "36px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}
-            />
-            <select
-              value={materialSiteFilter}
-              onChange={(e) => setMaterialSiteFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600" }}
-            >
-              <option value="">All Sites</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
-            </select>
-          </div>
-        </div>
-
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
-              <thead>
-                <tr>
-                  <th>Material Name</th>
-                  <th>Category</th>
-                  <th>Project Site</th>
-                  <th style={{ textAlign: "right" }}>Current Stock</th>
-                  <th>Unit</th>
-                  <th style={{ textAlign: "right" }}>Unit Rate</th>
-                  <th style={{ textAlign: "right" }}>Total Value</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredMaterials.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No materials found.</td></tr>
-                ) : (
-                  filteredMaterials.map(m => {
-                    const siteName = sites.find(s => s.id === m.siteId)?.siteName || "General Warehouse";
-                    const qty = Number(m.quantity || m.currentStock) || 0;
-                    const rate = Number(m.unitRate || m.rate) || 0;
-                    const totalCost = Number(m.totalCost) || (qty * rate);
-
-                    return (
-                      <tr key={m.id}>
-                        <td style={{ fontWeight: "700" }}>{m.materialName || m.name || "Material"}</td>
-                        <td>{m.category || "General"}</td>
-                        <td>{siteName}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700" }}>{qty}</td>
-                        <td>{m.unit || "units"}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(rate)}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace" }}>{formatINR(totalCost)}</td>
-                        <td><Badge status={m.status || "In Stock"} /></td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
       </div>
     );
   };
@@ -2526,22 +2402,61 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       return true;
     });
 
+    const totalMatExp = siteWiseFinancials.reduce((acc, c) => acc + c.financials.materialExpenses, 0);
+    const totalLabExp = siteWiseFinancials.reduce((acc, c) => acc + c.financials.labourExpenses, 0);
+
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Financial Auditing &amp; Site Expense Ledger
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Audit site-by-site budgets, material outlays, labour costs, client receivables, and field payments.
-            </p>
+      <div className="admin-dashboard-container">
+        {/* Financial KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(overallMetrics.totalProjectValue)}</div>
+              <div className="admin-summary-label">Total Project Budget</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(overallMetrics.totalExpenses)}</div>
+              <div className="admin-summary-label">Total Outlay Spent</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <TrendingUp size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</div>
+              <div className="admin-summary-label">Client Collections</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-red">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(overallMetrics.pendingPayments)}</div>
+              <div className="admin-summary-label">Balance Owed</div>
+            </div>
           </div>
         </div>
 
-        <Card title="Corporate Site-wise Financial Ledger" variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
+        {/* Section 1: Site-wise Ledger Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-header">
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Corporate Site-wise Financial Ledger</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Site-by-site budgets, material outlays, labour costs, client receivables, and balances</p>
+            </div>
+          </div>
+          <div className="admin-table-scroll">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>Site Name</th>
@@ -2556,7 +2471,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </thead>
               <tbody>
                 {siteWiseFinancials.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No sites found.</td></tr>
+                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No sites found.</td></tr>
                 ) : (
                   siteWiseFinancials.map(({ site, financials }) => (
                     <tr key={site.id}>
@@ -2571,79 +2486,78 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                     </tr>
                   ))
                 )}
-                <tr style={{ backgroundColor: "var(--primary-50)", fontWeight: "800", borderTop: "2px solid var(--primary-200)" }}>
-                  <td>Corporate Aggregate Totals</td>
+                <tr style={{ backgroundColor: "#f8fafc", fontWeight: "800", borderTop: "2px solid var(--border-color)" }}>
+                  <td>Corporate Totals</td>
                   <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalProjectValue)}</td>
-                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(siteWiseFinancials.reduce((acc, c) => acc + c.financials.materialExpenses, 0))}</td>
-                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(siteWiseFinancials.reduce((acc, c) => acc + c.financials.labourExpenses, 0))}</td>
+                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(totalMatExp)}</td>
+                  <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(totalLabExp)}</td>
                   <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(siteWiseFinancials.reduce((acc, c) => acc + c.financials.otherExpenses, 0))}</td>
                   <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalExpenses)}</td>
-                  <td style={{ textAlign: "right", color: "var(--success-800)", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</td>
-                  <td style={{ textAlign: "right", color: "var(--danger-800)", fontFamily: "monospace" }}>{formatINR(siteWiseFinancials.reduce((acc, c) => acc + c.financials.remainingBalance, 0))}</td>
+                  <td style={{ textAlign: "right", color: "var(--success-700)", fontFamily: "monospace" }}>{formatINR(overallMetrics.totalPaymentsReceived)}</td>
+                  <td style={{ textAlign: "right", color: "var(--danger-700)", fontFamily: "monospace" }}>{formatINR(siteWiseFinancials.reduce((acc, c) => acc + c.financials.remainingBalance, 0))}</td>
                 </tr>
               </tbody>
             </table>
           </div>
-        </Card>
+        </div>
 
-        <div style={{ marginTop: "10px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
-            <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Field &amp; General Expenses Ledger ({filteredExpenses.length})
-            </h3>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+        {/* Section 2: General Expenses Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-header" style={{ flexWrap: "wrap", gap: "10px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Field &amp; General Expenses Ledger ({filteredExpenses.length})</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Itemized operational expenses filed across all site locations</p>
+            </div>
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
               <input
                 type="text"
                 placeholder="Search description..."
                 value={expenseSearchQuery}
                 onChange={(e) => setExpenseSearchQuery(e.target.value)}
-                style={{ height: "36px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}
+                style={{ height: "36px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12px" }}
               />
               <select
                 value={expenseSiteFilter}
                 onChange={(e) => setExpenseSiteFilter(e.target.value)}
-                style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+                style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12px" }}
               >
                 <option value="">All Sites</option>
                 {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
               </select>
             </div>
           </div>
-
-          <Card variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Project Site</th>
-                    <th>Category</th>
-                    <th style={{ textAlign: "right" }}>Amount</th>
-                    <th>Date</th>
-                    <th>Paid To</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredExpenses.length === 0 ? (
-                    <tr><td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No general expenses found.</td></tr>
-                  ) : (
-                    filteredExpenses.map(exp => (
-                      <tr key={exp.id}>
-                        <td style={{ fontWeight: "700" }}>{exp.description}</td>
-                        <td>{sites.find(s => s.id === exp.siteId)?.siteName || "General / HQ"}</td>
-                        <td>{exp.category || "General"}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--danger-700)" }}>{formatINR(exp.amount)}</td>
-                        <td className="font-mono">{formatDateDMY(exp.date)}</td>
-                        <td>{exp.paidTo || "—"}</td>
-                        <td><Badge status={exp.status || "Approved"} /></td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Description</th>
+                  <th>Project Site</th>
+                  <th>Category</th>
+                  <th style={{ textAlign: "right" }}>Amount</th>
+                  <th>Date</th>
+                  <th>Paid To</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredExpenses.length === 0 ? (
+                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No general expenses found.</td></tr>
+                ) : (
+                  filteredExpenses.map(exp => (
+                    <tr key={exp.id}>
+                      <td style={{ fontWeight: "700" }}>{exp.description}</td>
+                      <td>{sites.find(s => s.id === exp.siteId)?.siteName || "General / HQ"}</td>
+                      <td>{exp.category || "General"}</td>
+                      <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--danger-700)" }}>{formatINR(exp.amount)}</td>
+                      <td className="font-mono">{formatDateDMY(exp.date)}</td>
+                      <td>{exp.paidTo || "—"}</td>
+                      <td><Badge status={exp.status || "Approved"} /></td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
@@ -2656,47 +2570,41 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     const delayedList = sites.filter(s => isSiteDelayed(s));
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Project Schedule Standing &amp; Milestone Auditing
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Compare linear milestone targets against actual site progress and track delay action points.
-            </p>
-          </div>
-        </div>
-
+      <div className="admin-dashboard-container">
+        {/* Delayed Alert Card */}
         {delayedList.length > 0 && (
-          <Card title="Delayed Schedules Action Center" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "var(--danger-50)" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "6px", color: "var(--danger-700)", fontWeight: "800" }}>
-                <AlertTriangle size={18} />
-                <span>Delayed Construction Projects detected: {delayedList.length} sites.</span>
-              </div>
-              <ul style={{ margin: "4px 0 0 20px", padding: 0, fontSize: "13px", color: "#334155" }}>
-                {delayedList.map(s => {
-                  const siteMaterials = materials.filter(m => m.siteId === s.id);
-                  const siteLabour = laborHistoryMap[s.id] || [];
-                  const siteDprs = allDprs.filter(d => d.siteId === s.id);
-                  const financials = getSiteFinancials(s, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-                  const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
-                  
-                  return (
-                    <li key={s.id} style={{ marginBottom: "6px" }}>
-                      <strong>{s.siteName}</strong>: Expected completion: <u>{formatDateDMY(s.expectedEndDate)}</u>. Actual progress: <strong>{financials.progressPercent}%</strong> (Planned: {planned}%, Gap: -{planned - financials.progressPercent}%).
-                    </li>
-                  );
-                })}
-              </ul>
+          <div className="admin-card" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "#fef2f2" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--danger-700)", fontWeight: "800", fontSize: "14px" }}>
+              <AlertTriangle size={18} />
+              <span>Delayed Construction Projects ({delayedList.length} sites require review)</span>
             </div>
-          </Card>
+            <ul style={{ margin: "6px 0 0 20px", padding: 0, fontSize: "13px", color: "#334155" }}>
+              {delayedList.map(s => {
+                const siteMaterials = materials.filter(m => m.siteId === s.id);
+                const siteLabour = laborHistoryMap[s.id] || [];
+                const siteDprs = allDprs.filter(d => d.siteId === s.id);
+                const financials = getSiteFinancials(s, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
+                const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
+                
+                return (
+                  <li key={s.id} style={{ marginBottom: "4px" }}>
+                    <strong>{s.siteName}</strong>: Target completion: <u>{formatDateDMY(s.expectedEndDate)}</u>. Actual progress: <strong>{financials.progressPercent}%</strong> (Planned: {planned}%, Gap: -{planned - financials.progressPercent}%).
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
 
-        <Card title="Corporate Site Progress Standing Ledger" variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
+        <div className="admin-table-card">
+          <div className="admin-table-header">
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Corporate Site Progress Standing Ledger</h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Linear milestone targets vs actual execution progress and schedule status</p>
+            </div>
+          </div>
+          <div className="admin-table-scroll">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>Site Name</th>
@@ -2744,70 +2652,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </tbody>
             </table>
           </div>
-        </Card>
-      </div>
-    );
-  };
-
-  // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 10: CENTRAL APPROVALS GATEWAY
-  // ══════════════════════════════════════════════════════════════════════════
-  const renderApprovalsView = () => {
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Central Approvals Gateway ({allApprovalRequests.length})
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Review and act upon field requests for leave, site location coordinates, and requisitions.
-            </p>
-          </div>
         </div>
-
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Requester</th>
-                  <th>Request Details</th>
-                  <th>Date</th>
-                  <th style={{ textAlign: "center" }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allApprovalRequests.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "30px", color: "var(--text-muted)" }}>All clear! No pending requests.</td></tr>
-                ) : (
-                  allApprovalRequests.map(req => (
-                    <tr key={req.id}>
-                      <td><Badge status={req.type === "Leave" ? "warning" : req.type === "Location" ? "pending" : "success"}>{req.type}</Badge></td>
-                      <td style={{ fontWeight: "700" }}>{req.employeeName}</td>
-                      <td>
-                        <div style={{ display: "flex", flexDirection: "column" }}>
-                          <span>{req.details}</span>
-                          {req.type === "Location" && (
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Proposed coordinates: {req.latitude.toFixed(6)}, {req.longitude.toFixed(6)}</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="font-mono">{req.requestDate}</td>
-                      <td>
-                        <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
-                          <button type="button" onClick={() => handleApproveRequest(req)} style={{ border: "none", background: "none", color: "#16a34a", padding: "4px 8px", fontSize: "12.5px", fontWeight: "700", cursor: "pointer" }}>Approve</button>
-                          <button type="button" onClick={() => handleRejectRequest(req)} style={{ border: "none", background: "none", color: "#dc2626", padding: "4px 8px", fontSize: "12.5px", fontWeight: "700", cursor: "pointer" }}>Reject</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
       </div>
     );
   };
@@ -2829,29 +2674,33 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px" }}>
+      <div className="admin-dashboard-container">
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
           <div>
-            <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
               System Activity &amp; Audit Trail ({filteredActivities.length})
             </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-              Immutable chronological record of administrative actions, check-ins, labour logs, and financial transactions.
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Chronological immutable record of administrative actions, check-ins, labour logs, and financial transactions.
             </p>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <input
-              type="text"
-              placeholder="Search user, action, site..."
-              value={activitySearchQuery}
-              onChange={(e) => setActivitySearchQuery(e.target.value)}
-              style={{ height: "36px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px" }}
-            />
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search user, action, site..."
+                value={activitySearchQuery}
+                onChange={(e) => setActivitySearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
             <select
               value={activityModuleFilter}
               onChange={(e) => setActivityModuleFilter(e.target.value)}
-              style={{ height: "36px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
             >
               <option value="all">All Modules</option>
               <option value="attendance">Attendance</option>
@@ -2863,9 +2712,9 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
         </div>
 
-        <Card variant="table">
-          <div style={{ overflowX: "auto" }}>
-            <table className="data-table" style={{ margin: 0 }}>
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
               <thead>
                 <tr>
                   <th>Timestamp</th>
@@ -2877,11 +2726,11 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </thead>
               <tbody>
                 {filteredActivities.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No system activity recorded.</td></tr>
+                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No system activity recorded.</td></tr>
                 ) : (
                   filteredActivities.map(a => (
                     <tr key={a.id}>
-                      <td className="font-mono" style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>
+                      <td className="font-mono" style={{ fontSize: "11.5px", color: "var(--primary-600)" }}>
                         {a.createdAt?.seconds 
                           ? new Date(a.createdAt.seconds * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit', hour12: true })
                           : "Just now"}
@@ -2896,10 +2745,13 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </tbody>
             </table>
           </div>
-        </Card>
+        </div>
       </div>
     );
   };
+
+
+
 
   return (
     <Layout
