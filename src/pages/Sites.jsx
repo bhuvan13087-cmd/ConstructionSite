@@ -309,8 +309,11 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   );
 };
 
-export default function Sites({ embedded = false }) {
+export default function Sites({ embedded = false, readOnly = false }) {
   const { userProfile } = useAuth();
+  const userRole = userProfile?.role || "admin";
+  const isReadOnly = readOnly || userRole === "super_admin" || userRole === "superadmin";
+
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
   const [selectedSiteId, setSelectedSiteId] = useState(null);
@@ -519,18 +522,39 @@ export default function Sites({ embedded = false }) {
   }, []);
 
   const filteredSites = useMemo(() => {
+    const todayStr = new Date().toISOString().split("T")[0];
     return sites.filter(site => {
-      // Search
+      // Search by site name, client name, location, or assigned engineer
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
         const matchName = (site.siteName || "").toLowerCase().includes(q);
         const matchClient = (site.clientName || "").toLowerCase().includes(q);
         const matchLoc = (site.location || "").toLowerCase().includes(q);
-        if (!matchName && !matchClient && !matchLoc) return false;
+        const matchCode = (site.siteCode || site.id || "").toLowerCase().includes(q);
+        const matchEng = (site.assignedEngineers || []).some(engId => {
+          const eng = engineers.find(e => e.id === engId || e.uid === engId || e.customId === engId);
+          return eng && ((eng.fullName || "").toLowerCase().includes(q) || (eng.name || "").toLowerCase().includes(q));
+        });
+        if (!matchName && !matchClient && !matchLoc && !matchCode && !matchEng) return false;
       }
 
       // Status Filter
-      if (statusFilter !== "all" && site.status !== statusFilter) return false;
+      if (statusFilter !== "all") {
+        if (statusFilter === "Delayed") {
+          const isDel = site.expectedEndDate && site.expectedEndDate < todayStr && site.status !== "Completed";
+          if (!isDel) return false;
+        } else if (statusFilter === "Active") {
+          if (site.status !== "Active" && site.status !== "Running") return false;
+        } else if (statusFilter === "Planning") {
+          if (site.status !== "Planning") return false;
+        } else if (statusFilter === "Completed") {
+          if (site.status !== "Completed") return false;
+        } else if (statusFilter === "No Recent Activity") {
+          if (site.status === "Completed") return false;
+        } else {
+          if (site.status !== statusFilter) return false;
+        }
+      }
 
       // Engineer Filter
       if (engineerFilter) {
@@ -553,7 +577,7 @@ export default function Sites({ embedded = false }) {
 
       return true;
     });
-  }, [sites, searchQuery, statusFilter, engineerFilter, fromDate, toDate, progressFilter]);
+  }, [sites, engineers, searchQuery, statusFilter, engineerFilter, fromDate, toDate, progressFilter]);
 
   const handleResetFilters = () => {
     setSearchQuery("");
@@ -798,11 +822,15 @@ export default function Sites({ embedded = false }) {
   };
 
   if (selectedSiteId) {
+    const selectedSiteObj = sites.find(s => s.id === selectedSiteId);
     return (
       <SiteDetails 
         siteId={selectedSiteId} 
+        initialSite={selectedSiteObj}
+        allEngineers={engineers}
         onBack={() => setSelectedSiteId(null)} 
         embedded={embedded}
+        readOnly={isReadOnly}
       />
     );
   }
@@ -817,8 +845,8 @@ export default function Sites({ embedded = false }) {
         </div>
       )}
 
-      {/* Pending Location Approvals Section */}
-      {sites.some(s => s.locationStatus === "Pending Approval") && (
+      {/* Pending Location Approvals Section (Admin Only) */}
+      {!isReadOnly && sites.some(s => s.locationStatus === "Pending Approval") && (
         <Card 
           title="Pending Location Approvals" 
           style={{ 
@@ -848,7 +876,7 @@ export default function Sites({ embedded = false }) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          gap: "16px",
+          gap: "14px",
           marginBottom: "24px",
           flexWrap: "wrap",
           width: "100%",
@@ -859,9 +887,9 @@ export default function Sites({ embedded = false }) {
         <div 
           className="sites-search-wrapper"
           style={{ 
-            flex: "1 1 320px", 
-            maxWidth: "460px", 
-            minWidth: "260px",
+            flex: "1 1 260px", 
+            maxWidth: "380px", 
+            minWidth: "220px",
             position: "relative"
           }}
         >
@@ -880,17 +908,17 @@ export default function Sites({ embedded = false }) {
             />
             <input 
               type="text" 
-              placeholder="Search sites by name, client, or location..." 
+              placeholder="Search site name, code, location, or engineer..." 
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               style={{
                 width: "100%",
-                height: "44px",
+                height: "42px",
                 padding: "0 16px 0 42px",
                 borderRadius: "10px",
                 border: "1.5px solid var(--border-color)",
                 backgroundColor: "#ffffff",
-                fontSize: "13.5px",
+                fontSize: "13px",
                 fontWeight: "500",
                 color: "var(--text-dark)",
                 outline: "none",
@@ -910,6 +938,33 @@ export default function Sites({ embedded = false }) {
           </div>
         </div>
 
+        {/* Status Filter Select */}
+        <div style={{ minWidth: "160px", flex: "0 1 180px" }}>
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            style={{
+              width: "100%",
+              height: "42px",
+              padding: "0 12px",
+              borderRadius: "10px",
+              border: "1.5px solid var(--border-color)",
+              backgroundColor: "#ffffff",
+              fontSize: "12.5px",
+              fontWeight: "650",
+              color: "var(--primary-900)",
+              outline: "none",
+              cursor: "pointer"
+            }}
+          >
+            <option value="all">All Statuses ({sites.length})</option>
+            <option value="Active">Active ({sites.filter(s => s.status === "Active" || s.status === "Running").length})</option>
+            <option value="Planning">Planning ({sites.filter(s => s.status === "Planning").length})</option>
+            <option value="Completed">Completed ({sites.filter(s => s.status === "Completed").length})</option>
+            <option value="Delayed">Delayed / Overdue ({sites.filter(s => s.expectedEndDate && s.expectedEndDate < new Date().toISOString().split("T")[0] && s.status !== "Completed").length})</option>
+          </select>
+        </div>
+
         {/* Action Controls */}
         <div 
           className="sites-actions-group"
@@ -922,38 +977,42 @@ export default function Sites({ embedded = false }) {
           }}
         >
           <ViewToggle viewMode={viewMode} onChange={setViewMode} />
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setShowAdminEntryModal(true)}
-            style={{ 
-              display: "flex", 
-              alignItems: "center", 
-              gap: "6px", 
-              backgroundColor: "#eff6ff", 
-              borderColor: "#bfdbfe", 
-              color: "#1d4ed8", 
-              fontWeight: "750",
-              height: "44px",
-              padding: "0 16px",
-              whiteSpace: "nowrap"
-            }}
-          >
-            <Shield size={16} />
-            <span>Add Entry for Engineer</span>
-          </Button>
-          <Button 
-            onClick={handleOpenAddModal} 
-            icon={Plus} 
-            className="btn-add"
-            style={{
-              height: "44px",
-              padding: "0 18px",
-              whiteSpace: "nowrap"
-            }}
-          >
-            Add Site
-          </Button>
+          {!isReadOnly && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowAdminEntryModal(true)}
+                style={{ 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: "6px", 
+                  backgroundColor: "#eff6ff", 
+                  borderColor: "#bfdbfe", 
+                  color: "#1d4ed8", 
+                  fontWeight: "750",
+                  height: "42px",
+                  padding: "0 16px",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                <Shield size={16} />
+                <span>Add Entry for Engineer</span>
+              </Button>
+              <Button 
+                onClick={handleOpenAddModal} 
+                icon={Plus} 
+                className="btn-add"
+                style={{
+                  height: "42px",
+                  padding: "0 18px",
+                  whiteSpace: "nowrap"
+                }}
+              >
+                Add Site
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
@@ -1027,13 +1086,19 @@ export default function Sites({ embedded = false }) {
               const initials = site.siteName ? site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
               const budgetVal = getSiteBudget(site);
               const budgetFormatted = budgetVal > 0 ? formatINR(budgetVal) : "—";
+              const isDelayed = site.expectedEndDate && site.expectedEndDate < new Date().toISOString().split("T")[0] && site.status !== "Completed";
+
+              const assignedUids = new Set([
+                ...(site.assignedEngineers || [])
+              ].filter(Boolean));
+              const assignedEngineersList = engineers.filter(e => assignedUids.has(e.id) || assignedUids.has(e.uid) || (e.email && assignedUids.has(e.email)));
 
               return (
                 <div
                   key={site.id}
                   style={{
                     background: "#ffffff",
-                    border: "1px solid var(--border-color)",
+                    border: isDelayed ? "1.5px solid #fca5a5" : "1px solid var(--border-color)",
                     borderRadius: "12px",
                     padding: "16px",
                     boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
@@ -1080,24 +1145,31 @@ export default function Sites({ embedded = false }) {
                           <span style={{ fontSize: "12px", color: "#64748b" }}>{site.clientName || "No Client"}</span>
                         </div>
                       </div>
-                      <span style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "4px",
-                        padding: "3px 8px",
-                        borderRadius: "12px",
-                        fontSize: "11px",
-                        fontWeight: "700",
-                        backgroundColor: sc.bg,
-                        color: sc.color,
-                        border: `1px solid ${sc.border}`
-                      }}>
-                        <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc.dot }} />
-                        {site.status || "Planning"}
-                      </span>
+                      <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "4px" }}>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "3px 8px",
+                          borderRadius: "12px",
+                          fontSize: "11px",
+                          fontWeight: "700",
+                          backgroundColor: sc.bg,
+                          color: sc.color,
+                          border: `1px solid ${sc.border}`
+                        }}>
+                          <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: sc.dot }} />
+                          {site.status || "Planning"}
+                        </span>
+                        {isDelayed && (
+                          <span style={{ fontSize: "10px", fontWeight: "800", color: "#dc2626", backgroundColor: "#fef2f2", padding: "1px 6px", borderRadius: "4px", border: "1px solid #fee2e2" }}>
+                            OVERDUE
+                          </span>
+                        )}
+                      </div>
                     </div>
 
-                    {/* Details: Location, Budget, Timeline */}
+                    {/* Details: Location, Budget, Timeline, Engineers */}
                     <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px", color: "#475569" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
                         <MapPin size={13} style={{ color: "#ea580c", flexShrink: 0 }} />
@@ -1111,84 +1183,111 @@ export default function Sites({ embedded = false }) {
                         <span style={{ color: "#64748b" }}>Dates:</span>
                         <span>{formatDateDMY(site.startDate)} to {formatDateDMY(site.expectedEndDate)}</span>
                       </div>
+
+                      {/* Assigned Engineers Snapshot */}
+                      {assignedEngineersList.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", alignItems: "center", borderTop: "1px solid #f8fafc", paddingTop: "6px", marginTop: "2px" }}>
+                          <span style={{ fontSize: "11px", color: "#64748b", fontWeight: "600" }}>Engineers:</span>
+                          {assignedEngineersList.slice(0, 2).map(e => (
+                            <span key={e.id || e.uid} style={{ fontSize: "11.5px", color: "#334155", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: "650" }}>
+                              <span style={{ color: "#16a34a", fontSize: "9px" }}>●</span> {e.fullName?.split(' ')[0] || e.name || "Engineer"}
+                            </span>
+                          ))}
+                          {assignedEngineersList.length > 2 && (
+                            <span style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "600" }}>+{assignedEngineersList.length - 2} more</span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
                   {/* Actions Footer */}
-                  <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "6px", borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
-                    <Button 
-                      onClick={() => setSelectedSiteId(site.id)} 
-                      variant="outline" 
-                      style={{ height: "30px", padding: "0 10px", fontSize: "11.5px" }}
-                    >
-                      View Details
-                    </Button>
-                    <button
-                      className="btn-icon btn-view-action"
-                      onClick={() => setSelectedSiteId(site.id)}
-                      title="View Site Dashboard"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#2563eb",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: "28px",
-                        height: "28px",
-                        transition: "transform 0.15s ease, color 0.15s ease",
-                        outline: "none"
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
-                    >
-                      <Building2 size={16} />
-                    </button>
-                    <button
-                      className="btn-icon btn-edit-action"
-                      onClick={() => handleOpenEditModal(site)}
-                      title="Edit Site"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#ea580c",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: "28px",
-                        height: "28px",
-                        transition: "transform 0.15s ease, color 0.15s ease",
-                        outline: "none"
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
-                    >
-                      <Edit3 size={16} />
-                    </button>
-                    <button
-                      className="btn-icon btn-delete-action"
-                      onClick={() => handleDeleteSite(site)}
-                      title="Delete Site"
-                      style={{
-                        background: "transparent",
-                        border: "none",
-                        color: "#dc2626",
-                        cursor: "pointer",
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        width: "28px",
-                        height: "28px",
-                        transition: "transform 0.15s ease, color 0.15s ease",
-                        outline: "none"
-                      }}
-                      onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
-                      onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: isReadOnly ? "stretch" : "flex-end", gap: "6px", borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
+                    {isReadOnly ? (
+                      <Button 
+                        onClick={() => setSelectedSiteId(site.id)} 
+                        variant="outline" 
+                        style={{ height: "32px", width: "100%", fontSize: "12px", fontWeight: "750", color: "#c2410c", borderColor: "#fed7aa", backgroundColor: "#fff7ed" }}
+                      >
+                        Inspect Site Operations →
+                      </Button>
+                    ) : (
+                      <>
+                        <Button 
+                          onClick={() => setSelectedSiteId(site.id)} 
+                          variant="outline" 
+                          style={{ height: "30px", padding: "0 10px", fontSize: "11.5px" }}
+                        >
+                          View Details
+                        </Button>
+                        <button
+                          className="btn-icon btn-view-action"
+                          onClick={() => setSelectedSiteId(site.id)}
+                          title="View Site Dashboard"
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#2563eb",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "28px",
+                            height: "28px",
+                            transition: "transform 0.15s ease, color 0.15s ease",
+                            outline: "none"
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
+                          onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
+                        >
+                          <Building2 size={16} />
+                        </button>
+                        <button
+                          className="btn-icon btn-edit-action"
+                          onClick={() => handleOpenEditModal(site)}
+                          title="Edit Site"
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#ea580c",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "28px",
+                            height: "28px",
+                            transition: "transform 0.15s ease, color 0.15s ease",
+                            outline: "none"
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                          onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                        <button
+                          className="btn-icon btn-delete-action"
+                          onClick={() => handleDeleteSite(site)}
+                          title="Delete Site"
+                          style={{
+                            background: "transparent",
+                            border: "none",
+                            color: "#dc2626",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: "28px",
+                            height: "28px",
+                            transition: "transform 0.15s ease, color 0.15s ease",
+                            outline: "none"
+                          }}
+                          onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                          onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -1346,80 +1445,93 @@ export default function Sites({ embedded = false }) {
                       {/* Actions column */}
                       <td style={{ paddingRight: "20px" }}>
                         <div className="table-actions" style={{ justifyContent: "flex-end" }}>
-                          {/* View */}
-                          <button
-                            className="btn-icon btn-view-action"
-                            onClick={() => setSelectedSiteId(site.id)}
-                            title="View Site Dashboard"
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#2563eb",
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              transition: "transform 0.15s ease, color 0.15s ease",
-                              outline: "none",
-                              flexShrink: 0
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
-                          >
-                            <Building2 size={15} />
-                          </button>
+                          {isReadOnly ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setSelectedSiteId(site.id)}
+                              style={{ fontSize: "11.5px", fontWeight: "750", color: "#c2410c", borderColor: "#fed7aa", backgroundColor: "#fff7ed" }}
+                            >
+                              Inspect
+                            </Button>
+                          ) : (
+                            <>
+                              {/* View */}
+                              <button
+                                className="btn-icon btn-view-action"
+                                onClick={() => setSelectedSiteId(site.id)}
+                                title="View Site Dashboard"
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#2563eb",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  width: "28px",
+                                  height: "28px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none",
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#1d4ed8"; }}
+                                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#2563eb"; }}
+                              >
+                                <Building2 size={15} />
+                              </button>
 
-                          {/* Edit */}
-                          <button
-                            className="btn-icon btn-edit-action"
-                            onClick={() => handleOpenEditModal(site)}
-                            title="Edit Site"
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#ea580c",
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              transition: "transform 0.15s ease, color 0.15s ease",
-                              outline: "none",
-                              flexShrink: 0
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
-                          >
-                            <Edit3 size={15} />
-                          </button>
+                              {/* Edit */}
+                              <button
+                                className="btn-icon btn-edit-action"
+                                onClick={() => handleOpenEditModal(site)}
+                                title="Edit Site"
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#ea580c",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  width: "28px",
+                                  height: "28px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none",
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#c2410c"; }}
+                                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#ea580c"; }}
+                              >
+                                <Edit3 size={15} />
+                              </button>
 
-                          {/* Delete */}
-                          <button
-                            className="btn-icon btn-delete-action"
-                            onClick={() => handleDeleteSite(site)}
-                            title="Delete Site"
-                            style={{
-                              background: "transparent",
-                              border: "none",
-                              color: "#dc2626",
-                              cursor: "pointer",
-                              display: "inline-flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              width: "28px",
-                              height: "28px",
-                              transition: "transform 0.15s ease, color 0.15s ease",
-                              outline: "none",
-                              flexShrink: 0
-                            }}
-                            onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
-                            onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                              {/* Delete */}
+                              <button
+                                className="btn-icon btn-delete-action"
+                                onClick={() => handleDeleteSite(site)}
+                                title="Delete Site"
+                                style={{
+                                  background: "transparent",
+                                  border: "none",
+                                  color: "#dc2626",
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  width: "28px",
+                                  height: "28px",
+                                  transition: "transform 0.15s ease, color 0.15s ease",
+                                  outline: "none",
+                                  flexShrink: 0
+                                }}
+                                onMouseEnter={e => { e.currentTarget.style.transform = "scale(1.22)"; e.currentTarget.style.color = "#b91c1c"; }}
+                                onMouseLeave={e => { e.currentTarget.style.transform = "scale(1)"; e.currentTarget.style.color = "#dc2626"; }}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            </>
+                          )}
                         </div>
                       </td>
                     </tr>

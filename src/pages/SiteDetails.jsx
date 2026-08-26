@@ -135,10 +135,35 @@ const normalizeDateToISO = (dateVal) => {
   return s;
 };
 
-export default function SiteDetails({ siteId, onBack, embedded = false }) {
+export default function SiteDetails({ 
+  siteId, 
+  onBack, 
+  embedded = false, 
+  initialSite = null, 
+  allEngineers = [], 
+  readOnly = false 
+}) {
   const { userProfile } = useAuth();
-  const [site, setSite] = useState(null);
-  const [engineers, setEngineers] = useState([]);
+  const userRole = userProfile?.role || "admin";
+  const isReadOnly = readOnly || userRole === "super_admin" || userRole === "superadmin";
+
+  const [site, setSite] = useState(initialSite || null);
+  const [engineers, setEngineers] = useState(() => {
+    if (initialSite && Array.isArray(allEngineers) && allEngineers.length > 0) {
+      return allEngineers.filter(eng => {
+        const isDirect = initialSite.assignedEngineers && (
+          initialSite.assignedEngineers.includes(eng.id) ||
+          initialSite.assignedEngineers.includes(eng.uid) ||
+          initialSite.assignedEngineers.includes(eng.customId) ||
+          initialSite.assignedEngineers.includes(eng.engineerId) ||
+          (eng.email && initialSite.assignedEngineers.includes(eng.email))
+        );
+        const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(initialSite.id);
+        return isDirect || isReverse;
+      });
+    }
+    return [];
+  });
   const [materials, setMaterials] = useState([]);
   const [labourHistory, setLabourHistory] = useState([]);
   const [attendance, setAttendance] = useState([]);
@@ -149,7 +174,7 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
   const [teams, setTeams] = useState([]);
   const [siteTransfers, setSiteTransfers] = useState([]);
   
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!initialSite);
   const [activeTab, setActiveTab] = useState("overview");
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
   const [showSiteInfoModal, setShowSiteInfoModal] = useState(false);
@@ -465,55 +490,60 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
 
   const loadData = async () => {
     try {
-      setLoading(true);
-      // Fetch all site details and related logs concurrently
-      const [
-        fetchedSites,
-        fetchedEngineers,
-        mats,
-        labour,
-        attend,
-        progress,
-        payments,
-        fetchedTeams
-      ] = await Promise.all([
-        getSites(),
-        getSiteEngineers(),
+      // 1. If site is not yet loaded from initialSite prop, fetch site & engineers first
+      if (!site) {
+        setLoading(true);
+        try {
+          const [fetchedSites, fetchedEngineers] = await Promise.all([
+            getSites(),
+            getSiteEngineers()
+          ]);
+          const currentSite = (fetchedSites || []).find(s => s.id === siteId);
+          if (currentSite) {
+            setSite(currentSite);
+            const assigned = (fetchedEngineers || []).filter(eng => {
+              const isDirect = currentSite.assignedEngineers && (
+                currentSite.assignedEngineers.includes(eng.id) ||
+                currentSite.assignedEngineers.includes(eng.uid) ||
+                currentSite.assignedEngineers.includes(eng.customId) ||
+                currentSite.assignedEngineers.includes(eng.engineerId) ||
+                (eng.email && currentSite.assignedEngineers.includes(eng.email))
+              );
+              const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(currentSite.id);
+              return isDirect || isReverse;
+            });
+            setEngineers(assigned);
+          } else {
+            showToast("Site not found.", "error");
+            onBack();
+            return;
+          }
+        } catch (e) {
+          console.warn("Primary site fetch error:", e);
+        }
+      }
+
+      // Dismiss primary loading immediately so overview and header render right away
+      setLoading(false);
+
+      // 2. Fetch secondary datasets asynchronously without blocking the UI
+      Promise.allSettled([
         getMaterialsDetailed(siteId),
         getLabourDailyCountsSummary(siteId),
         getAttendanceForSite(siteId),
         getDailyUpdatesForSite(siteId),
         getLabourPayments(siteId),
         getLabourTeams()
-      ]);
-
-      const currentSite = fetchedSites.find(s => s.id === siteId);
-      if (!currentSite) {
-        showToast("Site not found.", "error");
-        onBack();
-        return;
-      }
-      setSite(currentSite);
-
-      const assigned = fetchedEngineers.filter(eng => {
-        const isDirect = currentSite.assignedEngineers && (
-          currentSite.assignedEngineers.includes(eng.id) ||
-          currentSite.assignedEngineers.includes(eng.uid) ||
-          currentSite.assignedEngineers.includes(eng.customId) ||
-          currentSite.assignedEngineers.includes(eng.engineerId) ||
-          (eng.email && currentSite.assignedEngineers.includes(eng.email))
-        );
-        const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(currentSite.id);
-        return isDirect || isReverse;
+      ]).then(([matsRes, labourRes, attendRes, progRes, payRes, teamsRes]) => {
+        if (matsRes.status === "fulfilled" && matsRes.value) setMaterials(matsRes.value);
+        if (labourRes.status === "fulfilled" && labourRes.value) setLabourHistory(labourRes.value);
+        if (attendRes.status === "fulfilled" && attendRes.value) setAttendance(attendRes.value);
+        if (progRes.status === "fulfilled" && progRes.value) setProgressUpdates(progRes.value);
+        if (payRes.status === "fulfilled" && payRes.value) setSitePayments(payRes.value);
+        if (teamsRes.status === "fulfilled" && teamsRes.value) setTeams(teamsRes.value);
+      }).catch(err => {
+        console.warn("Secondary datasets load warning:", err);
       });
-      setEngineers(assigned);
-
-      setMaterials(mats);
-      setLabourHistory(labour);
-      setAttendance(attend);
-      setProgressUpdates(progress);
-      setSitePayments(payments || []);
-      setTeams(fetchedTeams || []);
 
     } catch (err) {
       console.error("Error loading site details:", err);
@@ -1115,11 +1145,11 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
           </div>
 
           {/* Labour Advance Entry Form or Read-Only Notice */}
-          <Card title="Labour Advance Payments" subtitle={isSiteCompleted ? `Historical advance records for ${site.siteName} (Read-Only)` : `Post an advance payment linked to ${site.siteName}`}>
-            {isSiteCompleted ? (
+          <Card title="Labour Advance Payments" subtitle={isSiteCompleted || isReadOnly ? `Historical advance records for ${site.siteName} (Read-Only)` : `Post an advance payment linked to ${site.siteName}`}>
+            {isSiteCompleted || isReadOnly ? (
               <div style={{ padding: "14px 16px", backgroundColor: "#f8fafc", borderRadius: "10px", border: "1px solid #e2e8f0", color: "#64748b", fontSize: "13px", fontWeight: "600", display: "flex", alignItems: "center", gap: "8px" }}>
                 <Lock size={16} style={{ color: "#166534" }} />
-                <span>This site is marked as Completed. New labour advances cannot be recorded in read-only archive mode.</span>
+                <span>{isSiteCompleted ? "This site is marked as Completed. New labour advances cannot be recorded in read-only archive mode." : "Executive Owner Monitoring Mode: Labour advance entry is restricted to project administrators."}</span>
               </div>
             ) : (
               <form onSubmit={handleSaveLabourAdvance} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: "16px", alignItems: "flex-end" }}>
@@ -1291,9 +1321,9 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
               <strong style={{ color: "#16a34a", fontWeight: "800", fontSize: "16px" }}>{isSiteCompleted ? 100 : Math.min(100, Math.max(0, Number(site.progress) || Number(site.completionPercentage) || 0))}%</strong>
             </div>
 
-            {/* Action Buttons */}
+            {/* Action Buttons (Admin Only) */}
             <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-              {!isSiteCompleted && (
+              {!isReadOnly && !isSiteCompleted && (
                 <button
                   type="button"
                   onClick={() => setShowAdminEntryModal(true)}
@@ -1318,7 +1348,7 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
                 </button>
               )}
 
-              {!isSiteCompleted ? (
+              {!isReadOnly && (!isSiteCompleted ? (
                 <button
                   type="button"
                   onClick={handleOpenCompletionModal}
@@ -1363,7 +1393,7 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
                   <Unlock size={14} />
                   <span>Reopen Site</span>
                 </button>
-              )}
+              ))}
             </div>
           </div>
         </div>
@@ -2016,7 +2046,7 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
                                 >
                                   <Eye size={16} />
                                 </button>
-                                {!isSiteCompleted && (
+                                {!isSiteCompleted && !isReadOnly && (
                                   <>
                                     <button 
                                       onClick={() => handleOpenEditMaterial(mat)} 
@@ -2359,18 +2389,20 @@ export default function SiteDetails({ siteId, onBack, embedded = false }) {
                     )}
 
                     <div style={{ display: "flex", gap: "10px", marginTop: "6px" }}>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        onClick={() => {
-                          setShowMaterialDetailsModal(false);
-                          handleOpenEditMaterial(row);
-                        }}
-                        style={{ flex: 1 }}
-                      >
-                        <Edit3 size={15} />
-                        <span>Edit Record</span>
-                      </Button>
+                      {!isReadOnly && !isSiteCompleted && (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => {
+                            setShowMaterialDetailsModal(false);
+                            handleOpenEditMaterial(row);
+                          }}
+                          style={{ flex: 1 }}
+                        >
+                          <Edit3 size={15} />
+                          <span>Edit Record</span>
+                        </Button>
+                      )}
                       <Button
                         type="button"
                         variant="primary"

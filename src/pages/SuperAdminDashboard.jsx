@@ -85,6 +85,7 @@ import {
 import { Link } from "react-router-dom";
 import ReportsDashboard from "./ReportsDashboard";
 import Sites from "./Sites";
+import SiteDetails from "./SiteDetails";
 
 export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const { userProfile } = useAuth();
@@ -211,6 +212,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // ── Activity Log Filter ──
   const [activitySearchQuery, setActivitySearchQuery] = useState("");
   const [activityModuleFilter, setActivityModuleFilter] = useState("all");
+
+  // ── Schedule & Standing View States ──
+  const [scheduleSearchQuery, setScheduleSearchQuery] = useState("");
+  const [scheduleStatusFilter, setScheduleStatusFilter] = useState("all");
+  const [scheduleSubTab, setScheduleSubTab] = useState("standing"); // "standing" | "timeline" | "attention"
+  const [scheduleDateFilter, setScheduleDateFilter] = useState("");
+  const [selectedScheduleSiteId, setSelectedScheduleSiteId] = useState(null);
+  const [scheduleViewMode, setScheduleViewMode] = useState("table"); // "table" | "grid"
 
   const [laborHistoryMap, setLaborHistoryMap] = useState({});
   const [showAllAlerts, setShowAllAlerts] = useState(false);
@@ -1466,7 +1475,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // VIEW 2: ALL SITES OPERATIONS (CANONICAL ADMIN SITES REUSE)
   // ══════════════════════════════════════════════════════════════════════════
   const renderSitesView = () => {
-    return <Sites embedded={true} />;
+    return <Sites embedded={true} readOnly={true} />;
   };
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -2104,95 +2113,1210 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 9: SCHEDULE STANDING & PROGRESS
+  // VIEW 9: SCHEDULE STANDING & PROGRESS MONITORING (OWNER-LEVEL)
   // ══════════════════════════════════════════════════════════════════════════
   const renderProgressView = () => {
-    const delayedList = sites.filter(s => isSiteDelayed(s));
+    // If a site is selected for drill-down inspection
+    if (selectedScheduleSiteId) {
+      const selectedSiteObj = sites.find(s => s.id === selectedScheduleSiteId);
+      if (selectedSiteObj) {
+        return (
+          <SiteDetails 
+            siteId={selectedScheduleSiteId} 
+            initialSite={selectedSiteObj}
+            allEngineers={engineers}
+            onBack={() => setSelectedScheduleSiteId(null)} 
+            embedded={true}
+            readOnly={true}
+          />
+        );
+      }
+    }
+
+    const todayStr = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    const todayObj = new Date();
+    const todayPlus14Obj = new Date();
+    todayPlus14Obj.setDate(todayPlus14Obj.getDate() + 14);
+    const todayPlus14Str = todayPlus14Obj.toISOString().split("T")[0];
+    const sevenDaysAgoObj = new Date();
+    sevenDaysAgoObj.setDate(sevenDaysAgoObj.getDate() - 7);
+    const sevenDaysAgoStr = sevenDaysAgoObj.toISOString().split("T")[0];
+
+    // Helper to calculate latest field activity timestamp and summary for each site
+    const getSiteLatestActivity = (siteId) => {
+      const dprs = allDprs.filter(d => d.siteId === siteId);
+      const acts = systemActivities.filter(a => a.siteId === siteId);
+      const labours = (rawLabourAttendance || []).filter(r => r.siteId === siteId && !r.lockedMetadata);
+      
+      let latestDate = null;
+      let latestSummary = "No recent field reports";
+
+      if (dprs.length > 0) {
+        const sorted = [...dprs].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+        latestDate = sorted[0].date;
+        latestSummary = sorted[0].workDescription || sorted[0].workDone || "DPR Log Submitted";
+      }
+      if (labours.length > 0) {
+        const sortedL = [...labours].sort((a, b) => (b.attendanceDate || b.date || "").localeCompare(a.attendanceDate || a.date || ""));
+        const labDate = sortedL[0].attendanceDate || sortedL[0].date;
+        if (!latestDate || (labDate && labDate > latestDate)) {
+          latestDate = labDate;
+          latestSummary = `Labour: ${sortedL[0].categoryName || 'Workforce'} deployed`;
+        }
+      }
+      if (acts.length > 0) {
+        const actDate = acts[0].createdAt?.seconds ? new Date(acts[0].createdAt.seconds * 1000).toISOString().split("T")[0] : null;
+        if (!latestDate || (actDate && actDate > latestDate)) {
+          latestDate = actDate;
+          latestSummary = acts[0].description || acts[0].actionType || "System Action";
+        }
+      }
+      return { latestDate, latestSummary };
+    };
+
+    // Calculate standing records for each canonical site
+    const siteStandings = sites.map(site => {
+      const siteMaterials = materials.filter(m => m.siteId === site.id);
+      const siteLabour = laborHistoryMap[site.id] || [];
+      const siteDprs = allDprs.filter(d => d.siteId === site.id);
+      const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
+      const actualProgress = financials.progressPercent;
+      const plannedProgress = calculatePlannedProgress(site.startDate, site.expectedEndDate);
+      const gap = actualProgress - plannedProgress;
+      const isDelayed = isSiteDelayed(site);
+
+      // Schedule Standing State
+      let standing = "On Track";
+      let standingBadge = "info";
+      let standingColor = "#0284c7";
+      let standingBg = "#f0f9ff";
+      let standingBorder = "#bae6fd";
+
+      if (site.status === "Completed") {
+        standing = "Completed";
+        standingBadge = "success";
+        standingColor = "#16a34a";
+        standingBg = "#f0fdf4";
+        standingBorder = "#bbf7d0";
+      } else if (site.status === "Planning") {
+        standing = "Planning";
+        standingBadge = "default";
+        standingColor = "#64748b";
+        standingBg = "#f8fafc";
+        standingBorder = "#e2e8f0";
+      } else if (isDelayed) {
+        standing = "Delayed / Overdue";
+        standingBadge = "danger";
+        standingColor = "#dc2626";
+        standingBg = "#fef2f2";
+        standingBorder = "#fecaca";
+      } else if (gap < -5) {
+        standing = "Behind Schedule";
+        standingBadge = "danger";
+        standingColor = "#ea580c";
+        standingBg = "#fff7ed";
+        standingBorder = "#fed7aa";
+      } else if (gap > 5) {
+        standing = "Ahead of Schedule";
+        standingBadge = "success";
+        standingColor = "#15803d";
+        standingBg = "#f0fdf4";
+        standingBorder = "#bbf7d0";
+      } else {
+        standing = "On Track";
+        standingBadge = "info";
+        standingColor = "#0284c7";
+        standingBg = "#f0f9ff";
+        standingBorder = "#bae6fd";
+      }
+
+      // Today's worker count for this site
+      const todayLabourRecords = (rawLabourAttendance || []).filter(r => {
+        if (!r || r.lockedMetadata || r.siteId !== site.id) return false;
+        return (r.attendanceDate || r.date) === todayStr;
+      });
+      const todayWorkerCount = todayLabourRecords.reduce((sum, r) => sum + resolveLabourRecordCalculations(r).workerCount, 0);
+
+      // Assigned field engineers
+      const assignedUids = new Set([
+        ...(site.assignedEngineers || []),
+        ...assignments.filter(a => a.siteId === site.id).map(a => a.engineerId || a.userId)
+      ].filter(Boolean));
+      const assignedEngineersList = engineers.filter(e => assignedUids.has(e.id) || assignedUids.has(e.uid) || (e.email && assignedUids.has(e.email)));
+
+      // Due soon check (within next 14 days)
+      const isDueSoon = site.status !== "Completed" && site.expectedEndDate && site.expectedEndDate >= todayStr && site.expectedEndDate <= todayPlus14Str;
+
+      // Activity check (no updates in > 7 days)
+      const { latestDate, latestSummary } = getSiteLatestActivity(site.id);
+      const isNoRecentActivity = site.status !== "Completed" && (!latestDate || latestDate < sevenDaysAgoStr);
+
+      // Days remaining or overdue
+      let daysDiffText = "—";
+      if (site.expectedEndDate) {
+        const diffMs = new Date(site.expectedEndDate).getTime() - todayObj.getTime();
+        const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+        if (site.status === "Completed") {
+          daysDiffText = "Finished";
+        } else if (diffDays < 0) {
+          daysDiffText = `${Math.abs(diffDays)}d overdue`;
+        } else if (diffDays === 0) {
+          daysDiffText = "Due today";
+        } else {
+          daysDiffText = `${diffDays}d remaining`;
+        }
+      }
+
+      return {
+        site,
+        actualProgress,
+        plannedProgress,
+        gap,
+        isDelayed,
+        isDueSoon,
+        isNoRecentActivity,
+        standing,
+        standingBadge,
+        standingColor,
+        standingBg,
+        standingBorder,
+        todayWorkerCount,
+        assignedEngineersList,
+        latestDate,
+        latestSummary,
+        daysDiffText
+      };
+    });
+
+    // Executive KPI Summary Counts
+    const totalSitesCount = sites.length;
+    const activeSitesCount = sites.filter(s => s.status === "Active" || s.status === "Running").length;
+    const planningSitesCount = sites.filter(s => s.status === "Planning").length;
+    const completedSitesCount = sites.filter(s => s.status === "Completed").length;
+    const delayedSitesCount = siteStandings.filter(s => s.isDelayed || s.standing === "Behind Schedule").length;
+    const dueSoonSitesCount = siteStandings.filter(s => s.isDueSoon).length;
+    const noRecentActivityCount = siteStandings.filter(s => s.isNoRecentActivity).length;
+    
+    const activeStandings = siteStandings.filter(s => s.site.status === "Active" || s.site.status === "Running");
+    const avgPortfolioProgress = activeStandings.length > 0
+      ? Math.round(activeStandings.reduce((sum, s) => sum + s.actualProgress, 0) / activeStandings.length)
+      : 0;
+
+    // Filter site standings for table/grid view
+    const filteredStandings = siteStandings.filter(item => {
+      // Search Query Filter
+      if (scheduleSearchQuery.trim()) {
+        const q = scheduleSearchQuery.toLowerCase().trim();
+        const mName = (item.site.siteName || "").toLowerCase().includes(q);
+        const mClient = (item.site.clientName || "").toLowerCase().includes(q);
+        const mLoc = (item.site.location || "").toLowerCase().includes(q);
+        const mCode = (item.site.siteCode || item.site.id || "").toLowerCase().includes(q);
+        const mEng = item.assignedEngineersList.some(e => ((e.fullName || "").toLowerCase().includes(q) || (e.name || "").toLowerCase().includes(q)));
+        if (!mName && !mClient && !mLoc && !mCode && !mEng) return false;
+      }
+
+      // Status Filter
+      if (scheduleStatusFilter !== "all") {
+        if (scheduleStatusFilter === "Delayed") {
+          if (!item.isDelayed && item.standing !== "Behind Schedule") return false;
+        } else if (scheduleStatusFilter === "Due Soon") {
+          if (!item.isDueSoon) return false;
+        } else if (scheduleStatusFilter === "No Recent Activity") {
+          if (!item.isNoRecentActivity) return false;
+        } else if (scheduleStatusFilter === "Ahead") {
+          if (item.standing !== "Ahead of Schedule") return false;
+        } else if (scheduleStatusFilter === "On Track") {
+          if (item.standing !== "On Track") return false;
+        } else if (scheduleStatusFilter === "Active") {
+          if (item.site.status !== "Active" && item.site.status !== "Running") return false;
+        } else if (scheduleStatusFilter === "Planning") {
+          if (item.site.status !== "Planning") return false;
+        } else if (scheduleStatusFilter === "Completed") {
+          if (item.site.status !== "Completed") return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Priority Attention List
+    const criticalAttentionList = siteStandings.filter(s => s.isDelayed || s.gap <= -10 || s.isDueSoon || s.isNoRecentActivity);
+
+    // Filtered Timeline / DPRs for Schedule Timeline tab
+    const filteredDprs = allDprs
+      .filter(d => {
+        if (scheduleDateFilter && d.date !== scheduleDateFilter) return false;
+        if (scheduleSearchQuery.trim()) {
+          const q = scheduleSearchQuery.toLowerCase().trim();
+          const sObj = sites.find(s => s.id === d.siteId);
+          const mSite = (sObj?.siteName || "").toLowerCase().includes(q);
+          const mEng = (d.engineerName || "").toLowerCase().includes(q);
+          const mDesc = (d.workDescription || d.workDone || "").toLowerCase().includes(q);
+          if (!mSite && !mEng && !mDesc) return false;
+        }
+        return true;
+      })
+      .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
 
     return (
-      <div className="admin-dashboard-container">
-        {/* Delayed Alert Card */}
-        {delayedList.length > 0 && (
-          <div className="admin-card" style={{ borderLeft: "4px solid var(--danger-500)", backgroundColor: "#fef2f2" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--danger-700)", fontWeight: "800", fontSize: "14px" }}>
-              <AlertTriangle size={18} />
-              <span>Delayed Construction Projects ({delayedList.length} sites require review)</span>
+      <div className="admin-dashboard-container" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        
+        {/* ── 1. Top Executive Overview KPI Summary Bar ── */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+          gap: "12px",
+          width: "100%"
+        }}>
+          {[
+            { label: "Total Sites", value: totalSitesCount, sub: "Registered projects", icon: "🏗️", bg: "#f8fafc", border: "#e2e8f0", color: "#334155" },
+            { label: "Active Sites", value: activeSitesCount, sub: "Under execution", icon: "⚡", bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d" },
+            { label: "Planning", value: planningSitesCount, sub: "Pre-construction", icon: "📐", bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" },
+            { label: "Completed", value: completedSitesCount, sub: "Delivered", icon: "✅", bg: "#f0fdf4", border: "#bbf7d0", color: "#16a34a" },
+            { label: "Delayed / Lagging", value: delayedSitesCount, sub: "Requires catch-up", icon: "⚠️", bg: delayedSitesCount > 0 ? "#fef2f2" : "#f8fafc", border: delayedSitesCount > 0 ? "#fecaca" : "#e2e8f0", color: delayedSitesCount > 0 ? "#dc2626" : "#64748b" },
+            { label: "Due in 14 Days", value: dueSoonSitesCount, sub: "Approaching target", icon: "⏳", bg: dueSoonSitesCount > 0 ? "#fffbeb" : "#f8fafc", border: dueSoonSitesCount > 0 ? "#fde68a" : "#e2e8f0", color: dueSoonSitesCount > 0 ? "#b45309" : "#64748b" },
+            { label: "No Recent Logs", value: noRecentActivityCount, sub: ">7 days inactive", icon: "💤", bg: noRecentActivityCount > 0 ? "#fff7ed" : "#f8fafc", border: noRecentActivityCount > 0 ? "#fed7aa" : "#e2e8f0", color: noRecentActivityCount > 0 ? "#c2410c" : "#64748b" },
+            { label: "Portfolio Progress", value: `${avgPortfolioProgress}%`, sub: "Avg across active", icon: "📊", bg: "#fdf4ff", border: "#f5d0fe", color: "#86198f" }
+          ].map((kpi, idx) => (
+            <div 
+              key={idx}
+              style={{
+                backgroundColor: kpi.bg,
+                border: `1.5px solid ${kpi.border}`,
+                borderRadius: "12px",
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "11.5px", fontWeight: "650", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                  {kpi.label}
+                </span>
+                <span style={{ fontSize: "14px" }}>{kpi.icon}</span>
+              </div>
+              <div style={{ fontSize: "20px", fontWeight: "850", color: kpi.color, fontFamily: "system-ui, sans-serif" }}>
+                {kpi.value}
+              </div>
+              <div style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "500" }}>
+                {kpi.sub}
+              </div>
             </div>
-            <ul style={{ margin: "6px 0 0 20px", padding: 0, fontSize: "13px", color: "#334155" }}>
-              {delayedList.map(s => {
-                const siteMaterials = materials.filter(m => m.siteId === s.id);
-                const siteLabour = laborHistoryMap[s.id] || [];
-                const siteDprs = allDprs.filter(d => d.siteId === s.id);
-                const financials = getSiteFinancials(s, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-                const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
-                
-                return (
-                  <li key={s.id} style={{ marginBottom: "4px" }}>
-                    <strong>{s.siteName}</strong>: Target completion: <u>{formatDateDMY(s.expectedEndDate)}</u>. Actual progress: <strong>{financials.progressPercent}%</strong> (Planned: {planned}%, Gap: -{planned - financials.progressPercent}%).
-                  </li>
-                );
-              })}
-            </ul>
+          ))}
+        </div>
+
+        {/* ── 2. Owner Priority Risk Alert Banner ── */}
+        {criticalAttentionList.length > 0 && (
+          <div 
+            style={{
+              backgroundColor: "#fef2f2",
+              border: "1.5px solid #fca5a5",
+              borderLeft: "5px solid #dc2626",
+              borderRadius: "12px",
+              padding: "16px 18px",
+              boxShadow: "0 2px 6px rgba(220, 38, 38, 0.06)"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <ShieldAlert size={18} style={{ color: "#dc2626", flexShrink: 0 }} />
+                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800", color: "#991b1b" }}>
+                  Executive Priority Attention ({criticalAttentionList.length} sites require owner oversight)
+                </h4>
+              </div>
+              <span style={{ fontSize: "11.5px", color: "#b91c1c", fontWeight: "600" }}>
+                Real-time Milestone Variance Analysis
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+              {criticalAttentionList.slice(0, 4).map(item => (
+                <div 
+                  key={item.site.id}
+                  onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: "1px solid #fee2e2",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px"
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#f87171"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(220,38,38,0.1)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#fee2e2"; e.currentTarget.style.boxShadow = "none"; }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>{item.site.siteName}</strong>
+                    <span style={{ fontSize: "10.5px", fontWeight: "750", color: item.standingColor, backgroundColor: item.standingBg, padding: "2px 6px", borderRadius: "4px", border: `1px solid ${item.standingBorder}` }}>
+                      {item.isDelayed ? "OVERDUE" : (item.gap <= -10 ? `${Math.abs(item.gap)}% LAG` : (item.isDueSoon ? "DUE SOON" : "INACTIVE"))}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    Target: <strong>{formatDateDMY(item.site.expectedEndDate)}</strong> ({item.daysDiffText})
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#475569", display: "flex", justifyContent: "space-between" }}>
+                    <span>Actual: <strong>{item.actualProgress}%</strong></span>
+                    <span>Planned: {item.plannedProgress}%</span>
+                    <span style={{ color: item.gap >= 0 ? "#16a34a" : "#dc2626", fontWeight: "700" }}>{item.gap >= 0 ? `+${item.gap}%` : `${item.gap}%`}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
-        <div className="admin-table-card">
-          <div className="admin-table-header">
-            <div>
-              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Corporate Site Progress Standing Ledger</h3>
-              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>Linear milestone targets vs actual execution progress and schedule status</p>
-            </div>
+        {/* ── 3. Sub-Navigation Tabs & Search Toolbar ── */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "14px",
+          flexWrap: "wrap",
+          width: "100%",
+          boxSizing: "border-box"
+        }}>
+          {/* Sub-Tabs Switcher */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            backgroundColor: "#f1f5f9",
+            padding: "4px",
+            borderRadius: "10px",
+            gap: "4px"
+          }}>
+            {[
+              { id: "standing", label: "Site Standing Ledger", count: filteredStandings.length, icon: LayoutGrid },
+              { id: "timeline", label: "Schedule & Daily Feed", count: filteredDprs.length, icon: Calendar },
+              { id: "attention", label: "Attention & Risks", count: criticalAttentionList.length, icon: AlertTriangle, alert: criticalAttentionList.length > 0 }
+            ].map(tabItem => {
+              const isActive = scheduleSubTab === tabItem.id;
+              const IconComp = tabItem.icon;
+              return (
+                <button
+                  key={tabItem.id}
+                  type="button"
+                  onClick={() => setScheduleSubTab(tabItem.id)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "7px 14px",
+                    borderRadius: "7px",
+                    border: "none",
+                    backgroundColor: isActive ? "#ffffff" : "transparent",
+                    color: isActive ? "#0f172a" : "#64748b",
+                    fontSize: "12.5px",
+                    fontWeight: isActive ? "750" : "600",
+                    cursor: "pointer",
+                    boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <IconComp size={14} style={{ color: isActive ? (tabItem.alert ? "#dc2626" : "#ea580c") : "#64748b" }} />
+                  <span>{tabItem.label}</span>
+                  <span style={{
+                    fontSize: "10.5px",
+                    fontWeight: "750",
+                    padding: "1px 6px",
+                    borderRadius: "10px",
+                    backgroundColor: isActive ? (tabItem.alert ? "#fee2e2" : "#ffedd5") : "#e2e8f0",
+                    color: isActive ? (tabItem.alert ? "#dc2626" : "#c2410c") : "#475569"
+                  }}>
+                    {tabItem.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
-          <div className="admin-table-scroll">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Site Name</th>
-                  <th>Client Name</th>
-                  <th>Target Completion Date</th>
-                  <th style={{ textAlign: "right" }}>Actual Progress</th>
-                  <th style={{ textAlign: "right" }}>Planned Target</th>
-                  <th style={{ textAlign: "right" }}>Variance (Gap)</th>
-                  <th>Schedule Standing</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sites.map(site => {
-                  const siteMaterials = materials.filter(m => m.siteId === site.id);
-                  const siteLabour = laborHistoryMap[site.id] || [];
-                  const siteDprs = allDprs.filter(d => d.siteId === site.id);
-                  const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-                  const planned = calculatePlannedProgress(site.startDate, site.expectedEndDate);
-                  const gap = financials.progressPercent - planned;
-                  
-                  let standingText = "On Track";
-                  let standingBadge = "success";
-                  if (gap < 0) {
-                    standingText = "Delayed";
-                    standingBadge = "danger";
-                  } else if (gap > 5) {
-                    standingText = "Ahead of Schedule";
-                    standingBadge = "success";
-                  }
-                  
-                  return (
-                    <tr key={site.id}>
-                      <td style={{ fontWeight: "700" }}>{site.siteName}</td>
-                      <td>{site.clientName || "—"}</td>
-                      <td className="font-mono">{formatDateDMY(site.expectedEndDate)}</td>
-                      <td style={{ textAlign: "right", fontWeight: "700" }}>{financials.progressPercent}%</td>
-                      <td style={{ textAlign: "right" }}>{planned}%</td>
-                      <td style={{ textAlign: "right", fontWeight: "700", color: gap >= 0 ? "var(--success-700)" : "var(--danger-700)" }}>
-                        {gap >= 0 ? `+${gap}%` : `${gap}%`}
-                      </td>
-                      <td><Badge status={standingBadge}>{standingText}</Badge></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+          {/* Search, Status Filter & Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", marginLeft: "auto" }}>
+            {/* Search Input */}
+            <div style={{ position: "relative", minWidth: "220px", maxWidth: "320px" }}>
+              <Search 
+                size={15} 
+                style={{ 
+                  position: "absolute", 
+                  left: "12px", 
+                  top: "50%", 
+                  transform: "translateY(-50%)", 
+                  color: "var(--text-muted)", 
+                  pointerEvents: "none" 
+                }} 
+              />
+              <input 
+                type="text" 
+                placeholder="Search site, client, engineer, code..." 
+                value={scheduleSearchQuery}
+                onChange={(e) => setScheduleSearchQuery(e.target.value)}
+                style={{
+                  width: "100%",
+                  height: "38px",
+                  padding: "0 12px 0 36px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "12.5px",
+                  fontWeight: "500",
+                  color: "var(--text-dark)",
+                  outline: "none",
+                  boxSizing: "border-box"
+                }}
+              />
+            </div>
+
+            {/* Status Select Filter */}
+            {scheduleSubTab === "standing" && (
+              <select
+                value={scheduleStatusFilter}
+                onChange={(e) => setScheduleStatusFilter(e.target.value)}
+                style={{
+                  height: "38px",
+                  padding: "0 10px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "650",
+                  color: "var(--primary-900)",
+                  outline: "none",
+                  cursor: "pointer"
+                }}
+              >
+                <option value="all">All Standing ({sites.length})</option>
+                <option value="Active">Active ({activeSitesCount})</option>
+                <option value="Planning">Planning ({planningSitesCount})</option>
+                <option value="Completed">Completed ({completedSitesCount})</option>
+                <option value="Delayed">Delayed / Overdue ({delayedSitesCount})</option>
+                <option value="Ahead">Ahead of Schedule</option>
+                <option value="On Track">On Track</option>
+                <option value="Due Soon">Due in 14 Days ({dueSoonSitesCount})</option>
+                <option value="No Recent Activity">No Recent Logs ({noRecentActivityCount})</option>
+              </select>
+            )}
+
+            {/* Date Filter for Timeline */}
+            {scheduleSubTab === "timeline" && (
+              <input
+                type="date"
+                value={scheduleDateFilter}
+                onChange={(e) => setScheduleDateFilter(e.target.value)}
+                style={{
+                  height: "38px",
+                  padding: "0 10px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--primary-900)",
+                  outline: "none",
+                  cursor: "pointer"
+                }}
+              />
+            )}
+
+            {/* Table / Grid Toggle */}
+            {scheduleSubTab === "standing" && (
+              <div style={{ display: "flex", backgroundColor: "#f1f5f9", borderRadius: "8px", padding: "2px" }}>
+                <button
+                  type="button"
+                  onClick={() => setScheduleViewMode("table")}
+                  style={{
+                    border: "none",
+                    backgroundColor: scheduleViewMode === "table" ? "#ffffff" : "transparent",
+                    color: scheduleViewMode === "table" ? "#0f172a" : "#64748b",
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    boxShadow: scheduleViewMode === "table" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                  }}
+                  title="Table View"
+                >
+                  <List size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScheduleViewMode("grid")}
+                  style={{
+                    border: "none",
+                    backgroundColor: scheduleViewMode === "grid" ? "#ffffff" : "transparent",
+                    color: scheduleViewMode === "grid" ? "#0f172a" : "#64748b",
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    boxShadow: scheduleViewMode === "grid" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                  }}
+                  title="Card Grid View"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+              </div>
+            )}
           </div>
         </div>
+
+        {/* ── 4. SUB-TAB CONTENT ── */}
+
+        {/* SUB-TAB 1: SITE STANDING & PROGRESS LEDGER */}
+        {scheduleSubTab === "standing" && (
+          filteredStandings.length === 0 ? (
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "var(--text-muted)"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>📋</div>
+              <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-900)", marginBottom: "4px" }}>
+                No construction sites match the standing filter
+              </div>
+              <div style={{ fontSize: "12px" }}>
+                Try resetting your search query or selecting "All Standing".
+              </div>
+            </div>
+          ) : scheduleViewMode === "table" ? (
+            /* Table View */
+            <div className="admin-table-card" style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", overflow: "hidden" }}>
+              <div className="admin-table-scroll">
+                <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "var(--primary-50)", borderBottom: "1.5px solid var(--border-color)" }}>
+                      <th style={{ width: "20%", paddingLeft: "18px" }}>Project &amp; Code</th>
+                      <th style={{ width: "14%" }}>Client &amp; Location</th>
+                      <th style={{ width: "14%" }}>Assigned Engineers</th>
+                      <th style={{ width: "12%" }}>Target Date</th>
+                      <th style={{ width: "14%", textAlign: "center" }}>Progress vs Target</th>
+                      <th style={{ width: "10%", textAlign: "right" }}>Milestone Gap</th>
+                      <th style={{ width: "12%", textAlign: "center" }}>Schedule Standing</th>
+                      <th style={{ width: "4%", textAlign: "center", paddingRight: "18px" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredStandings.map(item => {
+                      const initials = item.site.siteName ? item.site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+
+                      return (
+                        <tr 
+                          key={item.site.id} 
+                          style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                        >
+                          {/* Site Name & Code */}
+                          <td style={{ paddingLeft: "18px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <div 
+                                onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                                style={{
+                                  width: "32px",
+                                  height: "32px",
+                                  borderRadius: "8px",
+                                  backgroundColor: "#fff7ed",
+                                  border: "1.5px solid #ffedd5",
+                                  color: "#c2410c",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontWeight: "800",
+                                  fontSize: "11px",
+                                  flexShrink: 0,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                {initials}
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <div 
+                                  onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                                  style={{
+                                    fontWeight: "750",
+                                    fontSize: "13px",
+                                    color: "var(--primary-950)",
+                                    cursor: "pointer",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    maxWidth: "180px"
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                                  onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                                >
+                                  {item.site.siteName}
+                                </div>
+                                <div style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>
+                                  {item.site.siteCode || `ID: ${item.site.id.substring(0, 6)}`} • {item.todayWorkerCount > 0 ? `👷 ${item.todayWorkerCount} on site` : "0 workers today"}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Client & Location */}
+                          <td>
+                            <div style={{ fontSize: "12px", fontWeight: "650", color: "var(--primary-800)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "140px" }}>
+                              {item.site.clientName || "—"}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "140px" }}>
+                              <MapPin size={10} style={{ color: "#ea580c", flexShrink: 0 }} />
+                              <span>{item.site.location || "—"}</span>
+                            </div>
+                          </td>
+
+                          {/* Assigned Engineers */}
+                          <td>
+                            {item.assignedEngineersList.length === 0 ? (
+                              <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>Unassigned</span>
+                            ) : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                {item.assignedEngineersList.slice(0, 2).map(eng => (
+                                  <div key={eng.id || eng.uid} style={{ display: "flex", alignItems: "center", gap: "5px", fontSize: "11.5px", fontWeight: "650", color: "#334155" }}>
+                                    <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#16a34a", flexShrink: 0 }} />
+                                    <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "120px" }}>
+                                      {eng.fullName?.split(' ')[0] || eng.name || "Engineer"}
+                                    </span>
+                                  </div>
+                                ))}
+                                {item.assignedEngineersList.length > 2 && (
+                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>+{item.assignedEngineersList.length - 2} more</span>
+                                )}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Target Date */}
+                          <td>
+                            <div style={{ fontSize: "12px", fontWeight: "650", color: "var(--primary-900)", fontFamily: "monospace" }}>
+                              {formatDateDMY(item.site.expectedEndDate)}
+                            </div>
+                            <div style={{ fontSize: "10.5px", color: item.isDelayed ? "#dc2626" : (item.isDueSoon ? "#b45309" : "var(--text-muted)"), fontWeight: "600" }}>
+                              {item.daysDiffText}
+                            </div>
+                          </td>
+
+                          {/* Progress vs Target Bar */}
+                          <td style={{ textAlign: "center" }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginBottom: "4px" }}>
+                              <span style={{ fontWeight: "800", color: "#0f172a" }}>{item.actualProgress}%</span>
+                              <span style={{ color: "var(--text-muted)" }}>Target: {item.plannedProgress}%</span>
+                            </div>
+                            <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden", position: "relative" }}>
+                              <div 
+                                style={{ 
+                                  width: `${Math.min(100, item.actualProgress)}%`, 
+                                  height: "100%", 
+                                  backgroundColor: item.actualProgress >= item.plannedProgress ? "#16a34a" : (item.isDelayed ? "#dc2626" : "#ea580c"),
+                                  borderRadius: "3px" 
+                                }} 
+                              />
+                            </div>
+                          </td>
+
+                          {/* Milestone Gap */}
+                          <td style={{ textAlign: "right" }}>
+                            <span style={{ 
+                              fontSize: "12px", 
+                              fontWeight: "800", 
+                              fontFamily: "monospace",
+                              color: item.gap >= 0 ? "#16a34a" : "#dc2626" 
+                            }}>
+                              {item.gap >= 0 ? `+${item.gap}%` : `${item.gap}%`}
+                            </span>
+                          </td>
+
+                          {/* Schedule Standing */}
+                          <td style={{ textAlign: "center" }}>
+                            <span style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "3px 8px",
+                              borderRadius: "12px",
+                              fontSize: "10.5px",
+                              fontWeight: "750",
+                              backgroundColor: item.standingBg,
+                              color: item.standingColor,
+                              border: `1px solid ${item.standingBorder}`,
+                              whiteSpace: "nowrap"
+                            }}>
+                              <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: item.standingColor }} />
+                              {item.standing}
+                            </span>
+                          </td>
+
+                          {/* Action */}
+                          <td style={{ textAlign: "center", paddingRight: "18px" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                              style={{
+                                border: "1px solid #fed7aa",
+                                backgroundColor: "#fff7ed",
+                                color: "#c2410c",
+                                borderRadius: "6px",
+                                padding: "4px 8px",
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                transition: "all 0.12s ease"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#ffedd5"; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fff7ed"; }}
+                            >
+                              Inspect →
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Grid View */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "16px" }}>
+              {filteredStandings.map(item => {
+                const initials = item.site.siteName ? item.site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+
+                return (
+                  <div
+                    key={item.site.id}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      border: item.isDelayed ? "1.5px solid #fca5a5" : "1px solid var(--border-color)",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    <div>
+                      {/* Card Top: Initials, Name, Code, Standing */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div 
+                            onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                            style={{
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "8px",
+                              backgroundColor: "#fff7ed",
+                              border: "1.5px solid #ffedd5",
+                              color: "#c2410c",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: "800",
+                              fontSize: "12px",
+                              flexShrink: 0,
+                              cursor: "pointer"
+                            }}
+                          >
+                            {initials}
+                          </div>
+                          <div>
+                            <h4 
+                              onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                              style={{ margin: 0, fontSize: "13.5px", fontWeight: "750", color: "#0f172a", cursor: "pointer" }}
+                              onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                              onMouseLeave={e => e.currentTarget.style.color = "#0f172a"}
+                            >
+                              {item.site.siteName}
+                            </h4>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{item.site.clientName || "No Client"}</span>
+                          </div>
+                        </div>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "3px 8px",
+                          borderRadius: "12px",
+                          fontSize: "10.5px",
+                          fontWeight: "750",
+                          backgroundColor: item.standingBg,
+                          color: item.standingColor,
+                          border: `1px solid ${item.standingBorder}`
+                        }}>
+                          <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: item.standingColor }} />
+                          {item.standing}
+                        </span>
+                      </div>
+
+                      {/* Progress Bar & Gap */}
+                      <div style={{ backgroundColor: "#f8fafc", borderRadius: "8px", padding: "10px", border: "1px solid #f1f5f9", marginBottom: "10px" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginBottom: "6px" }}>
+                          <span>Actual: <strong style={{ color: "#0f172a" }}>{item.actualProgress}%</strong></span>
+                          <span>Planned Target: <strong>{item.plannedProgress}%</strong></span>
+                          <span style={{ fontWeight: "800", color: item.gap >= 0 ? "#16a34a" : "#dc2626" }}>
+                            {item.gap >= 0 ? `+${item.gap}% Ahead` : `${item.gap}% Behind`}
+                          </span>
+                        </div>
+                        <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden" }}>
+                          <div 
+                            style={{ 
+                              width: `${Math.min(100, item.actualProgress)}%`, 
+                              height: "100%", 
+                              backgroundColor: item.actualProgress >= item.plannedProgress ? "#16a34a" : (item.isDelayed ? "#dc2626" : "#ea580c"),
+                              borderRadius: "3px" 
+                            }} 
+                          />
+                        </div>
+                      </div>
+
+                      {/* Site Details: Dates, Workers, Location */}
+                      <div style={{ display: "flex", flexDirection: "column", gap: "5px", fontSize: "11.5px", color: "#475569" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Target Completion:</span>
+                          <strong>{formatDateDMY(item.site.expectedEndDate)} ({item.daysDiffText})</strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Today's Deployment:</span>
+                          <strong style={{ color: item.todayWorkerCount > 0 ? "#15803d" : "#64748b" }}>
+                            {item.todayWorkerCount > 0 ? `👷 ${item.todayWorkerCount} Active Workers` : "0 Workers Recorded"}
+                          </strong>
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ color: "var(--text-muted)" }}>Latest Field Activity:</span>
+                          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "160px", color: "#334155", fontWeight: "600" }}>
+                            {item.latestSummary}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Card Footer Button */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                        style={{
+                          width: "100%",
+                          height: "32px",
+                          borderRadius: "6px",
+                          border: "1px solid #fed7aa",
+                          backgroundColor: "#fff7ed",
+                          color: "#c2410c",
+                          fontSize: "12px",
+                          fontWeight: "750",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "6px",
+                          transition: "all 0.15s ease"
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#ffedd5"; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fff7ed"; }}
+                      >
+                        Inspect Site Standing &amp; Details →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* SUB-TAB 2: SCHEDULE & ACTIVITY TIMELINE FEED */}
+        {scheduleSubTab === "timeline" && (
+          filteredDprs.length === 0 ? (
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "var(--text-muted)"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>📅</div>
+              <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-900)", marginBottom: "4px" }}>
+                No daily progress reports recorded for this criteria
+              </div>
+              <div style={{ fontSize: "12px" }}>
+                Daily progress reports submitted by field site engineers will appear here chronologically.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              {filteredDprs.map(dpr => {
+                const sObj = sites.find(s => s.id === dpr.siteId);
+                const siteName = sObj?.siteName || dpr.siteName || "Site Project";
+                const totalWorkersInDpr = (dpr.labourDetails || []).reduce((sum, l) => sum + (Number(l.count) || 0), 0) || Number(dpr.labourCount) || 0;
+
+                return (
+                  <div
+                    key={dpr.id}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      border: "1px solid var(--border-color)",
+                      borderRadius: "12px",
+                      padding: "16px",
+                      boxShadow: "0 1px 3px rgba(0,0,0,0.02)",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "10px"
+                    }}
+                  >
+                    {/* DPR Top Bar */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <div style={{
+                          backgroundColor: "#eff6ff",
+                          border: "1px solid #bfdbfe",
+                          color: "#1d4ed8",
+                          padding: "4px 8px",
+                          borderRadius: "6px",
+                          fontSize: "12px",
+                          fontWeight: "800",
+                          fontFamily: "monospace"
+                        }}>
+                          {formatDateDMY(dpr.date)}
+                        </div>
+                        <div>
+                          <strong 
+                            onClick={() => sObj && setSelectedScheduleSiteId(sObj.id)}
+                            style={{ fontSize: "13.5px", color: "#0f172a", cursor: sObj ? "pointer" : "default" }}
+                            onMouseEnter={e => { if (sObj) e.currentTarget.style.color = "#ea580c"; }}
+                            onMouseLeave={e => { if (sObj) e.currentTarget.style.color = "#0f172a"; }}
+                          >
+                            {siteName}
+                          </strong>
+                          {sObj?.location && (
+                            <span style={{ fontSize: "11.5px", color: "var(--text-muted)", marginLeft: "8px" }}>
+                              • {sObj.location}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                        <span style={{ fontSize: "11.5px", color: "#475569", fontWeight: "600" }}>
+                          Supervised by: <strong>{dpr.engineerName || dpr.createdByName || "Site Engineer"}</strong>
+                        </span>
+                        {sObj && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedScheduleSiteId(sObj.id)}
+                            style={{
+                              border: "1px solid #fed7aa",
+                              backgroundColor: "#fff7ed",
+                              color: "#c2410c",
+                              borderRadius: "6px",
+                              padding: "3px 8px",
+                              fontSize: "11px",
+                              fontWeight: "750",
+                              cursor: "pointer"
+                            }}
+                          >
+                            Open Site →
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Work Description & Execution Details */}
+                    <div style={{
+                      backgroundColor: "#f8fafc",
+                      borderRadius: "8px",
+                      padding: "12px",
+                      border: "1px solid #f1f5f9",
+                      fontSize: "12.5px",
+                      color: "#334155",
+                      lineHeight: "1.5"
+                    }}>
+                      <div style={{ fontWeight: "750", color: "#0f172a", marginBottom: "4px" }}>
+                        Work Executed Today:
+                      </div>
+                      <div>
+                        {dpr.workDescription || dpr.workDone || dpr.description || "Field work executed as per site schedule."}
+                      </div>
+                    </div>
+
+                    {/* DPR Bottom Badges: Labour, Weather, Progress */}
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px", fontSize: "11.5px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span>👷 <strong>{totalWorkersInDpr}</strong> Workers Deployed</span>
+                        {dpr.weather && <span>🌤️ Weather: <strong>{dpr.weather}</strong></span>}
+                        {dpr.progressPercentage && <span>📈 Progress Reported: <strong>{dpr.progressPercentage}%</strong></span>}
+                      </div>
+
+                      {/* Photo Thumbnail Gallery */}
+                      {dpr.photos && dpr.photos.length > 0 && (
+                        <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>📸 {dpr.photos.length} Photo{dpr.photos.length === 1 ? '' : 's'}:</span>
+                          {dpr.photos.slice(0, 3).map((photoUrl, pIdx) => (
+                            <img
+                              key={pIdx}
+                              src={photoUrl}
+                              alt="Site progress"
+                              onClick={() => setSelectedPreviewImage(photoUrl)}
+                              style={{
+                                width: "28px",
+                                height: "28px",
+                                borderRadius: "4px",
+                                objectFit: "cover",
+                                border: "1px solid var(--border-color)",
+                                cursor: "pointer"
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* SUB-TAB 3: DELAY & ATTENTION HUB */}
+        {scheduleSubTab === "attention" && (
+          criticalAttentionList.length === 0 ? (
+            <div style={{
+              backgroundColor: "#f0fdf4",
+              borderRadius: "12px",
+              border: "1.5px solid #bbf7d0",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "#15803d"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>🎉</div>
+              <div style={{ fontWeight: "800", fontSize: "15px", marginBottom: "4px" }}>
+                All Construction Projects Operating On Schedule
+              </div>
+              <div style={{ fontSize: "12.5px", color: "#166534" }}>
+                Zero active sites are currently overdue or facing severe milestone delay.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>
+                Showing {criticalAttentionList.length} project{criticalAttentionList.length === 1 ? '' : 's'} identified as requiring owner oversight:
+              </div>
+
+              {criticalAttentionList.map(item => (
+                <div
+                  key={item.site.id}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: item.isDelayed ? "1.5px solid #fca5a5" : "1.5px solid #fed7aa",
+                    borderLeft: `5px solid ${item.isDelayed ? "#dc2626" : "#ea580c"}`,
+                    borderRadius: "12px",
+                    padding: "16px",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                          {item.site.siteName}
+                        </h4>
+                        <span style={{
+                          fontSize: "10.5px",
+                          fontWeight: "800",
+                          color: item.standingColor,
+                          backgroundColor: item.standingBg,
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          border: `1px solid ${item.standingBorder}`
+                        }}>
+                          {item.standing}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: "var(--text-muted)", marginTop: "2px" }}>
+                        {item.site.clientName || "No Client"} • {item.site.location || "Location not set"}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedScheduleSiteId(item.site.id)}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: "7px",
+                        border: "1px solid #fed7aa",
+                        backgroundColor: "#fff7ed",
+                        color: "#c2410c",
+                        fontSize: "12px",
+                        fontWeight: "800",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Inspect Site Standing →
+                    </button>
+                  </div>
+
+                  {/* Variance Card */}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+                    gap: "10px",
+                    backgroundColor: "#f8fafc",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #f1f5f9"
+                  }}>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Target Completion</span>
+                      <div style={{ fontSize: "12px", fontWeight: "750", color: "#0f172a", fontFamily: "monospace" }}>
+                        {formatDateDMY(item.site.expectedEndDate)}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Timeline Standing</span>
+                      <div style={{ fontSize: "12px", fontWeight: "750", color: item.isDelayed ? "#dc2626" : "#b45309" }}>
+                        {item.daysDiffText}
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Actual Progress</span>
+                      <div style={{ fontSize: "12px", fontWeight: "750", color: "#0f172a" }}>
+                        {item.actualProgress}%
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Planned Target</span>
+                      <div style={{ fontSize: "12px", fontWeight: "750", color: "#475569" }}>
+                        {item.plannedProgress}%
+                      </div>
+                    </div>
+                    <div>
+                      <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>Milestone Gap</span>
+                      <div style={{ fontSize: "12px", fontWeight: "800", color: item.gap >= 0 ? "#16a34a" : "#dc2626" }}>
+                        {item.gap >= 0 ? `+${item.gap}%` : `${item.gap}%`}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Operational Notes */}
+                  <div style={{ fontSize: "11.5px", color: "#475569" }}>
+                    <strong>Latest Activity:</strong> {item.latestSummary} ({item.latestDate ? formatDateDMY(item.latestDate) : "No record"})
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
       </div>
     );
   };
