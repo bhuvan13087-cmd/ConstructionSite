@@ -171,11 +171,22 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // ── Admins View State ──
   const [adminSearchQuery, setAdminSearchQuery] = useState("");
 
-  // ── Attendance View State ──
+  // ── Attendance Monitoring States ──
   const [attendanceSearchQuery, setAttendanceSearchQuery] = useState("");
   const [attendanceSiteFilter, setAttendanceSiteFilter] = useState("");
-  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState("all"); // 'all' | 'onsite' | 'checkout'
-  const [attendanceDateFilter, setAttendanceDateFilter] = useState("");
+  const [attendanceStatusFilter, setAttendanceStatusFilter] = useState("all"); // 'all' | 'submitted' | 'pending' | 'partial' | 'late' | 'onsite' | 'checkout'
+  const [attendanceDateFilter, setAttendanceDateFilter] = useState(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    } catch (e) {
+      return new Date().toISOString().split("T")[0];
+    }
+  });
+  const [attendanceToDateFilter, setAttendanceToDateFilter] = useState("");
+  const [attendanceDatePreset, setAttendanceDatePreset] = useState("today"); // 'today' | 'yesterday' | 'custom' | 'range'
+  const [attendanceSubTab, setAttendanceSubTab] = useState("sites"); // 'sites' | 'engineers' | 'workforce' | 'exceptions'
+  const [attendanceViewMode, setAttendanceViewMode] = useState("table"); // 'table' | 'grid'
+  const [selectedAttendanceInspectionSite, setSelectedAttendanceInspectionSite] = useState(null);
 
   // ── Labour View State ──
   const [labourSearchQuery, setLabourSearchQuery] = useState("");
@@ -1745,14 +1756,213 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 5: ATTENDANCE MONITORING
+  // VIEW 5: MASTER ATTENDANCE & WORKFORCE MONITORING (OWNER-LEVEL)
   // ══════════════════════════════════════════════════════════════════════════
   const renderAttendanceView = () => {
-    const filteredAttendance = allDeduplicatedAttendance.filter(r => {
+    // Current date helpers in Indian Standard Time (IST)
+    const todayIST = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    const yesterdayDateObj = new Date();
+    yesterdayDateObj.setDate(yesterdayDateObj.getDate() - 1);
+    const yesterdayIST = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(yesterdayDateObj);
+
+    const activeDate = attendanceDateFilter || todayIST;
+    const isRangeMode = attendanceDatePreset === "range" && !!attendanceToDateFilter && !!attendanceDateFilter;
+
+    // Filter Engineer Attendance records for active date / range
+    const filteredAttendanceRecords = allDeduplicatedAttendance.filter(r => {
+      const recDate = r.date || r.attendanceDate;
+      if (!recDate) return false;
+      if (isRangeMode) {
+        if (recDate < attendanceDateFilter || recDate > attendanceToDateFilter) return false;
+      } else {
+        if (recDate !== activeDate) return false;
+      }
+      return true;
+    });
+
+    // Filter Labour Attendance records for active date / range
+    const filteredLabourRecords = (rawLabourAttendance || []).filter(r => {
+      if (!r || r.lockedMetadata || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock") return false;
+      const recDate = r.attendanceDate || r.date;
+      if (!recDate) return false;
+      if (isRangeMode) {
+        if (recDate < attendanceDateFilter || recDate > attendanceToDateFilter) return false;
+      } else {
+        if (recDate !== activeDate) return false;
+      }
+      return true;
+    });
+
+    // Site-wise attendance status calculations
+    const siteAttendanceSummaries = sites.map(site => {
+      // Resolve assigned engineers for this site
+      const assignedUids = new Set([
+        ...(site.assignedEngineers || []),
+        ...assignments.filter(a => a.siteId === site.id).map(a => a.engineerId || a.userId)
+      ].filter(Boolean));
+      
+      const assignedEngineersList = engineers.filter(e => 
+        assignedUids.has(e.id) || assignedUids.has(e.uid) || (e.email && assignedUids.has(e.email))
+      );
+
+      // Check attendance for each assigned engineer on active date / range
+      const engineerAttendanceStatuses = assignedEngineersList.map(eng => {
+        const engRecords = filteredAttendanceRecords.filter(r => 
+          r.resolvedSiteId === site.id && (r.resolvedEngineerId === eng.id || r.resolvedEngineerId === eng.uid || (eng.email && r.engineerEmail === eng.email))
+        );
+        
+        const hasCheckedIn = engRecords.length > 0;
+        const checkInRec = engRecords[0] || null;
+
+        return {
+          engineer: eng,
+          hasCheckedIn,
+          record: checkInRec,
+          checkInTime: checkInRec?.checkInTimeFormatted || "—",
+          checkOutTime: checkInRec?.checkOutTimeFormatted || "—",
+          isCheckedOut: !!checkInRec?.isCheckedOut,
+          isVerified: !!checkInRec?.isVerified,
+          photoUrl: checkInRec?.photoUrl || null
+        };
+      });
+
+      // Labour deployment for this site
+      const siteLabour = filteredLabourRecords.filter(r => r.siteId === site.id);
+      const totalWorkers = siteLabour.reduce((sum, r) => sum + resolveLabourRecordCalculations(r).workerCount, 0);
+      const totalWageLiability = siteLabour.reduce((sum, r) => sum + resolveLabourRecordCalculations(r).amount, 0);
+      const distinctTeams = new Set(siteLabour.map(r => r.teamId || r.teamName).filter(Boolean)).size;
+
+      const assignedCount = assignedEngineersList.length;
+      const checkedInCount = engineerAttendanceStatuses.filter(e => e.hasCheckedIn).length;
+
+      // Overall Site Attendance Status
+      let attendanceStatus = "No Active Engineers";
+      let statusBadge = "default";
+      let statusColor = "#64748b";
+      let statusBg = "#f8fafc";
+      let statusBorder = "#e2e8f0";
+
+      if (site.status === "Completed" || site.status === "Planning") {
+        attendanceStatus = site.status === "Completed" ? "Completed Site" : "Planning Phase";
+        statusBadge = "default";
+        statusColor = "#64748b";
+        statusBg = "#f8fafc";
+        statusBorder = "#e2e8f0";
+      } else if (assignedCount === 0) {
+        attendanceStatus = "Unassigned";
+        statusBadge = "default";
+        statusColor = "#64748b";
+        statusBg = "#f8fafc";
+        statusBorder = "#e2e8f0";
+      } else if (checkedInCount === assignedCount && totalWorkers > 0) {
+        attendanceStatus = "Fully Submitted";
+        statusBadge = "success";
+        statusColor = "#16a34a";
+        statusBg = "#f0fdf4";
+        statusBorder = "#bbf7d0";
+      } else if (checkedInCount > 0) {
+        attendanceStatus = totalWorkers === 0 ? "Check-in Without Labour" : "Partial Check-in";
+        statusBadge = "warning";
+        statusColor = "#ea580c";
+        statusBg = "#fff7ed";
+        statusBorder = "#fed7aa";
+      } else {
+        attendanceStatus = "Pending Submission";
+        statusBadge = "danger";
+        statusColor = "#dc2626";
+        statusBg = "#fef2f2";
+        statusBorder = "#fecaca";
+      }
+
+      return {
+        site,
+        assignedEngineersList,
+        engineerAttendanceStatuses,
+        siteLabour,
+        totalWorkers,
+        totalWageLiability,
+        distinctTeams,
+        assignedCount,
+        checkedInCount,
+        attendanceStatus,
+        statusBadge,
+        statusColor,
+        statusBg,
+        statusBorder
+      };
+    });
+
+    // Active operational sites filter for KPIs
+    const operationalSites = siteAttendanceSummaries.filter(s => s.site.status === "Active" || s.site.status === "Running");
+    const activeSitesWithAssignments = operationalSites.filter(s => s.assignedCount > 0);
+
+    const totalSitesCount = operationalSites.length || sites.length;
+    const sitesSubmittedCount = activeSitesWithAssignments.filter(s => s.attendanceStatus === "Fully Submitted").length;
+    const sitesPartialCount = activeSitesWithAssignments.filter(s => s.attendanceStatus === "Partial Check-in" || s.attendanceStatus === "Check-in Without Labour").length;
+    const sitesPendingCount = activeSitesWithAssignments.filter(s => s.attendanceStatus === "Pending Submission").length;
+
+    // Unique Assigned Engineers across active sites
+    const uniqueAssignedEngineersMap = new Map();
+    activeSitesWithAssignments.forEach(s => {
+      s.assignedEngineersList.forEach(e => {
+        if (e.id || e.uid) uniqueAssignedEngineersMap.set(e.id || e.uid, e);
+      });
+    });
+    const totalEngineersCount = uniqueAssignedEngineersMap.size;
+
+    // Unique Engineers who checked in on active date
+    const uniqueCheckedInEngineers = new Set(filteredAttendanceRecords.map(r => r.resolvedEngineerId).filter(Boolean));
+    const engineersSubmittedCount = uniqueCheckedInEngineers.size;
+    const engineersPendingCount = Math.max(0, totalEngineersCount - engineersSubmittedCount);
+
+    // Total Workforce Deployed on active date
+    const totalWorkersDeployed = filteredLabourRecords.reduce((sum, r) => sum + resolveLabourRecordCalculations(r).workerCount, 0);
+    const totalWageLiabilityAll = filteredLabourRecords.reduce((sum, r) => sum + resolveLabourRecordCalculations(r).amount, 0);
+
+    // Attendance Rate %
+    const attendanceRatePct = totalEngineersCount > 0 
+      ? Math.min(100, Math.round((engineersSubmittedCount / totalEngineersCount) * 100)) 
+      : 100;
+
+    // Priority Exception Attention List
+    const attentionList = siteAttendanceSummaries.filter(s => 
+      (s.site.status === "Active" || s.site.status === "Running") &&
+      (s.attendanceStatus === "Pending Submission" || s.attendanceStatus === "Partial Check-in" || s.attendanceStatus === "Check-in Without Labour")
+    );
+
+    // Filter site summaries based on toolbar search and filters
+    const filteredSiteSummaries = siteAttendanceSummaries.filter(item => {
+      // Site Search Query
+      if (attendanceSearchQuery.trim()) {
+        const q = attendanceSearchQuery.toLowerCase().trim();
+        const mSite = (item.site.siteName || "").toLowerCase().includes(q);
+        const mClient = (item.site.clientName || "").toLowerCase().includes(q);
+        const mLoc = (item.site.location || "").toLowerCase().includes(q);
+        const mCode = (item.site.siteCode || item.site.id || "").toLowerCase().includes(q);
+        const mEng = item.assignedEngineersList.some(e => (e.fullName || e.name || "").toLowerCase().includes(q));
+        if (!mSite && !mClient && !mLoc && !mCode && !mEng) return false;
+      }
+
+      // Site Dropdown Filter
+      if (attendanceSiteFilter && item.site.id !== attendanceSiteFilter) return false;
+
+      // Status Filter
+      if (attendanceStatusFilter !== "all") {
+        if (attendanceStatusFilter === "submitted") {
+          if (item.attendanceStatus !== "Fully Submitted") return false;
+        } else if (attendanceStatusFilter === "pending") {
+          if (item.attendanceStatus !== "Pending Submission") return false;
+        } else if (attendanceStatusFilter === "partial") {
+          if (item.attendanceStatus !== "Partial Check-in" && item.attendanceStatus !== "Check-in Without Labour") return false;
+        }
+      }
+
+      return true;
+    });
+
+    // Filter Engineer Check-In ledger
+    const filteredEngineerRecords = filteredAttendanceRecords.filter(r => {
       if (attendanceSiteFilter && r.resolvedSiteId !== attendanceSiteFilter) return false;
-      if (attendanceStatusFilter === "onsite" && r.isCheckedOut) return false;
-      if (attendanceStatusFilter === "checkout" && !r.isCheckedOut) return false;
-      if (attendanceDateFilter && (r.date || r.attendanceDate) !== attendanceDateFilter) return false;
       if (attendanceSearchQuery.trim()) {
         const q = attendanceSearchQuery.toLowerCase().trim();
         const matchEng = (r.engineerName || "").toLowerCase().includes(q);
@@ -1762,164 +1972,1298 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       return true;
     });
 
-    const onSiteCount = filteredAttendance.filter(r => !r.isCheckedOut).length;
-    const checkedOutCount = filteredAttendance.filter(r => r.isCheckedOut).length;
-    const verifiedCount = filteredAttendance.filter(r => r.isVerified).length;
-
     return (
-      <div className="admin-dashboard-container">
-        {/* KPI Summary Cards */}
-        <div className="admin-summary-grid">
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-green">
-              <ClipboardCheck size={20} />
+      <div className="admin-dashboard-container" style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+        
+        {/* ── 1. Top Executive Overview KPI Summary Bar ── */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
+          gap: "12px",
+          width: "100%"
+        }}>
+          {[
+            { label: "Total Sites", value: totalSitesCount, sub: "Active projects", icon: "🏗️", bg: "#f8fafc", border: "#e2e8f0", color: "#334155" },
+            { label: "Submitted Sites", value: sitesSubmittedCount, sub: "Fully reported", icon: "✅", bg: "#f0fdf4", border: "#bbf7d0", color: "#15803d" },
+            { label: "Pending Sites", value: sitesPendingCount, sub: "0 check-ins", icon: "⚠️", bg: sitesPendingCount > 0 ? "#fef2f2" : "#f8fafc", border: sitesPendingCount > 0 ? "#fecaca" : "#e2e8f0", color: sitesPendingCount > 0 ? "#dc2626" : "#64748b" },
+            { label: "Partial Sites", value: sitesPartialCount, sub: "Incomplete logs", icon: "⚡", bg: sitesPartialCount > 0 ? "#fff7ed" : "#f8fafc", border: sitesPartialCount > 0 ? "#fed7aa" : "#e2e8f0", color: sitesPartialCount > 0 ? "#ea580c" : "#64748b" },
+            { label: "Total Engineers", value: totalEngineersCount, sub: "Field workforce", icon: "👷", bg: "#eff6ff", border: "#bfdbfe", color: "#1d4ed8" },
+            { label: "Engineers Checked-In", value: engineersSubmittedCount, sub: "On-site verified", icon: "📍", bg: "#f0fdf4", border: "#bbf7d0", color: "#16a34a" },
+            { label: "Engineers Pending", value: engineersPendingCount, sub: "Missing check-in", icon: "⏳", bg: engineersPendingCount > 0 ? "#fffbeb" : "#f8fafc", border: engineersPendingCount > 0 ? "#fde68a" : "#e2e8f0", color: engineersPendingCount > 0 ? "#b45309" : "#64748b" },
+            { label: "Total Workforce", value: `${totalWorkersDeployed}`, sub: `₹${Math.round(totalWageLiabilityAll).toLocaleString('en-IN')}`, icon: "👥", bg: "#fdf4ff", border: "#f5d0fe", color: "#86198f" }
+          ].map((kpi, idx) => (
+            <div 
+              key={idx}
+              style={{
+                backgroundColor: kpi.bg,
+                border: `1.5px solid ${kpi.border}`,
+                borderRadius: "12px",
+                padding: "12px 14px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "4px",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.02)"
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: "11px", fontWeight: "650", color: "var(--text-muted)", textTransform: "uppercase", letterSpacing: "0.4px" }}>
+                  {kpi.label}
+                </span>
+                <span style={{ fontSize: "14px" }}>{kpi.icon}</span>
+              </div>
+              <div style={{ fontSize: "20px", fontWeight: "850", color: kpi.color, fontFamily: "system-ui, sans-serif" }}>
+                {kpi.value}
+              </div>
+              <div style={{ fontSize: "10.5px", color: "var(--text-muted)", fontWeight: "500" }}>
+                {kpi.sub}
+              </div>
             </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{filteredAttendance.length}</div>
-              <div className="admin-summary-label">Total Records</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-teal">
-              <UserCheck size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{onSiteCount}</div>
-              <div className="admin-summary-label">On Site Now</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-slate">
-              <Clock size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{checkedOutCount}</div>
-              <div className="admin-summary-label">Checked Out</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-orange">
-              <ShieldCheck size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{verifiedCount}</div>
-              <div className="admin-summary-label">GPS Verified</div>
-            </div>
-          </div>
+          ))}
         </div>
 
-        {/* Toolbar & Filters */}
-        <div className="sites-toolbar-container">
-          <div>
-            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Master Engineer Attendance Monitor ({filteredAttendance.length})
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
-              Audit ledger of field engineer check-ins, check-outs, photo proofs, and geofence locations.
-            </p>
+        {/* ── 2. Owner Priority Attention & Missing Attendance Hub ── */}
+        {attentionList.length > 0 && (
+          <div 
+            style={{
+              backgroundColor: "#fef2f2",
+              border: "1.5px solid #fca5a5",
+              borderLeft: "5px solid #dc2626",
+              borderRadius: "12px",
+              padding: "16px 18px",
+              boxShadow: "0 2px 6px rgba(220, 38, 38, 0.06)"
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <ShieldAlert size={18} style={{ color: "#dc2626", flexShrink: 0 }} />
+                <h4 style={{ margin: 0, fontSize: "13.5px", fontWeight: "800", color: "#991b1b" }}>
+                  Attendance Exceptions ({attentionList.length} sites require executive review for {isRangeMode ? `${formatDateDMY(attendanceDateFilter)} to ${formatDateDMY(attendanceToDateFilter)}` : formatDateDMY(activeDate)})
+                </h4>
+              </div>
+              <span style={{ fontSize: "11.5px", color: "#b91c1c", fontWeight: "600" }}>
+                Live Field Verification &amp; Geofence Alert
+              </span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "10px" }}>
+              {attentionList.slice(0, 4).map(item => (
+                <div 
+                  key={item.site.id}
+                  onClick={() => setSelectedAttendanceInspectionSite(item)}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: "1px solid #fee2e2",
+                    borderRadius: "8px",
+                    padding: "10px 12px",
+                    cursor: "pointer",
+                    transition: "all 0.15s ease",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "4px"
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.borderColor = "#f87171"; e.currentTarget.style.boxShadow = "0 2px 8px rgba(220,38,38,0.1)"; }}
+                  onMouseLeave={e => { e.currentTarget.style.borderColor = "#fee2e2"; e.currentTarget.style.boxShadow = "none"; }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <strong style={{ fontSize: "12.5px", color: "#0f172a" }}>{item.site.siteName}</strong>
+                    <span style={{ fontSize: "10px", fontWeight: "750", color: item.statusColor, backgroundColor: item.statusBg, padding: "2px 6px", borderRadius: "4px", border: `1px solid ${item.statusBorder}` }}>
+                      {item.attendanceStatus}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#64748b" }}>
+                    Assigned: <strong>{item.assignedCount} Engineers</strong> ({item.checkedInCount} checked in)
+                  </div>
+                  <div style={{ fontSize: "11px", color: "#475569", display: "flex", justifyContent: "space-between" }}>
+                    <span>Workforce: <strong>{item.totalWorkers} workers</strong></span>
+                    <span style={{ color: "var(--brand-orange)", fontWeight: "700" }}>Inspect →</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── 3. Date Presets & Sub-Tabs Toolbar ── */}
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: "14px",
+          flexWrap: "wrap",
+          width: "100%",
+          boxSizing: "border-box"
+        }}>
+          {/* Sub-Tabs Switcher */}
+          <div style={{
+            display: "flex",
+            alignItems: "center",
+            backgroundColor: "#f1f5f9",
+            padding: "4px",
+            borderRadius: "10px",
+            gap: "4px"
+          }}>
+            {[
+              { id: "sites", label: "Site-Wise Matrix", count: filteredSiteSummaries.length, icon: LayoutGrid },
+              { id: "engineers", label: "Engineer Check-Ins", count: filteredEngineerRecords.length, icon: UserCheck },
+              { id: "workforce", label: "Workforce Deployments", count: filteredLabourRecords.length, icon: Users },
+              { id: "exceptions", label: "Exceptions", count: attentionList.length, icon: AlertTriangle, alert: attentionList.length > 0 }
+            ].map(tabItem => {
+              const isActive = attendanceSubTab === tabItem.id;
+              const IconComp = tabItem.icon;
+              return (
+                <button
+                  key={tabItem.id}
+                  type="button"
+                  onClick={() => setAttendanceSubTab(tabItem.id)}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "7px 14px",
+                    borderRadius: "7px",
+                    border: "none",
+                    backgroundColor: isActive ? "#ffffff" : "transparent",
+                    color: isActive ? "#0f172a" : "#64748b",
+                    fontSize: "12.5px",
+                    fontWeight: isActive ? "750" : "600",
+                    cursor: "pointer",
+                    boxShadow: isActive ? "0 1px 3px rgba(0,0,0,0.08)" : "none",
+                    transition: "all 0.15s ease"
+                  }}
+                >
+                  <IconComp size={14} style={{ color: isActive ? (tabItem.alert ? "#dc2626" : "#ea580c") : "#64748b" }} />
+                  <span>{tabItem.label}</span>
+                  <span style={{
+                    fontSize: "10.5px",
+                    fontWeight: "750",
+                    padding: "1px 6px",
+                    borderRadius: "10px",
+                    backgroundColor: isActive ? (tabItem.alert ? "#fee2e2" : "#ffedd5") : "#e2e8f0",
+                    color: isActive ? (tabItem.alert ? "#dc2626" : "#c2410c") : "#475569"
+                  }}>
+                    {tabItem.count}
+                  </span>
+                </button>
+              );
+            })}
           </div>
 
-          <div className="sites-actions-group">
-            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
-              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-              <input
-                type="text"
-                placeholder="Search engineer, site..."
-                value={attendanceSearchQuery}
-                onChange={(e) => setAttendanceSearchQuery(e.target.value)}
-                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
-              />
-            </div>
-            <select
-              value={attendanceSiteFilter}
-              onChange={(e) => setAttendanceSiteFilter(e.target.value)}
-              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
-            >
-              <option value="">All Sites</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
-            </select>
-            <select
-              value={attendanceStatusFilter}
-              onChange={(e) => setAttendanceStatusFilter(e.target.value)}
-              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
-            >
-              <option value="all">All Status</option>
-              <option value="onsite">On Site</option>
-              <option value="checkout">Checked Out</option>
-            </select>
-            <input
-              type="date"
-              value={attendanceDateFilter}
-              onChange={(e) => setAttendanceDateFilter(e.target.value)}
-              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
-            />
-            {attendanceDateFilter && (
+          {/* Date Filter Presets & Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginLeft: "auto" }}>
+            {/* Quick Date Presets */}
+            <div style={{ display: "flex", backgroundColor: "#f1f5f9", borderRadius: "8px", padding: "2px" }}>
               <button
                 type="button"
-                onClick={() => setAttendanceDateFilter("")}
-                className="btn btn-outline"
-                style={{ height: "38px", padding: "0 10px", fontSize: "12px" }}
+                onClick={() => {
+                  setAttendanceDatePreset("today");
+                  setAttendanceDateFilter(todayIST);
+                  setAttendanceToDateFilter("");
+                }}
+                style={{
+                  border: "none",
+                  backgroundColor: attendanceDatePreset === "today" ? "#ffffff" : "transparent",
+                  color: attendanceDatePreset === "today" ? "#0f172a" : "#64748b",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: attendanceDatePreset === "today" ? "750" : "600",
+                  cursor: "pointer",
+                  boxShadow: attendanceDatePreset === "today" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                }}
               >
-                Clear Date
+                Today
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttendanceDatePreset("yesterday");
+                  setAttendanceDateFilter(yesterdayIST);
+                  setAttendanceToDateFilter("");
+                }}
+                style={{
+                  border: "none",
+                  backgroundColor: attendanceDatePreset === "yesterday" ? "#ffffff" : "transparent",
+                  color: attendanceDatePreset === "yesterday" ? "#0f172a" : "#64748b",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: attendanceDatePreset === "yesterday" ? "750" : "600",
+                  cursor: "pointer",
+                  boxShadow: attendanceDatePreset === "yesterday" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                }}
+              >
+                Yesterday
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttendanceDatePreset("custom");
+                  setAttendanceToDateFilter("");
+                }}
+                style={{
+                  border: "none",
+                  backgroundColor: attendanceDatePreset === "custom" ? "#ffffff" : "transparent",
+                  color: attendanceDatePreset === "custom" ? "#0f172a" : "#64748b",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: attendanceDatePreset === "custom" ? "750" : "600",
+                  cursor: "pointer",
+                  boxShadow: attendanceDatePreset === "custom" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                }}
+              >
+                Custom Date
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setAttendanceDatePreset("range");
+                  if (!attendanceToDateFilter) setAttendanceToDateFilter(todayIST);
+                }}
+                style={{
+                  border: "none",
+                  backgroundColor: attendanceDatePreset === "range" ? "#ffffff" : "transparent",
+                  color: attendanceDatePreset === "range" ? "#0f172a" : "#64748b",
+                  padding: "6px 12px",
+                  borderRadius: "6px",
+                  fontSize: "12px",
+                  fontWeight: attendanceDatePreset === "range" ? "750" : "600",
+                  cursor: "pointer",
+                  boxShadow: attendanceDatePreset === "range" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                }}
+              >
+                Date Range
+              </button>
+            </div>
+
+            {/* Date Pickers */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <input
+                type="date"
+                value={attendanceDateFilter}
+                onChange={(e) => {
+                  setAttendanceDateFilter(e.target.value);
+                  if (attendanceDatePreset !== "range") setAttendanceDatePreset("custom");
+                }}
+                style={{
+                  height: "36px",
+                  padding: "0 8px",
+                  borderRadius: "8px",
+                  border: "1.5px solid var(--border-color)",
+                  backgroundColor: "#ffffff",
+                  fontSize: "12px",
+                  fontWeight: "600",
+                  color: "var(--primary-900)",
+                  outline: "none"
+                }}
+              />
+              {attendanceDatePreset === "range" && (
+                <>
+                  <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>to</span>
+                  <input
+                    type="date"
+                    value={attendanceToDateFilter}
+                    onChange={(e) => setAttendanceToDateFilter(e.target.value)}
+                    style={{
+                      height: "36px",
+                      padding: "0 8px",
+                      borderRadius: "8px",
+                      border: "1.5px solid var(--border-color)",
+                      backgroundColor: "#ffffff",
+                      fontSize: "12px",
+                      fontWeight: "600",
+                      color: "var(--primary-900)",
+                      outline: "none"
+                    }}
+                  />
+                </>
+              )}
+            </div>
+
+            {/* Table / Grid View Toggle for Site Matrix */}
+            {attendanceSubTab === "sites" && (
+              <div style={{ display: "flex", backgroundColor: "#f1f5f9", borderRadius: "8px", padding: "2px" }}>
+                <button
+                  type="button"
+                  onClick={() => setAttendanceViewMode("table")}
+                  style={{
+                    border: "none",
+                    backgroundColor: attendanceViewMode === "table" ? "#ffffff" : "transparent",
+                    color: attendanceViewMode === "table" ? "#0f172a" : "#64748b",
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    boxShadow: attendanceViewMode === "table" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                  }}
+                  title="Table View"
+                >
+                  <List size={15} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAttendanceViewMode("grid")}
+                  style={{
+                    border: "none",
+                    backgroundColor: attendanceViewMode === "grid" ? "#ffffff" : "transparent",
+                    color: attendanceViewMode === "grid" ? "#0f172a" : "#64748b",
+                    padding: "6px 8px",
+                    borderRadius: "6px",
+                    cursor: "pointer",
+                    boxShadow: attendanceViewMode === "grid" ? "0 1px 2px rgba(0,0,0,0.06)" : "none"
+                  }}
+                  title="Card Grid View"
+                >
+                  <LayoutGrid size={15} />
+                </button>
+              </div>
             )}
           </div>
         </div>
 
-        <div className="admin-table-card">
-          <div className="admin-table-scroll">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Engineer</th>
-                  <th>Project Site</th>
-                  <th>Date</th>
-                  <th>Check-In</th>
-                  <th>Check-Out</th>
-                  <th>Status</th>
-                  <th>Verification</th>
-                  <th style={{ textAlign: "center" }}>Photo Proof</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredAttendance.length === 0 ? (
-                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No attendance records found.</td></tr>
-                ) : (
-                  filteredAttendance.map(rec => (
-                    <tr key={rec.id}>
-                      <td style={{ fontWeight: "700" }}>{rec.engineerName}</td>
-                      <td>{rec.siteName}</td>
-                      <td className="font-mono">{formatDateDMY(rec.date || rec.attendanceDate)}</td>
-                      <td className="font-mono">{rec.checkInTimeFormatted}</td>
-                      <td className="font-mono">{rec.checkOutTimeFormatted || "—"}</td>
-                      <td>
-                        <Badge status={rec.isCheckedOut ? "default" : "success"}>
-                          {rec.isCheckedOut ? "Checked Out" : "On Site"}
-                        </Badge>
-                      </td>
-                      <td>
-                        <span style={{ fontSize: "11.5px", color: rec.isVerified ? "#16a34a" : "#ca8a04", fontWeight: "700" }}>
-                          {rec.isVerified ? "✓ Verified GPS" : "Pending"}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: "center" }}>
-                        {rec.photoUrl ? (
-                          <button
-                            type="button"
-                            onClick={() => setSelectedPreviewImage({ url: rec.photoUrl, title: `Attendance: ${rec.engineerName}` })}
-                            style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                          >
-                            <Eye size={13} /> View
-                          </button>
-                        ) : "—"}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+        {/* ── 4. Secondary Search & Site Filter Toolbar ── */}
+        <div style={{
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          flexWrap: "wrap",
+          width: "100%"
+        }}>
+          <div style={{ position: "relative", flex: "1 1 240px", maxWidth: "340px" }}>
+            <Search 
+              size={15} 
+              style={{ 
+                position: "absolute", 
+                left: "12px", 
+                top: "50%", 
+                transform: "translateY(-50%)", 
+                color: "var(--text-muted)", 
+                pointerEvents: "none" 
+              }} 
+            />
+            <input 
+              type="text" 
+              placeholder="Search site, client, engineer..." 
+              value={attendanceSearchQuery}
+              onChange={(e) => setAttendanceSearchQuery(e.target.value)}
+              style={{
+                width: "100%",
+                height: "38px",
+                padding: "0 12px 0 36px",
+                borderRadius: "8px",
+                border: "1.5px solid var(--border-color)",
+                backgroundColor: "#ffffff",
+                fontSize: "12.5px",
+                fontWeight: "500",
+                color: "var(--text-dark)",
+                outline: "none",
+                boxSizing: "border-box"
+              }}
+            />
+          </div>
+
+          <select
+            value={attendanceSiteFilter}
+            onChange={(e) => setAttendanceSiteFilter(e.target.value)}
+            style={{
+              height: "38px",
+              padding: "0 10px",
+              borderRadius: "8px",
+              border: "1.5px solid var(--border-color)",
+              backgroundColor: "#ffffff",
+              fontSize: "12px",
+              fontWeight: "650",
+              color: "var(--primary-900)",
+              outline: "none",
+              cursor: "pointer",
+              minWidth: "160px"
+            }}
+          >
+            <option value="">All Project Sites ({sites.length})</option>
+            {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+          </select>
+
+          {attendanceSubTab === "sites" && (
+            <select
+              value={attendanceStatusFilter}
+              onChange={(e) => setAttendanceStatusFilter(e.target.value)}
+              style={{
+                height: "38px",
+                padding: "0 10px",
+                borderRadius: "8px",
+                border: "1.5px solid var(--border-color)",
+                backgroundColor: "#ffffff",
+                fontSize: "12px",
+                fontWeight: "650",
+                color: "var(--primary-900)",
+                outline: "none",
+                cursor: "pointer"
+              }}
+            >
+              <option value="all">All Submission Statuses</option>
+              <option value="submitted">Fully Submitted ({sitesSubmittedCount})</option>
+              <option value="partial">Partial Submission ({sitesPartialCount})</option>
+              <option value="pending">Pending Submission ({sitesPendingCount})</option>
+            </select>
+          )}
+
+          <div style={{ marginLeft: "auto", fontSize: "12px", color: "var(--text-muted)", fontWeight: "600" }}>
+            Monitoring Date: <strong>{isRangeMode ? `${formatDateDMY(attendanceDateFilter)} to ${formatDateDMY(attendanceToDateFilter)}` : formatDateDMY(activeDate)}</strong>
           </div>
         </div>
+
+        {/* ── 5. SUB-TAB CONTENT ── */}
+
+        {/* SUB-TAB 1: SITE-WISE ATTENDANCE MATRIX */}
+        {attendanceSubTab === "sites" && (
+          filteredSiteSummaries.length === 0 ? (
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "var(--text-muted)"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>📋</div>
+              <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-900)", marginBottom: "4px" }}>
+                No site attendance records match your search criteria
+              </div>
+              <div style={{ fontSize: "12px" }}>
+                Try resetting your search query or switching to "All Submission Statuses".
+              </div>
+            </div>
+          ) : attendanceViewMode === "table" ? (
+            /* Table View */
+            <div className="admin-table-card" style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", overflow: "hidden" }}>
+              <div className="admin-table-scroll">
+                <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "var(--primary-50)", borderBottom: "1.5px solid var(--border-color)" }}>
+                      <th style={{ width: "22%", paddingLeft: "18px" }}>Project &amp; Code</th>
+                      <th style={{ width: "15%" }}>Client &amp; Location</th>
+                      <th style={{ width: "24%" }}>Assigned Site Engineers</th>
+                      <th style={{ width: "12%", textAlign: "center" }}>Submission Status</th>
+                      <th style={{ width: "12%", textAlign: "center" }}>Workforce Deployed</th>
+                      <th style={{ width: "10%", textAlign: "right" }}>Wage Total</th>
+                      <th style={{ width: "5%", textAlign: "center", paddingRight: "18px" }}>Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredSiteSummaries.map(item => {
+                      const initials = item.site.siteName ? item.site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+
+                      return (
+                        <tr 
+                          key={item.site.id} 
+                          style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                          onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                          onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                        >
+                          {/* Site Name & Code */}
+                          <td style={{ paddingLeft: "18px" }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                              <div 
+                                onClick={() => setSelectedAttendanceInspectionSite(item)}
+                                style={{
+                                  width: "32px",
+                                  height: "32px",
+                                  borderRadius: "8px",
+                                  backgroundColor: "#fff7ed",
+                                  border: "1.5px solid #ffedd5",
+                                  color: "#c2410c",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  fontWeight: "800",
+                                  fontSize: "11px",
+                                  flexShrink: 0,
+                                  cursor: "pointer"
+                                }}
+                              >
+                                {initials}
+                              </div>
+                              <div style={{ minWidth: 0 }}>
+                                <div 
+                                  onClick={() => setSelectedAttendanceInspectionSite(item)}
+                                  style={{
+                                    fontWeight: "750",
+                                    fontSize: "13px",
+                                    color: "var(--primary-950)",
+                                    cursor: "pointer",
+                                    whiteSpace: "nowrap",
+                                    overflow: "hidden",
+                                    textOverflow: "ellipsis",
+                                    maxWidth: "180px"
+                                  }}
+                                  onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                                  onMouseLeave={e => e.currentTarget.style.color = "var(--primary-950)"}
+                                >
+                                  {item.site.siteName}
+                                </div>
+                                <div style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>
+                                  {item.site.siteCode || `ID: ${item.site.id.substring(0, 6)}`}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+
+                          {/* Client & Location */}
+                          <td>
+                            <div style={{ fontSize: "12px", fontWeight: "650", color: "var(--primary-800)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "140px" }}>
+                              {item.site.clientName || "—"}
+                            </div>
+                            <div style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "140px" }}>
+                              <MapPin size={10} style={{ color: "#ea580c", flexShrink: 0 }} />
+                              <span>{item.site.location || "—"}</span>
+                            </div>
+                          </td>
+
+                          {/* Individual Assigned Engineers Status */}
+                          <td>
+                            {item.engineerAttendanceStatuses.length === 0 ? (
+                              <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>No engineers assigned</span>
+                            ) : (
+                              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                                {item.engineerAttendanceStatuses.map(engStat => (
+                                  <div 
+                                    key={engStat.engineer.id || engStat.engineer.uid}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      justifyContent: "space-between",
+                                      gap: "6px",
+                                      fontSize: "11.5px",
+                                      backgroundColor: engStat.hasCheckedIn ? "#f0fdf4" : "#fef2f2",
+                                      border: `1px solid ${engStat.hasCheckedIn ? "#bbf7d0" : "#fecaca"}`,
+                                      borderRadius: "6px",
+                                      padding: "2px 8px"
+                                    }}
+                                  >
+                                    <div style={{ display: "flex", alignItems: "center", gap: "5px", minWidth: 0 }}>
+                                      <span style={{ 
+                                        width: "6px", 
+                                        height: "6px", 
+                                        borderRadius: "50%", 
+                                        backgroundColor: engStat.hasCheckedIn ? (engStat.isCheckedOut ? "#0284c7" : "#16a34a") : "#dc2626",
+                                        flexShrink: 0 
+                                      }} />
+                                      <strong style={{ color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "110px" }}>
+                                        {engStat.engineer.fullName?.split(' ')[0] || engStat.engineer.name || "Engineer"}
+                                      </strong>
+                                    </div>
+                                    <span style={{ fontSize: "10.5px", color: engStat.hasCheckedIn ? "#15803d" : "#dc2626", fontWeight: "700", whiteSpace: "nowrap", fontFamily: "monospace" }}>
+                                      {engStat.hasCheckedIn ? engStat.checkInTime : "Pending"}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Overall Submission Status */}
+                          <td style={{ textAlign: "center" }}>
+                            <span style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              padding: "3px 8px",
+                              borderRadius: "12px",
+                              fontSize: "10.5px",
+                              fontWeight: "750",
+                              backgroundColor: item.statusBg,
+                              color: item.statusColor,
+                              border: `1px solid ${item.statusBorder}`,
+                              whiteSpace: "nowrap"
+                            }}>
+                              <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: item.statusColor }} />
+                              {item.attendanceStatus}
+                            </span>
+                          </td>
+
+                          {/* Workforce Deployed */}
+                          <td style={{ textAlign: "center" }}>
+                            <div style={{ fontSize: "12.5px", fontWeight: "800", color: item.totalWorkers > 0 ? "#0f172a" : "var(--text-muted)" }}>
+                              {item.totalWorkers > 0 ? `👷 ${item.totalWorkers} Workers` : "0 Workers"}
+                            </div>
+                            {item.distinctTeams > 0 && (
+                              <div style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>
+                                {item.distinctTeams} team{item.distinctTeams === 1 ? '' : 's'}
+                              </div>
+                            )}
+                          </td>
+
+                          {/* Wage Total */}
+                          <td style={{ textAlign: "right" }}>
+                            <span style={{ fontSize: "12px", fontWeight: "800", fontFamily: "monospace", color: item.totalWageLiability > 0 ? "#0f172a" : "var(--text-muted)" }}>
+                              {item.totalWageLiability > 0 ? `₹${Math.round(item.totalWageLiability).toLocaleString('en-IN')}` : "—"}
+                            </span>
+                          </td>
+
+                          {/* Action */}
+                          <td style={{ textAlign: "center", paddingRight: "18px" }}>
+                            <button
+                              type="button"
+                              onClick={() => setSelectedAttendanceInspectionSite(item)}
+                              style={{
+                                border: "1px solid #fed7aa",
+                                backgroundColor: "#fff7ed",
+                                color: "#c2410c",
+                                borderRadius: "6px",
+                                padding: "4px 8px",
+                                fontSize: "11px",
+                                fontWeight: "750",
+                                cursor: "pointer",
+                                whiteSpace: "nowrap",
+                                transition: "all 0.12s ease"
+                              }}
+                              onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#ffedd5"; }}
+                              onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fff7ed"; }}
+                            >
+                              Inspect →
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            /* Card Grid View */
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: "16px" }}>
+              {filteredSiteSummaries.map(item => {
+                const initials = item.site.siteName ? item.site.siteName.split(" ").map(w => w[0]).join("").substring(0, 2).toUpperCase() : "CS";
+
+                return (
+                  <div
+                    key={item.site.id}
+                    style={{
+                      backgroundColor: "#ffffff",
+                      border: `1.5px solid ${item.statusBorder}`,
+                      borderRadius: "12px",
+                      padding: "16px",
+                      boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      transition: "all 0.15s ease"
+                    }}
+                  >
+                    <div>
+                      {/* Card Top: Initials, Name, Code, Status */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px", marginBottom: "10px" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div 
+                            onClick={() => setSelectedAttendanceInspectionSite(item)}
+                            style={{
+                              width: "36px",
+                              height: "36px",
+                              borderRadius: "8px",
+                              backgroundColor: "#fff7ed",
+                              border: "1.5px solid #ffedd5",
+                              color: "#c2410c",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: "800",
+                              fontSize: "12px",
+                              flexShrink: 0,
+                              cursor: "pointer"
+                            }}
+                          >
+                            {initials}
+                          </div>
+                          <div>
+                            <h4 
+                              onClick={() => setSelectedAttendanceInspectionSite(item)}
+                              style={{ margin: 0, fontSize: "13.5px", fontWeight: "750", color: "#0f172a", cursor: "pointer" }}
+                              onMouseEnter={e => e.currentTarget.style.color = "#ea580c"}
+                              onMouseLeave={e => e.currentTarget.style.color = "#0f172a"}
+                            >
+                              {item.site.siteName}
+                            </h4>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{item.site.clientName || "No Client"}</span>
+                          </div>
+                        </div>
+                        <span style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "4px",
+                          padding: "3px 8px",
+                          borderRadius: "12px",
+                          fontSize: "10.5px",
+                          fontWeight: "750",
+                          backgroundColor: item.statusBg,
+                          color: item.statusColor,
+                          border: `1px solid ${item.statusBorder}`
+                        }}>
+                          <span style={{ width: "5px", height: "5px", borderRadius: "50%", backgroundColor: item.statusColor }} />
+                          {item.attendanceStatus}
+                        </span>
+                      </div>
+
+                      {/* Assigned Engineers Status List */}
+                      <div style={{ backgroundColor: "#f8fafc", borderRadius: "8px", padding: "8px 10px", border: "1px solid #f1f5f9", marginBottom: "10px" }}>
+                        <div style={{ fontSize: "11px", fontWeight: "750", color: "#475569", marginBottom: "6px" }}>
+                          Assigned Site Engineers ({item.assignedCount}):
+                        </div>
+                        {item.engineerAttendanceStatuses.length === 0 ? (
+                          <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>No engineers assigned</span>
+                        ) : (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            {item.engineerAttendanceStatuses.map(engStat => (
+                              <div key={engStat.engineer.id || engStat.engineer.uid} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px" }}>
+                                <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontWeight: "650", color: "#0f172a" }}>
+                                  <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: engStat.hasCheckedIn ? "#16a34a" : "#dc2626" }} />
+                                  {engStat.engineer.fullName?.split(' ')[0] || engStat.engineer.name || "Engineer"}
+                                </span>
+                                <span style={{ fontSize: "10.5px", color: engStat.hasCheckedIn ? "#15803d" : "#dc2626", fontWeight: "750", fontFamily: "monospace" }}>
+                                  {engStat.hasCheckedIn ? `${engStat.checkInTime} ✓` : "Pending"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Workforce Summary */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "12px", color: "#334155" }}>
+                        <span>Workforce Deployed: <strong style={{ color: item.totalWorkers > 0 ? "#15803d" : "#64748b" }}>{item.totalWorkers} workers</strong></span>
+                        <span>Wage Total: <strong style={{ fontFamily: "monospace" }}>₹{Math.round(item.totalWageLiability).toLocaleString('en-IN')}</strong></span>
+                      </div>
+                    </div>
+
+                    {/* Card Footer Button */}
+                    <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "10px" }}>
+                      <button
+                        type="button"
+                        onClick={() => setSelectedAttendanceInspectionSite(item)}
+                        style={{
+                          width: "100%",
+                          height: "32px",
+                          borderRadius: "6px",
+                          border: "1px solid #fed7aa",
+                          backgroundColor: "#fff7ed",
+                          color: "#c2410c",
+                          fontSize: "12px",
+                          fontWeight: "750",
+                          cursor: "pointer",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: "6px",
+                          transition: "all 0.15s ease"
+                        }}
+                        onMouseEnter={e => { e.currentTarget.style.backgroundColor = "#ffedd5"; }}
+                        onMouseLeave={e => { e.currentTarget.style.backgroundColor = "#fff7ed"; }}
+                      >
+                        Inspect Site Attendance &amp; Workforce →
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )
+        )}
+
+        {/* SUB-TAB 2: ENGINEER CHECK-IN LEDGER */}
+        {attendanceSubTab === "engineers" && (
+          filteredEngineerRecords.length === 0 ? (
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "var(--text-muted)"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>📍</div>
+              <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-900)", marginBottom: "4px" }}>
+                No engineer check-in records for this date criteria
+              </div>
+              <div style={{ fontSize: "12px" }}>
+                Engineer check-ins submitted from field devices will appear here chronologically.
+              </div>
+            </div>
+          ) : (
+            <div className="admin-table-card" style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", overflow: "hidden" }}>
+              <div className="admin-table-scroll">
+                <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ backgroundColor: "var(--primary-50)", borderBottom: "1.5px solid var(--border-color)" }}>
+                      <th style={{ width: "20%", paddingLeft: "18px" }}>Field Engineer</th>
+                      <th style={{ width: "20%" }}>Project Site</th>
+                      <th style={{ width: "12%" }}>Date</th>
+                      <th style={{ width: "12%" }}>Check-In Time</th>
+                      <th style={{ width: "12%" }}>Check-Out Time</th>
+                      <th style={{ width: "10%", textAlign: "center" }}>Presence Status</th>
+                      <th style={{ width: "10%" }}>GPS Geofence</th>
+                      <th style={{ width: "4%", textAlign: "center", paddingRight: "18px" }}>Photo Proof</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredEngineerRecords.map(rec => (
+                      <tr 
+                        key={rec.id} 
+                        style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                        onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                        onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                      >
+                        <td style={{ paddingLeft: "18px" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                            <div style={{
+                              width: "28px",
+                              height: "28px",
+                              borderRadius: "50%",
+                              backgroundColor: "#eff6ff",
+                              border: "1px solid #bfdbfe",
+                              color: "#1d4ed8",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              fontWeight: "800",
+                              fontSize: "11px"
+                            }}>
+                              {(rec.engineerName || "E")[0].toUpperCase()}
+                            </div>
+                            <div>
+                              <strong style={{ fontSize: "13px", color: "#0f172a" }}>{rec.engineerName}</strong>
+                              {rec.engineerPhone && <div style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>{rec.engineerPhone}</div>}
+                            </div>
+                          </div>
+                        </td>
+
+                        <td>
+                          <span style={{ fontSize: "12.5px", fontWeight: "650", color: "var(--primary-900)" }}>{rec.siteName}</span>
+                        </td>
+
+                        <td className="font-mono" style={{ fontSize: "12px" }}>
+                          {formatDateDMY(rec.date || rec.attendanceDate)}
+                        </td>
+
+                        <td className="font-mono" style={{ fontSize: "12px", fontWeight: "750", color: "#16a34a" }}>
+                          {rec.checkInTimeFormatted}
+                        </td>
+
+                        <td className="font-mono" style={{ fontSize: "12px", color: rec.checkOutTimeFormatted ? "#0284c7" : "var(--text-muted)" }}>
+                          {rec.checkOutTimeFormatted || "On Site"}
+                        </td>
+
+                        <td style={{ textAlign: "center" }}>
+                          <Badge status={rec.isCheckedOut ? "default" : "success"}>
+                            {rec.isCheckedOut ? "Checked Out" : "On Site"}
+                          </Badge>
+                        </td>
+
+                        <td>
+                          <span style={{ fontSize: "11.5px", color: rec.isVerified ? "#16a34a" : "#ca8a04", fontWeight: "700" }}>
+                            {rec.isVerified ? "✓ Verified GPS" : "Pending Verification"}
+                          </span>
+                        </td>
+
+                        <td style={{ textAlign: "center", paddingRight: "18px" }}>
+                          {rec.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPreviewImage({ url: rec.photoUrl, title: `Attendance Photo Proof: ${rec.engineerName}` })}
+                              style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <Eye size={13} /> View
+                            </button>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* SUB-TAB 3: WORKFORCE DEPLOYMENT SUMMARY */}
+        {attendanceSubTab === "workforce" && (
+          filteredLabourRecords.length === 0 ? (
+            <div style={{
+              backgroundColor: "#ffffff",
+              borderRadius: "12px",
+              border: "1px solid var(--border-color)",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "var(--text-muted)"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>👥</div>
+              <div style={{ fontWeight: "700", fontSize: "14px", color: "var(--primary-900)", marginBottom: "4px" }}>
+                No workforce logs recorded for this date criteria
+              </div>
+              <div style={{ fontSize: "12px" }}>
+                Daily labour deployment entries submitted by site engineers will appear here.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+              <div className="admin-table-card" style={{ backgroundColor: "#ffffff", borderRadius: "12px", border: "1px solid var(--border-color)", overflow: "hidden" }}>
+                <div className="admin-table-scroll">
+                  <table className="admin-table" style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ backgroundColor: "var(--primary-50)", borderBottom: "1.5px solid var(--border-color)" }}>
+                        <th style={{ width: "20%", paddingLeft: "18px" }}>Project Site</th>
+                        <th style={{ width: "18%" }}>Trade Category</th>
+                        <th style={{ width: "18%" }}>Contractor Team</th>
+                        <th style={{ width: "12%", textAlign: "center" }}>Headcount</th>
+                        <th style={{ width: "12%", textAlign: "right" }}>Daily Rate</th>
+                        <th style={{ width: "12%", textAlign: "right" }}>Wage Total</th>
+                        <th style={{ width: "8%", textAlign: "center", paddingRight: "18px" }}>Shift</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredLabourRecords.map((labourRec, lIdx) => {
+                        const sObj = sites.find(s => s.id === labourRec.siteId);
+                        const { workerCount, amount, rate } = resolveLabourRecordCalculations(labourRec);
+
+                        return (
+                          <tr 
+                            key={labourRec.id || lIdx}
+                            style={{ borderBottom: "1px solid #f1f5f9", transition: "background 0.12s ease" }}
+                            onMouseEnter={e => e.currentTarget.style.backgroundColor = "#f8fafc"}
+                            onMouseLeave={e => e.currentTarget.style.backgroundColor = "transparent"}
+                          >
+                            <td style={{ paddingLeft: "18px", fontWeight: "750", color: "#0f172a" }}>
+                              {sObj?.siteName || labourRec.siteName || "Site Project"}
+                            </td>
+                            <td>
+                              <Badge status="info">{labourRec.categoryName || labourRec.category || "General Labour"}</Badge>
+                            </td>
+                            <td>
+                              <span style={{ fontSize: "12px", color: "#334155", fontWeight: "600" }}>{labourRec.teamName || "Direct / Independent"}</span>
+                            </td>
+                            <td style={{ textAlign: "center", fontWeight: "800", fontSize: "13px" }}>
+                              👷 {workerCount}
+                            </td>
+                            <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "12px" }}>
+                              ₹{rate}
+                            </td>
+                            <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "12px", fontWeight: "800", color: "#0f172a" }}>
+                              ₹{Math.round(amount).toLocaleString('en-IN')}
+                            </td>
+                            <td style={{ textAlign: "center", paddingRight: "18px" }}>
+                              <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "capitalize" }}>
+                                {labourRec.shiftType || labourRec.shift || "Full Day"}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* SUB-TAB 4: EXCEPTIONS & ATTENTION MATRIX */}
+        {attendanceSubTab === "exceptions" && (
+          attentionList.length === 0 ? (
+            <div style={{
+              backgroundColor: "#f0fdf4",
+              borderRadius: "12px",
+              border: "1.5px solid #bbf7d0",
+              padding: "48px 24px",
+              textAlign: "center",
+              color: "#15803d"
+            }}>
+              <div style={{ fontSize: "36px", marginBottom: "8px" }}>🎉</div>
+              <div style={{ fontWeight: "800", fontSize: "15px", marginBottom: "4px" }}>
+                100% Attendance Compliance for {formatDateDMY(activeDate)}
+              </div>
+              <div style={{ fontSize: "12.5px", color: "#166534" }}>
+                All active project sites have verified engineer check-ins and workforce deployment reports submitted.
+              </div>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+              <div style={{ fontSize: "12.5px", color: "#64748b", fontWeight: "600" }}>
+                Showing {attentionList.length} site exception{attentionList.length === 1 ? '' : 's'} requiring executive attention:
+              </div>
+
+              {attentionList.map(item => (
+                <div
+                  key={item.site.id}
+                  style={{
+                    backgroundColor: "#ffffff",
+                    border: `1.5px solid ${item.statusBorder}`,
+                    borderLeft: `5px solid ${item.statusColor}`,
+                    borderRadius: "12px",
+                    padding: "16px",
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.03)",
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: "10px"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <h4 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "#0f172a" }}>
+                          {item.site.siteName}
+                        </h4>
+                        <span style={{
+                          fontSize: "10.5px",
+                          fontWeight: "800",
+                          color: item.statusColor,
+                          backgroundColor: item.statusBg,
+                          padding: "2px 8px",
+                          borderRadius: "12px",
+                          border: `1px solid ${item.statusBorder}`
+                        }}>
+                          {item.attendanceStatus}
+                        </span>
+                      </div>
+                      <div style={{ fontSize: "11.5px", color: "var(--text-muted)", marginTop: "2px" }}>
+                        {item.site.clientName || "No Client"} • {item.site.location || "Location not set"}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setSelectedAttendanceInspectionSite(item)}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: "7px",
+                        border: "1px solid #fed7aa",
+                        backgroundColor: "#fff7ed",
+                        color: "#c2410c",
+                        fontSize: "12px",
+                        fontWeight: "800",
+                        cursor: "pointer"
+                      }}
+                    >
+                      Inspect Site Attendance →
+                    </button>
+                  </div>
+
+                  {/* Engineer Check-In Status Detail */}
+                  <div style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                    gap: "8px",
+                    backgroundColor: "#f8fafc",
+                    padding: "10px 14px",
+                    borderRadius: "8px",
+                    border: "1px solid #f1f5f9"
+                  }}>
+                    {item.engineerAttendanceStatuses.map(engStat => (
+                      <div key={engStat.engineer.id || engStat.engineer.uid} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", fontSize: "11.5px" }}>
+                        <span style={{ fontWeight: "700", color: "#0f172a" }}>{engStat.engineer.fullName || engStat.engineer.name}:</span>
+                        <span style={{ fontWeight: "800", color: engStat.hasCheckedIn ? "#16a34a" : "#dc2626" }}>
+                          {engStat.hasCheckedIn ? `Checked In (${engStat.checkInTime})` : "Missing Check-In ⚠️"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
+
+        {/* ── 6. DETAILED SITE ATTENDANCE INSPECTION MODAL ── */}
+        {selectedAttendanceInspectionSite && (
+          <div 
+            style={{
+              position: "fixed",
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              backgroundColor: "rgba(15, 23, 42, 0.65)",
+              backdropFilter: "blur(4px)",
+              zIndex: 9999,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "16px"
+            }}
+            onClick={() => setSelectedAttendanceInspectionSite(null)}
+          >
+            <div 
+              style={{
+                backgroundColor: "#ffffff",
+                borderRadius: "16px",
+                maxWidth: "720px",
+                width: "100%",
+                maxHeight: "90vh",
+                overflowY: "auto",
+                boxShadow: "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04)",
+                padding: "24px",
+                display: "flex",
+                flexDirection: "column",
+                gap: "18px"
+              }}
+              onClick={e => e.stopPropagation()}
+            >
+              {/* Modal Header */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid #f1f5f9", paddingBottom: "14px" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "850", color: "#0f172a" }}>
+                      {selectedAttendanceInspectionSite.site.siteName}
+                    </h3>
+                    <span style={{
+                      fontSize: "11px",
+                      fontWeight: "800",
+                      color: selectedAttendanceInspectionSite.statusColor,
+                      backgroundColor: selectedAttendanceInspectionSite.statusBg,
+                      padding: "2px 8px",
+                      borderRadius: "12px",
+                      border: `1px solid ${selectedAttendanceInspectionSite.statusBorder}`
+                    }}>
+                      {selectedAttendanceInspectionSite.attendanceStatus}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: "12px", color: "var(--text-muted)", marginTop: "2px" }}>
+                    Client: {selectedAttendanceInspectionSite.site.clientName || "—"} • Date: <strong>{isRangeMode ? `${formatDateDMY(attendanceDateFilter)} to ${formatDateDMY(attendanceToDateFilter)}` : formatDateDMY(activeDate)}</strong>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setSelectedAttendanceInspectionSite(null)}
+                  style={{
+                    border: "none",
+                    background: "#f1f5f9",
+                    borderRadius: "50%",
+                    width: "32px",
+                    height: "32px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: "800",
+                    color: "#64748b"
+                  }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Assigned Engineers Status */}
+              <div>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "13.5px", fontWeight: "800", color: "#0f172a" }}>
+                  Assigned Site Engineers ({selectedAttendanceInspectionSite.assignedCount})
+                </h4>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {selectedAttendanceInspectionSite.engineerAttendanceStatuses.map(engStat => (
+                    <div 
+                      key={engStat.engineer.id || engStat.engineer.uid}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "10px 14px",
+                        borderRadius: "8px",
+                        backgroundColor: engStat.hasCheckedIn ? "#f0fdf4" : "#fef2f2",
+                        border: `1px solid ${engStat.hasCheckedIn ? "#bbf7d0" : "#fecaca"}`
+                      }}
+                    >
+                      <div>
+                        <strong style={{ fontSize: "13px", color: "#0f172a" }}>{engStat.engineer.fullName || engStat.engineer.name}</strong>
+                        <div style={{ fontSize: "11px", color: "var(--text-muted)" }}>{engStat.engineer.phone || engStat.engineer.email || "Site Engineer"}</div>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <div style={{ textAlign: "right" }}>
+                          <div style={{ fontSize: "12px", fontWeight: "800", color: engStat.hasCheckedIn ? "#16a34a" : "#dc2626" }}>
+                            {engStat.hasCheckedIn ? `Checked In: ${engStat.checkInTime}` : "No Check-In Recorded"}
+                          </div>
+                          {engStat.checkOutTime && engStat.checkOutTime !== "—" && (
+                            <div style={{ fontSize: "10.5px", color: "#0284c7" }}>Checked Out: {engStat.checkOutTime}</div>
+                          )}
+                        </div>
+
+                        {engStat.photoUrl && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedPreviewImage({ url: engStat.photoUrl, title: `Selfie Proof: ${engStat.engineer.fullName}` })}
+                            style={{
+                              border: "1px solid #bfdbfe",
+                              backgroundColor: "#eff6ff",
+                              color: "#1d4ed8",
+                              borderRadius: "6px",
+                              padding: "4px 8px",
+                              fontSize: "11px",
+                              fontWeight: "750",
+                              cursor: "pointer"
+                            }}
+                          >
+                            View Selfie
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Workforce Breakdown */}
+              <div>
+                <h4 style={{ margin: "0 0 10px 0", fontSize: "13.5px", fontWeight: "800", color: "#0f172a" }}>
+                  Workforce Deployed ({selectedAttendanceInspectionSite.totalWorkers} Workers • ₹{Math.round(selectedAttendanceInspectionSite.totalWageLiability).toLocaleString('en-IN')})
+                </h4>
+                {selectedAttendanceInspectionSite.siteLabour.length === 0 ? (
+                  <div style={{ padding: "16px", backgroundColor: "#f8fafc", borderRadius: "8px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+                    No labour logs recorded for this site on this date.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {selectedAttendanceInspectionSite.siteLabour.map((l, lIdx) => {
+                      const { workerCount, amount, rate } = resolveLabourRecordCalculations(l);
+                      return (
+                        <div 
+                          key={l.id || lIdx}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            padding: "8px 12px",
+                            borderRadius: "6px",
+                            backgroundColor: "#f8fafc",
+                            border: "1px solid #f1f5f9",
+                            fontSize: "12px"
+                          }}
+                        >
+                          <div>
+                            <strong>{l.categoryName || l.category || "Workforce"}</strong> ({l.teamName || "Direct"})
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                            <span>👷 {workerCount} Workers</span>
+                            <span style={{ fontFamily: "monospace", fontWeight: "750" }}>₹{Math.round(amount).toLocaleString('en-IN')}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div style={{ display: "flex", justifyContent: "flex-end", gap: "10px", borderTop: "1px solid #f1f5f9", paddingTop: "14px" }}>
+                <Button 
+                  onClick={() => setSelectedAttendanceInspectionSite(null)}
+                  variant="outline"
+                  style={{ height: "36px", padding: "0 16px" }}
+                >
+                  Close Inspection
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     );
   };
