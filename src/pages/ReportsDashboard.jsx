@@ -325,7 +325,7 @@ function LineChartComponent({ data }) {
 // ==========================================================================
 // CENTRAL REPORTS DASHBOARD PAGE
 // ==========================================================================
-export default function ReportsDashboard() {
+export default function ReportsDashboard({ embedded = false }) {
   const { userProfile } = useAuth();
   const userRole = userProfile?.role || "admin";
   const isSuperAdmin = userRole === "super_admin" || userRole === "superadmin";
@@ -2083,6 +2083,13 @@ export default function ReportsDashboard() {
   }, [isPrinting]);
 
   if (loading) {
+    if (embedded) {
+      return (
+        <div style={{ padding: "40px 0" }}>
+          <Loading show={true} text="Assembling Site Reports..." />
+        </div>
+      );
+    }
     return (
       <Layout hideNavbar={true}>
         <Loading show={true} text="Assembling Management dashboard..." />
@@ -2106,8 +2113,8 @@ export default function ReportsDashboard() {
     }
   };
 
-  return (
-    <Layout hideNavbar={true}>
+  const reportMainContent = (
+    <div className={embedded ? "embedded-reports-dashboard" : ""}>
       {/* A4 Portrait Print Stylesheet with browser headers/footers suppression */}
       <style>{`
         @media print {
@@ -4771,6 +4778,16 @@ export default function ReportsDashboard() {
 
 
       </div>
+    </div>
+  );
+
+  if (embedded) {
+    return reportMainContent;
+  }
+
+  return (
+    <Layout hideNavbar={true}>
+      {reportMainContent}
     </Layout>
   );
 }

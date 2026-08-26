@@ -309,7 +309,7 @@ const PendingApprovalItem = ({ site, engineers, onApprove, onReject }) => {
   );
 };
 
-export default function Sites() {
+export default function Sites({ embedded = false }) {
   const { userProfile } = useAuth();
   const [sites, setSites] = useState([]);
   const [engineers, setEngineers] = useState([]);
@@ -802,12 +802,13 @@ export default function Sites() {
       <SiteDetails 
         siteId={selectedSiteId} 
         onBack={() => setSelectedSiteId(null)} 
+        embedded={embedded}
       />
     );
   }
 
-  return (
-    <Layout title="Construction Sites" description="Manage active civil construction projects and track details.">
+  const sitesMainContent = (
+    <div className={embedded ? "embedded-sites-dashboard" : ""}>
       {toast.show && (
         <div id="toast-container" className="toast-container">
           <div className={`toast toast-${toast.type}`}>
@@ -1675,6 +1676,16 @@ export default function Sites() {
       )}
 
       <Loading show={loading} text="Processing Request..." />
+    </div>
+  );
+
+  if (embedded) {
+    return sitesMainContent;
+  }
+
+  return (
+    <Layout title="Construction Sites" description="Manage active civil construction projects and track details.">
+      {sitesMainContent}
     </Layout>
   );
 }

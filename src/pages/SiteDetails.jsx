@@ -135,7 +135,7 @@ const normalizeDateToISO = (dateVal) => {
   return s;
 };
 
-export default function SiteDetails({ siteId, onBack }) {
+export default function SiteDetails({ siteId, onBack, embedded = false }) {
   const { userProfile } = useAuth();
   const [site, setSite] = useState(null);
   const [engineers, setEngineers] = useState([]);
@@ -568,6 +568,13 @@ export default function SiteDetails({ siteId, onBack }) {
   }, [siteId]);
 
   if (loading) {
+    if (embedded) {
+      return (
+        <div style={{ padding: "40px 0" }}>
+          <Loading show={true} text="Synchronizing site databases..." />
+        </div>
+      );
+    }
     return (
       <Layout title="Site Details" description="Loading detailed resource logs...">
         <Loading show={true} text="Synchronizing site databases..." />
@@ -1038,11 +1045,8 @@ export default function SiteDetails({ siteId, onBack }) {
     { id: "photos", label: "Photos", icon: Camera }
   ];
 
-  return (
-    <Layout 
-      title={`Dashboard: ${site.siteName}`} 
-      description={`Resource tracking, worker logs, and logistics audit ledger for ${site.location}.`}
-    >
+  const detailsContent = (
+    <div className={embedded ? "embedded-site-details" : ""}>
       {toast.show && (
         <div id="toast-container" className="toast-container">
           <div className={`toast toast-${toast.type}`}>
@@ -4117,6 +4121,19 @@ export default function SiteDetails({ siteId, onBack }) {
       )}
 
       <ConfirmationModal {...confirmModalState} onClose={closeConfirmModal} />
+    </div>
+  );
+
+  if (embedded) {
+    return detailsContent;
+  }
+
+  return (
+    <Layout 
+      title={`Dashboard: ${site.siteName}`} 
+      description={`Resource tracking, worker logs, and logistics audit ledger for ${site.location}.`}
+    >
+      {detailsContent}
     </Layout>
   );
 }

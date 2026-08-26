@@ -83,6 +83,8 @@ import {
   RefreshCw
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import ReportsDashboard from "./ReportsDashboard";
+import Sites from "./Sites";
 
 export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const { userProfile } = useAuth();
@@ -143,6 +145,23 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
   // ── Modal Photo Preview ──
   const [selectedPreviewImage, setSelectedPreviewImage] = useState(null);
+
+  // ── Site Supervision Modal Attendance Date Range Filter State ──
+  const [siteAttendanceFromDate, setSiteAttendanceFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return d.toISOString().split("T")[0];
+  });
+  const [siteAttendanceToDate, setSiteAttendanceToDate] = useState(() => {
+    return new Date().toISOString().split("T")[0];
+  });
+  const [siteLaborInspectionDate, setSiteLaborInspectionDate] = useState(() => {
+    try {
+      return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(new Date());
+    } catch (e) {
+      return new Date().toISOString().split("T")[0];
+    }
+  });
 
   // ── Engineers View State ──
   const [engineerSearchQuery, setEngineerSearchQuery] = useState("");
@@ -641,11 +660,14 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // ══════════════════════════════════════════════════════════════════════════
   const renderDashboardView = () => {
     // 1. Core Computed Quantities from Canonical Firestore Data
-    const activeSitesList = sites.filter(s => (s.status || "active").toLowerCase() === "active" || (s.status || "").toLowerCase() === "running");
+    const activeSitesList = sites.filter(s => (s.status || "Active").toLowerCase() === "active");
     const activeSitesCount = activeSitesList.length;
-    const runningSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "running").length;
-    const completedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "completed").length;
-    const delayedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "delayed" || isSiteDelayed(s)).length;
+    const planningSitesList = sites.filter(s => (s.status || "").toLowerCase() === "planning");
+    const planningSitesCount = planningSitesList.length;
+    const completedSitesList = sites.filter(s => (s.status || "").toLowerCase() === "completed");
+    const completedSitesCount = completedSitesList.length;
+    const delayedSitesList = sites.filter(s => (s.status || "").toLowerCase() === "delayed" || isSiteDelayed(s));
+    const delayedSitesCount = delayedSitesList.length;
     const onTrackSitesCount = Math.max(0, activeSitesCount - delayedSitesCount);
 
     // Site Engineers & Attendance Pulse
@@ -832,17 +854,29 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
       
       let siteWorkforceToday = 0;
+      let siteTodayLabourCost = 0;
       (rawLabourAttendance || []).forEach(r => {
-        if (!r || r.lockedMetadata) return;
-        if (r.siteId === site.id && (r.attendanceDate || r.date) === todayDateString) {
-          siteWorkforceToday += Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+        if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
+        if (r.siteId === site.id && (r.attendanceDate === todayDateString || r.date === todayDateString)) {
+          const { workerCount, amount } = resolveLabourRecordCalculations(r);
+          siteWorkforceToday += workerCount;
+          siteTodayLabourCost += amount;
         }
       });
+
+      const siteAssignedEngineers = engineers.filter(e => 
+        (Array.isArray(site.assignedEngineers) && (site.assignedEngineers.includes(e.id) || site.assignedEngineers.includes(e.uid))) ||
+        e.assignedSiteId === site.id || 
+        (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) || 
+        assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))
+      );
 
       return {
         site,
         progress: financials.progressPercent || Number(site.progress) || 0,
         workforce: siteWorkforceToday,
+        todayLabourCost: siteTodayLabourCost,
+        assignedEngineers: siteAssignedEngineers,
         expense: financials.totalSpent || 0,
         status: site.status || "Active"
       };
@@ -894,7 +928,25 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         {/* ── 2. EXECUTIVE KPI OVERVIEW (6 COMPACT CARDS) ── */}
         <div className="admin-summary-grid">
           {/* Total Sites */}
-          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "total_sites", title: "All Construction Sites", subtitle: `${sites.length} Projects in Portfolio`, items: sites })} style={{ cursor: "pointer" }}>
+          <div 
+            className="admin-summary-card" 
+            onClick={() => setKpiDrilldownState({ 
+              isOpen: true, 
+              type: "total_sites", 
+              title: "All Construction Sites", 
+              subtitle: `${sites.length} Projects in Portfolio`, 
+              items: sites.map(s => ({
+                id: s.id,
+                title: s.siteName,
+                subtitle: `Client: ${s.clientName || "Corporate Client"} • Location: ${s.location || s.formattedAddress || "N/A"}`,
+                status: s.status || "Active",
+                badgeStatus: s.status?.toLowerCase() === "completed" ? "success" : (isSiteDelayed(s) ? "danger" : "default"),
+                metric: `${s.progress || 0}% Progress`,
+                actionSite: s
+              }))
+            })} 
+            style={{ cursor: "pointer" }}
+          >
             <div className="admin-summary-icon erp-kpi-icon-slate">
               <Building2 size={20} />
             </div>
@@ -905,7 +957,25 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
 
           {/* Active Sites */}
-          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "active_sites", title: "Active Construction Sites", subtitle: `${activeSitesCount} Active Projects`, items: activeSitesList })} style={{ cursor: "pointer" }}>
+          <div 
+            className="admin-summary-card" 
+            onClick={() => setKpiDrilldownState({ 
+              isOpen: true, 
+              type: "active_sites", 
+              title: "Active Construction Sites", 
+              subtitle: `${activeSitesCount} Active Projects`, 
+              items: activeSitesList.map(s => ({
+                id: s.id,
+                title: s.siteName,
+                subtitle: `Client: ${s.clientName || "Corporate Client"} • Location: ${s.location || s.formattedAddress || "N/A"}`,
+                status: s.status || "Active",
+                badgeStatus: "info",
+                metric: `${s.progress || 0}% Progress`,
+                actionSite: s
+              }))
+            })} 
+            style={{ cursor: "pointer" }}
+          >
             <div className="admin-summary-icon erp-kpi-icon-blue">
               <Activity size={20} />
             </div>
@@ -916,7 +986,25 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
 
           {/* Completed Sites */}
-          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "completed_sites", title: "Completed Sites", subtitle: `${completedSitesCount} Delivered Projects`, items: sites.filter(s => (s.status || "").toLowerCase() === "completed") })} style={{ cursor: "pointer" }}>
+          <div 
+            className="admin-summary-card" 
+            onClick={() => setKpiDrilldownState({ 
+              isOpen: true, 
+              type: "completed_sites", 
+              title: "Completed Sites", 
+              subtitle: `${completedSitesCount} Delivered Projects`, 
+              items: completedSitesList.map(s => ({
+                id: s.id,
+                title: s.siteName,
+                subtitle: `Delivered • Client: ${s.clientName || "Corporate Client"} • Location: ${s.location || s.formattedAddress || "N/A"}`,
+                status: "Completed",
+                badgeStatus: "success",
+                metric: `100% Progress`,
+                actionSite: s
+              }))
+            })} 
+            style={{ cursor: "pointer" }}
+          >
             <div className="admin-summary-icon erp-kpi-icon-green">
               <TrendingUp size={20} />
             </div>
@@ -927,7 +1015,34 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
 
           {/* Delayed Sites */}
-          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "delayed_sites", title: "Delayed Sites Requiring Attention", subtitle: `${delayedSitesCount} Delayed Projects`, items: sites.filter(s => isSiteDelayed(s)) })} style={{ cursor: "pointer" }}>
+          <div 
+            className="admin-summary-card" 
+            onClick={() => setKpiDrilldownState({ 
+              isOpen: true, 
+              type: "delayed_sites", 
+              title: "Delayed Sites Requiring Attention", 
+              subtitle: `${delayedSitesCount} Delayed Projects`, 
+              items: delayedSitesList.map(s => {
+                const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
+                const actual = Number(s.progress) || 0;
+                const gap = Math.max(0, planned - actual);
+                const delayDetail = s.delayReason || (s.expectedEndDate && isSiteDelayed(s)
+                  ? `Target was ${formatDateDMY(s.expectedEndDate)} • ${gap > 0 ? `${gap}% behind schedule` : 'Past completion date'}`
+                  : `Behind schedule (${actual}% vs planned ${planned}%)`);
+                return {
+                  id: s.id,
+                  title: s.siteName,
+                  subtitle: `Client: ${s.clientName || "Corporate Client"} • Target: ${formatDateDMY(s.expectedEndDate) || "Not Set"}`,
+                  status: s.status || "Delayed",
+                  badgeStatus: "danger",
+                  metric: `${actual}% Progress`,
+                  delayDetail,
+                  actionSite: s
+                };
+              })
+            })} 
+            style={{ cursor: "pointer" }}
+          >
             <div className="admin-summary-icon erp-kpi-icon-red">
               <AlertTriangle size={20} />
             </div>
@@ -940,7 +1055,25 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           </div>
 
           {/* Site Engineers */}
-          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "site_engineers", title: "Site Engineers Roster", subtitle: `${activeEngineersCount} Active Field Engineers`, items: activeEngineersList })} style={{ cursor: "pointer" }}>
+          <div 
+            className="admin-summary-card" 
+            onClick={() => setKpiDrilldownState({ 
+              isOpen: true, 
+              type: "site_engineers", 
+              title: "Site Engineers Roster", 
+              subtitle: `${activeEngineersCount} Active Field Engineers`, 
+              items: activeEngineersList.map(eng => ({
+                id: eng.id || eng.uid,
+                title: eng.fullName || eng.name,
+                subtitle: `${eng.email || ""} • ${eng.phoneNumber || eng.phone || ""}`,
+                status: eng.status || "Active",
+                badgeStatus: "success",
+                metric: `${(eng.assignedSites || []).length || (eng.assignedSiteId ? 1 : 0)} Assigned Sites`,
+                link: "/superadmin/engineers"
+              }))
+            })} 
+            style={{ cursor: "pointer" }}
+          >
             <div className="admin-summary-icon erp-kpi-icon-purple">
               <Users size={20} />
             </div>
@@ -977,8 +1110,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                   <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#166534" }}>Active</div>
                 </div>
                 <div style={{ padding: "8px 10px", backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", textAlign: "center" }}>
-                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#1d4ed8" }}>{runningSitesCount}</div>
-                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#1e40af" }}>Running</div>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#1d4ed8" }}>{planningSitesCount}</div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#1e40af" }}>Planning</div>
                 </div>
                 <div style={{ padding: "8px 10px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", textAlign: "center" }}>
                   <div style={{ fontSize: "18px", fontWeight: "800", color: "#b91c1c" }}>{delayedSitesCount}</div>
@@ -993,10 +1126,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             {/* Segmented Distribution Bar */}
             <div style={{ marginTop: "12px" }}>
               <div style={{ display: "flex", height: "6px", borderRadius: "3px", overflow: "hidden", backgroundColor: "#e2e8f0" }}>
-                <div style={{ width: `${sites.length > 0 ? (activeSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#22c55e" }} />
-                <div style={{ width: `${sites.length > 0 ? (runningSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#3b82f6" }} />
-                <div style={{ width: `${sites.length > 0 ? (delayedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#ef4444" }} />
-                <div style={{ width: `${sites.length > 0 ? (completedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#64748b" }} />
+                <div style={{ width: `${sites.length > 0 ? (activeSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#22c55e" }} title={`Active: ${activeSitesCount}`} />
+                <div style={{ width: `${sites.length > 0 ? (planningSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#3b82f6" }} title={`Planning: ${planningSitesCount}`} />
+                <div style={{ width: `${sites.length > 0 ? (delayedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#ef4444" }} title={`Delayed: ${delayedSitesCount}`} />
+                <div style={{ width: `${sites.length > 0 ? (completedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#64748b" }} title={`Completed: ${completedSitesCount}`} />
               </div>
             </div>
           </div>
@@ -1069,51 +1202,42 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                 <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Financial Overview</h3>
                 <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Corporate Spend</span>
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
-                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" }}>
+                <div style={{ padding: "10px 12px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
                   <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Total Expenses</div>
-                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-950)", fontFamily: "monospace", marginTop: "2px" }}>
-                    ₹{formatINR(overallMetrics.totalExpenses)}
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-950)", fontFamily: "monospace", marginTop: "4px" }}>
+                    {formatINR(overallMetrics.totalExpenses)}
                   </div>
                 </div>
-                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Today's Expenses</div>
-                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--brand-orange)", fontFamily: "monospace", marginTop: "2px" }}>
-                    ₹{formatINR(todayTotalExpenses)}
+                <div style={{ padding: "10px 12px", backgroundColor: "#fff7ed", border: "1px solid #fed7aa", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#c2410c", textTransform: "uppercase" }}>Today's Expenses</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--brand-orange)", fontFamily: "monospace", marginTop: "4px" }}>
+                    {formatINR(todayTotalExpenses)}
                   </div>
                 </div>
-                <div style={{ padding: "8px 10px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#166534", textTransform: "uppercase" }}>Client Paid</div>
-                  <div style={{ fontSize: "15px", fontWeight: "800", color: "#15803d", fontFamily: "monospace", marginTop: "2px" }}>
-                    ₹{formatINR(overallMetrics.totalPaymentsReceived)}
-                  </div>
-                </div>
-                <div style={{ padding: "8px 10px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#991b1b", textTransform: "uppercase" }}>Pending Balance</div>
-                  <div style={{ fontSize: "15px", fontWeight: "800", color: "#b91c1c", fontFamily: "monospace", marginTop: "2px" }}>
-                    ₹{formatINR(overallMetrics.pendingPayments)}
+                <div style={{ padding: "10px 12px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#991b1b", textTransform: "uppercase" }}>Pending</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "#b91c1c", fontFamily: "monospace", marginTop: "4px" }}>
+                    {formatINR(overallMetrics.pendingPayments)}
                   </div>
                 </div>
               </div>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--primary-600)", fontWeight: "600", marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
-              <span>Budget Value: ₹{formatINR(overallMetrics.totalProjectValue)}</span>
-              <span style={{ color: overallMetrics.totalPaymentsReceived >= overallMetrics.totalExpenses ? "#15803d" : "#b91c1c" }}>
-                Net: ₹{formatINR(Math.abs(overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses))}
-              </span>
+              <span>Total Project Portfolio Budget: {formatINR(overallMetrics.totalProjectValue)}</span>
             </div>
           </div>
         </div>
 
-        {/* ── 7. SITE PERFORMANCE (COMPACT TABLE) ── */}
+        {/* ── 7. SITE PROGRESS OVERVIEW (COMPACT TABLE) ── */}
         <div className="admin-table-card">
           <div className="admin-table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
             <div>
               <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>
-                Site Performance Overview ({sites.length} Sites)
+                Site Progress Overview ({sites.length} Sites)
               </h3>
               <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>
-                Execution progress, today's workforce deployment, and financial outlay spend per site.
+                Execution progress, assigned field engineers, today's workforce deployment, and total project spend per site.
               </p>
             </div>
             <Link to="/superadmin/sites" className="btn btn-outline" style={{ height: "30px", padding: "0 10px", fontSize: "11.5px", fontWeight: "700" }}>
@@ -1124,26 +1248,67 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
             <table className="admin-table">
               <thead>
                 <tr>
-                  <th>Site Name</th>
-                  <th style={{ width: "200px" }}>Progress</th>
+                  <th>Site &amp; Location</th>
+                  <th>Assigned Engineer(s)</th>
+                  <th style={{ width: "170px" }}>Progress</th>
                   <th style={{ textAlign: "right" }}>Today's Labour</th>
-                  <th style={{ textAlign: "right" }}>Total Outlay</th>
+                  <th style={{ textAlign: "right" }}>Total Cost</th>
+                  <th style={{ textAlign: "center" }}>Target Date</th>
                   <th style={{ textAlign: "center" }}>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {sitePerformanceList.length === 0 ? (
-                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No sites recorded.</td></tr>
+                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No sites recorded.</td></tr>
                 ) : (
-                  sitePerformanceList.map(({ site, progress, workforce, expense, status }) => (
+                  sitePerformanceList.map(({ site, progress, workforce, todayLabourCost, assignedEngineers, expense, status }) => (
                     <tr 
                       key={site.id} 
                       onClick={() => setSelectedInspectSite(site)} 
                       style={{ cursor: "pointer" }}
                       title="Click to inspect detailed site operations"
                     >
-                      <td style={{ fontWeight: "700", color: "var(--primary-950)" }}>
-                        {site.siteName}
+                      <td>
+                        <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
+                          {site.siteName}
+                        </strong>
+                        <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>
+                          {site.location || site.assignedAddress || site.clientName || "Tamil Nadu"}
+                        </span>
+                      </td>
+                      <td>
+                        {assignedEngineers.length > 0 ? (
+                          <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                            {assignedEngineers.map(eng => {
+                              const engId = eng.id || eng.uid;
+                              const hasAttendance = todayAttendanceList.some(r => 
+                                (r.resolvedEngineerId === engId || r.engineerId === engId || r.userId === engId) &&
+                                (r.resolvedSiteId === site.id || r.siteId === site.id)
+                              );
+                              return (
+                                <div 
+                                  key={engId} 
+                                  style={{ display: "inline-flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--primary-900)", fontWeight: "500", lineHeight: "1.2" }}
+                                  title={hasAttendance ? `Attendance submitted today for ${site.siteName}` : `No attendance submitted today for ${site.siteName}`}
+                                >
+                                  <span 
+                                    style={{ 
+                                      width: "6.5px", 
+                                      height: "6.5px", 
+                                      borderRadius: "50%", 
+                                      backgroundColor: hasAttendance ? "#16a34a" : "#cbd5e1",
+                                      display: "inline-block",
+                                      flexShrink: 0
+                                    }} 
+                                  />
+                                  <span>{eng.fullName || eng.name}</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>Unassigned</span>
+                        )}
                       </td>
                       <td>
                         <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -1155,11 +1320,27 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                           </span>
                         </div>
                       </td>
-                      <td style={{ textAlign: "right", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
-                        {workforce > 0 ? `${workforce} Workers` : "—"}
+                      <td style={{ textAlign: "right" }}>
+                        {workforce > 0 ? (
+                          <div>
+                            <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", fontVariantNumeric: "tabular-nums" }}>
+                              {workforce} Workers
+                            </strong>
+                            {todayLabourCost > 0 && (
+                              <span style={{ fontSize: "10.5px", color: "var(--brand-orange)", fontWeight: "700", fontFamily: "monospace" }}>
+                                {formatINR(todayLabourCost)}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>—</span>
+                        )}
                       </td>
-                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "600" }}>
-                        ₹{formatINR(expense)}
+                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700", color: "var(--primary-950)" }}>
+                        {formatINR(expense)}
+                      </td>
+                      <td style={{ textAlign: "center", fontSize: "11.5px", color: "var(--primary-700)", fontWeight: "600" }}>
+                        {formatDateDMY(site.expectedEndDate) || "—"}
                       </td>
                       <td style={{ textAlign: "center" }}>
                         <Badge status={status.toLowerCase() === "completed" ? "success" : (status.toLowerCase() === "delayed" ? "danger" : "default")}>
@@ -1282,1020 +1463,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 2: ALL SITES (GRID & LIST/TABLE VIEW + DEEP-DIVE MONITORING)
+  // VIEW 2: ALL SITES OPERATIONS (CANONICAL ADMIN SITES REUSE)
   // ══════════════════════════════════════════════════════════════════════════
   const renderSitesView = () => {
-    // 1. Filtering logic
-    const filteredSites = sites.filter(s => {
-      if (siteStatusFilter !== "all" && (s.status || "").toLowerCase() !== siteStatusFilter.toLowerCase()) return false;
-      if (siteSearchQuery.trim()) {
-        const q = siteSearchQuery.toLowerCase().trim();
-        const matchName = (s.siteName || "").toLowerCase().includes(q);
-        const matchClient = (s.clientName || "").toLowerCase().includes(q);
-        const matchLoc = (s.location || "").toLowerCase().includes(q);
-        if (!matchName && !matchClient && !matchLoc) return false;
-      }
-      return true;
-    });
-
-    const selectedSite = sites.find(s => s.id === selectedSiteId);
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // A. ALL SITES BROWSING (GRID & LIST VIEW)
-    // ──────────────────────────────────────────────────────────────────────────
-    if (!selectedSite) {
-      return (
-        <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-          
-          {/* Top Control Bar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px", marginBottom: "4px" }}>
-            <div>
-              <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)" }}>
-                All Construction Sites ({filteredSites.length})
-              </h2>
-              <p style={{ margin: "3px 0 0 0", fontSize: "12.5px", color: "var(--text-muted)" }}>
-                Executive monitoring of all projects. Toggle between Card Grid and Table View to inspect operations.
-              </p>
-            </div>
-
-            <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-              {/* Search */}
-              <div style={{ position: "relative", minWidth: "240px", maxWidth: "360px", flex: "1 1 240px" }}>
-                <Search size={15} style={{ position: "absolute", left: "12px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-                <input
-                  type="text"
-                  placeholder="Search site, client, location..."
-                  value={siteSearchQuery}
-                  onChange={(e) => setSiteSearchQuery(e.target.value)}
-                  style={{ width: "100%", height: "38px", paddingLeft: "36px", paddingRight: "12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", boxSizing: "border-box", outline: "none" }}
-                />
-              </div>
-
-              {/* Status Filter */}
-              <select
-                value={siteStatusFilter}
-                onChange={(e) => setSiteStatusFilter(e.target.value)}
-                style={{ height: "38px", padding: "0 12px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
-              >
-                <option value="all">All Statuses</option>
-                <option value="active">Active</option>
-                <option value="planning">Planning</option>
-                <option value="delayed">Delayed</option>
-                <option value="completed">Completed</option>
-              </select>
-
-              {/* View Mode Toggle Button Group */}
-              <div style={{
-                display: "inline-flex",
-                borderRadius: "8px",
-                border: "1px solid var(--border-color)",
-                backgroundColor: "#f8fafc",
-                padding: "2px"
-              }}>
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode("grid")}
-                  title="Card Grid View"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "none",
-                    backgroundColor: sitesViewMode === "grid" ? "#ffffff" : "transparent",
-                    color: sitesViewMode === "grid" ? "var(--primary-900)" : "var(--text-muted)",
-                    boxShadow: sitesViewMode === "grid" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                    fontWeight: sitesViewMode === "grid" ? "750" : "600",
-                    fontSize: "12px",
-                    cursor: "pointer"
-                  }}
-                >
-                  <LayoutGrid size={14} /> Grid
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode("list")}
-                  title="Normal List / Table View"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "5px",
-                    padding: "6px 12px",
-                    borderRadius: "6px",
-                    border: "none",
-                    backgroundColor: sitesViewMode === "list" ? "#ffffff" : "transparent",
-                    color: sitesViewMode === "list" ? "var(--primary-900)" : "var(--text-muted)",
-                    boxShadow: sitesViewMode === "list" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                    fontWeight: sitesViewMode === "list" ? "750" : "600",
-                    fontSize: "12px",
-                    cursor: "pointer"
-                  }}
-                >
-                  <List size={14} /> List View
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {filteredSites.length === 0 ? (
-            <Card>
-              <div style={{ textAlign: "center", padding: "40px", color: "var(--text-muted)" }}>
-                <Building2 size={36} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
-                <p style={{ margin: 0, fontSize: "14px", fontWeight: "600" }}>No construction sites match your filter criteria.</p>
-              </div>
-            </Card>
-          ) : sitesViewMode === "grid" ? (
-            /* ── GRID VIEW ── */
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(350px, 1fr))", gap: "18px" }}>
-              {filteredSites.map(site => {
-                const siteMaterials = materials.filter(m => m.siteId === site.id);
-                const siteLabour = laborHistoryMap[site.id] || [];
-                const siteDprs = allDprs.filter(d => d.siteId === site.id);
-                const siteExpenses = generalExpenses.filter(e => e.siteId === site.id);
-                const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-                const isDelayed = isSiteDelayed(site);
-                const budget = getSiteBudget(site);
-                
-                // Today's site metrics
-                const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
-                const siteTodayLabour = (rawLabourAttendance || []).filter(r => r && !r.lockedMetadata && r.siteId === site.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).reduce((acc, c) => acc + Number(c.workerCount || (c.workerEntries && c.workerEntries.length) || 1), 0);
-                const siteTotalSpent = siteExpenses.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
-                
-                // Assigned engineers
-                const assignedUids = new Set([
-                  ...(site.assignedEngineers || []),
-                  ...assignments.filter(a => a.siteId === site.id).map(a => a.engineerId || a.userId)
-                ].filter(Boolean));
-                const assignedEngineersList = engineers.filter(e => assignedUids.has(e.id) || assignedUids.has(e.uid));
-
-                return (
-                  <div
-                    key={site.id}
-                    onClick={() => {
-                      setSelectedSiteId(site.id);
-                      setSelectedSiteTab("overview");
-                      setSiteInspectionDate("");
-                    }}
-                    style={{
-                      background: "#ffffff",
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "14px",
-                      boxShadow: "0 2px 6px rgba(15,23,42,0.04)",
-                      padding: "20px",
-                      cursor: "pointer",
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "space-between",
-                      gap: "16px",
-                      transition: "transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease"
-                    }}
-                    onMouseEnter={e => {
-                      e.currentTarget.style.transform = "translateY(-2px)";
-                      e.currentTarget.style.boxShadow = "0 8px 20px rgba(15,23,42,0.08)";
-                      e.currentTarget.style.borderColor = "var(--primary-300)";
-                    }}
-                    onMouseLeave={e => {
-                      e.currentTarget.style.transform = "translateY(0)";
-                      e.currentTarget.style.boxShadow = "0 2px 6px rgba(15,23,42,0.04)";
-                      e.currentTarget.style.borderColor = "var(--border-color)";
-                    }}
-                  >
-                    <div>
-                      {/* Top Row: Title & Badges */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px", marginBottom: "8px" }}>
-                        <h3 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
-                          {site.siteName}
-                        </h3>
-                        <div style={{ display: "flex", gap: "6px", flexShrink: 0 }}>
-                          <Badge status={site.status || "Planning"} />
-                          {isDelayed && <Badge status="danger">Delayed</Badge>}
-                        </div>
-                      </div>
-
-                      <p style={{ margin: "0 0 12px 0", fontSize: "12px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                        <MapPin size={13} style={{ color: "var(--primary-500)" }} />
-                        {site.location || "Location not specified"}
-                      </p>
-
-                      {/* Customer & Assigned Engineers */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "12px" }}>
-                        <div>
-                          <span style={{ color: "var(--text-muted)", fontSize: "11px", display: "block" }}>Client / Project</span>
-                          <strong style={{ color: "var(--primary-900)" }}>{site.clientName || "—"}</strong>
-                        </div>
-                        <div>
-                          <span style={{ color: "var(--text-muted)", fontSize: "11px", display: "block" }}>Assigned Engineers</span>
-                          <strong style={{ color: "var(--primary-900)" }}>
-                            {assignedEngineersList.length > 0 
-                              ? `${assignedEngineersList.length} (${assignedEngineersList.slice(0, 2).map(e => e.fullName?.split(' ')[0] || e.name).join(', ')})`
-                              : "None assigned"}
-                          </strong>
-                        </div>
-                      </div>
-
-                      {/* Today's Operational Pulse Grid */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px", marginTop: "10px", backgroundColor: "#f8fafc", padding: "10px", borderRadius: "8px" }}>
-                        <div>
-                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Today's Attendance</span>
-                          <strong style={{ fontSize: "12px", color: siteTodayAttendance.length > 0 ? "#15803d" : "var(--primary-900)" }}>
-                            {siteTodayAttendance.length > 0 ? `${siteTodayAttendance.length} On Site` : "No Check-ins"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Today's Labour</span>
-                          <strong style={{ fontSize: "12px", color: siteTodayLabour > 0 ? "#c2410c" : "var(--primary-900)" }}>
-                            {siteTodayLabour > 0 ? `${siteTodayLabour} Workers` : "0 logged"}
-                          </strong>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Materials Logged</span>
-                          <strong style={{ fontSize: "12px", color: "var(--primary-900)" }}>
-                            {siteMaterials.length} Items
-                          </strong>
-                        </div>
-                        <div>
-                          <span style={{ fontSize: "10.5px", color: "var(--text-muted)", display: "block" }}>Total Spent</span>
-                          <strong style={{ fontSize: "12px", color: "var(--primary-900)", fontFamily: "monospace" }}>
-                            {formatINR(siteTotalSpent)}
-                          </strong>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div>
-                      {/* Progress bar */}
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", fontWeight: "700", marginBottom: "4px" }}>
-                        <span style={{ color: "var(--text-muted)" }}>Execution Progress</span>
-                        <span style={{ color: "var(--primary-700)" }}>{financials.progressPercent}%</span>
-                      </div>
-                      <div style={{ width: "100%", height: "6px", backgroundColor: "var(--primary-100)", borderRadius: "3px", overflow: "hidden", marginBottom: "12px" }}>
-                        <div style={{ width: `${financials.progressPercent}%`, height: "100%", backgroundColor: "var(--primary-600)" }} />
-                      </div>
-
-                      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: "4px", fontSize: "12.5px", fontWeight: "750", color: "var(--primary-600)" }}>
-                        <span>Inspect Site Operations</span>
-                        <ChevronRight size={14} />
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            /* ── NORMAL LIST / TABLE VIEW ── */
-            <Card variant="table">
-              <div style={{ overflowX: "auto" }}>
-                <table className="data-table" style={{ margin: 0 }}>
-                  <thead>
-                    <tr>
-                      <th>Site Name</th>
-                      <th>Customer / Project</th>
-                      <th>Assigned Engineers</th>
-                      <th>Status</th>
-                      <th>Today's Attendance</th>
-                      <th style={{ textAlign: "right" }}>Today's Labour</th>
-                      <th style={{ textAlign: "right" }}>Materials</th>
-                      <th style={{ textAlign: "right" }}>Total Spent</th>
-                      <th style={{ textAlign: "right" }}>Progress</th>
-                      <th style={{ textAlign: "center" }}>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredSites.map(site => {
-                      const siteMaterials = materials.filter(m => m.siteId === site.id);
-                      const siteLabour = laborHistoryMap[site.id] || [];
-                      const siteDprs = allDprs.filter(d => d.siteId === site.id);
-                      const siteExpenses = generalExpenses.filter(e => e.siteId === site.id);
-                      const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-                      const isDelayed = isSiteDelayed(site);
-
-                      const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
-                      const siteTodayLabour = (rawLabourAttendance || []).filter(r => r && !r.lockedMetadata && r.siteId === site.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).reduce((acc, c) => acc + Number(c.workerCount || (c.workerEntries && c.workerEntries.length) || 1), 0);
-                      const siteTotalSpent = siteExpenses.reduce((acc, c) => acc + (Number(c.amount) || 0), 0);
-
-                      const assignedUids = new Set([
-                        ...(site.assignedEngineers || []),
-                        ...assignments.filter(a => a.siteId === site.id).map(a => a.engineerId || a.userId)
-                      ].filter(Boolean));
-                      const assignedEngineersList = engineers.filter(e => assignedUids.has(e.id) || assignedUids.has(e.uid));
-
-                      return (
-                        <tr key={site.id}>
-                          <td style={{ fontWeight: "700" }}>{site.siteName}</td>
-                          <td>{site.clientName || "—"}</td>
-                          <td>
-                            {assignedEngineersList.length > 0 
-                              ? assignedEngineersList.map(e => e.fullName || e.name).join(", ")
-                              : <span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Unassigned</span>}
-                          </td>
-                          <td>
-                            <div style={{ display: "flex", gap: "4px" }}>
-                              <Badge status={site.status || "Planning"} />
-                              {isDelayed && <Badge status="danger">Delayed</Badge>}
-                            </div>
-                          </td>
-                          <td>
-                            <span style={{
-                              fontSize: "11px",
-                              fontWeight: "750",
-                              padding: "2px 8px",
-                              borderRadius: "12px",
-                              backgroundColor: siteTodayAttendance.length > 0 ? "#dcfce7" : "#f1f5f9",
-                              color: siteTodayAttendance.length > 0 ? "#15803d" : "#64748b"
-                            }}>
-                              {siteTodayAttendance.length > 0 ? `${siteTodayAttendance.length} On Site` : "No Check-ins"}
-                            </span>
-                          </td>
-                          <td style={{ textAlign: "right", fontWeight: "700", color: siteTodayLabour > 0 ? "#c2410c" : "inherit" }}>
-                            {siteTodayLabour}
-                          </td>
-                          <td style={{ textAlign: "right" }}>{siteMaterials.length} Items</td>
-                          <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "600" }}>{formatINR(siteTotalSpent)}</td>
-                          <td style={{ textAlign: "right", fontWeight: "750", color: "var(--primary-700)" }}>{financials.progressPercent}%</td>
-                          <td style={{ textAlign: "center" }}>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedSiteId(site.id);
-                                setSelectedSiteTab("overview");
-                                setSiteInspectionDate("");
-                              }}
-                              style={{
-                                border: "none",
-                                background: "transparent",
-                                color: "var(--primary-600)",
-                                fontWeight: "750",
-                                fontSize: "12px",
-                                cursor: "pointer",
-                                padding: "4px 8px"
-                              }}
-                            >
-                              Inspect Details →
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </Card>
-          )}
-
-        </div>
-      );
-    }
-
-    // ──────────────────────────────────────────────────────────────────────────
-    // B. SELECTED SITE DEEP-DIVE MONITORING SUITE
-    // ──────────────────────────────────────────────────────────────────────────
-    const siteMaterials = materials.filter(m => m.siteId === selectedSite.id);
-    const siteLabour = laborHistoryMap[selectedSite.id] || [];
-    const siteDprs = allDprs.filter(d => d.siteId === selectedSite.id);
-    const siteExpenses = generalExpenses.filter(e => e.siteId === selectedSite.id);
-    const siteTeams = rawTeams.filter(t => t.siteId === selectedSite.id);
-    const siteActivities = systemActivities.filter(a => a.siteId === selectedSite.id);
-    const siteDocs = documents.filter(d => d.siteId === selectedSite.id);
-
-    // Site Attendance
-    const siteAttendanceRecords = allDeduplicatedAttendance.filter(r => r.resolvedSiteId === selectedSite.id);
-    
-    // Assigned engineers for this site
-    const siteAssignedUids = new Set([
-      ...(selectedSite.assignedEngineers || []),
-      ...assignments.filter(a => a.siteId === selectedSite.id).map(a => a.engineerId || a.userId)
-    ].filter(Boolean));
-    const siteAssignedEngineers = engineers.filter(e => siteAssignedUids.has(e.id) || siteAssignedUids.has(e.uid));
-
-    // Date-Filtered records if siteInspectionDate is chosen
-    const activeDate = siteInspectionDate;
-    const filteredSiteAttendance = activeDate 
-      ? siteAttendanceRecords.filter(r => (r.date || r.attendanceDate) === activeDate)
-      : siteAttendanceRecords;
-
-    const filteredSiteLabour = (rawLabourAttendance || []).filter(r => {
-      if (!r || r.lockedMetadata || r.siteId !== selectedSite.id) return false;
-      if (activeDate) return (r.attendanceDate || r.date) === activeDate;
-      return true;
-    });
-
-    const filteredSiteMaterials = activeDate
-      ? siteMaterials.filter(m => formatDateDMY(m.date || m.createdAt) === formatDateDMY(activeDate))
-      : siteMaterials;
-
-    const filteredSiteExpenses = activeDate
-      ? siteExpenses.filter(e => (e.date || "").startsWith(activeDate))
-      : siteExpenses;
-
-    const filteredSiteDprs = activeDate
-      ? siteDprs.filter(d => (d.date || "").startsWith(activeDate))
-      : siteDprs;
-
-    // Photos Collection for this site
-    const sitePhotos = [];
-    siteDprs.forEach(dpr => {
-      if (dpr.photos && Array.isArray(dpr.photos)) {
-        dpr.photos.forEach(p => sitePhotos.push({ url: p, title: `DPR: ${dpr.workDescription || 'Daily Update'}`, date: dpr.date || formatDateDMY(dpr.createdAt), source: 'Daily Progress Report' }));
-      } else if (dpr.photoUrl) {
-        sitePhotos.push({ url: dpr.photoUrl, title: `DPR: ${dpr.workDescription || 'Daily Update'}`, date: dpr.date || formatDateDMY(dpr.createdAt), source: 'Daily Progress Report' });
-      }
-    });
-
-    siteAttendanceRecords.forEach(att => {
-      if (att.photoUrl) {
-        sitePhotos.push({ url: att.photoUrl, title: `Check-in: ${att.engineerName}`, date: att.date || att.attendanceDate, source: 'Attendance Proof' });
-      }
-      if (att.checkOutPhotoUrl) {
-        sitePhotos.push({ url: att.checkOutPhotoUrl, title: `Check-out: ${att.engineerName}`, date: att.date || att.attendanceDate, source: 'Attendance Proof' });
-      }
-    });
-
-    siteDocs.forEach(doc => {
-      if (doc.url && (doc.fileType?.includes('image') || doc.url.match(/\.(jpg|jpeg|png|webp)/i))) {
-        sitePhotos.push({ url: doc.url, title: doc.title || doc.name || 'Site Document Image', date: formatDateDMY(doc.createdAt), source: 'Project Document' });
-      }
-    });
-
-    // Site Financials & Progress
-    const financials = getSiteFinancials(selectedSite, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
-    const isDelayed = isSiteDelayed(selectedSite);
-    const plannedProgress = calculatePlannedProgress(selectedSite.startDate, selectedSite.expectedEndDate);
-    const budget = getSiteBudget(selectedSite);
-    const totalSpent = siteExpenses.reduce((acc, curr) => acc + (Number(curr.amount) || 0), 0);
-    const utilization = budget > 0 ? (totalSpent / budget) * 100 : 0;
-    const remaining = budget - totalSpent;
-
-    return (
-      <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
-        
-        {/* Top Header Bar */}
-        <div style={{
-          background: "#ffffff",
-          border: "1px solid var(--border-color)",
-          borderRadius: "14px",
-          padding: "16px 20px",
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "14px"
-        }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            <button
-              type="button"
-              onClick={() => {
-                setSelectedSiteId("");
-                setSiteInspectionDate("");
-              }}
-              style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: "6px",
-                padding: "7px 14px",
-                borderRadius: "8px",
-                border: "1px solid var(--border-color)",
-                backgroundColor: "#f8fafc",
-                color: "var(--primary-900)",
-                fontSize: "12.5px",
-                fontWeight: "750",
-                cursor: "pointer"
-              }}
-            >
-              <ArrowLeft size={14} /> Back to All Sites
-            </button>
-
-            <div>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "900", color: "var(--primary-950)" }}>
-                  {selectedSite.siteName}
-                </h2>
-                <Badge status={selectedSite.status || "Planning"} />
-                {isDelayed && <Badge status="danger">Delayed</Badge>}
-                <span style={{ fontSize: "11.5px", color: "#16a34a", display: "inline-flex", alignItems: "center", gap: "4px", fontWeight: "700" }}>
-                  <ShieldCheck size={13} /> Super Admin Read-Only
-                </span>
-              </div>
-              <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                <MapPin size={12} style={{ color: "var(--primary-500)" }} />
-                {selectedSite.location || "Location not specified"} · Client: <strong>{selectedSite.clientName || "—"}</strong>
-              </p>
-            </div>
-          </div>
-
-          {/* Date Selector for Site-Specific Inspection */}
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "6px", backgroundColor: "#f8fafc", padding: "4px 8px", borderRadius: "8px", border: "1px solid var(--border-color)" }}>
-              <Calendar size={14} style={{ color: "var(--primary-600)" }} />
-              <input
-                type="date"
-                value={siteInspectionDate}
-                onChange={(e) => setSiteInspectionDate(e.target.value)}
-                style={{ border: "none", background: "transparent", fontSize: "12px", outline: "none", fontWeight: "600" }}
-              />
-            </div>
-            {siteInspectionDate && (
-              <button
-                type="button"
-                onClick={() => setSiteInspectionDate("")}
-                style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff", fontSize: "11.5px", cursor: "pointer", fontWeight: "600" }}
-              >
-                Clear Date
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setSiteInspectionDate(todayDateString)}
-              style={{
-                padding: "5px 10px",
-                borderRadius: "6px",
-                border: "1px solid var(--border-color)",
-                backgroundColor: siteInspectionDate === todayDateString ? "#eff6ff" : "#ffffff",
-                color: siteInspectionDate === todayDateString ? "#1d4ed8" : "inherit",
-                fontSize: "11.5px",
-                cursor: "pointer",
-                fontWeight: "700"
-              }}
-            >
-              Today
-            </button>
-          </div>
-        </div>
-
-        {/* ── Sub-Navigation Tabs ── */}
-        <div style={{
-          display: "flex",
-          gap: "6px",
-          borderBottom: "1px solid var(--border-color)",
-          paddingBottom: "10px",
-          overflowX: "auto"
-        }}>
-          {[
-            { id: "overview", label: "Overview & Progress", icon: Activity },
-            { id: "attendance", label: `Attendance (${filteredSiteAttendance.length})`, icon: ClipboardCheck },
-            { id: "labour", label: `Labour Ledger (${filteredSiteLabour.length})`, icon: Briefcase },
-            { id: "materials", label: `Materials (${filteredSiteMaterials.length})`, icon: Package },
-            { id: "expenses", label: `Site Expenses (${filteredSiteExpenses.length})`, icon: DollarSign },
-            { id: "reports", label: `DPR Reports (${filteredSiteDprs.length})`, icon: FileText },
-            { id: "photos", label: `Photos Gallery (${sitePhotos.length})`, icon: Camera },
-            { id: "engineers", label: `Assigned Engineers (${siteAssignedEngineers.length})`, icon: Users },
-            { id: "activity", label: `Activity Log (${siteActivities.length})`, icon: Clock }
-          ].map(tabItem => {
-            const Icon = tabItem.icon;
-            const isActive = selectedSiteTab === tabItem.id;
-            return (
-              <button
-                key={tabItem.id}
-                type="button"
-                onClick={() => setSelectedSiteTab(tabItem.id)}
-                style={{
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "6px",
-                  padding: "7px 14px",
-                  borderRadius: "8px",
-                  border: isActive ? "1px solid #fed7aa" : "1px solid transparent",
-                  backgroundColor: isActive ? "#fff7ed" : "transparent",
-                  color: isActive ? "#c2410c" : "var(--text-muted)",
-                  fontWeight: isActive ? "800" : "600",
-                  fontSize: "12.5px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap"
-                }}
-              >
-                <Icon size={14} />
-                {tabItem.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* ── 1. Overview & Progress Tab ── */}
-        {selectedSiteTab === "overview" && (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "20px", alignItems: "start" }}>
-            <Card title="Project Site Registry Details">
-              <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
-                <div style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Site / Project Name</span>
-                  <h3 style={{ margin: "2px 0 0 0", fontSize: "17px", fontWeight: "800", color: "var(--primary-900)" }}>{selectedSite.siteName}</h3>
-                </div>
-                <div style={{ borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Client Name</span>
-                  <p style={{ margin: "2px 0 0 0", fontSize: "13.5px", fontWeight: "600" }}>{selectedSite.clientName || "—"}</p>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", borderBottom: "1px solid var(--border-color)", paddingBottom: "10px" }}>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Start Date</span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600" }} className="font-mono">{formatDateDMY(selectedSite.startDate)}</p>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Expected End Date</span>
-                    <p style={{ margin: "2px 0 0 0", fontSize: "13px", fontWeight: "600", color: isDelayed ? "var(--danger-600)" : "inherit" }} className="font-mono">{formatDateDMY(selectedSite.expectedEndDate)}</p>
-                  </div>
-                </div>
-                <div>
-                  <span style={{ fontSize: "11px", color: "var(--text-muted)", textTransform: "uppercase", fontWeight: "700" }}>Geofence Coordinates</span>
-                  <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                    <MapPin size={12} />
-                    {selectedSite.latitude ? `${Number(selectedSite.latitude).toFixed(6)}, ${Number(selectedSite.longitude).toFixed(6)} (Radius: ${selectedSite.radius || 150}m)` : "Geofence not configured"}
-                  </p>
-                </div>
-              </div>
-            </Card>
-
-            <Card title="Work Progress &amp; Milestone Standing">
-              <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", fontWeight: "700" }}>
-                    <span>Actual Progress</span>
-                    <span style={{ color: "var(--primary-700)" }}>{financials.progressPercent}%</span>
-                  </div>
-                  <div style={{ width: "100%", height: "8px", backgroundColor: "var(--primary-100)", borderRadius: "4px", overflow: "hidden" }}>
-                    <div style={{ width: `${financials.progressPercent}%`, height: "100%", backgroundColor: "var(--primary-600)" }} />
-                  </div>
-                </div>
-
-                <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", fontWeight: "700" }}>
-                    <span>Linear Milestone Target</span>
-                    <span style={{ color: "var(--accent-700)" }}>{plannedProgress}%</span>
-                  </div>
-                  <div style={{ width: "100%", height: "8px", backgroundColor: "var(--accent-100)", borderRadius: "4px", overflow: "hidden" }}>
-                    <div style={{ width: `${plannedProgress}%`, height: "100%", backgroundColor: "var(--accent-500)" }} />
-                  </div>
-                </div>
-
-                {/* Progress Gap Indicator */}
-                <div style={{
-                  padding: "10px 12px",
-                  borderRadius: "8px",
-                  backgroundColor: financials.progressPercent >= plannedProgress ? "var(--success-50)" : "var(--danger-50)",
-                  border: `1px solid ${financials.progressPercent >= plannedProgress ? "var(--success-200)" : "var(--danger-200)"}`,
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "8px"
-                }}>
-                  {financials.progressPercent >= plannedProgress ? (
-                    <>
-                      <CheckCircle2 size={16} style={{ color: "var(--success-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--success-700)" }}>
-                        Site is running ahead of plan (+{financials.progressPercent - plannedProgress}%)
-                      </span>
-                    </>
-                  ) : (
-                    <>
-                      <AlertTriangle size={16} style={{ color: "var(--danger-600)", flexShrink: 0 }} />
-                      <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--danger-700)" }}>
-                        Site is behind linear milestones (-{plannedProgress - financials.progressPercent}%)
-                      </span>
-                    </>
-                  )}
-                </div>
-
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", borderTop: "1px solid var(--border-color)", paddingTop: "12px" }}>
-                  <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Budget</span>
-                    <strong style={{ fontSize: "12px", color: "var(--primary-900)", fontFamily: "monospace" }}>{formatINR(budget)}</strong>
-                  </div>
-                  <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Spent</span>
-                    <strong style={{ fontSize: "12px", color: "var(--primary-900)", fontFamily: "monospace" }}>{formatINR(totalSpent)}</strong>
-                  </div>
-                  <div style={{ backgroundColor: "#f8fafc", padding: "8px", borderRadius: "6px" }}>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>Remaining</span>
-                    <strong style={{ fontSize: "12px", color: remaining < 0 ? "var(--danger-700)" : "var(--success-700)", fontFamily: "monospace" }}>{formatINR(remaining)}</strong>
-                  </div>
-                </div>
-              </div>
-            </Card>
-          </div>
-        )}
-
-        {/* ── 2. Attendance Tab ── */}
-        {selectedSiteTab === "attendance" && (
-          <Card title={`Attendance Records for "${selectedSite.siteName}"`} variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Engineer Name</th>
-                    <th>Date</th>
-                    <th>Check-In</th>
-                    <th>Check-Out</th>
-                    <th>Status</th>
-                    <th>Verification</th>
-                    <th style={{ textAlign: "center" }}>Photo Proof</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSiteAttendance.length === 0 ? (
-                    <tr><td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No attendance records found for this selection.</td></tr>
-                  ) : (
-                    filteredSiteAttendance.map(rec => (
-                      <tr key={rec.id}>
-                        <td style={{ fontWeight: "700" }}>{rec.engineerName}</td>
-                        <td className="font-mono">{formatDateDMY(rec.date || rec.attendanceDate)}</td>
-                        <td className="font-mono">{rec.checkInTimeFormatted}</td>
-                        <td className="font-mono">{rec.checkOutTimeFormatted || "—"}</td>
-                        <td>
-                          <span style={{
-                            fontSize: "11px",
-                            fontWeight: "750",
-                            padding: "2px 8px",
-                            borderRadius: "12px",
-                            backgroundColor: rec.isCheckedOut ? "#f1f5f9" : "#dcfce7",
-                            color: rec.isCheckedOut ? "#475569" : "#15803d"
-                          }}>
-                            {rec.isCheckedOut ? "Checked Out" : "On Site"}
-                          </span>
-                        </td>
-                        <td>
-                          <span style={{ fontSize: "11px", color: rec.isVerified ? "#16a34a" : "#ca8a04", fontWeight: "700" }}>
-                            {rec.isVerified ? "✓ Verified GPS" : "Pending"}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {rec.photoUrl ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedPreviewImage({ url: rec.photoUrl, title: `Attendance Check-In: ${rec.engineerName}` })}
-                              style={{ border: "none", background: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "3px" }}
-                            >
-                              <ImageIcon size={13} /> View
-                            </button>
-                          ) : "—"}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {/* ── 3. Labour Tab ── */}
-        {selectedSiteTab === "labour" && (
-          <Card title={`Labour & Workforce Records for "${selectedSite.siteName}"`} variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Attendance Date</th>
-                    <th>Labour Category / Team</th>
-                    <th style={{ textAlign: "right" }}>Worker Count</th>
-                    <th style={{ textAlign: "right" }}>Rate / Day</th>
-                    <th style={{ textAlign: "right" }}>Calculated Amount</th>
-                    <th>Recorded By</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSiteLabour.length === 0 ? (
-                    <tr><td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No labour logs found.</td></tr>
-                  ) : (
-                    filteredSiteLabour.map(r => {
-                      const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                      const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-                      const amount = Number(r.totalAmount || (workerCount * rate));
-
-                      return (
-                        <tr key={r.id}>
-                          <td className="font-mono">{formatDateDMY(r.attendanceDate || r.date)}</td>
-                          <td style={{ fontWeight: "600" }}>{r.categoryName || r.category || r.teamName || "General Labour"}</td>
-                          <td style={{ textAlign: "right", fontWeight: "700" }}>{workerCount}</td>
-                          <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(rate)}</td>
-                          <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace" }}>{formatINR(amount)}</td>
-                          <td>{r.recordedByName || r.engineerName || "Site Engineer"}</td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {/* ── 4. Materials Tab ── */}
-        {selectedSiteTab === "materials" && (
-          <Card title={`Material Inventory for "${selectedSite.siteName}"`} variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Material Name</th>
-                    <th>Category</th>
-                    <th style={{ textAlign: "right" }}>Quantity</th>
-                    <th>Unit</th>
-                    <th style={{ textAlign: "right" }}>Unit Rate</th>
-                    <th style={{ textAlign: "right" }}>Total Value</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSiteMaterials.length === 0 ? (
-                    <tr><td colSpan={7} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No material logs found.</td></tr>
-                  ) : (
-                    filteredSiteMaterials.map(m => (
-                      <tr key={m.id}>
-                        <td style={{ fontWeight: "700" }}>{m.materialName || m.name || "Material"}</td>
-                        <td>{m.category || "General"}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700" }}>{m.quantity || 0}</td>
-                        <td>{m.unit || "units"}</td>
-                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(m.unitRate || m.rate || 0)}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace" }}>{formatINR(m.totalCost || ((m.quantity || 0) * (m.unitRate || 0)))}</td>
-                        <td><Badge status={m.status || "In Stock"} /></td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {/* ── 5. Expenses Tab ── */}
-        {selectedSiteTab === "expenses" && (
-          <Card title={`Site Expense Ledger for "${selectedSite.siteName}"`} variant="table">
-            <div style={{ overflowX: "auto" }}>
-              <table className="data-table" style={{ margin: 0 }}>
-                <thead>
-                  <tr>
-                    <th>Description</th>
-                    <th>Category</th>
-                    <th style={{ textAlign: "right" }}>Amount</th>
-                    <th>Date</th>
-                    <th>Paid To / Vendor</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredSiteExpenses.length === 0 ? (
-                    <tr><td colSpan={6} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No expenses logged for this site.</td></tr>
-                  ) : (
-                    filteredSiteExpenses.map(exp => (
-                      <tr key={exp.id}>
-                        <td style={{ fontWeight: "700" }}>{exp.description}</td>
-                        <td>{exp.category || "General"}</td>
-                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--danger-700)" }}>{formatINR(exp.amount)}</td>
-                        <td className="font-mono">{formatDateDMY(exp.date)}</td>
-                        <td>{exp.paidTo || "—"}</td>
-                        <td><Badge status={exp.status || "Approved"} /></td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        )}
-
-        {/* ── 6. DPR Reports Tab ── */}
-        {selectedSiteTab === "reports" && (
-          <Card title={`Daily Progress Reports (DPRs) for "${selectedSite.siteName}"`}>
-            {filteredSiteDprs.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "24px" }}>No Daily Progress Reports recorded for this selection.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-                {filteredSiteDprs.map(dpr => (
-                  <div key={dpr.id} style={{ padding: "16px", borderRadius: "10px", border: "1px solid var(--border-color)", backgroundColor: "#ffffff" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "6px" }}>
-                      <strong style={{ fontSize: "14px", color: "var(--primary-950)" }}>Date: {dpr.date || formatDateDMY(dpr.createdAt)}</strong>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>By: {dpr.submittedByName || dpr.engineerName || "Site Engineer"}</span>
-                    </div>
-                    <p style={{ margin: "0 0 6px 0", fontSize: "13px", color: "#334155", lineHeight: "1.5" }}>{dpr.workDescription || dpr.description || "No notes."}</p>
-                    {dpr.weather && <span style={{ fontSize: "11.5px", color: "var(--text-muted)" }}>Weather Condition: {dpr.weather}</span>}
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* ── 7. Photos Gallery Tab ── */}
-        {selectedSiteTab === "photos" && (
-          <Card title={`Site Photos Gallery for "${selectedSite.siteName}" (${sitePhotos.length} Photos)`}>
-            {sitePhotos.length === 0 ? (
-              <div style={{ textAlign: "center", padding: "36px", color: "var(--text-muted)" }}>
-                <Camera size={32} style={{ color: "var(--primary-300)", marginBottom: "8px" }} />
-                <p style={{ margin: 0, fontSize: "13px" }}>No site photos uploaded yet.</p>
-              </div>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(200px, 1fr))", gap: "16px" }}>
-                {sitePhotos.map((photo, idx) => (
-                  <div
-                    key={idx}
-                    onClick={() => setSelectedPreviewImage(photo)}
-                    style={{
-                      border: "1px solid var(--border-color)",
-                      borderRadius: "10px",
-                      overflow: "hidden",
-                      backgroundColor: "#fff",
-                      cursor: "pointer",
-                      display: "flex",
-                      flexDirection: "column"
-                    }}
-                  >
-                    <div style={{ height: "140px", backgroundColor: "#f1f5f9", overflow: "hidden", position: "relative" }}>
-                      <img
-                        src={photo.url}
-                        alt={photo.title}
-                        style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                      />
-                    </div>
-                    <div style={{ padding: "10px" }}>
-                      <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                        {photo.title}
-                      </strong>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", color: "var(--text-muted)", marginTop: "4px" }}>
-                        <span>{photo.source}</span>
-                        <span>{photo.date}</span>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* ── 8. Assigned Engineers Tab ── */}
-        {selectedSiteTab === "engineers" && (
-          <Card title={`Assigned Site Engineers for "${selectedSite.siteName}"`}>
-            {siteAssignedEngineers.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "24px" }}>No engineers currently assigned to this site.</p>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "14px" }}>
-                {siteAssignedEngineers.map(eng => {
-                  const engId = eng.id || eng.uid;
-                  const recentAtt = siteAttendanceRecords.find(r => r.resolvedEngineerId === engId);
-
-                  return (
-                    <div key={eng.id} style={{ padding: "14px 16px", borderRadius: "10px", border: "1px solid var(--border-color)", backgroundColor: "#f8fafc" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
-                        <strong style={{ fontSize: "14px", color: "var(--primary-950)" }}>{eng.fullName || eng.name}</strong>
-                        <Badge status={eng.status || "active"} />
-                      </div>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block" }}>📧 {eng.email || "—"}</span>
-                      <span style={{ fontSize: "12px", color: "var(--text-muted)", display: "block" }}>📞 {eng.phoneNumber || eng.phone || "—"}</span>
-                      <div style={{ borderTop: "1px solid #e2e8f0", marginTop: "8px", paddingTop: "6px", fontSize: "11px", color: "var(--text-muted)" }}>
-                        Recent Attendance: {recentAtt ? `${formatDateDMY(recentAtt.date || recentAtt.attendanceDate)} (${recentAtt.isCheckedOut ? 'Checked Out' : 'On Site'})` : 'No logs'}
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* ── 9. Activity History Tab ── */}
-        {selectedSiteTab === "activity" && (
-          <Card title={`Operations Activity History for "${selectedSite.siteName}"`}>
-            {siteActivities.length === 0 ? (
-              <p style={{ color: "var(--text-muted)", fontStyle: "italic", textAlign: "center", padding: "24px" }}>No system activity recorded specifically for this site.</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-                {siteActivities.map(act => (
-                  <div key={act.id} style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid var(--border-color)", paddingBottom: "8px" }}>
-                    <div>
-                      <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{act.description || act.actionType}</strong>
-                      <span style={{ fontSize: "11.5px", color: "var(--text-muted)", display: "block" }}>By {act.userName || 'System'} · Module: {act.moduleType}</span>
-                    </div>
-                    <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "monospace" }}>
-                      {act.createdAt?.seconds ? new Date(act.createdAt.seconds * 1000).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : "Recently"}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </Card>
-        )}
-
-        {/* Image Preview Modal */}
-        {selectedPreviewImage && (
-          <ConfirmationModal
-            isOpen={!!selectedPreviewImage}
-            onClose={() => setSelectedPreviewImage(null)}
-            title={selectedPreviewImage.title || "Image Preview"}
-            message=""
-            confirmText="Close"
-            variant="info"
-            onConfirm={() => setSelectedPreviewImage(null)}
-            details={
-              <div style={{ textAlign: "center" }}>
-                <img
-                  src={selectedPreviewImage.url}
-                  alt={selectedPreviewImage.title}
-                  style={{ maxWidth: "100%", maxHeight: "500px", borderRadius: "8px", objectFit: "contain" }}
-                />
-              </div>
-            }
-          />
-        )}
-
-      </div>
-    );
+    return <Sites embedded={true} />;
   };
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -3937,177 +3108,11 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   };
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 13: CENTRAL DAILY PROGRESS REPORTS (DPR) & SITE LOGS
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 13: SUPER ADMIN SITE REPORTS DASHBOARD (CANONICAL ADMIN REPORTS REUSE)
   // ══════════════════════════════════════════════════════════════════════════
   const renderReportsView = () => {
-    const filteredReports = allDprs.filter(r => {
-      if (reportsSiteFilter && r.siteId !== reportsSiteFilter) return false;
-      if (reportsDateFilter && (r.date || r.reportDate) !== reportsDateFilter) return false;
-      if (reportsSearchQuery.trim()) {
-        const q = reportsSearchQuery.toLowerCase().trim();
-        const mSite = (r.siteName || sites.find(s => s.id === r.siteId)?.siteName || "").toLowerCase().includes(q);
-        const mEng = (r.engineerName || r.submittedByName || "").toLowerCase().includes(q);
-        const mWork = (r.workDone || r.description || r.activity || "").toLowerCase().includes(q);
-        if (!mSite && !mEng && !mWork) return false;
-      }
-      return true;
-    }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
-    const todayReports = filteredReports.filter(r => (r.date || r.reportDate || "").startsWith(todayDateString));
-    const sitesReportedToday = new Set(todayReports.map(r => r.siteId)).size;
-    const totalPhotos = filteredReports.reduce((s, r) => s + ((r.photos && r.photos.length) || (r.photoUrl ? 1 : 0)), 0);
-
-    return (
-      <div className="admin-dashboard-container">
-        {/* KPI Summary Cards */}
-        <div className="admin-summary-grid">
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-blue">
-              <FileText size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{filteredReports.length}</div>
-              <div className="admin-summary-label">Total DPR Logs</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-orange">
-              <ClipboardCheck size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{todayReports.length}</div>
-              <div className="admin-summary-label">Reports Logged Today</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-green">
-              <Building2 size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{sitesReportedToday}/{sites.length}</div>
-              <div className="admin-summary-label">Active Sites Reported</div>
-            </div>
-          </div>
-          <div className="admin-summary-card">
-            <div className="admin-summary-icon erp-kpi-icon-teal">
-              <Camera size={20} />
-            </div>
-            <div className="admin-summary-info">
-              <div className="admin-summary-value">{totalPhotos}</div>
-              <div className="admin-summary-label">Site Evidence Photos</div>
-            </div>
-          </div>
-        </div>
-
-        {/* Toolbar & Filters */}
-        <div className="sites-toolbar-container">
-          <div>
-            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
-              Central Daily Progress Reports (DPR) Monitor ({filteredReports.length})
-            </h2>
-            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
-              Field progress logs, concrete pour logs, weather conditions, and structural stage updates.
-            </p>
-          </div>
-
-          <div className="sites-actions-group">
-            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
-              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-              <input
-                type="text"
-                placeholder="Search work, engineer, site..."
-                value={reportsSearchQuery}
-                onChange={(e) => setReportsSearchQuery(e.target.value)}
-                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
-              />
-            </div>
-            <select
-              value={reportsSiteFilter}
-              onChange={(e) => setReportsSiteFilter(e.target.value)}
-              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
-            >
-              <option value="">All Sites</option>
-              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
-            </select>
-            <input
-              type="date"
-              value={reportsDateFilter}
-              onChange={(e) => setReportsDateFilter(e.target.value)}
-              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
-            />
-            {reportsDateFilter && (
-              <button
-                type="button"
-                onClick={() => setReportsDateFilter("")}
-                className="btn btn-outline"
-                style={{ height: "38px", padding: "0 10px", fontSize: "12px" }}
-              >
-                Clear Date
-              </button>
-            )}
-          </div>
-        </div>
-
-        {/* Reports Table */}
-        <div className="admin-table-card">
-          <div className="admin-table-scroll">
-            <table className="admin-table">
-              <thead>
-                <tr>
-                  <th>Project Site</th>
-                  <th>Submitting Engineer</th>
-                  <th>Report Date</th>
-                  <th>Weather</th>
-                  <th>Work Executed Description</th>
-                  <th style={{ textAlign: "right" }}>Labour on Site</th>
-                  <th style={{ textAlign: "center" }}>Photo Evidence</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredReports.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No daily progress reports found.</td></tr>
-                ) : (
-                  filteredReports.map(r => {
-                    const siteName = r.siteName || sites.find(s => s.id === r.siteId)?.siteName || "Civil Project";
-                    const photos = r.photos || (r.photoUrl ? [r.photoUrl] : []);
-
-                    return (
-                      <tr key={r.id}>
-                        <td style={{ fontWeight: "700" }}>{siteName}</td>
-                        <td>{r.engineerName || r.submittedByName || "Site Engineer"}</td>
-                        <td className="font-mono">{formatDateDMY(r.date || r.reportDate)}</td>
-                        <td>
-                          <Badge status="info">{r.weather || "Sunny / Clear"}</Badge>
-                        </td>
-                        <td style={{ maxWidth: "300px" }}>
-                          <span style={{ fontSize: "12px", color: "var(--primary-900)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {r.workDone || r.description || r.activity || "Construction work logged"}
-                          </span>
-                        </td>
-                        <td style={{ textAlign: "right", fontWeight: "700" }}>
-                          {r.labourCount || r.workersCount || "—"}
-                        </td>
-                        <td style={{ textAlign: "center" }}>
-                          {photos.length > 0 ? (
-                            <button
-                              type="button"
-                              onClick={() => setSelectedPreviewImage({ url: photos[0], title: `DPR Photo: ${siteName}` })}
-                              style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                            >
-                              <Camera size={13} /> {photos.length} Photo{photos.length === 1 ? "" : "s"}
-                            </button>
-                          ) : "—"}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-    );
+    return <ReportsDashboard embedded={true} />;
   };
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -4275,7 +3280,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         tab === "payments" ? "Payments & Outstandings" :
         tab === "payroll" ? "Worker Payouts & Settlement" :
         tab === "progress" ? "Schedule & Progress Standing" :
-        tab === "reports" ? "Central Daily Progress Reports (DPR)" :
+        tab === "reports" ? "Site Reports Dashboard" :
         tab === "approvals" ? "Central Approvals Gateway" :
         tab === "activity" ? "System Activity & Audit Trail" :
         `Super Admin: ${tab.charAt(0).toUpperCase() + tab.slice(1)}`
@@ -4486,7 +3491,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
           isOpen={!!selectedInspectSite}
           onClose={() => setSelectedInspectSite(null)}
           title={`Operations Deep-Dive: ${selectedInspectSite.siteName}`}
-          maxWidth="960px"
+          maxWidth="1140px"
         >
           <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
             {/* Top Site Metadata Banner */}
@@ -4575,121 +3580,481 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </div>
             )}
 
-            {/* Tab 2: Engineers & Attendance */}
-            {siteModalActiveTab === "engineers" && (
-              <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Engineers Assigned to Site &amp; Today's Presence</h4>
-                {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No engineers currently assigned to this site.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-                    {engineers.filter(e => e.assignedSiteId === selectedInspectSite.id || (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))).map(eng => {
-                      const todayRec = todayAttendanceList.find(r => r.resolvedSiteId === selectedInspectSite.id && (r.resolvedEngineerId === eng.id || r.resolvedEngineerId === eng.uid));
-                      return (
-                        <div key={eng.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                          <div>
-                            <strong style={{ fontSize: "13px", color: "var(--primary-950)" }}>{eng.fullName || eng.name}</strong>
-                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{eng.email} • {eng.phoneNumber || eng.phone || ""}</span>
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                            {todayRec ? (
-                              <>
-                                <span style={{ fontSize: "11px", fontWeight: "750", padding: "2px 8px", borderRadius: "10px", backgroundColor: todayRec.isCheckedOut ? "#f1f5f9" : "#dcfce7", color: todayRec.isCheckedOut ? "#475569" : "#15803d" }}>
-                                  {todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.checkInTimeFormatted})`}
-                                </span>
-                                {todayRec.photoUrl && (
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedPreviewImage({ url: todayRec.photoUrl, title: `Check-in Selfie — ${eng.fullName || eng.name}` })}
-                                    style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
-                                  >
-                                    <img src={todayRec.photoUrl} alt="Selfie Proof" style={{ width: "30px", height: "30px", borderRadius: "4px", objectFit: "cover" }} />
-                                  </button>
-                                )}
-                              </>
-                            ) : (
-                              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Not Checked In Today</span>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            )}
+            {/* Tab 2: Engineers & Historical Attendance */}
+            {siteModalActiveTab === "engineers" && (() => {
+              const siteAssignedEngineers = engineers.filter(e => 
+                (Array.isArray(selectedInspectSite.assignedEngineers) && (selectedInspectSite.assignedEngineers.includes(e.id) || selectedInspectSite.assignedEngineers.includes(e.uid))) ||
+                e.assignedSiteId === selectedInspectSite.id || 
+                (Array.isArray(e.assignedSites) && e.assignedSites.includes(selectedInspectSite.id)) || 
+                assignments.some(a => a.siteId === selectedInspectSite.id && (a.engineerId === e.id || a.engineerId === e.uid))
+              );
+              const assignedEngineerIds = new Set(siteAssignedEngineers.flatMap(e => [e.id, e.uid, e._id].filter(Boolean)));
 
-            {/* Tab 3: Labour */}
-            {siteModalActiveTab === "labour" && (
-              <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Today's Civil Field Workforce Attendance</h4>
-                {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No labour attendance logged for this site today.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                    {(rawLabourAttendance || []).filter(r => !r.lockedMetadata && r.siteId === selectedInspectSite.id && (r.attendanceDate === todayDateString || r.date === todayDateString)).map(r => (
-                      <div key={r.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                        <div>
-                          <strong style={{ fontSize: "12.5px" }}>{r.categoryName || r.category || "General Civil Labour"}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{r.workerCount || 1} Workers @ ₹{r.dailyWage || r.rate || 0}/day</span>
-                        </div>
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
-                          {formatINR(r.totalAmount || ((r.workerCount || 1) * (r.dailyWage || r.rate || 0)))}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
+              // Historical Attendance matching site and assigned engineers within selected date range
+              const siteAttendanceHistory = allDeduplicatedAttendance.filter(rec => {
+                if (rec.resolvedSiteId !== selectedInspectSite.id && rec.siteId !== selectedInspectSite.id) return false;
+                const engId = rec.resolvedEngineerId || rec.engineerId || rec.userId;
+                if (assignedEngineerIds.size > 0 && engId && !assignedEngineerIds.has(engId)) {
+                  const engMatches = siteAssignedEngineers.some(e => e.id === engId || e.uid === engId);
+                  if (!engMatches) return false;
+                }
+                const recDate = rec.date || rec.attendanceDate;
+                if (!recDate) return false;
+                if (siteAttendanceFromDate && recDate < siteAttendanceFromDate) return false;
+                if (siteAttendanceToDate && recDate > siteAttendanceToDate) return false;
+                return true;
+              });
 
-            {/* Tab 4: Materials */}
-            {siteModalActiveTab === "materials" && (
-              <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Material Stock at Site (Cement, Steel, Sand, Aggregates)</h4>
-                {materials.filter(m => m.siteId === selectedInspectSite.id).length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No material stock records registered for this site.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "250px", overflowY: "auto" }}>
-                    {materials.filter(m => m.siteId === selectedInspectSite.id).map(m => (
-                      <div key={m.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                        <div>
-                          <strong style={{ fontSize: "12.5px" }}>{m.materialName || m.name}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>Stock: {m.quantity || m.currentStock || 0} {m.unit || "units"}</span>
-                        </div>
-                        <span style={{ fontSize: "12px", fontWeight: "700" }}>
-                          {formatINR(m.totalCost || 0)}
-                        </span>
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "14px" }}>
+                  {/* Assigned Engineers Roster Banner */}
+                  <div style={{ padding: "12px 14px", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase", display: "block", marginBottom: "6px" }}>
+                      Assigned Site Engineers ({siteAssignedEngineers.length})
+                    </span>
+                    {siteAssignedEngineers.length === 0 ? (
+                      <span style={{ fontSize: "12px", color: "var(--text-muted)" }}>No engineers currently assigned to this site.</span>
+                    ) : (
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                        {siteAssignedEngineers.map(eng => {
+                          const todayRec = todayAttendanceList.find(r => 
+                            (r.resolvedSiteId === selectedInspectSite.id || r.siteId === selectedInspectSite.id) && 
+                            (r.resolvedEngineerId === eng.id || r.resolvedEngineerId === eng.uid || r.engineerId === eng.id || r.engineerId === eng.uid || r.userId === eng.id || r.userId === eng.uid)
+                          );
+                          return (
+                            <div key={eng.id || eng.uid} style={{ display: "inline-flex", alignItems: "center", gap: "8px", padding: "6px 10px", backgroundColor: "#ffffff", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                              <span style={{ width: "7px", height: "7px", borderRadius: "50%", backgroundColor: todayRec ? "#16a34a" : "#cbd5e1", display: "inline-block" }} />
+                              <div>
+                                <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", lineHeight: "1.2" }}>{eng.fullName || eng.name}</strong>
+                                <span style={{ fontSize: "10.5px", color: "var(--primary-600)" }}>{eng.phoneNumber || eng.phone || eng.email || "Field Engineer"}</span>
+                              </div>
+                              <span style={{ fontSize: "10px", fontWeight: "700", padding: "1px 6px", borderRadius: "8px", backgroundColor: todayRec ? "#dcfce7" : "#f1f5f9", color: todayRec ? "#15803d" : "#64748b", marginLeft: "4px" }}>
+                                {todayRec ? (todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.checkInTimeFormatted})`) : "Not Marked Today"}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    )}
                   </div>
-                )}
-              </div>
-            )}
+
+                  {/* Date Range Filter Bar */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", padding: "10px 14px", backgroundColor: "#fafafa", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--primary-800)" }}>From:</span>
+                        <input 
+                          type="date" 
+                          value={siteAttendanceFromDate} 
+                          onChange={(e) => setSiteAttendanceFromDate(e.target.value)} 
+                          style={{ height: "30px", padding: "2px 8px", fontSize: "11.5px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#fff" }}
+                        />
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--primary-800)" }}>To:</span>
+                        <input 
+                          type="date" 
+                          value={siteAttendanceToDate} 
+                          onChange={(e) => setSiteAttendanceToDate(e.target.value)} 
+                          style={{ height: "30px", padding: "2px 8px", fontSize: "11.5px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#fff" }}
+                        />
+                      </div>
+                      <div style={{ display: "flex", gap: "4px" }}>
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            setSiteAttendanceFromDate(todayDateString);
+                            setSiteAttendanceToDate(todayDateString);
+                          }}
+                          className="erp-btn-secondary"
+                          style={{ padding: "2px 8px", fontSize: "11px", height: "30px" }}
+                        >
+                          Today
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const d = new Date();
+                            d.setDate(d.getDate() - 7);
+                            setSiteAttendanceFromDate(d.toISOString().split("T")[0]);
+                            setSiteAttendanceToDate(todayDateString);
+                          }}
+                          className="erp-btn-secondary"
+                          style={{ padding: "2px 8px", fontSize: "11px", height: "30px" }}
+                        >
+                          Last 7 Days
+                        </button>
+                        <button 
+                          type="button" 
+                          onClick={() => {
+                            const d = new Date();
+                            d.setDate(d.getDate() - 30);
+                            setSiteAttendanceFromDate(d.toISOString().split("T")[0]);
+                            setSiteAttendanceToDate(todayDateString);
+                          }}
+                          className="erp-btn-secondary"
+                          style={{ padding: "2px 8px", fontSize: "11px", height: "30px" }}
+                        >
+                          Last 30 Days
+                        </button>
+                      </div>
+                    </div>
+                    <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--primary-700)" }}>
+                      {siteAttendanceHistory.length} Attendance Records
+                    </span>
+                  </div>
+
+                  {/* Historical Attendance Records Table */}
+                  {siteAttendanceHistory.length === 0 ? (
+                    <div style={{ padding: "32px", textAlign: "center", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", color: "var(--text-muted)", fontSize: "12.5px" }}>
+                      No attendance records found for this site within the selected date range ({formatDateDMY(siteAttendanceFromDate)} to {formatDateDMY(siteAttendanceToDate)}).
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: "360px", overflowY: "auto", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
+                      <table className="admin-table" style={{ margin: 0 }}>
+                        <thead>
+                          <tr style={{ backgroundColor: "#f8fafc" }}>
+                            <th style={{ width: "110px" }}>Date</th>
+                            <th>Engineer Name</th>
+                            <th style={{ textAlign: "center", width: "120px" }}>Check-In</th>
+                            <th style={{ textAlign: "center", width: "120px" }}>Check-Out</th>
+                            <th style={{ textAlign: "center", width: "140px" }}>Status</th>
+                            <th style={{ textAlign: "center", width: "130px" }}>Photo Proof</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {siteAttendanceHistory.map(rec => {
+                            const photoUrl = rec.photoUrl || rec.photoURL || rec.selfieUrl || rec.imageUrl || rec.photo || rec.checkInPhotoUrl;
+                            const recDateStr = formatDateDMY(rec.date || rec.attendanceDate);
+                            return (
+                              <tr key={rec.id}>
+                                <td style={{ fontWeight: "700", color: "var(--primary-950)", fontSize: "12px" }}>
+                                  {recDateStr}
+                                </td>
+                                <td>
+                                  <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>{rec.engineerName}</strong>
+                                  <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{rec.engineerEmail || rec.engineerPhone || "Site Engineer"}</span>
+                                </td>
+                                <td style={{ textAlign: "center", fontFamily: "monospace", fontSize: "11.5px", fontWeight: "600" }}>
+                                  {rec.checkInTimeFormatted}
+                                </td>
+                                <td style={{ textAlign: "center", fontFamily: "monospace", fontSize: "11.5px", color: rec.checkOutTimeFormatted ? "var(--primary-950)" : "var(--text-muted)" }}>
+                                  {rec.checkOutTimeFormatted || "—"}
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <Badge status={rec.isCheckedOut ? "default" : (rec.isVerified ? "success" : "info")}>
+                                    {rec.isCheckedOut ? "Checked Out" : (rec.isVerified ? "Present / On-Site" : "Present")}
+                                  </Badge>
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  {photoUrl ? (
+                                    <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                                      <img 
+                                        src={photoUrl} 
+                                        alt="Proof Thumbnail" 
+                                        style={{ width: "28px", height: "28px", borderRadius: "4px", objectFit: "cover", border: "1px solid #cbd5e1" }} 
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedPreviewImage({
+                                          url: photoUrl,
+                                          title: `Attendance Photo — ${rec.engineerName} (${recDateStr})`
+                                        })}
+                                        title="View Full Photo Proof"
+                                        className="erp-btn-secondary"
+                                        style={{
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          gap: "3px",
+                                          padding: "2px 6px",
+                                          fontSize: "11px",
+                                          cursor: "pointer",
+                                          borderRadius: "4px"
+                                        }}
+                                      >
+                                        <Eye size={12} style={{ color: "var(--primary-600)" }} />
+                                        <span>View</span>
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>No Photo</span>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Tab 3: Workforce / Labour (Date-Based Report-Style View) */}
+            {siteModalActiveTab === "labour" && (() => {
+              const activeLaborDate = siteLaborInspectionDate || todayDateString;
+              const dateLabourRecords = (rawLabourAttendance || []).filter(r => 
+                !r?.id?.startsWith("labour_lock_") && 
+                r?.type !== "labour_attendance_lock" && 
+                !r?.lockedMetadata && 
+                r?.type !== "lock" && 
+                r?.siteId === selectedInspectSite.id && 
+                (r?.attendanceDate === activeLaborDate || r?.date === activeLaborDate)
+              );
+
+              let totalWorkers = 0;
+              let totalLabourCost = 0;
+
+              const rows = dateLabourRecords.map(r => {
+                const { workerCount, units, wage, amount } = resolveLabourRecordCalculations(r);
+                totalWorkers += workerCount;
+                totalLabourCost += amount;
+                const team = r.teamName || (r.teamId ? "Labour Team" : "Civil Team");
+                const workerType = r.categoryName || r.category || (r.categoryId ? String(r.categoryId).replace(/^cat_/, '') : "Civil Labour");
+                return {
+                  id: r.id,
+                  team,
+                  workerType,
+                  workerCount,
+                  units,
+                  wage,
+                  amount
+                };
+              });
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  {/* Date Filter Bar */}
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", padding: "10px 14px", backgroundColor: "#fafafa", borderRadius: "8px", border: "1px solid #e2e8f0" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                        <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--primary-800)" }}>Date:</span>
+                        <input 
+                          type="date" 
+                          value={activeLaborDate} 
+                          onChange={(e) => setSiteLaborInspectionDate(e.target.value)} 
+                          style={{ height: "30px", padding: "2px 8px", fontSize: "11.5px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#fff" }}
+                        />
+                      </div>
+                      <button 
+                        type="button" 
+                        onClick={() => setSiteLaborInspectionDate(todayDateString)}
+                        className="erp-btn-secondary"
+                        style={{ padding: "2px 8px", fontSize: "11px", height: "30px" }}
+                      >
+                        Today
+                      </button>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                      <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--brand-orange)" }}>
+                        {totalWorkers} Active Workers
+                      </span>
+                      <span style={{ fontSize: "11.5px", fontWeight: "700", color: "var(--primary-950)", fontFamily: "monospace" }}>
+                        Total: {formatINR(totalLabourCost)}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Labor Records Breakdown Table */}
+                  {rows.length === 0 ? (
+                    <div style={{ padding: "28px", textAlign: "center", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", color: "var(--text-muted)", fontSize: "12.5px" }}>
+                      No labour attendance logged for this site on {formatDateDMY(activeLaborDate)}.
+                    </div>
+                  ) : (
+                    <div style={{ overflowX: "auto", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
+                      <table className="admin-table" style={{ margin: 0 }}>
+                        <thead>
+                          <tr style={{ backgroundColor: "#f8fafc" }}>
+                            <th>Team</th>
+                            <th>Worker Type</th>
+                            <th style={{ textAlign: "center" }}>Workers</th>
+                            <th style={{ textAlign: "center" }}>Duration (Days)</th>
+                            <th style={{ textAlign: "center" }}>Calculation</th>
+                            <th style={{ textAlign: "right" }}>Total Amount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map(row => (
+                            <tr key={row.id}>
+                              <td style={{ fontWeight: "700", color: "var(--primary-950)" }}>{row.team}</td>
+                              <td>{row.workerType}</td>
+                              <td style={{ textAlign: "center", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>{row.workerCount}</td>
+                              <td style={{ textAlign: "center", fontSize: "11.5px", color: "var(--primary-700)" }}>
+                                {row.units} {row.units === 1 ? "Day" : "Days"}
+                              </td>
+                              <td style={{ textAlign: "center", fontFamily: "monospace", fontSize: "11.5px", color: "var(--primary-800)" }}>
+                                {row.workerCount} × {row.units} × {formatINR(row.wage)}
+                              </td>
+                              <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700", color: "var(--primary-950)" }}>
+                                {formatINR(row.amount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800", borderTop: "2px solid #cbd5e1" }}>
+                            <td colSpan={2} style={{ color: "var(--primary-950)" }}>Total Workforce &amp; Spend ({formatDateDMY(activeLaborDate)})</td>
+                            <td style={{ textAlign: "center", color: "var(--primary-950)" }}>{totalWorkers} Workers</td>
+                            <td colSpan={2}></td>
+                            <td style={{ textAlign: "right", fontFamily: "monospace", color: "var(--brand-orange)", fontSize: "13px" }}>
+                              {formatINR(totalLabourCost)}
+                            </td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Tab 4: Materials & Stock (Report-Style Structure) */}
+            {siteModalActiveTab === "materials" && (() => {
+              const siteMaterials = materials.filter(m => m.siteId === selectedInspectSite.id);
+              const totalMatAmount = siteMaterials.reduce((sum, m) => sum + Number(m.totalAmount || m.totalCost || m.amount || ((m.quantity || 0) * (m.unitPrice || m.rate || 0)) || 0), 0);
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <h4 style={{ margin: 0, fontSize: "13px", fontWeight: "800", color: "var(--primary-950)" }}>
+                      Materials Inventory &amp; Stock Register
+                    </h4>
+                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)" }}>
+                      {siteMaterials.length} Recorded Entries
+                    </span>
+                  </div>
+
+                  {siteMaterials.length === 0 ? (
+                    <div style={{ padding: "28px", textAlign: "center", backgroundColor: "#f8fafc", borderRadius: "8px", border: "1px solid #e2e8f0", color: "var(--text-muted)", fontSize: "12.5px" }}>
+                      No material deliveries or stock records registered for this site.
+                    </div>
+                  ) : (
+                    <div style={{ maxHeight: "300px", overflowY: "auto", border: "1px solid var(--border-color)", borderRadius: "8px" }}>
+                      <table className="admin-table" style={{ margin: 0 }}>
+                        <thead>
+                          <tr style={{ backgroundColor: "#f8fafc" }}>
+                            <th>Material Name</th>
+                            <th style={{ textAlign: "center" }}>Quantity</th>
+                            <th>Supplier / Vendor</th>
+                            <th style={{ textAlign: "right" }}>Rate</th>
+                            <th style={{ textAlign: "right" }}>Amount</th>
+                            <th style={{ textAlign: "center" }}>Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {siteMaterials.map(m => {
+                            const amt = Number(m.totalAmount || m.totalCost || m.amount || ((m.quantity || 0) * (m.unitPrice || m.rate || 0)) || 0);
+                            const rate = Number(m.unitPrice || m.rate || 0);
+                            return (
+                              <tr key={m.id}>
+                                <td>
+                                  <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block" }}>{m.materialName || m.name}</strong>
+                                  <span style={{ fontSize: "10.5px", color: "var(--text-muted)" }}>{m.category || m.materialType || "General Supply"} • {m.purchaseDate || m.date || formatDateDMY(m.createdAt)}</span>
+                                </td>
+                                <td style={{ textAlign: "center", fontWeight: "600", fontSize: "12px" }}>
+                                  {m.quantity || m.receivedQuantity || m.currentStock || 0} {m.unit || "Units"}
+                                </td>
+                                <td style={{ fontSize: "11.5px", color: "var(--primary-800)" }}>
+                                  {m.supplierName || m.teamName || m.vendor || "Direct Supply"}
+                                </td>
+                                <td style={{ textAlign: "right", fontFamily: "monospace", fontSize: "11.5px" }}>
+                                  {rate > 0 ? formatINR(rate) : "—"}
+                                </td>
+                                <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700", color: "var(--primary-950)" }}>
+                                  {formatINR(amt)}
+                                </td>
+                                <td style={{ textAlign: "center" }}>
+                                  <Badge status={(m.status || "").toLowerCase() === "approved" ? "success" : "default"}>
+                                    {m.status || "Logged"}
+                                  </Badge>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr style={{ backgroundColor: "#f1f5f9", fontWeight: "800", borderTop: "2px solid #cbd5e1" }}>
+                            <td colSpan={4} style={{ color: "var(--primary-950)" }}>Total Site Material Inward Cost</td>
+                            <td style={{ textAlign: "right", fontFamily: "monospace", color: "var(--primary-950)", fontSize: "13px" }}>
+                              {formatINR(totalMatAmount)}
+                            </td>
+                            <td></td>
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Tab 5: Financials & Expenses */}
-            {siteModalActiveTab === "expenses" && (
-              <div>
-                <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800" }}>Site Financial Ledger &amp; Outlays</h4>
-                {generalExpenses.filter(e => e.siteId === selectedInspectSite.id).length === 0 ? (
-                  <p style={{ color: "var(--text-muted)", fontSize: "12px" }}>No general expenses recorded for this site.</p>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "250px", overflowY: "auto" }}>
-                    {generalExpenses.filter(e => e.siteId === selectedInspectSite.id).map(e => (
-                      <div key={e.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
-                        <div>
-                          <strong style={{ fontSize: "12.5px" }}>{e.description}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{e.category || "General"} • {formatDateDMY(e.date)}</span>
-                        </div>
-                        <span style={{ fontSize: "12px", fontWeight: "700", color: "var(--primary-950)" }}>
-                          {formatINR(e.amount || 0)}
-                        </span>
-                      </div>
-                    ))}
+            {siteModalActiveTab === "expenses" && (() => {
+              const siteMaterials = materials.filter(m => m.siteId === selectedInspectSite.id);
+              const siteLabour = laborHistoryMap[selectedInspectSite.id] || [];
+              const siteDprs = allDprs.filter(d => d.siteId === selectedInspectSite.id);
+              const siteExpenses = generalExpenses.filter(e => e.siteId === selectedInspectSite.id);
+              const sitePayments = labourPayments.filter(lp => lp.siteId === selectedInspectSite.id);
+              const financials = getSiteFinancials(selectedInspectSite, siteMaterials, siteLabour, siteDprs, labourMaster.categories, siteExpenses, sitePayments);
+
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px" }}>
+                    <div style={{ padding: "10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Contract Budget</span>
+                      <strong style={{ fontSize: "14px", color: "var(--primary-950)", fontFamily: "monospace", display: "block", marginTop: "2px" }}>{formatINR(financials.budget)}</strong>
+                    </div>
+                    <div style={{ padding: "10px", backgroundColor: "#fff7ed", borderRadius: "6px", border: "1px solid #fed7aa" }}>
+                      <span style={{ fontSize: "10px", color: "#c2410c", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Total Cost Spent</span>
+                      <strong style={{ fontSize: "14px", color: "var(--brand-orange)", fontFamily: "monospace", display: "block", marginTop: "2px" }}>{formatINR(financials.totalSpent)}</strong>
+                    </div>
+                    <div style={{ padding: "10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Material Cost</span>
+                      <strong style={{ fontSize: "14px", color: "var(--primary-950)", fontFamily: "monospace", display: "block", marginTop: "2px" }}>{formatINR(financials.materialCost)}</strong>
+                    </div>
+                    <div style={{ padding: "10px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0" }}>
+                      <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Labour Cost</span>
+                      <strong style={{ fontSize: "14px", color: "var(--primary-950)", fontFamily: "monospace", display: "block", marginTop: "2px" }}>{formatINR(financials.labourCost)}</strong>
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
+
+                  <div style={{ marginTop: "4px" }}>
+                    <h4 style={{ margin: "0 0 8px 0", fontSize: "13px", fontWeight: "800", color: "var(--primary-950)" }}>
+                      Site General Expenses Ledger
+                    </h4>
+                    {siteExpenses.length === 0 ? (
+                      <div style={{ padding: "20px", textAlign: "center", backgroundColor: "#fafafa", borderRadius: "6px", border: "1px solid #e2e8f0", color: "var(--text-muted)", fontSize: "12px" }}>
+                        No general expenses recorded for this site.
+                      </div>
+                    ) : (
+                      <div style={{ maxHeight: "200px", overflowY: "auto", border: "1px solid var(--border-color)", borderRadius: "6px" }}>
+                        <table className="admin-table" style={{ margin: 0 }}>
+                          <thead>
+                            <tr style={{ backgroundColor: "#f8fafc" }}>
+                              <th>Description</th>
+                              <th>Category</th>
+                              <th>Date</th>
+                              <th style={{ textAlign: "right" }}>Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {siteExpenses.map(e => (
+                              <tr key={e.id}>
+                                <td style={{ fontWeight: "600", fontSize: "12px" }}>{e.description}</td>
+                                <td style={{ fontSize: "11px", color: "var(--primary-700)" }}>{e.category || "General"}</td>
+                                <td style={{ fontSize: "11px", color: "var(--text-muted)" }}>{formatDateDMY(e.date)}</td>
+                                <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "700", color: "var(--primary-950)" }}>{formatINR(e.amount || 0)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Tab 6: Progress & DPRs */}
             {siteModalActiveTab === "progress" && (
@@ -4711,9 +4076,21 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                             <button
                               type="button"
                               onClick={() => setSelectedPreviewImage({ url: d.photoUrl, title: `DPR Photo — ${d.date}` })}
-                              style={{ border: "none", background: "none", cursor: "pointer", padding: 0 }}
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "4px",
+                                padding: "3px 8px",
+                                fontSize: "11px",
+                                cursor: "pointer",
+                                borderRadius: "6px",
+                                border: "1px solid var(--border-color)",
+                                backgroundColor: "#ffffff",
+                                color: "var(--primary-700)"
+                              }}
                             >
-                              <img src={d.photoUrl} alt="DPR Photo" style={{ width: "45px", height: "45px", borderRadius: "4px", objectFit: "cover" }} />
+                              <Eye size={13} style={{ color: "var(--primary-600)" }} />
+                              <span>View DPR Photo</span>
                             </button>
                           </div>
                         )}
@@ -4727,26 +4104,59 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         </Modal>
       )}
 
-      {/* ── 3. PHOTO PROOF LIGHTBOX MODAL ── */}
+      {/* ── 3. PHOTO PROOF LIGHTBOX MODAL (ASPECT RATIO PRESERVED) ── */}
       {selectedPreviewImage && (
-        <ConfirmationModal
+        <Modal
           isOpen={!!selectedPreviewImage}
           onClose={() => setSelectedPreviewImage(null)}
           title={selectedPreviewImage.title || "Photo Proof"}
-          message=""
-          confirmText="Close"
-          variant="info"
-          onConfirm={() => setSelectedPreviewImage(null)}
-          details={
-            <div style={{ textAlign: "center" }}>
-              <img
-                src={selectedPreviewImage.url}
-                alt={selectedPreviewImage.title}
-                style={{ maxWidth: "100%", maxHeight: "500px", borderRadius: "8px", objectFit: "contain" }}
-              />
-            </div>
+          maxWidth="840px"
+          footer={
+            <button
+              type="button"
+              onClick={() => setSelectedPreviewImage(null)}
+              className="btn btn-outline"
+              style={{ padding: "8px 20px", fontSize: "13px", fontWeight: "700" }}
+            >
+              Close Viewer
+            </button>
           }
-        />
+        >
+          <div style={{ textAlign: "center", padding: "6px 0" }}>
+            {selectedPreviewImage.url ? (
+              <div style={{ 
+                display: "flex", 
+                justifyContent: "center", 
+                alignItems: "center", 
+                backgroundColor: "#0f172a", 
+                borderRadius: "12px", 
+                padding: "16px", 
+                overflow: "hidden",
+                minHeight: "260px"
+              }}>
+                <img
+                  src={selectedPreviewImage.url}
+                  alt={selectedPreviewImage.title}
+                  style={{ 
+                    maxWidth: "100%", 
+                    maxHeight: "75vh", 
+                    width: "auto", 
+                    height: "auto", 
+                    borderRadius: "8px", 
+                    objectFit: "contain", 
+                    boxShadow: "0 10px 30px rgba(0,0,0,0.35)" 
+                  }}
+                />
+              </div>
+            ) : (
+              <div style={{ padding: "40px 20px", color: "var(--text-muted)", fontSize: "13px" }}>
+                <Camera size={40} style={{ margin: "0 auto 10px auto", opacity: "0.4", display: "block" }} />
+                <strong style={{ display: "block", color: "var(--primary-900)", marginBottom: "4px" }}>No Photo Available</strong>
+                <p style={{ margin: 0, fontSize: "12px" }}>No verified image was recorded for this entry.</p>
+              </div>
+            )}
+          </div>
+        </Modal>
       )}
 
       {/* ── 4. KPI CLICK-TO-DRILLDOWN MODAL ── */}
@@ -4787,7 +4197,12 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
                             )}
                             <div>
                               <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>{item.title}</strong>
-                              <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{item.subtitle}</span>
+                              <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block" }}>{item.subtitle}</span>
+                              {item.delayDetail && (
+                                <span style={{ fontSize: "11px", color: "var(--danger-700)", fontWeight: "600", display: "inline-block", marginTop: "2px" }}>
+                                  ⚠️ {item.delayDetail}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
