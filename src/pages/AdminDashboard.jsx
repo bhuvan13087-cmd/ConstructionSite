@@ -53,7 +53,7 @@ import {
   subscribeCanonicalEngineers,
   resolveEngineerIdentity
 } from "../services/firebaseService";
-import { formatINR } from "../services/businessLogic";
+import { formatINR, resolveLabourRecordCalculations } from "../services/businessLogic";
 
 // Universal date string normalizer to ISO 'YYYY-MM-DD'
 const normalizeToISODate = (val) => {
@@ -473,45 +473,16 @@ export default function AdminDashboard() {
     (rawLabourAttendance || []).forEach(r => {
       if (!r) return;
       // Exclude lock/metadata records
-      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata) return;
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       if (siteIds.size > 0 && r.siteId && !siteIds.has(r.siteId)) return;
 
-      const dateField = r.attendanceDate || r.date;
-      if (!isTodayRecord(dateField, r.createdAt || r.updatedAt, todayDateKeys)) return;
+      const dateField = normalizeToISODate(r.attendanceDate || r.date);
+      if (!dateField || !todayDateKeys.includes(dateField)) return;
 
-      const recKey = r.id || `${r.siteId}_${r.teamId}_${r.categoryId}_${r.date || r.attendanceDate}`;
+      const recKey = r.id || `${r.siteId}_${r.teamId}_${r.categoryId}_${dateField}`;
       if (uniqueMap.has(recKey)) return;
 
-      const workerCount = Number(
-        r.workerCount !== undefined 
-          ? r.workerCount 
-          : (r.workerEntries && Array.isArray(r.workerEntries) && r.workerEntries.length > 0 
-              ? r.workerEntries.length 
-              : (r.total !== undefined ? r.total : 1))
-      ) || 0;
-
-      const customUnits = Number(
-        r.customWorkUnits !== undefined 
-          ? r.customWorkUnits 
-          : (r.units !== undefined 
-              ? r.units 
-              : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
-      ) || 1.0;
-
-      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage || 0)) || 0;
-
-      let calculatedAmount = 0;
-      if (r.calculatedAmount !== undefined && r.calculatedAmount !== null) {
-        calculatedAmount = Number(r.calculatedAmount) || 0;
-      } else if (r.totalAmount !== undefined && r.totalAmount !== null) {
-        calculatedAmount = Number(r.totalAmount) || 0;
-      } else if (r.workerEntries && Array.isArray(r.workerEntries) && r.workerEntries.length > 0) {
-        r.workerEntries.forEach(w => {
-          calculatedAmount += Number(w.calculatedAmount) || (Number(w.units || w.customWorkUnits || 1) * Number(w.dailyWage || w.wage || dailyWage));
-        });
-      } else {
-        calculatedAmount = workerCount * customUnits * dailyWage;
-      }
+      const { workerCount, units: customUnits, wage: dailyWage, amount: calculatedAmount } = resolveLabourRecordCalculations(r);
 
       uniqueMap.set(recKey, {
         id: recKey,
@@ -521,7 +492,7 @@ export default function AdminDashboard() {
         customUnits,
         dailyWage,
         calculatedAmount,
-        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        date: dateField,
         rawRecord: r
       });
     });
@@ -529,26 +500,25 @@ export default function AdminDashboard() {
     // Process legacy siteLabourEntries records
     (rawLegacyLabour || []).forEach(r => {
       if (!r) return;
-      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock") return;
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       if (siteIds.size > 0 && r.siteId && !siteIds.has(r.siteId)) return;
 
-      const dateField = r.date || r.attendanceDate;
-      if (!isTodayRecord(dateField, r.createdAt, todayDateKeys)) return;
+      const dateField = normalizeToISODate(r.date || r.attendanceDate);
+      if (!dateField || !todayDateKeys.includes(dateField)) return;
 
-      const recKey = r.id || `legacy_labour_${r.siteId}_${r.categoryId}_${r.date}`;
+      const recKey = r.id || `legacy_labour_${r.siteId}_${r.categoryId}_${dateField}`;
       if (uniqueMap.has(recKey)) return;
 
-      let workerCount = Number(r.workerCount || r.total || 1) || 1;
-      let calculatedAmount = Number(r.calculatedAmount || r.totalAmount || (workerCount * 500)) || 0;
+      const { workerCount, units: customUnits, wage: dailyWage, amount: calculatedAmount } = resolveLabourRecordCalculations(r);
 
       uniqueMap.set(recKey, {
         id: recKey,
         siteId: r.siteId,
         workerCount,
-        customUnits: 1,
-        dailyWage: 500,
+        customUnits,
+        dailyWage,
         calculatedAmount,
-        date: normalizeToISODate(dateField) || todayDateKeys[0],
+        date: dateField,
         rawRecord: r
       });
     });

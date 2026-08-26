@@ -71,7 +71,7 @@ import {
   verifyEngineerAttendanceGate,
   subscribeTodayAttendance
 } from "../services/firebaseService.js";
-import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR, formatDateDMY } from "../services/businessLogic";
+import { verifyTNLocation, verifySiteGeofence, hasPermission, getLabourDisplayName, processMaterialPaymentAndDelivery, getSiteExpenseLedger, formatINR, formatDateDMY, resolveLabourRecordCalculations } from "../services/businessLogic";
 import { updateEngineerPasswordAuth } from "../firebase/auth";
 import Loading from "../components/common/Loading";
 import Card from "../components/common/Card";
@@ -9490,12 +9490,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
     let grandTotalLabourCost = 0;
 
     filteredRecords.forEach(r => {
-      const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
-      const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const teamObj = labourTeams.find(t => t.id === r.teamId);
-      const catObj = teamObj?.categories?.[r.categoryId] || categories.find(c => c.id === r.categoryId);
-      const wage = Number(r.dailyWage || r.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
-      const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+      const { workerCount: count, units, amount: cost } = resolveLabourRecordCalculations(r);
 
       grandTotalWorkers += count;
       grandTotalWorkUnits += count * units;
@@ -9751,12 +9746,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
               let dateCost = 0;
 
               records.forEach(r => {
-                const count = Number(r.workerCount) || 1;
-                const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : 1.0)) || 1.0;
-                const teamObj = labourTeams.find(t => t.id === r.teamId);
-                const catObj = teamObj?.categories?.[r.categoryId] || categories.find(c => c.id === r.categoryId);
-                const wage = Number(r.dailyWage || r.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
-                const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+                const { workerCount: count, amount: cost } = resolveLabourRecordCalculations(r);
 
                 dateWorkers += count;
                 dateCost += cost;
@@ -9814,14 +9804,11 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                   {/* List of Category Entries */}
                   <div style={{ padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
                     {records.map(record => {
-                      const count = Number(record.workerCount) || 1;
-                      const units = Number(record.customWorkUnits !== undefined ? record.customWorkUnits : (record.units !== undefined ? record.units : 1.0)) || 1.0;
+                      const { workerCount: count, units, wage, amount: cost } = resolveLabourRecordCalculations(record);
                       const teamObj = labourTeams.find(t => t.id === record.teamId);
                       const teamName = teamObj ? (teamObj.name || teamObj.teamName) : (record.teamName || "Labour Team");
                       const catObj = teamObj?.categories?.[record.categoryId] || categories.find(c => c.id === record.categoryId);
                       const catName = catObj ? catObj.name : (record.categoryName || record.category || "Labour Category");
-                      const wage = Number(record.dailyWage || record.wage || catObj?.wage || catObj?.salaryAmount || catObj?.baseWage || 0);
-                      const cost = record.calculatedAmount !== undefined && record.calculatedAmount !== null ? Number(record.calculatedAmount) : (count * units * wage);
                       const recordLocked = record.status === "submitted" || record.locked || isTeamLockedOnDate(record.attendanceDate, record.teamId);
 
                       return (

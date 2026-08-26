@@ -37,7 +37,8 @@ import {
   isSiteDelayed,
   formatINR,
   getSiteBudget,
-  formatDateDMY
+  formatDateDMY,
+  resolveLabourRecordCalculations
 } from "../services/businessLogic";
 import {
   Building2,
@@ -550,10 +551,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   const todayLabourCount = useMemo(() => {
     let count = 0;
     (rawLabourAttendance || []).forEach(r => {
-      if (!r || r.lockedMetadata) return;
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       const dateField = r.attendanceDate || r.date;
       if (dateField === todayDateString) {
-        const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+        const { workerCount } = resolveLabourRecordCalculations(r);
         count += workerCount;
       }
     });
@@ -636,66 +637,57 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   }
 
   // ══════════════════════════════════════════════════════════════════════════
-  // VIEW 1: VISVAS NEXUS OPERATIONS COMMAND (VNOC) ── SUPER ADMIN COMMAND CENTER
+  // VIEW 1: SUPER ADMIN EXECUTIVE DASHBOARD (OWNER COMMAND CENTER)
   // ══════════════════════════════════════════════════════════════════════════
   const renderDashboardView = () => {
-    // 1. Core Computed Quantities
+    // 1. Core Computed Quantities from Canonical Firestore Data
     const activeSitesList = sites.filter(s => (s.status || "active").toLowerCase() === "active" || (s.status || "").toLowerCase() === "running");
     const activeSitesCount = activeSitesList.length;
+    const runningSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "running").length;
     const completedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "completed").length;
     const delayedSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "delayed" || isSiteDelayed(s)).length;
-    const onHoldSitesCount = sites.filter(s => (s.status || "").toLowerCase() === "on-hold" || (s.status || "").toLowerCase() === "paused").length;
     const onTrackSitesCount = Math.max(0, activeSitesCount - delayedSitesCount);
-    
+
     // Site Engineers & Attendance Pulse
     const activeEngineersList = engineers.filter(e => (e.status || "active").toLowerCase() === "active");
-    const activeEngineersCount = activeEngineersList.length;
+    const activeEngineersCount = activeEngineersList.length || engineers.length;
     const presentEngineersSet = new Set(todayAttendanceList.map(r => r.resolvedEngineerId || r.engineerName));
     const presentCount = presentEngineersSet.size;
     const pendingEngineersCount = Math.max(0, activeEngineersCount - presentCount);
-    const onSiteCount = todayAttendanceList.filter(r => !r.isCheckedOut).length;
-    const checkedOutCount = todayAttendanceList.filter(r => r.isCheckedOut).length;
-    const verifiedCount = todayAttendanceList.filter(r => r.isVerified).length;
     const attendanceRate = activeEngineersCount > 0 ? Math.round((presentCount / activeEngineersCount) * 100) : 0;
-    
+
+    // Labour & Workforce Today
     const sitesWithAttendanceSet = new Set(todayAttendanceList.map(r => r.resolvedSiteId));
-    const activeSitesWithAttendanceCount = activeSitesList.filter(s => sitesWithAttendanceSet.has(s.id)).length;
-    const activeSitesPendingAttendanceCount = Math.max(0, activeSitesCount - activeSitesWithAttendanceCount);
-    
-    // Labour Pulse & Civil Trade Breakdown
     const sitesWithLabourTodaySet = new Set();
     let todayLabourExpense = 0;
     let masonCount = 0;
     let barbenderCount = 0;
     let carpenterCount = 0;
     let helperCount = 0;
-    let otherTradeCount = 0;
 
     (rawLabourAttendance || []).forEach(r => {
-      if (!r || r.lockedMetadata) return;
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       const dateField = r.attendanceDate || r.date;
       if (dateField === todayDateString) {
         if (r.siteId) sitesWithLabourTodaySet.add(r.siteId);
-        const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-        todayLabourExpense += Number(r.totalAmount || (workerCount * rate));
+        const { workerCount, amount } = resolveLabourRecordCalculations(r);
+        todayLabourExpense += amount;
 
         const cat = (r.categoryName || r.category || "").toLowerCase();
-        if (cat.includes("mason") || cat.includes("kothanar") || cat.includes("brick") || cat.includes("plaster")) {
+        if (cat.includes("mason") || cat.includes("karigar") || cat.includes("brick") || cat.includes("plaster")) {
           masonCount += workerCount;
         } else if (cat.includes("bar") || cat.includes("steel") || cat.includes("rebar") || cat.includes("bender")) {
           barbenderCount += workerCount;
         } else if (cat.includes("carpenter") || cat.includes("shutter") || cat.includes("centering") || cat.includes("formwork")) {
           carpenterCount += workerCount;
-        } else if (cat.includes("helper") || cat.includes("mazdoor") || cat.includes("chithal") || cat.includes("coolie") || cat.includes("general")) {
-          helperCount += workerCount;
         } else {
-          otherTradeCount += workerCount;
+          helperCount += workerCount;
         }
       }
     });
 
     const totalWorkforceToday = presentCount + todayLabourCount;
+    const distinctTeams = new Set((rawLabourAttendance || []).filter(r => (r.attendanceDate || r.date) === todayDateString).map(r => r.teamId || r.teamName).filter(Boolean)).size || rawTeams.length;
 
     // Today's Materials Expense
     let todayMaterialExpense = 0;
@@ -703,8 +695,8 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       const mDate = m.date || (m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
       if (mDate === todayDateString) {
         const qty = Number(m.quantity || m.currentStock) || 0;
-        const rate = Number(m.unitRate || m.rate) || 0;
-        todayMaterialExpense += Number(m.totalCost) || (qty * rate);
+        const rate = Number(m.unitRate || m.rate || m.unitPrice) || 0;
+        todayMaterialExpense += Number(m.totalCost || m.amount) || (qty * rate);
       }
     });
 
@@ -718,183 +710,85 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
     const todayTotalExpenses = todayLabourExpense + todayMaterialExpense + todayGeneralExpense;
 
-    // Financial Health
-    const netPosition = overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses;
-    const isProfit = netPosition >= 0;
+    // Overall Progress
+    const totalProgressSum = sites.reduce((sum, s) => {
+      const siteMaterials = materials.filter(m => m.siteId === s.id);
+      const siteLabour = laborHistoryMap[s.id] || [];
+      const siteDprs = allDprs.filter(d => d.siteId === s.id);
+      const financials = getSiteFinancials(s, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
+      return sum + (financials.progressPercent || Number(s.progress) || 0);
+    }, 0);
+    const averageProgressPercent = sites.length > 0 ? Math.round(totalProgressSum / sites.length) : 0;
 
-    // Expense Category Breakdown
-    const expenseBreakdown = {
-      "Material": 0,
-      "Labour": 0,
-      "General": 0,
-      "Fuel & Equipment": 0
-    };
-    materials.forEach(m => {
-      const qty = Number(m.quantity || m.currentStock) || 0;
-      const rate = Number(m.unitRate || m.rate) || 0;
-      expenseBreakdown["Material"] += Number(m.totalCost) || (qty * rate);
-    });
-    (rawLabourAttendance || []).forEach(r => {
-      if (!r || r.lockedMetadata) return;
-      const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-      const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-      expenseBreakdown["Labour"] += Number(r.totalAmount || (workerCount * rate));
-    });
-    generalExpenses.forEach(e => {
-      const cat = (e.category || "General").trim();
-      const amt = Number(e.amount) || 0;
-      if (cat.toLowerCase().includes("fuel") || cat.toLowerCase().includes("equipment") || cat.toLowerCase().includes("machinery")) {
-        expenseBreakdown["Fuel & Equipment"] += amt;
-      } else if (cat.toLowerCase().includes("material")) {
-        expenseBreakdown["Material"] += amt;
-      } else if (cat.toLowerCase().includes("labour") || cat.toLowerCase().includes("worker")) {
-        expenseBreakdown["Labour"] += amt;
-      } else {
-        expenseBreakdown["General"] += amt;
-      }
-    });
-    const totalCategorizedExpenses = Object.values(expenseBreakdown).reduce((a, b) => a + b, 0) || 1;
-
-    // Upcoming Deadlines
-    const upcomingDeadlinesList = sites
-      .filter(s => s.expectedEndDate && (s.status || "").toLowerCase() !== "completed")
-      .sort((a, b) => (a.expectedEndDate || "").localeCompare(b.expectedEndDate || ""))
-      .slice(0, 4);
-
-    // Operational Exceptions (Derived safely from canonical Firestore data)
+    // Attention Required (Real Production Derivations)
     const alerts = [];
-    const nowMs = Date.now();
-
     activeSitesList.forEach(s => {
       if (!sitesWithAttendanceSet.has(s.id)) {
         alerts.push({
-          id: `alert_sa_att_${s.id}`,
-          type: 'danger',
-          category: 'Missing Attendance',
+          id: `alert_att_${s.id}`,
+          type: "danger",
+          category: "Missing Attendance",
           title: `No Attendance: ${s.siteName}`,
-          message: `Zero field engineer check-ins recorded today for "${s.siteName}".`,
-          link: `/superadmin/attendance`,
+          message: `Zero engineer check-ins recorded today.`,
           site: s
         });
       }
     });
 
-    activeSitesList.forEach(s => {
-      if (!sitesWithLabourTodaySet.has(s.id)) {
-        alerts.push({
-          id: `alert_sa_lab_${s.id}`,
-          type: 'warning',
-          category: 'Missing Labour',
-          title: `No Labour Force: ${s.siteName}`,
-          message: `No daily worker attendance muster filed today for "${s.siteName}".`,
-          link: `/superadmin/labour`,
-          site: s
-        });
-      }
-    });
-
-    sites.forEach(site => {
-      if (site.status === 'Delayed' || isSiteDelayed(site)) {
-        const planned = calculatePlannedProgress(site.startDate, site.expectedEndDate);
-        const prog = site.progress !== undefined ? Number(site.progress) : 0;
+    sites.forEach(s => {
+      if (s.status === "Delayed" || isSiteDelayed(s)) {
+        const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
+        const prog = Number(s.progress) || 0;
         const gap = Math.max(0, planned - prog);
         alerts.push({
-          id: `alert_sa_delay_${site.id}`,
-          type: 'danger',
-          category: 'Schedule Delay',
-          title: `Milestone Delayed: ${site.siteName}`,
-          message: `Progress is ${prog}% vs planned ${planned}% (-${gap}% gap). Expected: ${formatDateDMY(site.expectedEndDate)}.`,
-          link: `/superadmin/progress`,
-          site: site
-        });
-      }
-    });
-
-    generalExpenses.forEach(exp => {
-      if (Number(exp.amount) >= 100000) {
-        alerts.push({
-          id: `alert_sa_high_${exp.id}`,
-          type: 'warning',
-          category: 'High Outlay',
-          title: `High Outlay: ₹${Number(exp.amount).toLocaleString()}`,
-          message: `Field expense for "${exp.description}" logged at ${sites.find(s => s.id === exp.siteId)?.siteName || 'HQ'}.`,
-          link: `/superadmin/finance`
+          id: `alert_del_${s.id}`,
+          type: "danger",
+          category: "Schedule Delay",
+          title: `Delayed: ${s.siteName}`,
+          message: `${prog}% completed vs planned ${planned}% (${gap}% gap).`,
+          site: s
         });
       }
     });
 
     approvals.forEach(a => {
-      if ((a.status || '').toLowerCase() === 'pending') {
-        const createdMs = a.createdAt?.seconds 
-          ? a.createdAt.seconds * 1000 
-          : (a.createdAt ? new Date(a.createdAt).getTime() : nowMs);
-        const diffHours = (nowMs - createdMs) / (1000 * 60 * 60);
-        if (diffHours >= 48) {
-          alerts.push({
-            id: `alert_sa_app_${a.id}`,
-            type: 'warning',
-            category: 'Pending Approval',
-            title: `Pending Approval: ${a.type}`,
-            message: `${a.type} request from ${a.requestedBy || 'Engineer'} pending over 48 hours.`,
-            link: `/superadmin/approvals`
-          });
-        }
-      }
-    });
-
-    // Today's Operations Feed (Live Chronological Stream)
-    const todayFeedList = [];
-    
-    todayAttendanceList.forEach(rec => {
-      todayFeedList.push({
-        id: `att_in_${rec.id}`,
-        module: "Attendance",
-        moduleType: "attendance",
-        badgeStatus: "success",
-        title: `${rec.engineerName} Checked In`,
-        description: `Logged on-site presence at ${rec.siteName} (${rec.isVerified ? "GPS Verified" : "Pending GPS"})`,
-        time: rec.checkInTimeFormatted,
-        timestamp: rec.checkInTime?.seconds ? rec.checkInTime.seconds * 1000 : (rec.timestamp?.seconds ? rec.timestamp.seconds * 1000 : 0),
-        siteName: rec.siteName,
-        user: rec.engineerName,
-        photoUrl: rec.photoUrl
-      });
-      if (rec.isCheckedOut && rec.checkOutTimeFormatted) {
-        todayFeedList.push({
-          id: `att_out_${rec.id}`,
-          module: "Attendance",
-          moduleType: "attendance",
-          badgeStatus: "default",
-          title: `${rec.engineerName} Checked Out`,
-          description: `Checked out from ${rec.siteName}`,
-          time: rec.checkOutTimeFormatted,
-          timestamp: rec.checkOutTime?.seconds ? rec.checkOutTime.seconds * 1000 : 0,
-          siteName: rec.siteName,
-          user: rec.engineerName,
-          photoUrl: rec.checkOutPhotoUrl
+      if ((a.status || "").toLowerCase() === "pending") {
+        alerts.push({
+          id: `alert_app_${a.id}`,
+          type: "warning",
+          category: "Pending Approval",
+          title: `Pending Approval: ${a.type || "Request"}`,
+          message: `${a.type || "Request"} from ${a.requestedBy || "Engineer"}.`,
+          link: "/superadmin/approvals"
         });
       }
     });
 
+    // Today's Operations Feed
+    const todayFeedList = [];
+    todayAttendanceList.forEach(rec => {
+      todayFeedList.push({
+        id: `att_${rec.id}`,
+        user: rec.engineerName,
+        action: rec.isCheckedOut ? "Checked Out" : "Checked In",
+        site: rec.siteName,
+        time: rec.checkInTimeFormatted,
+        timestamp: rec.checkInTime?.seconds ? rec.checkInTime.seconds * 1000 : 0
+      });
+    });
+
     (rawLabourAttendance || []).forEach(r => {
       if (!r || r.lockedMetadata) return;
-      const dateField = r.attendanceDate || r.date;
-      if (dateField === todayDateString) {
+      if ((r.attendanceDate || r.date) === todayDateString) {
         const site = sites.find(s => s.id === r.siteId);
-        const workerCount = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-        const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-        const total = Number(r.totalAmount || (workerCount * rate));
+        const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
         todayFeedList.push({
           id: `lab_${r.id}`,
-          module: "Labour",
-          moduleType: "labour",
-          badgeStatus: "info",
-          title: `Labour: ${workerCount} Workers (${r.categoryName || r.category || "Civil Gang"})`,
-          description: `${r.categoryName || r.category || "General Labour"} logged at ${site?.siteName || "Site"} — ₹${total.toLocaleString()}`,
+          user: r.recordedByName || r.engineerName || "Site Engineer",
+          action: `Logged ${count} ${r.categoryName || r.category || "Workers"}`,
+          site: site?.siteName || "Civil Site",
           time: r.createdAt?.seconds ? new Date(r.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
-          timestamp: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0,
-          siteName: site?.siteName || "Site",
-          user: r.recordedByName || r.engineerName || "Site Engineer"
+          timestamp: r.createdAt?.seconds ? r.createdAt.seconds * 1000 : 0
         });
       }
     });
@@ -905,1333 +799,481 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         const site = sites.find(s => s.id === m.siteId);
         todayFeedList.push({
           id: `mat_${m.id}`,
-          module: "Materials",
-          moduleType: "materials",
-          badgeStatus: "info",
-          title: `Material: ${m.materialName || m.name || "Item"}`,
-          description: `${m.quantity || 0} ${m.unit || "units"} added at ${site?.siteName || "Site"}`,
+          user: m.recordedByName || m.engineerName || "Site Engineer",
+          action: `Received ${m.quantity || 0} ${m.unit || "units"} of ${m.materialName || m.name || "Material"}`,
+          site: site?.siteName || "Civil Site",
           time: m.createdAt?.seconds ? new Date(m.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
-          timestamp: m.createdAt?.seconds ? m.createdAt.seconds * 1000 : 0,
-          siteName: site?.siteName || "Site",
-          user: m.engineerName || m.recordedByName || "Site Engineer"
+          timestamp: m.createdAt?.seconds ? m.createdAt.seconds * 1000 : 0
         });
       }
     });
 
-    generalExpenses.forEach(exp => {
-      if ((exp.date || "").startsWith(todayDateString)) {
-        const site = sites.find(s => s.id === exp.siteId);
+    generalExpenses.forEach(e => {
+      if ((e.date || "").startsWith(todayDateString)) {
+        const site = sites.find(s => s.id === e.siteId);
         todayFeedList.push({
-          id: `exp_${exp.id}`,
-          module: "Expenses",
-          moduleType: "expenses",
-          badgeStatus: "warning",
-          title: `Expense: ₹${Number(exp.amount || 0).toLocaleString()}`,
-          description: `"${exp.description}" (${exp.category || "General"}) at ${site?.siteName || "Site"}`,
-          time: exp.createdAt?.seconds ? new Date(exp.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
-          timestamp: exp.createdAt?.seconds ? exp.createdAt.seconds * 1000 : 0,
-          siteName: site?.siteName || "Site",
-          user: exp.recordedByName || "Administrator"
-        });
-      }
-    });
-
-    allDprs.forEach(dpr => {
-      const dDate = dpr.date || (dpr.createdAt?.seconds ? new Date(dpr.createdAt.seconds * 1000).toISOString().split("T")[0] : "");
-      if (dDate === todayDateString) {
-        const site = sites.find(s => s.id === dpr.siteId);
-        todayFeedList.push({
-          id: `dpr_${dpr.id}`,
-          module: "Reports",
-          moduleType: "reports",
-          badgeStatus: "success",
-          title: `DPR: ${dpr.workDescription ? dpr.workDescription.substring(0, 32) + '...' : "Daily Progress Report"}`,
-          description: `Progress filed for ${site?.siteName || "Site"}${dpr.weather ? ` • Weather: ${dpr.weather}` : ''}`,
-          time: dpr.createdAt?.seconds ? new Date(dpr.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
-          timestamp: dpr.createdAt?.seconds ? dpr.createdAt.seconds * 1000 : 0,
-          siteName: site?.siteName || "Site",
-          user: dpr.submittedByName || dpr.engineerName || "Site Engineer"
+          id: `exp_${e.id}`,
+          user: e.recordedByName || "Administrator",
+          action: `Expense ₹${Number(e.amount || 0).toLocaleString()} (${e.description || e.category || "General"})`,
+          site: site?.siteName || "General / HQ",
+          time: e.createdAt?.seconds ? new Date(e.createdAt.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true }) : "Today",
+          timestamp: e.createdAt?.seconds ? e.createdAt.seconds * 1000 : 0
         });
       }
     });
 
     todayFeedList.sort((a, b) => b.timestamp - a.timestamp);
 
-    const filteredTodayFeed = todayFeedList.filter(item => {
-      if (dashboardActivityFilter === "all") return true;
-      return item.moduleType === dashboardActivityFilter;
-    });
+    // Site Performance list
+    const sitePerformanceList = sites.map(site => {
+      const siteMaterials = materials.filter(m => m.siteId === site.id);
+      const siteLabour = laborHistoryMap[site.id] || [];
+      const siteDprs = allDprs.filter(d => d.siteId === site.id);
+      const financials = getSiteFinancials(site, siteMaterials, siteLabour, siteDprs, labourMaster.categories, generalExpenses, labourPayments);
+      
+      let siteWorkforceToday = 0;
+      (rawLabourAttendance || []).forEach(r => {
+        if (!r || r.lockedMetadata) return;
+        if (r.siteId === site.id && (r.attendanceDate || r.date) === todayDateString) {
+          siteWorkforceToday += Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+        }
+      });
 
-    // Sites with Activity Set
-    const sitesWithActivitySet = new Set(todayFeedList.map(item => item.siteName));
-    activeSitesList.forEach(s => {
-      if (todayAttendanceList.some(r => r.resolvedSiteId === s.id)) sitesWithActivitySet.add(s.id);
-      if (sitesWithLabourTodaySet.has(s.id)) sitesWithActivitySet.add(s.id);
-    });
-    const sitesWithActivityCount = activeSitesList.filter(s => sitesWithActivitySet.has(s.id) || sitesWithActivitySet.has(s.siteName)).length;
-    const sitesWithNoActivityCount = Math.max(0, activeSitesCount - sitesWithActivityCount);
-
-    // Filtered Exceptions for Action Center
-    const filteredExceptions = alerts.filter(a => {
-      if (exceptionFilter === "all") return true;
-      if (exceptionFilter === "attendance") return a.category === "Missing Attendance";
-      if (exceptionFilter === "labour") return a.category === "Missing Labour";
-      if (exceptionFilter === "delays") return a.category === "Schedule Delay";
-      if (exceptionFilter === "approvals") return a.category === "Pending Approval";
-      if (exceptionFilter === "expenses") return a.category === "High Outlay";
-      return true;
-    });
-
-    // KPI Click-to-Drilldown Trigger
-    const openKpiDrilldown = (type) => {
-      switch (type) {
-        case "sites_total":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "sites",
-            title: `All Organization Sites Portfolio (${sites.length} Sites)`,
-            subtitle: "Complete operational list of all active, running, completed, and paused construction projects.",
-            items: sites.map(s => ({
-              id: s.id,
-              title: s.siteName,
-              subtitle: `Client: ${s.clientName || "Corporate"} • Location: ${s.location || "N/A"}`,
-              status: s.status || "active",
-              badgeStatus: (s.status || "active").toLowerCase() === "active" ? "success" : (s.status || "").toLowerCase() === "delayed" ? "danger" : "default",
-              metric: `${s.progress || 0}% Progress`,
-              actionSite: s
-            }))
-          });
-          break;
-        case "sites_active":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "sites",
-            title: `Active & Running Projects (${activeSitesList.length} Sites)`,
-            subtitle: "All currently operational project sites undergoing field execution.",
-            items: activeSitesList.map(s => ({
-              id: s.id,
-              title: s.siteName,
-              subtitle: `Client: ${s.clientName || "Corporate"} • Location: ${s.location || "N/A"}`,
-              status: s.status || "active",
-              badgeStatus: "success",
-              metric: `${s.progress || 0}% Progress`,
-              actionSite: s
-            }))
-          });
-          break;
-        case "sites_attention":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "sites",
-            title: `Sites Requiring Attention (${alerts.length} Exceptions)`,
-            subtitle: "Projects with delayed milestones, missing daily attendance, or missing worker logs.",
-            items: alerts.map(a => ({
-              id: a.id,
-              title: a.title,
-              subtitle: a.message,
-              status: a.category,
-              badgeStatus: a.type === "danger" ? "danger" : "warning",
-              metric: "Attention Required",
-              link: a.link,
-              actionSite: a.site
-            }))
-          });
-          break;
-        case "workforce_total":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "engineers",
-            title: `Registered Site Engineers Directory (${engineers.length} Engineers)`,
-            subtitle: "Master list of company site engineers with contact details and assignment standing.",
-            items: engineers.map(e => {
-              const todayRec = todayAttendanceList.find(r => r.resolvedEngineerId === (e.id || e.uid));
-              return {
-                id: e.id || e.uid,
-                title: e.fullName || e.name || "Site Engineer",
-                subtitle: `${e.email || ""} • ${e.phone || e.phoneNumber || ""}`,
-                status: todayRec ? (todayRec.isCheckedOut ? "Checked Out" : `On Site (${todayRec.siteName})`) : "Not Checked In",
-                badgeStatus: todayRec ? (todayRec.isCheckedOut ? "default" : "success") : "warning",
-                metric: e.status || "active"
-              };
-            })
-          });
-          break;
-        case "workforce_present":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "attendance",
-            title: `Engineers Present On Field Today (${todayAttendanceList.length} Checked In)`,
-            subtitle: "Real-time field presence verified by GPS and photo logs.",
-            items: todayAttendanceList.map(r => ({
-              id: r.id,
-              title: r.engineerName,
-              subtitle: `${r.siteName} • In: ${r.checkInTimeFormatted}`,
-              status: r.isCheckedOut ? "Checked Out" : "On Site Now",
-              badgeStatus: r.isCheckedOut ? "default" : "success",
-              metric: r.isVerified ? "GPS Verified" : "Pending GPS",
-              photoUrl: r.photoUrl
-            }))
-          });
-          break;
-        case "workforce_pending":
-          {
-            const presentIds = new Set(todayAttendanceList.map(r => r.resolvedEngineerId || r.engineerName));
-            const pendingEngineers = activeEngineersList.filter(e => !presentIds.has(e.id) && !presentIds.has(e.uid) && !presentIds.has(e.name) && !presentIds.has(e.fullName));
-            setKpiDrilldownState({
-              isOpen: true,
-              type: "engineers",
-              title: `Engineers Not Yet Checked In Today (${pendingEngineers.length} Pending)`,
-              subtitle: "Active site engineers who have not yet submitted morning check-in.",
-              items: pendingEngineers.map(e => ({
-                id: e.id || e.uid,
-                title: e.fullName || e.name || "Site Engineer",
-                subtitle: `${e.email || ""} • ${e.phone || e.phoneNumber || ""}`,
-                status: "Check-in Missing",
-                badgeStatus: "danger",
-                metric: "Pending"
-              }))
-            });
-          }
-          break;
-        case "workforce_labour":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "labour",
-            title: `Today's Active Labour Force (${todayLabourCount} Workers On-Site)`,
-            subtitle: "Site-wise workforce allocations and daily wage rates logged today.",
-            items: (rawLabourAttendance || [])
-              .filter(r => !r.lockedMetadata && (r.attendanceDate === todayDateString || r.date === todayDateString))
-              .map(r => {
-                const site = sites.find(s => s.id === r.siteId);
-                const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-                return {
-                  id: r.id,
-                  title: `${site?.siteName || "Site"} — ${r.categoryName || r.category || "General Labour"}`,
-                  subtitle: `${count} Workers @ ₹${rate}/day • Logged by: ${r.recordedByName || r.engineerName || "Engineer"}`,
-                  status: `₹${Number(r.totalAmount || (count * rate)).toLocaleString()}`,
-                  badgeStatus: "info",
-                  metric: `${count} Workers`
-                };
-              })
-          });
-          break;
-        case "finance_today":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "finance",
-            title: `Today's Outlays & Expenses (${formatINR(todayTotalExpenses)})`,
-            subtitle: "Itemized breakdown of labour wages, material purchases, and general site expenses recorded today.",
-            items: [
-              ...(todayLabourExpense > 0 ? [{
-                id: "item_lab_today",
-                title: "Labour Force Wages Today",
-                subtitle: `Across ${sitesWithLabourTodaySet.size} active sites (${todayLabourCount} workers)`,
-                status: formatINR(todayLabourExpense),
-                badgeStatus: "info",
-                metric: "Labour"
-              }] : []),
-              ...materials.filter(m => (m.date === todayDateString || (m.createdAt?.seconds && new Date(m.createdAt.seconds * 1000).toISOString().split("T")[0] === todayDateString))).map(m => ({
-                id: m.id,
-                title: `Material: ${m.materialName || m.name}`,
-                subtitle: `Site: ${sites.find(s => s.id === m.siteId)?.siteName || "Site"} (${m.quantity} ${m.unit || "units"})`,
-                status: formatINR(m.totalCost || 0),
-                badgeStatus: "purple",
-                metric: "Materials"
-              })),
-              ...generalExpenses.filter(e => (e.date || "").startsWith(todayDateString)).map(e => ({
-                id: e.id,
-                title: `General: ${e.description}`,
-                subtitle: `Site: ${sites.find(s => s.id === e.siteId)?.siteName || "Site"} (${e.category || "General"})`,
-                status: formatINR(e.amount || 0),
-                badgeStatus: "warning",
-                metric: "Expense"
-              }))
-            ]
-          });
-          break;
-        case "finance_spent":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "finance",
-            title: `Corporate Expenditure Outlays (${formatINR(overallMetrics.totalExpenses)})`,
-            subtitle: "Site-wise historical expenditure ledger across materials, labour, and general expenses.",
-            items: sites.map(s => {
-              const sMats = materials.filter(m => m.siteId === s.id);
-              const sLab = laborHistoryMap[s.id] || [];
-              const sDprs = allDprs.filter(d => d.siteId === s.id);
-              const f = getSiteFinancials(s, sMats, sLab, sDprs, labourMaster.categories, generalExpenses, labourPayments);
-              return {
-                id: s.id,
-                title: s.siteName,
-                subtitle: `Budget: ${formatINR(f.budget)} • Progress: ${f.progressPercent}%`,
-                status: formatINR(f.totalSpent),
-                badgeStatus: f.totalSpent > f.budget && f.budget > 0 ? "danger" : "default",
-                metric: `Spent: ${formatINR(f.totalSpent)}`,
-                actionSite: s
-              };
-            })
-          });
-          break;
-        case "finance_pending":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "finance",
-            title: `Pending Payments & Outstanding Owed (${formatINR(overallMetrics.pendingPayments)})`,
-            subtitle: "Balance owed by clients and unpaid ledger entries across construction sites.",
-            items: sites.filter(s => {
-              const sMats = materials.filter(m => m.siteId === s.id);
-              const sLab = laborHistoryMap[s.id] || [];
-              const sDprs = allDprs.filter(d => d.siteId === s.id);
-              const f = getSiteFinancials(s, sMats, sLab, sDprs, labourMaster.categories, generalExpenses, labourPayments);
-              return f.pendingPayment > 0;
-            }).map(s => {
-              const sMats = materials.filter(m => m.siteId === s.id);
-              const sLab = laborHistoryMap[s.id] || [];
-              const sDprs = allDprs.filter(d => d.siteId === s.id);
-              const f = getSiteFinancials(s, sMats, sLab, sDprs, labourMaster.categories, generalExpenses, labourPayments);
-              return {
-                id: s.id,
-                title: s.siteName,
-                subtitle: `Client: ${s.clientName || "Corporate"} • Budget: ${formatINR(f.budget)}`,
-                status: formatINR(f.pendingPayment),
-                badgeStatus: "warning",
-                metric: "Pending Balance",
-                actionSite: s
-              };
-            })
-          });
-          break;
-        case "operations_events":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "activity",
-            title: `Today's Operations Stream (${todayFeedList.length} Events Logged)`,
-            subtitle: "Chronological live audit feed across attendance, labour, materials, expenses, and DPRs.",
-            items: todayFeedList.map(item => ({
-              id: item.id,
-              title: item.title,
-              subtitle: `${item.description} • ${item.time} by ${item.user}`,
-              status: item.module,
-              badgeStatus: item.badgeStatus,
-              metric: item.time
-            }))
-          });
-          break;
-        case "operations_inactive":
-          {
-            const inactiveSites = activeSitesList.filter(s => !sitesWithActivitySet.has(s.id) && !sitesWithActivitySet.has(s.siteName));
-            setKpiDrilldownState({
-              isOpen: true,
-              type: "sites",
-              title: `Active Sites Without Any Activity Today (${inactiveSites.length} Inactive)`,
-              subtitle: "Projects with no check-in, no labour log, no material entry, and no DPR filed today.",
-              items: inactiveSites.map(s => ({
-                id: s.id,
-                title: s.siteName,
-                subtitle: `Client: ${s.clientName || "Corporate"} • Location: ${s.location || "N/A"}`,
-                status: "No Activity Today",
-                badgeStatus: "danger",
-                metric: "0 Events",
-                actionSite: s
-              }))
-            });
-          }
-          break;
-        case "operations_delayed":
-          setKpiDrilldownState({
-            isOpen: true,
-            type: "sites",
-            title: `Delayed Projects Schedule (${delayedSitesCount} Sites)`,
-            subtitle: "Projects falling behind target milestone deadlines.",
-            items: sites.filter(s => s.status === "Delayed" || isSiteDelayed(s)).map(s => {
-              const planned = calculatePlannedProgress(s.startDate, s.expectedEndDate);
-              const prog = s.progress !== undefined ? Number(s.progress) : 0;
-              const gap = Math.max(0, planned - prog);
-              return {
-                id: s.id,
-                title: s.siteName,
-                subtitle: `Target End: ${formatDateDMY(s.expectedEndDate)} • Target: ${planned}% vs Actual: ${prog}%`,
-                status: `-${gap}% Gap`,
-                badgeStatus: "danger",
-                metric: "Delayed",
-                actionSite: s
-              };
-            })
-          });
-          break;
-        default:
-          break;
-      }
-    };
-
-    // Scalable Site Portfolio Filtering & Sorting (Engineered for 500+ Sites)
-    const portfolioSites = sites.filter(site => {
-      // 1. Status Filter
-      if (portfolioStatusFilter === "attention") {
-        const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
-        const hasNoAtt = !sitesWithAttendanceSet.has(site.id) && ((site.status || "active").toLowerCase() === "active" || (site.status || "").toLowerCase() === "running");
-        if (!isDelayed && !hasNoAtt) return false;
-      } else if (portfolioStatusFilter === "delayed") {
-        if (site.status !== "Delayed" && !isSiteDelayed(site)) return false;
-      } else if (portfolioStatusFilter === "active") {
-        if ((site.status || "active").toLowerCase() !== "active" && (site.status || "").toLowerCase() !== "running") return false;
-      } else if (portfolioStatusFilter === "completed") {
-        if ((site.status || "").toLowerCase() !== "completed") return false;
-      } else if (portfolioStatusFilter === "on-hold") {
-        if ((site.status || "").toLowerCase() !== "on-hold" && (site.status || "").toLowerCase() !== "paused") return false;
-      }
-
-      // 2. Activity Filter
-      if (portfolioActivityFilter === "with_activity") {
-        if (!sitesWithActivitySet.has(site.id) && !sitesWithActivitySet.has(site.siteName)) return false;
-      } else if (portfolioActivityFilter === "no_activity") {
-        if (sitesWithActivitySet.has(site.id) || sitesWithActivitySet.has(site.siteName)) return false;
-      }
-
-      // 3. Search Query
-      if (dashboardSearchQuery.trim()) {
-        const q = dashboardSearchQuery.toLowerCase().trim();
-        const mName = (site.siteName || "").toLowerCase().includes(q);
-        const mClient = (site.clientName || "").toLowerCase().includes(q);
-        const mLoc = (site.location || "").toLowerCase().includes(q);
-        if (!mName && !mClient && !mLoc) return false;
-      }
-
-      return true;
-    }).sort((a, b) => {
-      if (portfolioSortBy === "attention") {
-        const aDelayed = a.status === "Delayed" || isSiteDelayed(a);
-        const bDelayed = b.status === "Delayed" || isSiteDelayed(b);
-        const aNoAtt = !sitesWithAttendanceSet.has(a.id);
-        const bNoAtt = !sitesWithAttendanceSet.has(b.id);
-        const aScore = (aDelayed ? 2 : 0) + (aNoAtt ? 1 : 0);
-        const bScore = (bDelayed ? 2 : 0) + (bNoAtt ? 1 : 0);
-        return bScore - aScore;
-      }
-      if (portfolioSortBy === "progress") {
-        return (Number(b.progress) || 0) - (Number(a.progress) || 0);
-      }
-      if (portfolioSortBy === "budget") {
-        return (Number(b.budget || b.projectValue) || 0) - (Number(a.budget || a.projectValue) || 0);
-      }
-      if (portfolioSortBy === "name") {
-        return (a.siteName || "").localeCompare(b.siteName || "");
-      }
-      return 0;
+      return {
+        site,
+        progress: financials.progressPercent || Number(site.progress) || 0,
+        workforce: siteWorkforceToday,
+        expense: financials.totalSpent || 0,
+        status: site.status || "Active"
+      };
     });
 
     return (
-      <div className="admin-dashboard-container">
+      <div className="admin-dashboard-container" style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
+        
+        {/* ── 1. EXECUTIVE HEADER ── */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "12px", paddingBottom: "2px" }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <h1 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "var(--primary-950)", letterSpacing: "-0.2px" }}>
+                Executive Overview
+              </h1>
+              <span style={{ display: "inline-flex", alignItems: "center", gap: "4px", padding: "2px 8px", backgroundColor: "#ecfdf5", color: "#059669", borderRadius: "12px", fontSize: "11px", fontWeight: "700", border: "1px solid #a7f3d0" }}>
+                <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: "#10b981" }} />
+                Live (IST)
+              </span>
+            </div>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>
+              Central monitoring and operations oversight for Visvas Builders construction portfolio.
+            </p>
+          </div>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* LIVE TELEMETRY HEADER                                                 */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          flexWrap: "wrap",
-          gap: "10px",
-          padding: "10px 16px",
-          backgroundColor: "#f8fafc",
-          borderRadius: "8px",
-          border: "1px solid #e2e8f0"
-        }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-            <span style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "50%",
-              backgroundColor: "#22c55e",
-              boxShadow: "0 0 8px rgba(34, 197, 94, 0.6)",
-              display: "inline-block"
-            }} />
-            <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", letterSpacing: "0.3px" }}>
-              VISVAS NEXUS OPERATIONS COMMAND
-            </strong>
-            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>• LIVE FIELD TELEMETRY • {formattedTodayDate}</span>
+            <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", padding: "6px 12px", backgroundColor: "#ffffff", borderRadius: "8px", border: "1px solid #e2e8f0", fontSize: "12px", fontWeight: "700", color: "var(--primary-800)" }}>
+              <Calendar size={13} style={{ color: "var(--brand-orange)" }} />
+              <span>{formattedTodayDate}</span>
+            </div>
+            <button
+              type="button"
+              onClick={async () => {
+                setDataLoading(true);
+                await loadStaticData();
+                setDataLoading(false);
+                showToast("Executive telemetry updated.", "success");
+              }}
+              className="btn btn-outline"
+              style={{ display: "inline-flex", alignItems: "center", gap: "6px", height: "34px", padding: "0 12px", fontSize: "12px", fontWeight: "700", borderRadius: "8px" }}
+              title="Refresh Data"
+            >
+              <RefreshCw size={13} className={dataLoading ? "animate-spin" : ""} />
+              <span>Refresh</span>
+            </button>
           </div>
-
-          <button
-            type="button"
-            onClick={loadStaticData}
-            className="erp-btn-secondary"
-            style={{ fontSize: "11px", padding: "3px 10px", display: "inline-flex", alignItems: "center", gap: "4px" }}
-            title="Refresh static data tables"
-          >
-            <RefreshCw size={12} />
-            Sync Pulse
-          </button>
         </div>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 1: EXECUTIVE TELEMETRY PULSE STRIP (4 MACRO GAUGES)           */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-summary-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-
-          {/* 1. PORTFOLIO CAPITAL PULSE CARD */}
-          <div
-            className="superadmin-macro-card"
-            onClick={() => openKpiDrilldown("sites_total")}
-            title="Click to inspect all organization sites"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-              <div className="admin-summary-icon erp-kpi-icon-orange">
-                <Building2 size={20} />
-              </div>
-              <span style={{ fontSize: "10.5px", fontWeight: "800", color: alerts.length > 0 ? "#dc2626" : "var(--success-600)", backgroundColor: alerts.length > 0 ? "#fee2e2" : "#dcfce7", padding: "2px 8px", borderRadius: "10px" }}>
-                {alerts.length > 0 ? `${alerts.length} Attention` : "Healthy"}
-              </span>
+        {/* ── 2. EXECUTIVE KPI OVERVIEW (6 COMPACT CARDS) ── */}
+        <div className="admin-summary-grid">
+          {/* Total Sites */}
+          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "total_sites", title: "All Construction Sites", subtitle: `${sites.length} Projects in Portfolio`, items: sites })} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-slate">
+              <Building2 size={20} />
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
-              <div className="admin-summary-value">{formatINR(overallMetrics.totalProjectValue)}</div>
-              <div className="admin-summary-label">Corporate Portfolio Budget ({overallMetrics.totalSites} Sites)</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
-                <span><strong>{activeSitesCount}</strong> Active</span>
-                <span><strong>{completedSitesCount}</strong> Done</span>
-                <span style={{ color: delayedSitesCount > 0 ? "#dc2626" : "inherit" }}><strong>{delayedSitesCount}</strong> Delayed</span>
-              </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{sites.length}</div>
+              <div className="admin-summary-label">Total Sites</div>
             </div>
           </div>
 
-          {/* 2. ACTIVE CIVIL WORKFORCE PULSE CARD */}
-          <div
-            className="superadmin-macro-card"
-            onClick={() => openKpiDrilldown("workforce_present")}
-            title="Click to inspect today's field presence"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-              <div className="admin-summary-icon erp-kpi-icon-purple">
-                <Users size={20} />
-              </div>
-              <span style={{ fontSize: "10.5px", fontWeight: "800", color: "#16a34a", backgroundColor: "#dcfce7", padding: "2px 8px", borderRadius: "10px" }}>
-                {attendanceRate}% Eng Presence
-              </span>
+          {/* Active Sites */}
+          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "active_sites", title: "Active Construction Sites", subtitle: `${activeSitesCount} Active Projects`, items: activeSitesList })} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-blue">
+              <Activity size={20} />
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
-              <div className="admin-summary-value">{totalWorkforceToday} Total On-Site</div>
-              <div className="admin-summary-label">Active Civil Workforce Today</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
-                <span><strong>{presentCount}</strong> Engineers</span>
-                <span><strong>{todayLabourCount}</strong> Labour</span>
-                <span style={{ color: pendingEngineersCount > 0 ? "#ea580c" : "inherit" }}><strong>{pendingEngineersCount}</strong> Unmarked</span>
-              </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{activeSitesCount}</div>
+              <div className="admin-summary-label">Active Sites</div>
             </div>
           </div>
 
-          {/* 3. DAILY FINANCIAL OUTLAYS PULSE CARD */}
-          <div
-            className="superadmin-macro-card"
-            onClick={() => openKpiDrilldown("finance_today")}
-            title="Click to inspect today's expenditure outlays"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-              <div className="admin-summary-icon erp-kpi-icon-teal">
-                <DollarSign size={20} />
-              </div>
-              <span style={{ fontSize: "10.5px", fontWeight: "800", color: isProfit ? "#16a34a" : "#dc2626", backgroundColor: isProfit ? "#dcfce7" : "#fee2e2", padding: "2px 8px", borderRadius: "10px" }}>
-                {isProfit ? "Surplus" : "Deficit"}
-              </span>
+          {/* Completed Sites */}
+          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "completed_sites", title: "Completed Sites", subtitle: `${completedSitesCount} Delivered Projects`, items: sites.filter(s => (s.status || "").toLowerCase() === "completed") })} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <TrendingUp size={20} />
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
-              <div className="admin-summary-value">{formatINR(todayTotalExpenses)}</div>
-              <div className="admin-summary-label">Today's Combined Outlay</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
-                <span>Labour: <strong>{formatINR(todayLabourExpense)}</strong></span>
-                <span>Spent: <strong>{formatINR(overallMetrics.totalExpenses)}</strong></span>
-              </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{completedSitesCount}</div>
+              <div className="admin-summary-label">Completed</div>
             </div>
           </div>
 
-          {/* 4. CORPORATE MILESTONE ADHERENCE INDEX CARD */}
-          <div
-            className="superadmin-macro-card"
-            onClick={() => openKpiDrilldown("operations_delayed")}
-            title="Click to inspect project milestones"
-          >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", width: "100%" }}>
-              <div className="admin-summary-icon erp-kpi-icon-blue">
-                <Activity size={20} />
-              </div>
-              <span style={{ fontSize: "10.5px", fontWeight: "800", color: "#2563eb", backgroundColor: "#dbeafe", padding: "2px 8px", borderRadius: "10px" }}>
-                {todayFeedList.length} Events Logged
-              </span>
+          {/* Delayed Sites */}
+          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "delayed_sites", title: "Delayed Sites Requiring Attention", subtitle: `${delayedSitesCount} Delayed Projects`, items: sites.filter(s => isSiteDelayed(s)) })} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-red">
+              <AlertTriangle size={20} />
             </div>
-            <div className="admin-summary-info" style={{ marginTop: "10px", width: "100%" }}>
-              <div className="admin-summary-value">{overallMetrics.overallProgressPercent}% Average</div>
-              <div className="admin-summary-label">Corporate Milestone Adherence</div>
-              <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", marginTop: "8px", color: "var(--primary-700)", borderTop: "1px solid #f1f5f9", paddingTop: "6px" }}>
-                <span><strong>{onTrackSitesCount}</strong> On Track</span>
-                <span style={{ color: delayedSitesCount > 0 ? "#dc2626" : "inherit" }}><strong>{delayedSitesCount}</strong> Delayed</span>
-                <span><strong>{sitesWithActivityCount}</strong> Active Today</span>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ color: delayedSitesCount > 0 ? "var(--danger-700)" : "var(--primary-950)" }}>
+                {delayedSitesCount}
               </div>
+              <div className="admin-summary-label">Delayed</div>
             </div>
           </div>
 
+          {/* Site Engineers */}
+          <div className="admin-summary-card" onClick={() => setKpiDrilldownState({ isOpen: true, type: "site_engineers", title: "Site Engineers Roster", subtitle: `${activeEngineersCount} Active Field Engineers`, items: activeEngineersList })} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-purple">
+              <Users size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{activeEngineersCount}</div>
+              <div className="admin-summary-label">Site Engineers</div>
+            </div>
+          </div>
+
+          {/* Today's Workforce */}
+          <div className="admin-summary-card" onClick={() => setShowTodayAttendanceModal(true)} style={{ cursor: "pointer" }}>
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <UserCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{totalWorkforceToday}</div>
+              <div className="admin-summary-label">Today's Workforce</div>
+            </div>
+          </div>
         </div>
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 2: OPERATIONAL ANOMALY & EXCEPTION RADAR                      */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {alerts.length > 0 && (
-          <div className="admin-card" style={{ borderLeft: "4px solid #ef4444", padding: "16px 20px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <AlertTriangle size={18} style={{ color: "#dc2626" }} />
-                <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>
-                  Operational Anomaly &amp; Exception Radar ({alerts.length})
-                </h3>
+        {/* ── 3. SITE HEALTH & 4. OVERALL PROJECT PROGRESS ── */}
+        <div className="admin-middle-grid">
+          {/* Section 3: Site Health */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Site Health</h3>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>{sites.length} Total Projects</span>
               </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#15803d" }}>{activeSitesCount}</div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#166534" }}>Active</div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#1d4ed8" }}>{runningSitesCount}</div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#1e40af" }}>Running</div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#b91c1c" }}>{delayedSitesCount}</div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#991b1b" }}>Delayed</div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "18px", fontWeight: "800", color: "#475569" }}>{completedSitesCount}</div>
+                  <div style={{ fontSize: "10.5px", fontWeight: "700", color: "#334155" }}>Completed</div>
+                </div>
+              </div>
+            </div>
+            {/* Segmented Distribution Bar */}
+            <div style={{ marginTop: "12px" }}>
+              <div style={{ display: "flex", height: "6px", borderRadius: "3px", overflow: "hidden", backgroundColor: "#e2e8f0" }}>
+                <div style={{ width: `${sites.length > 0 ? (activeSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#22c55e" }} />
+                <div style={{ width: `${sites.length > 0 ? (runningSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#3b82f6" }} />
+                <div style={{ width: `${sites.length > 0 ? (delayedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#ef4444" }} />
+                <div style={{ width: `${sites.length > 0 ? (completedSitesCount / sites.length) * 100 : 0}%`, backgroundColor: "#64748b" }} />
+              </div>
+            </div>
+          </div>
 
-              {/* Exception Filter Chips */}
-              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-                {[
-                  { id: "all", label: `All (${alerts.length})` },
-                  { id: "attendance", label: `Attendance (${alerts.filter(a => a.category === "Missing Attendance").length})` },
-                  { id: "labour", label: `Labour (${alerts.filter(a => a.category === "Missing Labour").length})` },
-                  { id: "delays", label: `Delays (${alerts.filter(a => a.category === "Schedule Delay").length})` },
-                  { id: "approvals", label: `Approvals (${alerts.filter(a => a.category === "Pending Approval").length})` },
-                  { id: "expenses", label: `Outlays (${alerts.filter(a => a.category === "High Outlay").length})` }
-                ].map(c => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => setExceptionFilter(c.id)}
+          {/* Section 4: Overall Project Progress */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Overall Project Progress</h3>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Portfolio Average</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", margin: "4px 0 10px 0" }}>
+                <span style={{ fontSize: "28px", fontWeight: "800", color: "var(--primary-950)", fontVariantNumeric: "tabular-nums" }}>
+                  {averageProgressPercent}%
+                </span>
+                <span style={{ fontSize: "12px", fontWeight: "600", color: "var(--primary-600)" }}>Completed Across Organization</span>
+              </div>
+              <div style={{ width: "100%", height: "8px", backgroundColor: "#e2e8f0", borderRadius: "4px", overflow: "hidden" }}>
+                <div style={{ width: `${averageProgressPercent}%`, height: "100%", background: "linear-gradient(90deg, #f97316, #ea580c)", borderRadius: "4px" }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11.5px", color: "var(--text-muted)", fontWeight: "600", marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+              <span>🟢 {onTrackSitesCount} On Track</span>
+              <span>🔴 {delayedSitesCount} Delayed</span>
+              <span>⚪ {completedSitesCount} Completed</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 5. WORKFORCE TODAY & 6. FINANCIAL OVERVIEW ── */}
+        <div className="admin-middle-grid">
+          {/* Section 5: Workforce Today */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Workforce Today</h3>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--brand-orange)" }}>{totalWorkforceToday} Total Active</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px" }}>
+                <div style={{ padding: "8px 6px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "#16a34a" }}>{presentCount}</div>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-700)" }}>Eng Present</div>
+                </div>
+                <div style={{ padding: "8px 6px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: pendingEngineersCount > 0 ? "#ea580c" : "#16a34a" }}>{pendingEngineersCount}</div>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-700)" }}>Eng Missing</div>
+                </div>
+                <div style={{ padding: "8px 6px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>{todayLabourCount}</div>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-700)" }}>Total Labour</div>
+                </div>
+                <div style={{ padding: "8px 6px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px", textAlign: "center" }}>
+                  <div style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>{distinctTeams}</div>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--primary-700)" }}>Active Teams</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: "4px", fontSize: "11px", color: "var(--primary-600)", fontWeight: "600", marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+              <span>🧱 {masonCount} Masons</span>
+              <span>🏗️ {barbenderCount} Barbenders</span>
+              <span>🪵 {carpenterCount} Carpenters</span>
+              <span>🦺 {helperCount} Helpers</span>
+            </div>
+          </div>
+
+          {/* Section 6: Financial Overview */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>Financial Overview</h3>
+                <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>Corporate Spend</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: "8px" }}>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Total Expenses</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--primary-950)", fontFamily: "monospace", marginTop: "2px" }}>
+                    ₹{formatINR(overallMetrics.totalExpenses)}
+                  </div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "var(--text-muted)", textTransform: "uppercase" }}>Today's Expenses</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "var(--brand-orange)", fontFamily: "monospace", marginTop: "2px" }}>
+                    ₹{formatINR(todayTotalExpenses)}
+                  </div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#166534", textTransform: "uppercase" }}>Client Paid</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "#15803d", fontFamily: "monospace", marginTop: "2px" }}>
+                    ₹{formatINR(overallMetrics.totalPaymentsReceived)}
+                  </div>
+                </div>
+                <div style={{ padding: "8px 10px", backgroundColor: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: "700", color: "#991b1b", textTransform: "uppercase" }}>Pending Balance</div>
+                  <div style={{ fontSize: "15px", fontWeight: "800", color: "#b91c1c", fontFamily: "monospace", marginTop: "2px" }}>
+                    ₹{formatINR(overallMetrics.pendingPayments)}
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", color: "var(--primary-600)", fontWeight: "600", marginTop: "12px", borderTop: "1px solid #f1f5f9", paddingTop: "8px" }}>
+              <span>Budget Value: ₹{formatINR(overallMetrics.totalProjectValue)}</span>
+              <span style={{ color: overallMetrics.totalPaymentsReceived >= overallMetrics.totalExpenses ? "#15803d" : "#b91c1c" }}>
+                Net: ₹{formatINR(Math.abs(overallMetrics.totalPaymentsReceived - overallMetrics.totalExpenses))}
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 7. SITE PERFORMANCE (COMPACT TABLE) ── */}
+        <div className="admin-table-card">
+          <div className="admin-table-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)" }}>
+                Site Performance Overview ({sites.length} Sites)
+              </h3>
+              <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "var(--primary-600)" }}>
+                Execution progress, today's workforce deployment, and financial outlay spend per site.
+              </p>
+            </div>
+            <Link to="/superadmin/sites" className="btn btn-outline" style={{ height: "30px", padding: "0 10px", fontSize: "11.5px", fontWeight: "700" }}>
+              View All Sites →
+            </Link>
+          </div>
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Site Name</th>
+                  <th style={{ width: "200px" }}>Progress</th>
+                  <th style={{ textAlign: "right" }}>Today's Labour</th>
+                  <th style={{ textAlign: "right" }}>Total Outlay</th>
+                  <th style={{ textAlign: "center" }}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sitePerformanceList.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "24px", color: "var(--text-muted)" }}>No sites recorded.</td></tr>
+                ) : (
+                  sitePerformanceList.map(({ site, progress, workforce, expense, status }) => (
+                    <tr 
+                      key={site.id} 
+                      onClick={() => setSelectedInspectSite(site)} 
+                      style={{ cursor: "pointer" }}
+                      title="Click to inspect detailed site operations"
+                    >
+                      <td style={{ fontWeight: "700", color: "var(--primary-950)" }}>
+                        {site.siteName}
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <div style={{ flex: 1, height: "6px", backgroundColor: "#e2e8f0", borderRadius: "3px", overflow: "hidden" }}>
+                            <div style={{ width: `${progress}%`, height: "100%", backgroundColor: progress >= 100 ? "#22c55e" : "#f97316", borderRadius: "3px" }} />
+                          </div>
+                          <span style={{ fontSize: "12px", fontWeight: "700", minWidth: "32px", textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
+                            {progress}%
+                          </span>
+                        </div>
+                      </td>
+                      <td style={{ textAlign: "right", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
+                        {workforce > 0 ? `${workforce} Workers` : "—"}
+                      </td>
+                      <td style={{ textAlign: "right", fontFamily: "monospace", fontWeight: "600" }}>
+                        ₹{formatINR(expense)}
+                      </td>
+                      <td style={{ textAlign: "center" }}>
+                        <Badge status={status.toLowerCase() === "completed" ? "success" : (status.toLowerCase() === "delayed" ? "danger" : "default")}>
+                          {status}
+                        </Badge>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* ── 8. ATTENTION REQUIRED & 9. TODAY'S OPERATIONS ── */}
+        <div className="admin-middle-grid">
+          {/* Section 8: Attention Required */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
+                <AlertTriangle size={15} style={{ color: alerts.length > 0 ? "#dc2626" : "#16a34a" }} />
+                <span>Attention Required</span>
+              </h3>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: alerts.length > 0 ? "#dc2626" : "#16a34a" }}>
+                {alerts.length > 0 ? `${alerts.length} Action Items` : "All Clear"}
+              </span>
+            </div>
+
+            {alerts.length === 0 ? (
+              <div style={{ padding: "24px", textAlign: "center", color: "#16a34a", backgroundColor: "#f0fdf4", borderRadius: "8px", border: "1px solid #bbf7d0" }}>
+                <CheckCircle2 size={24} style={{ margin: "0 auto 6px auto", display: "block" }} />
+                <strong style={{ fontSize: "13px" }}>All Operations Normal</strong>
+                <p style={{ margin: "2px 0 0 0", fontSize: "11.5px", color: "#166534" }}>No delayed sites or missing attendance alerts detected.</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxHeight: "280px", overflowY: "auto" }}>
+                {alerts.slice(0, 6).map(alert => (
+                  <div
+                    key={alert.id}
+                    onClick={() => {
+                      if (alert.site) setSelectedInspectSite(alert.site);
+                    }}
                     style={{
-                      padding: "3px 8px",
-                      borderRadius: "6px",
+                      padding: "10px 12px",
+                      borderRadius: "8px",
                       border: "1px solid",
-                      borderColor: exceptionFilter === c.id ? "#dc2626" : "var(--border-color)",
-                      backgroundColor: exceptionFilter === c.id ? "#fee2e2" : "#ffffff",
-                      color: exceptionFilter === c.id ? "#dc2626" : "var(--primary-700)",
-                      fontSize: "11px",
-                      fontWeight: "700",
-                      cursor: "pointer"
+                      borderColor: alert.type === "danger" ? "#fecaca" : "#fed7aa",
+                      backgroundColor: alert.type === "danger" ? "#fef2f2" : "#fff7ed",
+                      cursor: alert.site ? "pointer" : "default"
                     }}
                   >
-                    {c.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: "10px" }}>
-              {(showAllAlerts ? filteredExceptions : filteredExceptions.slice(0, 4)).map(alert => (
-                <div
-                  key={alert.id}
-                  style={{
-                    padding: "10px 12px",
-                    borderRadius: "8px",
-                    backgroundColor: alert.type === "danger" ? "#fef2f2" : "#fffbeb",
-                    border: `1px solid ${alert.type === "danger" ? "#fecaca" : "#fef3c7"}`,
-                    display: "flex",
-                    flexDirection: "column",
-                    gap: "4px"
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "10px", fontWeight: "800", textTransform: "uppercase", color: alert.type === "danger" ? "#b91c1c" : "#b45309" }}>
-                      [{alert.category}]
-                    </span>
-                    {alert.site ? (
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInspectSite(alert.site)}
-                        style={{ border: "none", background: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "11px", cursor: "pointer", padding: 0 }}
-                      >
-                        Inspect Site →
-                      </button>
-                    ) : alert.link ? (
-                      <Link to={alert.link} style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-600)", textDecoration: "none" }}>
-                        Review →
-                      </Link>
-                    ) : null}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                      <strong style={{ fontSize: "12px", color: alert.type === "danger" ? "#991b1b" : "#9a3412" }}>
+                        {alert.title}
+                      </strong>
+                      <span style={{ fontSize: "10px", fontWeight: "700", textTransform: "uppercase", color: alert.type === "danger" ? "#b91c1c" : "#c2410c" }}>
+                        {alert.category}
+                      </span>
+                    </div>
+                    <p style={{ margin: "3px 0 0 0", fontSize: "11.5px", color: "#334155" }}>
+                      {alert.message}
+                    </p>
                   </div>
-                  <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{alert.title}</strong>
-                  <p style={{ margin: 0, fontSize: "11.5px", color: "var(--primary-700)", lineHeight: "1.35" }}>{alert.message}</p>
-                </div>
-              ))}
-            </div>
-
-            {filteredExceptions.length > 4 && (
-              <div style={{ marginTop: "12px", paddingTop: "8px", borderTop: "1px solid var(--border-color)", textAlign: "center" }}>
-                <button
-                  type="button"
-                  onClick={() => setShowAllAlerts(!showAllAlerts)}
-                  style={{ background: "none", border: "none", color: "var(--primary-600)", fontWeight: "700", fontSize: "12px", cursor: "pointer" }}
-                >
-                  {showAllAlerts ? "Show Less" : `View All ${filteredExceptions.length} Operational Exceptions`}
-                </button>
+                ))}
               </div>
             )}
           </div>
-        )}
 
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 3: MASTER ATTENDANCE & CIVIL WORKFORCE TRADE BREAKDOWN ROW     */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-middle-grid">
+          {/* Section 9: Today's Operations */}
+          <div className="admin-card" style={{ padding: "16px 18px", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+              <h3 style={{ margin: 0, fontSize: "14px", fontWeight: "800", color: "var(--primary-950)", display: "flex", alignItems: "center", gap: "6px" }}>
+                <Clock size={15} style={{ color: "var(--brand-orange)" }} />
+                <span>Today's Operations</span>
+              </h3>
+              <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--text-muted)" }}>
+                {todayFeedList.length} Events Logged
+              </span>
+            </div>
 
-          {/* Left: Master Attendance Command Banner */}
-          <div className="admin-attendance-card" style={{ margin: 0, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div>
-              <div className="admin-attendance-header-row" style={{ marginBottom: "10px" }}>
-                <div className="admin-attendance-title-group">
-                  <div className="admin-attendance-icon-wrap">
-                    <ClipboardCheck size={20} />
-                  </div>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <h3 className="admin-attendance-title" style={{ fontSize: "13.5px" }}>Field Engineers Presence</h3>
-                      <div className="admin-attendance-live-badge">
-                        <span className="admin-attendance-live-dot" />
-                        Live
-                      </div>
+            {todayFeedList.length === 0 ? (
+              <div style={{ padding: "24px", textAlign: "center", color: "var(--text-muted)" }}>
+                No events recorded yet today.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "280px", overflowY: "auto" }}>
+                {todayFeedList.slice(0, 8).map(event => (
+                  <div
+                    key={event.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      padding: "8px 10px",
+                      borderRadius: "6px",
+                      backgroundColor: "#f8fafc",
+                      border: "1px solid #e2e8f0",
+                      fontSize: "12px"
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1, paddingRight: "8px" }}>
+                      <strong style={{ color: "var(--primary-950)" }}>{event.user}</strong>
+                      <span style={{ color: "var(--text-muted)" }}> — </span>
+                      <span style={{ color: "var(--primary-800)" }}>{event.action}</span>
+                      <span style={{ color: "var(--text-muted)" }}> — </span>
+                      <span style={{ color: "var(--brand-orange)", fontWeight: "600" }}>{event.site}</span>
                     </div>
-                    <p className="admin-attendance-subtitle" style={{ fontSize: "11px" }}>
-                      {presentCount} of {activeEngineersCount} active engineers on site today.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  className="erp-btn-primary"
-                  onClick={() => setShowTodayAttendanceModal(true)}
-                  style={{ fontSize: "11px", padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: "4px" }}
-                >
-                  <ClipboardCheck size={13} />
-                  Ledger ({todayAttendanceList.length})
-                </button>
-              </div>
-
-              <div className="admin-attendance-metrics" style={{ gap: "6px" }}>
-                <div className="admin-attendance-metric-pill present">
-                  <UserCheck size={13} />
-                  <span>{presentCount} Present ({attendanceRate}%)</span>
-                </div>
-                <div className="admin-attendance-metric-pill onsite">
-                  <Clock size={13} />
-                  <span>{onSiteCount} On Site</span>
-                </div>
-                <div className="admin-attendance-metric-pill checkout">
-                  <CheckCircle2 size={13} />
-                  <span>{checkedOutCount} Done</span>
-                </div>
-                <div className="admin-attendance-metric-pill verified">
-                  <ShieldCheck size={13} />
-                  <span>{verifiedCount} Verified</span>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "var(--primary-700)" }}>
-              <span>Sites with Presence: <strong>{activeSitesWithAttendanceCount}/{activeSitesCount}</strong></span>
-              <Link to="/superadmin/attendance" style={{ color: "var(--primary-600)", fontWeight: "700", textDecoration: "none" }}>
-                Full Monitor →
-              </Link>
-            </div>
-          </div>
-
-          {/* Right: Civil Workforce Trade Headcounts */}
-          <div className="admin-card" style={{ display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-            <div>
-              <div className="admin-card-header" style={{ marginBottom: "10px" }}>
-                <div>
-                  <h3 className="admin-card-title" style={{ fontSize: "13.5px" }}>Civil Workforce Trade Musters</h3>
-                  <p className="admin-card-subtitle" style={{ fontSize: "11px" }}>Today's field labour distribution across specialized crafts</p>
-                </div>
-                <span style={{ fontSize: "12px", fontWeight: "800", color: "#c2410c", backgroundColor: "#ffedd5", padding: "2px 8px", borderRadius: "8px" }}>
-                  {todayLabourCount} Total Workers
-                </span>
-              </div>
-
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(110px, 1fr))", gap: "8px" }}>
-                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🧱 Masons / Karigar</span>
-                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{masonCount}</strong>
-                </div>
-                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🏗️ Barbenders</span>
-                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{barbenderCount}</strong>
-                </div>
-                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🪵 Carpenters</span>
-                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{carpenterCount}</strong>
-                </div>
-                <div style={{ padding: "8px", backgroundColor: "#f8fafc", borderRadius: "6px", border: "1px solid #e2e8f0", textAlign: "center" }}>
-                  <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>🦺 Helpers / Mazdoors</span>
-                  <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>{helperCount}</strong>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ borderTop: "1px solid #f1f5f9", paddingTop: "8px", marginTop: "10px", display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11.5px", color: "var(--primary-700)" }}>
-              <span>Daily Wage Outlay: <strong>{formatINR(todayLabourExpense)}</strong></span>
-              <Link to="/superadmin/labour" style={{ color: "var(--primary-600)", fontWeight: "700", textDecoration: "none" }}>
-                Labour Muster →
-              </Link>
-            </div>
-          </div>
-
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 4: FINANCIAL ALLOCATION & MILESTONE SCHEDULE ROW             */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-middle-grid">
-
-          {/* Financial Command View */}
-          <div className="admin-card">
-            <div className="admin-card-header">
-              <div>
-                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Civil Expense Allocation Tracks</h3>
-                <p className="admin-card-subtitle">Distribution across critical expenditure heads</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => openKpiDrilldown("finance_spent")}
-                className="erp-btn-secondary"
-                style={{ fontSize: "11px", padding: "3px 8px" }}
-              >
-                Drill Down →
-              </button>
-            </div>
-            <div className="admin-expense-list">
-              {Object.entries(expenseBreakdown).map(([category, amount]) => {
-                const pct = Math.round((amount / totalCategorizedExpenses) * 100);
-                const colorClass = category === "Material" ? "material" : category === "Labour" ? "labor" : category === "Fuel & Equipment" ? "equipment" : "others";
-                return (
-                  <div key={category} className="admin-expense-item">
-                    <div className="admin-expense-meta">
-                      <span className="admin-expense-cat">{category}</span>
-                      <span className="admin-expense-pct">{pct}% • {formatINR(amount)}</span>
-                    </div>
-                    <div className="admin-progress-track">
-                      <div className={`admin-progress-fill ${colorClass}`} style={{ width: `${pct}%` }} />
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Project Performance & Upcoming Deadlines */}
-          <div className="admin-card">
-            <div className="admin-card-header">
-              <div>
-                <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Corporate Milestone Schedule</h3>
-                <p className="admin-card-subtitle">Upcoming target completion dates &amp; S-curve health</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => openKpiDrilldown("operations_delayed")}
-                className="erp-btn-secondary"
-                style={{ fontSize: "11px", padding: "3px 8px" }}
-              >
-                Delays ({delayedSitesCount})
-              </button>
-            </div>
-            <div className="admin-deadlines-list">
-              {upcomingDeadlinesList.length === 0 ? (
-                <div style={{ textAlign: "center", padding: "16px", color: "var(--text-muted)", fontSize: "12px" }}>
-                  No upcoming deadlines recorded.
-                </div>
-              ) : (
-                upcomingDeadlinesList.map(site => {
-                  const daysLeft = Math.ceil((new Date(site.expectedEndDate).getTime() - Date.now()) / (1000 * 60 * 60 * 24));
-                  const isUrgent = daysLeft <= 14;
-                  return (
-                    <div key={site.id} className="admin-deadline-item" style={{ padding: "6px 0" }}>
-                      <div className="admin-deadline-info">
-                        <span className="admin-deadline-name" style={{ fontSize: "12.5px" }}>{site.siteName}</span>
-                        <span className="admin-deadline-date" style={{ fontSize: "11px" }}>Target: {formatDateDMY(site.expectedEndDate)}</span>
-                      </div>
-                      <span className={`admin-deadline-badge ${isUrgent ? "urgent" : "normal"}`} style={{ fontSize: "10.5px" }}>
-                        {daysLeft > 0 ? `${daysLeft} days left` : "Overdue"}
-                      </span>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 5: SCALABLE CIVIL SITE OPERATIONS CONSOLE                    */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-table-card">
-          <div className="admin-table-header" style={{ flexWrap: "wrap", gap: "10px" }}>
-            <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Civil Site Portfolio &amp; Operations Console</h3>
-              <p className="admin-card-subtitle">
-                Priority-ranked monitoring matrix across all {overallMetrics.totalSites} registered Visvas projects.
-              </p>
-            </div>
-
-            {/* Filter Bar Controls & View Switcher */}
-            <div className="sites-actions-group" style={{ flexWrap: "wrap", gap: "8px" }}>
-              <div className="sites-search-wrapper" style={{ minWidth: "170px" }}>
-                <Search size={14} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
-                <input
-                  type="text"
-                  placeholder="Search site, client, location..."
-                  value={dashboardSearchQuery}
-                  onChange={(e) => setDashboardSearchQuery(e.target.value)}
-                  style={{ width: "100%", height: "34px", paddingLeft: "30px", paddingRight: "8px", borderRadius: "6px", border: "1px solid var(--border-color)", fontSize: "12px", boxSizing: "border-box" }}
-                />
-              </div>
-
-              <select
-                value={portfolioStatusFilter}
-                onChange={(e) => setPortfolioStatusFilter(e.target.value)}
-                style={{ height: "34px", padding: "0 8px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12px", fontWeight: "600" }}
-              >
-                <option value="all">All Statuses ({sites.length})</option>
-                <option value="attention">Attention Required ({alerts.length})</option>
-                <option value="active">Active / Running ({activeSitesCount})</option>
-                <option value="delayed">Delayed Schedule ({delayedSitesCount})</option>
-                <option value="completed">Completed ({completedSitesCount})</option>
-              </select>
-
-              <select
-                value={portfolioSortBy}
-                onChange={(e) => setPortfolioSortBy(e.target.value)}
-                style={{ height: "34px", padding: "0 8px", borderRadius: "6px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12px", fontWeight: "600" }}
-              >
-                <option value="attention">Sort: Attention Priority</option>
-                <option value="progress">Sort: Progress %</option>
-                <option value="budget">Sort: Budget Size</option>
-                <option value="name">Sort: Name</option>
-              </select>
-
-              {/* Grid / Table View Switcher */}
-              <div style={{ display: "flex", border: "1px solid var(--border-color)", borderRadius: "6px", overflow: "hidden" }}>
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode("grid")}
-                  style={{
-                    padding: "6px 9px",
-                    border: "none",
-                    backgroundColor: sitesViewMode === "grid" ? "var(--brand-orange)" : "#ffffff",
-                    color: sitesViewMode === "grid" ? "#ffffff" : "var(--primary-700)",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center"
-                  }}
-                  title="Grid View"
-                >
-                  <LayoutGrid size={14} />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleViewMode("table")}
-                  style={{
-                    padding: "6px 9px",
-                    border: "none",
-                    backgroundColor: sitesViewMode === "table" ? "var(--brand-orange)" : "#ffffff",
-                    color: sitesViewMode === "table" ? "#ffffff" : "var(--primary-700)",
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center"
-                  }}
-                  title="Table / List View"
-                >
-                  <List size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {sitesViewMode === "grid" ? (
-            /* ── GRID VIEW ── */
-            <div style={{ padding: "14px", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
-              {portfolioSites.length === 0 ? (
-                <div style={{ gridColumn: "1 / -1", textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
-                  No construction sites match the selected filter criteria.
-                </div>
-              ) : (
-                portfolioSites.slice(0, 15).map(site => {
-                  const assignedEngList = engineers.filter(e => {
-                    if (e.assignedSiteId === site.id) return true;
-                    if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
-                    if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
-                    return false;
-                  });
-                  const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
-                  const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
-                  
-                  let siteLabourCount = 0;
-                  (rawLabourAttendance || []).forEach(r => {
-                    if (!r || r.lockedMetadata || r.siteId !== site.id) return;
-                    if ((r.attendanceDate || r.date) === todayDateString) {
-                      siteLabourCount += Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                    }
-                  });
-
-                  const progVal = site.progress !== undefined ? Number(site.progress) : 0;
-                  const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
-
-                  return (
-                    <div
-                      key={site.id}
-                      style={{
-                        padding: "12px 14px",
-                        backgroundColor: "#f8fafc",
-                        borderRadius: "8px",
-                        border: "1px solid #e2e8f0",
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: "8px",
-                        transition: "all 0.15s ease"
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
-                        <div>
-                          <strong style={{ fontSize: "13px", color: "var(--primary-950)", display: "block" }}>{site.siteName}</strong>
-                          <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                            <MapPin size={10} style={{ color: "#94a3b8" }} />
-                            {site.location || site.clientName || "N/A"}
-                          </span>
-                        </div>
-                        <Badge status={isDelayed ? "danger" : (site.status || "active")} style={{ fontSize: "10px" }} />
-                      </div>
-
-                      {/* Presence and Labour info */}
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: "11px", backgroundColor: "#fff", padding: "6px 8px", borderRadius: "6px", border: "1px solid #f1f5f9" }}>
-                        <span style={{ color: "var(--primary-700)" }}>
-                          <strong>{assignedEngList.filter(e => sitePresentEngSet.has(e.id) || sitePresentEngSet.has(e.uid) || sitePresentEngSet.has(e.name)).length}/{assignedEngList.length || 0}</strong> Eng Present
-                        </span>
-                        <span style={{ color: "var(--primary-700)" }}>
-                          <strong>{siteLabourCount}</strong> Labour Today
-                        </span>
-                      </div>
-
-                      {/* Progress Bar */}
-                      <div>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: "11px", marginBottom: "3px" }}>
-                          <span style={{ color: "var(--text-muted)" }}>Execution Progress</span>
-                          <strong style={{ color: isDelayed ? "#dc2626" : "var(--primary-950)" }}>{progVal}%</strong>
-                        </div>
-                        <div style={{ width: "100%", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                          <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: isDelayed ? "#dc2626" : "#16a34a", borderRadius: "100px" }} />
-                        </div>
-                      </div>
-
-                      {/* Inspect Button */}
-                      <button
-                        type="button"
-                        onClick={() => setSelectedInspectSite(site)}
-                        className="erp-btn-secondary"
-                        style={{ width: "100%", fontSize: "11.5px", padding: "5px", justifyContent: "center", marginTop: "2px" }}
-                      >
-                        Inspect Site Operations →
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          ) : (
-            /* ── TABLE VIEW ── */
-            <div className="admin-table-scroll">
-              <table className="admin-table">
-                <thead>
-                  <tr>
-                    <th>Site &amp; Client</th>
-                    <th>Assigned Engineers</th>
-                    <th>Today's Activity</th>
-                    <th>Labour</th>
-                    <th>Today's Outlay</th>
-                    <th>Progress</th>
-                    <th style={{ textAlign: "center" }}>Status</th>
-                    <th style={{ textAlign: "right" }}>Inspect</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {portfolioSites.length === 0 ? (
-                    <tr>
-                      <td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>
-                        No construction sites match the selected filter criteria.
-                      </td>
-                    </tr>
-                  ) : (
-                    portfolioSites.slice(0, 15).map(site => {
-                      // Assigned engineers
-                      const assignedEngList = engineers.filter(e => {
-                        if (e.assignedSiteId === site.id) return true;
-                        if (Array.isArray(e.assignedSites) && e.assignedSites.includes(site.id)) return true;
-                        if (assignments.some(a => a.siteId === site.id && (a.engineerId === e.id || a.engineerId === e.uid))) return true;
-                        return false;
-                      });
-
-                      // Today's presence
-                      const siteTodayAttendance = todayAttendanceList.filter(r => r.resolvedSiteId === site.id);
-                      const sitePresentEngSet = new Set(siteTodayAttendance.map(r => r.resolvedEngineerId || r.engineerName));
-
-                      // Today's labour
-                      let siteLabourCount = 0;
-                      let siteLabourAmount = 0;
-                      (rawLabourAttendance || []).forEach(r => {
-                        if (!r || r.lockedMetadata || r.siteId !== site.id) return;
-                        const d = r.attendanceDate || r.date;
-                        if (d === todayDateString) {
-                          const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-                          const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-                          siteLabourCount += count;
-                          siteLabourAmount += Number(r.totalAmount || (count * rate));
-                        }
-                      });
-
-                      // Today's expenses
-                      let siteGeneralExpense = 0;
-                      generalExpenses.forEach(e => {
-                        if (e.siteId === site.id && (e.date || "").startsWith(todayDateString)) {
-                          siteGeneralExpense += Number(e.amount) || 0;
-                        }
-                      });
-
-                      const progVal = site.progress !== undefined ? Number(site.progress) : 0;
-                      const isDelayed = site.status === "Delayed" || isSiteDelayed(site);
-
-                      return (
-                        <tr key={site.id}>
-                          <td>
-                            <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
-                              {site.siteName}
-                            </strong>
-                            <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "inline-flex", alignItems: "center", gap: "3px" }}>
-                              <MapPin size={10} style={{ color: "#94a3b8" }} />
-                              {site.location || site.clientName || "N/A"}
-                            </span>
-                          </td>
-
-                          <td>
-                            {assignedEngList.length > 0 ? (
-                              <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                                {assignedEngList.slice(0, 2).map((eng, idx) => {
-                                  const isPresent = sitePresentEngSet.has(eng.id) || sitePresentEngSet.has(eng.uid) || sitePresentEngSet.has(eng.name);
-                                  return (
-                                    <div key={idx} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "11px" }}>
-                                      <span style={{ width: "6px", height: "6px", borderRadius: "50%", backgroundColor: isPresent ? "#16a34a" : "#cbd5e1" }} />
-                                      <span style={{ fontWeight: isPresent ? "700" : "500" }}>{eng.fullName || eng.name}</span>
-                                    </div>
-                                  );
-                                })}
-                                {assignedEngList.length > 2 && (
-                                  <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>+{assignedEngList.length - 2} more</span>
-                                )}
-                              </div>
-                            ) : (
-                              <span style={{ fontSize: "11px", color: "#94a3b8", fontStyle: "italic" }}>Unassigned</span>
-                            )}
-                          </td>
-
-                          <td>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
-                              {siteTodayAttendance.length > 0 && <Badge status="success" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Att ({siteTodayAttendance.length})</Badge>}
-                              {siteLabourCount > 0 && <Badge status="info" style={{ fontSize: "9.5px", padding: "1px 5px" }}>Lab ({siteLabourCount})</Badge>}
-                              {siteTodayAttendance.length === 0 && siteLabourCount === 0 && (
-                                <span style={{ fontSize: "11px", color: "#94a3b8" }}>No activity</span>
-                              )}
-                            </div>
-                          </td>
-
-                          <td>
-                            <span style={{ fontSize: "11.5px", fontWeight: siteLabourCount > 0 ? "700" : "500" }}>
-                              {siteLabourCount > 0 ? `${siteLabourCount} W` : "0"}
-                            </span>
-                          </td>
-
-                          <td>
-                            <span style={{ fontSize: "11.5px", fontWeight: (siteLabourAmount + siteGeneralExpense) > 0 ? "700" : "500" }}>
-                              {formatINR(siteLabourAmount + siteGeneralExpense)}
-                            </span>
-                          </td>
-
-                          <td>
-                            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                              <div style={{ width: "45px", height: "6px", backgroundColor: "#e2e8f0", borderRadius: "100px", overflow: "hidden" }}>
-                                <div style={{ width: `${progVal}%`, height: "100%", backgroundColor: isDelayed ? "#dc2626" : "#16a34a", borderRadius: "100px" }} />
-                              </div>
-                              <span style={{ fontSize: "11px", fontWeight: "800" }}>{progVal}%</span>
-                            </div>
-                          </td>
-
-                          <td style={{ textAlign: "center" }}>
-                            <Badge status={isDelayed ? "danger" : (site.status || "active")} />
-                          </td>
-
-                          <td style={{ textAlign: "right" }}>
-                            <button
-                              type="button"
-                              onClick={() => setSelectedInspectSite(site)}
-                              className="erp-btn-secondary"
-                              style={{ fontSize: "11px", padding: "3px 8px" }}
-                            >
-                              Inspect
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {portfolioSites.length > 15 && (
-            <div style={{ padding: "10px 16px", borderTop: "1px solid var(--border-color)", textAlign: "center", fontSize: "11.5px", color: "var(--text-muted)" }}>
-              Showing top 15 priority-ranked sites of {portfolioSites.length} total filtered sites. Use search above to locate any specific project.
-            </div>
-          )}
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 6: REAL-TIME OPERATIONS CHRONO-STREAM & AUDIT LOG            */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", marginBottom: "12px" }}>
-            <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px", margin: 0 }}>Real-Time Operations Chrono-Stream</h3>
-              <p className="admin-card-subtitle" style={{ margin: "2px 0 0 0" }}>Live chronological feed of all field activities logged across Visvas projects today ({todayFeedList.length} events).</p>
-            </div>
-
-            {/* Filter Tabs */}
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              {["all", "attendance", "labour", "materials", "expenses", "reports"].map(f => (
-                <button
-                  key={f}
-                  type="button"
-                  onClick={() => setDashboardActivityFilter(f)}
-                  style={{
-                    padding: "3px 8px",
-                    borderRadius: "6px",
-                    border: "1px solid",
-                    borderColor: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--border-color)",
-                    backgroundColor: dashboardActivityFilter === f ? "#fff7ed" : "#ffffff",
-                    color: dashboardActivityFilter === f ? "var(--brand-orange)" : "var(--primary-700)",
-                    fontSize: "11px",
-                    fontWeight: "700",
-                    cursor: "pointer",
-                    textTransform: "capitalize"
-                  }}
-                >
-                  {f === "all" ? `All (${todayFeedList.length})` : `${f} (${todayFeedList.filter(item => item.moduleType === f).length})`}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {filteredTodayFeed.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "28px", color: "var(--text-muted)", fontSize: "12.5px" }}>
-              No operations activity recorded for the selected filter today.
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px", maxHeight: "280px", overflowY: "auto" }}>
-              {filteredTodayFeed.map(item => (
-                <div
-                  key={item.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    padding: "8px 12px",
-                    backgroundColor: "#f8fafc",
-                    borderRadius: "6px",
-                    border: "1px solid #e2e8f0",
-                    gap: "10px"
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", minWidth: 0, flex: 1 }}>
-                    <Badge status={item.badgeStatus} style={{ fontSize: "10px", flexShrink: 0 }}>
-                      {item.module}
-                    </Badge>
-                    <div style={{ minWidth: 0, flex: 1 }}>
-                      <strong style={{ fontSize: "12px", color: "var(--primary-950)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.title}
-                      </strong>
-                      <span style={{ fontSize: "11px", color: "var(--primary-600)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {item.description}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <span style={{ fontSize: "11px", fontWeight: "700", color: "var(--primary-700)", display: "block" }}>
-                      {item.time}
-                    </span>
-                    <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block" }}>
-                      by {item.user}
+                    <span style={{ fontSize: "11px", color: "var(--text-muted)", whiteSpace: "nowrap", fontFamily: "monospace" }}>
+                      {event.time}
                     </span>
                   </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        {/* SECTION 7: EXECUTIVE GATEWAYS & SPECIALIZED SHORTCUTS                 */}
-        {/* ══════════════════════════════════════════════════════════════════════ */}
-        <div className="admin-card">
-          <div className="admin-card-header" style={{ marginBottom: "10px" }}>
-            <div>
-              <h3 className="admin-card-title" style={{ fontSize: "14px" }}>Executive Gateways</h3>
-              <p className="admin-card-subtitle">Direct access to specialized ledgers</p>
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: "8px" }}>
-            {[
-              { to: "/superadmin/sites", label: "All Sites Operations", icon: Building2, desc: `${overallMetrics.totalSites} Sites` },
-              { to: "/superadmin/engineers", label: "Engineers Directory", icon: Users, desc: `${engineers.length} Engineers` },
-              { to: "/superadmin/attendance", label: "Attendance Monitor", icon: ClipboardCheck, desc: `${presentCount} Present` },
-              { to: "/superadmin/labour", label: "Daily Labour Ledger", icon: Briefcase, desc: `${todayLabourCount} Workers` },
-              { to: "/superadmin/materials", label: "Materials Stock", icon: Package, desc: `${materials.length} Items` },
-              { to: "/superadmin/payments", label: "Corporate Payments", icon: DollarSign, desc: "Ledger" },
-              { to: "/superadmin/payroll", label: "Worker Payouts", icon: FileText, desc: "Wages" },
-              { to: "/superadmin/finance", label: "Financial Ledger", icon: TrendingUp, desc: formatINR(overallMetrics.totalExpenses) },
-              { to: "/superadmin/reports", label: "Reports & Analytics", icon: Layers, desc: "DPRs" },
-              { to: "/superadmin/admins", label: "Admin Accounts", icon: ShieldCheck, desc: `${admins.length || 1} Admins` },
-              { to: "/superadmin/activity", label: "Audit Trail", icon: Activity, desc: "System Logs" }
-            ].map(item => {
-              const IconComponent = item.icon;
-              return (
-                <Link
-                  key={item.to}
-                  to={item.to}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    padding: "10px 12px",
-                    borderRadius: "6px",
-                    border: "1px solid var(--border-color)",
-                    backgroundColor: "#ffffff",
-                    textDecoration: "none",
-                    transition: "all 0.15s ease"
-                  }}
-                  onMouseEnter={e => {
-                    e.currentTarget.style.borderColor = "var(--brand-orange)";
-                    e.currentTarget.style.boxShadow = "0 2px 6px rgba(234, 88, 12, 0.08)";
-                  }}
-                  onMouseLeave={e => {
-                    e.currentTarget.style.borderColor = "var(--border-color)";
-                    e.currentTarget.style.boxShadow = "none";
-                  }}
-                >
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "2px" }}>
-                    <IconComponent size={15} style={{ color: "var(--brand-orange)" }} />
-                    <strong style={{ fontSize: "12px", color: "var(--primary-950)" }}>{item.label}</strong>
-                  </div>
-                  <span style={{ fontSize: "10.5px", color: "var(--primary-600)" }}>{item.desc}</span>
-                </Link>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -4088,7 +3130,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
     // Filter raw labour attendance records
     const filteredLabour = rawLabourAttendance.filter(r => {
-      if (!r || r.lockedMetadata) return false;
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return false;
       const recDate = r.attendanceDate || r.date;
       if (labourDateFilter && recDate !== labourDateFilter) return false;
       if (labourSiteFilter && r.siteId !== labourSiteFilter) return false;
@@ -4104,11 +3146,13 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
     });
 
     // Compute Metrics for current filter
-    const totalWorkersFiltered = filteredLabour.reduce((sum, r) => sum + Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1), 0);
+    const totalWorkersFiltered = filteredLabour.reduce((sum, r) => {
+      const { workerCount } = resolveLabourRecordCalculations(r);
+      return sum + workerCount;
+    }, 0);
     const totalWageLiability = filteredLabour.reduce((sum, r) => {
-      const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
-      const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
-      return sum + Number(r.totalAmount || (count * rate));
+      const { amount } = resolveLabourRecordCalculations(r);
+      return sum + amount;
     }, 0);
     const activeSitesWithLabour = new Set(filteredLabour.map(r => r.siteId)).size;
     const distinctTeams = new Set(filteredLabour.map(r => r.teamId || r.teamName).filter(Boolean)).size;
@@ -4121,7 +3165,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
     filteredLabour.forEach(r => {
       const cat = (r.categoryName || r.category || "").toLowerCase();
-      const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+      const { workerCount: count } = resolveLabourRecordCalculations(r);
       if (cat.includes("mason") || cat.includes("karigar") || cat.includes("brick") || cat.includes("plaster")) {
         masonCountFiltered += count;
       } else if (cat.includes("barbend") || cat.includes("steel") || cat.includes("rebar") || cat.includes("fitter")) {

@@ -3242,6 +3242,9 @@ export async function getLabourDailyCountsHistory(siteId) {
   const newList = [];
   snapNew.forEach(d => {
     const data = d.data();
+    if (d.id?.startsWith("labour_lock_") || data.type === "labour_attendance_lock" || data.lockedMetadata || data.type === "lock") {
+      return;
+    }
     if (data.workerCount !== undefined) {
       const workerCount = Number(data.workerCount !== undefined ? data.workerCount : 1) || 1;
       const customWorkUnits = Number(
@@ -6065,11 +6068,15 @@ export function subscribeLabourAttendanceRecords(siteId, onUpdate) {
   return onSnapshot(q, (snapshot) => {
     const list = [];
     snapshot.forEach(docSnap => {
-      list.push({ id: docSnap.id, ...docSnap.data() });
+      const data = docSnap.data();
+      if (docSnap.id.startsWith("labour_lock_") || data.type === "labour_attendance_lock" || data.lockedMetadata || data.type === "lock") {
+        return; // Exclude lock documents from workforce records
+      }
+      list.push({ id: docSnap.id, ...data });
     });
     // Sort by attendanceDate descending, then workerName ascending
     list.sort((a, b) => {
-      const dateCompare = (b.attendanceDate || "").localeCompare(a.attendanceDate || "");
+      const dateCompare = (b.attendanceDate || b.date || "").localeCompare(a.attendanceDate || a.date || "");
       if (dateCompare !== 0) return dateCompare;
       return (a.workerName || a.categoryId || "").localeCompare(b.workerName || b.categoryId || "");
     });
@@ -6086,7 +6093,11 @@ export function subscribeAllLabourAttendance(onUpdate) {
   return onSnapshot(q, (snapshot) => {
     const map = new Map();
     snapshot.forEach(docSnap => {
-      map.set(docSnap.id, { id: docSnap.id, ...docSnap.data() });
+      const data = docSnap.data();
+      if (docSnap.id.startsWith("labour_lock_") || data.type === "labour_attendance_lock" || data.lockedMetadata || data.type === "lock") {
+        return; // Exclude lock documents from workforce records
+      }
+      map.set(docSnap.id, { id: docSnap.id, ...data });
     });
     const list = Array.from(map.values());
     // Sort by attendanceDate descending

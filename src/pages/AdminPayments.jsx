@@ -16,7 +16,7 @@ import {
   recordWorkerPayoutPayment,
   logMaterialPayment
 } from "../services/firebaseService";
-import { formatINR, formatDateDMY } from "../services/businessLogic";
+import { formatINR, formatDateDMY, resolveLabourRecordCalculations } from "../services/businessLogic";
 import {
   CreditCard,
   Building2,
@@ -245,18 +245,7 @@ export default function AdminPayments() {
 
   // Resolve single labour attendance record status strictly from canonical data
   const resolveLabourAttendanceRecord = (r) => {
-    const count = Number(r.workerCount) || 1;
-    const customUnits = Number(
-      r.customWorkUnits !== undefined 
-        ? r.customWorkUnits 
-        : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
-    ) || 1.0;
-    const wage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : 0));
-    const totalPayable = Number(
-      r.calculatedAmount !== undefined 
-        ? r.calculatedAmount 
-        : (r.totalAmount !== undefined ? r.totalAmount : (count * customUnits * wage))
-    ) || 0;
+    const { amount: totalPayable } = resolveLabourRecordCalculations(r);
 
     const dateStr = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || "";
     const specificStatusKey = `labour_rec_${r.id}`;
@@ -308,7 +297,7 @@ export default function AdminPayments() {
       if (!site || !site.id) return;
 
       // 1. Calculate Site Labour Obligations
-      const siteLabourRecords = labourAttendance.filter(r => r.siteId === site.id);
+      const siteLabourRecords = labourAttendance.filter(r => r.siteId === site.id && !r.id?.startsWith("labour_lock_") && r.type !== "labour_attendance_lock" && !r.lockedMetadata && r.type !== "lock");
       let siteLabourPayable = 0;
       let siteLabourPaid = 0;
 
@@ -443,7 +432,8 @@ export default function AdminPayments() {
 
     const siteRecords = labourAttendance.filter(r => {
       if (r.siteId !== selectedSiteId) return false;
-      const rDate = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || extractDateStr(r.createdAt) || "";
+      if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return false;
+      const rDate = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || "";
       if (!isDateInRange(rDate)) return false;
       return true;
     });
@@ -457,15 +447,8 @@ export default function AdminPayments() {
       const teamObj = teams.find(t => t.id === r.teamId);
       const categoryObj = teamObj?.categories?.[r.categoryId];
       const categoryName = categoryObj ? categoryObj.name : (r.categoryName || r.categoryId || "Labour");
-      const baseWage = categoryObj ? Number(categoryObj.baseWage) || 0 : (Number(r.dailyWage) || 0);
 
-      const count = Number(r.workerCount) || 1;
-      const customUnits = Number(
-        r.customWorkUnits !== undefined 
-          ? r.customWorkUnits 
-          : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
-      ) || 1.0;
-      const effectiveDailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : baseWage));
+      const { workerCount: count, units: customUnits, wage: effectiveDailyWage } = resolveLabourRecordCalculations(r);
 
       const paymentRes = resolveLabourAttendanceRecord(r);
       const dateStr = extractDateStr(r.attendanceDate) || extractDateStr(r.date) || "";

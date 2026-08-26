@@ -35,7 +35,8 @@ import {
   computeSitePendingItemsSummary,
   formatINR,
   getSiteBudget,
-  formatDateDDMonthYYYY
+  formatDateDDMonthYYYY,
+  resolveLabourRecordCalculations
 } from "../services/businessLogic";
 import { 
   ArrowLeft, 
@@ -186,17 +187,9 @@ export default function SiteDetails({ siteId, onBack }) {
   const siteLabourFinancials = useMemo(() => {
     let grossAmount = 0;
     (labourHistory || []).forEach(row => {
-      if (row.totalAmount) {
-        grossAmount += Number(row.totalAmount) || 0;
-      } else if (row.calculatedAmount) {
-        grossAmount += Number(row.calculatedAmount) || 0;
-      } else if (row.workerCount) {
-        const wage = Number(row.dailyWage || row.wage || 500);
-        const units = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1));
-        grossAmount += Number(row.workerCount) * units * wage;
-      } else {
-        grossAmount += (Number(row.wage) || 500) * (Number(row.units) || 1);
-      }
+      if (!row || row.id?.startsWith("labour_lock_") || row.type === "labour_attendance_lock" || row.lockedMetadata || row.type === "lock") return;
+      const { amount } = resolveLabourRecordCalculations(row);
+      grossAmount += amount;
     });
 
     const advancePaid = (sitePayments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
@@ -849,6 +842,7 @@ export default function SiteDetails({ siteId, onBack }) {
 
   // Filter labour by date (defaults to today's date)
   const filteredLabour = labourHistory.filter(row => {
+    if (!row || row.id?.startsWith("labour_lock_") || row.type === "labour_attendance_lock" || row.lockedMetadata || row.type === "lock") return false;
     const rowDate = row.date || row.attendanceDate;
     if (!labourDateFilter) return true;
     return rowDate === labourDateFilter;
@@ -863,10 +857,7 @@ export default function SiteDetails({ siteId, onBack }) {
 
   filteredLabour.forEach(row => {
     if (row.memberId !== undefined || row.workerCount !== undefined || row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
-      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
-      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
-      const earnedCost = Number(row.calculatedAmount !== undefined ? row.calculatedAmount : (row.totalAmount !== undefined ? row.totalAmount : (count * customUnits * wage))) || 0;
+      const { workerCount: count, units: customUnits, wage, amount: earnedCost } = resolveLabourRecordCalculations(row);
 
       dailyTotalWorkers += count;
       if (customUnits > 0) {
@@ -923,11 +914,9 @@ export default function SiteDetails({ siteId, onBack }) {
   const labourSummaryMap = { Masons: 0, Helpers: 0, Painters: 0, Plumbers: 0, Electricians: 0, Others: 0, totalDays: 0 };
   let laborSpent = 0;
   labourHistory.forEach(row => {
+    if (!row || row.id?.startsWith("labour_lock_") || row.type === "labour_attendance_lock" || row.lockedMetadata || row.type === "lock") return;
     if (row.memberId !== undefined || row.workerCount !== undefined || row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
-      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
-      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
-      const cost = Number(row.calculatedAmount !== undefined ? row.calculatedAmount : (row.totalAmount !== undefined ? row.totalAmount : (count * customUnits * wage))) || 0;
+      const { workerCount: count, units: customUnits, amount: cost } = resolveLabourRecordCalculations(row);
       laborSpent += cost;
       const cat = row.categoryName || "";
       const totalRowUnits = count * customUnits;
@@ -2707,24 +2696,9 @@ export default function SiteDetails({ siteId, onBack }) {
                     ) : (
                       filteredLabour.map((row, idx) => {
                         const isMember = row.memberId !== undefined || row.workerCount !== undefined || row.categoryId !== undefined;
-                        const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
-                        const customUnits = Number(
-                          row.customWorkUnits !== undefined 
-                            ? row.customWorkUnits 
-                            : (row.units !== undefined 
-                                ? row.units 
-                                : (row.attendanceType === "Half Day" ? 0.5 : 1.0))
-                        ) || 1.0;
-                        const baseRate = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || row.baseWage || 0));
+                        const { workerCount: count, units: customUnits, wage: baseRate, amount: earnedPayment } = resolveLabourRecordCalculations(row);
                         const effectiveRate = baseRate * customUnits;
                         const hasCustomWorkers = Array.isArray(row.workerEntries) && row.workerEntries.length > 0;
-                        const earnedPayment = Number(
-                          row.calculatedAmount !== undefined 
-                            ? row.calculatedAmount 
-                            : (row.totalAmount !== undefined 
-                                ? row.totalAmount 
-                                : (count * effectiveRate))
-                        ) || 0;
 
                         const workType = row.categoryName || row.name || (row.categoryId ? String(row.categoryId).replace(/^cat_/, '') : (isMember ? "Labour" : "General Headcount"));
                         const teamName = row.teamName || (row.teamId ? "Labour Team" : "");
@@ -2882,24 +2856,9 @@ export default function SiteDetails({ siteId, onBack }) {
             {showLabourDetailsModal && selectedLabourForDetails && (() => {
               const rec = selectedLabourForDetails;
               const isMember = rec.memberId !== undefined || rec.workerCount !== undefined || rec.categoryId !== undefined;
-              const count = Number(rec.workerCount !== undefined ? rec.workerCount : 1) || 1;
-              const customUnits = Number(
-                rec.customWorkUnits !== undefined 
-                  ? rec.customWorkUnits 
-                  : (rec.units !== undefined 
-                      ? rec.units 
-                      : (rec.attendanceType === "Half Day" ? 0.5 : 1.0))
-              ) || 1.0;
-              const baseRate = Number(rec.dailyWage !== undefined ? rec.dailyWage : (rec.wage || rec.baseWage || 0));
+              const { workerCount: count, units: customUnits, wage: baseRate, amount: earnedPayment } = resolveLabourRecordCalculations(rec);
               const effectiveRate = baseRate * customUnits;
               const hasCustomWorkers = Array.isArray(rec.workerEntries) && rec.workerEntries.length > 0;
-              const earnedPayment = Number(
-                rec.calculatedAmount !== undefined 
-                  ? rec.calculatedAmount 
-                  : (rec.totalAmount !== undefined 
-                      ? rec.totalAmount 
-                      : (count * effectiveRate))
-              ) || 0;
 
               const workType = rec.categoryName || rec.name || (rec.categoryId ? String(rec.categoryId).replace(/^cat_/, '') : (isMember ? "Labour" : "General Headcount"));
               const teamName = rec.teamName || (rec.teamId ? "Labour Team" : "");

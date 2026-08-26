@@ -22,7 +22,8 @@ import {
   isSiteDelayed,
   formatINR,
   getSiteBudget,
-  calculateTotalSitesBudget
+  calculateTotalSitesBudget,
+  resolveLabourRecordCalculations
 } from "../services/businessLogic";
 import { 
   Building2, 
@@ -831,17 +832,14 @@ export default function ReportsDashboard() {
 
       // Labour Cost aggregation
       siteLabour.forEach(l => {
-        if (!isWithinDateRange(l.attendanceDate)) return;
+        if (!l || l.id?.startsWith("labour_lock_") || l.type === "labour_attendance_lock" || l.lockedMetadata || l.type === "lock") return;
+        const lDate = normalizeDateStr(l.attendanceDate || l.date || "");
+        if (!isWithinDateRange(lDate)) return;
 
-        const teamObj = teams.find(t => t.id === l.teamId);
-        const categoryObj = teamObj?.categories?.[l.categoryId];
-        const dailyWage = Number(l.dailyWage !== undefined ? l.dailyWage : (l.wage !== undefined ? l.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-        const count = Number(l.workerCount) || 1;
-        const factor = Number(l.customWorkUnits !== undefined ? l.customWorkUnits : (l.units !== undefined ? l.units : (l.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-        const wages = Number(l.calculatedAmount !== undefined ? l.calculatedAmount : (l.totalAmount !== undefined ? l.totalAmount : (count * factor * dailyWage))) || 0;
+        const { amount: wages } = resolveLabourRecordCalculations(l);
 
         labourCost += wages;
-        const mKey = l.attendanceDate ? l.attendanceDate.substring(0, 7) : "";
+        const mKey = lDate ? lDate.substring(0, 7) : "";
         if (mKey) monthlyMap[mKey] = (monthlyMap[mKey] || 0) + wages;
       });
 
@@ -914,19 +912,16 @@ export default function ReportsDashboard() {
 
     // 1. Labour Payouts
     labourAttendance.forEach(r => {
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
       if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
-      if (!isDateInMonth(r.attendanceDate, anchor)) return;
+      const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+      if (!isDateInMonth(rDate, anchor)) return;
 
       // Enforce site engineer project assignment boundary
       if (!allowedSiteIds.has(r.siteId)) return;
 
-      const teamObj = teams.find(t => t.id === r.teamId);
-      const categoryObj = teamObj?.categories?.[r.categoryId];
-      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-      const count = Number(r.workerCount) || 1;
-      const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
+      const { amount: wages } = resolveLabourRecordCalculations(r);
 
       labourSalaryTotal += wages;
     });
@@ -967,14 +962,11 @@ export default function ReportsDashboard() {
       Object.keys(t.categories || {}).forEach(catId => {
         let amount = 0;
         labourAttendance.forEach(r => {
-          if (r.teamId === t.id && r.categoryId === catId && isDateInMonth(r.attendanceDate, anchor)) {
+          if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
+          const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+          if (r.teamId === t.id && r.categoryId === catId && isDateInMonth(rDate, anchor)) {
             if (!allowedSiteIds.has(r.siteId)) return;
-            const teamObj = teams.find(team => team.id === r.teamId);
-            const categoryObj = teamObj?.categories?.[r.categoryId];
-            const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-            const count = Number(r.workerCount) || 1;
-            const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-            const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
+            const { amount: wages } = resolveLabourRecordCalculations(r);
             amount += wages;
           }
         });
@@ -1063,18 +1055,14 @@ export default function ReportsDashboard() {
     });
 
     labourAttendance.forEach(r => {
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
       if (filterTeamId !== "all" && r.teamId !== filterTeamId) return;
       if (!allowedSiteIds.has(r.siteId)) return;
-      if (!matchesDateFilters(r.attendanceDate)) return;
+      const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+      if (!matchesDateFilters(rDate)) return;
 
-      const teamObj = teams.find(t => t.id === r.teamId);
-      const categoryObj = teamObj?.categories?.[r.categoryId];
-      const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-      const count = Number(r.workerCount) || 1;
-      const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
-      
+      const { amount: wages } = resolveLabourRecordCalculations(r);
       labourExpense += wages;
     });
 
@@ -1130,10 +1118,11 @@ export default function ReportsDashboard() {
 
   // Calculate Labour Date Range Report Data from canonical production records (labourAttendance state)
   const labourDateRangeReportData = useMemo(() => {
-    // 1. Deduplicate by doc ID to prevent double counting
+    // 1. Deduplicate by doc ID to prevent double counting and exclude lock documents
     const uniqueRecordsMap = new Map();
-    labourAttendance.forEach(r => {
+    (labourAttendance || []).forEach(r => {
       if (!r || !r.id) return;
+      if (r.id.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
       if (uniqueRecordsMap.has(r.id)) return;
       uniqueRecordsMap.set(r.id, r);
     });
@@ -1222,30 +1211,8 @@ export default function ReportsDashboard() {
         catName = r.categoryId || "Worker";
       }
 
-      // Resolve Daily Wage from canonical config
-      let dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : 0));
-      if (!dailyWage && teamObj?.categories) {
-        if (Array.isArray(teamObj.categories)) {
-          const c = teamObj.categories.find(x => x.id === r.categoryId);
-          if (c) dailyWage = Number(c.baseWage || c.wage || c.salaryAmount || 0);
-        } else if (teamObj.categories[r.categoryId]) {
-          dailyWage = Number(teamObj.categories[r.categoryId].baseWage || teamObj.categories[r.categoryId].wage || 0);
-        }
-      }
-      if (!dailyWage && labourMaster[r.categoryId]) {
-        dailyWage = Number(labourMaster[r.categoryId].dailyWage || 0);
-      }
+      const { workerCount, units: customWorkUnits, wage: dailyWage, amount: categoryTotal } = resolveLabourRecordCalculations(r);
 
-      const workerCount = Number(r.workerCount) || (r.attendanceValue !== undefined ? Number(r.attendanceValue) : 1);
-      const customWorkUnits = Number(
-        r.customWorkUnits !== undefined 
-          ? r.customWorkUnits 
-          : (r.units !== undefined 
-              ? r.units 
-              : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
-      ) || 1.0;
-
-      const categoryTotal = Number(r.calculatedAmount) || Number(r.totalAmount) || (workerCount * customWorkUnits * dailyWage);
       const calculationStr = customWorkUnits !== 1.0
         ? `${workerCount} × ${customWorkUnits} × ₹${dailyWage.toLocaleString("en-IN")}`
         : `${workerCount} × ₹${dailyWage.toLocaleString("en-IN")}`;
@@ -1295,6 +1262,9 @@ export default function ReportsDashboard() {
       };
     });
 
+    // Total working days
+    const totalWorkingDays = sortedDates.length;
+
     // Resolve site name display & assigned engineers
     let siteNameDisplay = "All Sites";
     let assignedEngineersDisplay = "";
@@ -1310,7 +1280,7 @@ export default function ReportsDashboard() {
 
     return {
       dailySections,
-      totalWorkingDays: dailySections.length,
+      totalWorkingDays,
       grandTotalWorkers,
       grandTotalLabourCost,
       siteNameDisplay,
@@ -1318,7 +1288,7 @@ export default function ReportsDashboard() {
       startDate: filterStartDate,
       endDate: filterEndDate
     };
-  }, [labourAttendance, filterSiteId, allowedSiteIds, filterTeamId, filterEngineerId, filterStartDate, filterEndDate, sites, teams, engineers, engineersMap, labourMaster]);
+  }, [labourAttendance, filterSiteId, allowedSiteIds, filterStartDate, filterEndDate, sites, teams, engineers, engineersMap, labourMaster]);
 
   // Calculate Material Date Range Report Data from canonical production records (materials state)
   const materialDateRangeReportData = useMemo(() => {
@@ -4210,12 +4180,7 @@ export default function ReportsDashboard() {
                       };
                     }
                     
-                    const count = Number(r.workerCount) || 1;
-                    const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-                    const teamObj = teams.find(t => t.id === r.teamId);
-                    const categoryObj = teamObj?.categories?.[r.categoryId];
-                    const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-                    const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
+                    const { workerCount: count, amount: wages } = resolveLabourRecordCalculations(r);
                     
                     weeklySummary[weekKey].totalWorkers += count;
                     weeklySummary[weekKey].totalWages += wages;
@@ -4259,9 +4224,11 @@ export default function ReportsDashboard() {
                   const monthlySummary = {};
                   
                   labourAttendance.forEach(r => {
+                    if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
                     if (filterSiteId !== "all" && r.siteId !== filterSiteId) return;
                     if (!allowedSiteIds.has(r.siteId)) return;
-                    if (!isDateInMonth(r.attendanceDate, anchor)) return;
+                    const rDate = normalizeDateStr(r.attendanceDate || r.date || "");
+                    if (!isDateInMonth(rDate, anchor)) return;
                     
                     const monthKey = r.siteId;
                     if (!monthlySummary[monthKey]) {
@@ -4273,14 +4240,9 @@ export default function ReportsDashboard() {
                       };
                     }
                     
-                    const count = Number(r.workerCount) || 1;
-                    const factor = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-                    const teamObj = teams.find(t => t.id === r.teamId);
-                    const categoryObj = teamObj?.categories?.[r.categoryId];
-                    const dailyWage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : (categoryObj ? Number(categoryObj.baseWage) || 0 : 0)));
-                    const wages = Number(r.calculatedAmount !== undefined ? r.calculatedAmount : (r.totalAmount !== undefined ? r.totalAmount : (count * factor * dailyWage))) || 0;
+                    const { workerCount: count, amount: wages } = resolveLabourRecordCalculations(r);
                     
-                    monthlySummary[monthKey].days.add(r.attendanceDate);
+                    monthlySummary[monthKey].days.add(rDate);
                     monthlySummary[monthKey].totalWorkers += count;
                     monthlySummary[monthKey].totalWages += wages;
                   });

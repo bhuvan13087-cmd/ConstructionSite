@@ -16,6 +16,7 @@ import {
   subscribePayrollStatuses,
   savePayrollStatus
 } from "../services/firebaseService";
+import { resolveLabourRecordCalculations } from "../services/businessLogic";
 import { 
   DollarSign, 
   Calendar, 
@@ -218,7 +219,9 @@ export default function PayrollSummary() {
     const monthKey = getActiveMonthKey();
 
     const filteredRecords = labourAttendance.filter(r => {
-      if (!isDateInPeriod(r.attendanceDate)) return false;
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return false;
+      const recDate = r.attendanceDate || r.date;
+      if (!isDateInPeriod(recDate)) return false;
       if (filterSiteId && r.siteId !== filterSiteId) return false;
       if (filterTeamId && r.teamId !== filterTeamId) return false;
       
@@ -247,7 +250,7 @@ export default function PayrollSummary() {
 
       const categoryObj = teamObj.categories?.[categoryId];
       const categoryName = categoryObj ? categoryObj.name : categoryId;
-      const dailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
+      const defaultDailyWage = categoryObj ? Number(categoryObj.baseWage) || 0 : 0;
 
       let totalUnits = 0;
       let totalAmountForGroup = 0;
@@ -255,22 +258,7 @@ export default function PayrollSummary() {
       let halfDays = 0;
 
       records.forEach(r => {
-        const count = Number(r.workerCount) || 1;
-        const customUnits = Number(
-          r.customWorkUnits !== undefined 
-            ? r.customWorkUnits 
-            : (r.units !== undefined 
-                ? r.units 
-                : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
-        ) || 1.0;
-        const wage = Number(r.dailyWage !== undefined ? r.dailyWage : (r.wage !== undefined ? r.wage : dailyWage));
-        const amount = Number(
-          r.calculatedAmount !== undefined 
-            ? r.calculatedAmount 
-            : (r.totalAmount !== undefined 
-                ? r.totalAmount 
-                : (count * customUnits * wage))
-        ) || 0;
+        const { workerCount: count, units: customUnits, wage, amount } = resolveLabourRecordCalculations(r);
 
         totalUnits += count * customUnits;
         totalAmountForGroup += amount;

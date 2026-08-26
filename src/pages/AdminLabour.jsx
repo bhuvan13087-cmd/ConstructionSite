@@ -22,7 +22,8 @@ import {
   getLabourDisplayName,
   calculateLabourFinancials,
   formatINR,
-  calculateTotalWorkers
+  calculateTotalWorkers,
+  resolveLabourRecordCalculations
 } from "../services/businessLogic";
 import {
   Users,
@@ -179,6 +180,30 @@ export default function AdminLabour() {
 
   // Search states for teams and members filtering
   const [memberSearchQuery, setMemberSearchQuery] = useState("");
+
+  // Universal Today's ISO Date String
+  const todayDateStr = React.useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }, []);
+
+  // Today's canonical labour summary for KPI cards (Single Source of Truth)
+  const todayLabourSummary = React.useMemo(() => {
+    let activeWorkers = 0;
+    let checkInsLogged = 0;
+
+    (allLabourAttendance || []).forEach(r => {
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return;
+      const recDate = r.attendanceDate || r.date;
+      if (recDate === todayDateStr) {
+        const { workerCount } = resolveLabourRecordCalculations(r);
+        activeWorkers += workerCount;
+        checkInsLogged += 1;
+      }
+    });
+
+    return { activeWorkers, checkInsLogged };
+  }, [allLabourAttendance, todayDateStr]);
 
   const showToast = (message, type = "info") => {
     setToast({ show: true, message, type });
@@ -1593,8 +1618,10 @@ export default function AdminLabour() {
   // -------------------------------------------------------------
   const renderAttendanceTab = () => {
     const filteredAttendance = allLabourAttendance.filter(r => {
+      if (!r || r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") return false;
       if (adminFilterSiteId && r.siteId !== adminFilterSiteId) return false;
-      if (adminFilterDate && r.attendanceDate !== adminFilterDate) return false;
+      const recDate = r.attendanceDate || r.date;
+      if (adminFilterDate && recDate !== adminFilterDate) return false;
       if (adminFilterTeamId && r.teamId !== adminFilterTeamId) return false;
       return sites.some(s => s.id === r.siteId);
     });
@@ -1605,13 +1632,10 @@ export default function AdminLabour() {
     let totalLabourCost = 0;
 
     filteredAttendance.forEach(r => {
-      const count = Number(r.workerCount) || (r.workerName ? 1 : 0);
-      const units = Number(r.customWorkUnits !== undefined ? r.customWorkUnits : (r.units !== undefined ? r.units : (r.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wage = Number(r.dailyWage || r.wage || 0);
-      const cost = r.calculatedAmount !== undefined && r.calculatedAmount !== null ? Number(r.calculatedAmount) : (count * units * wage);
+      const { workerCount: count, units, wage, amount: cost } = resolveLabourRecordCalculations(r);
 
-      if (r.attendanceType === "Full Day" || units >= 1) totalFullDay += count;
-      else if (r.attendanceType === "Half Day" || units === 0.5) totalHalfDay += count;
+      if (units >= 1.0) totalFullDay += count;
+      else if (units < 1.0) totalHalfDay += count;
       totalLabourCost += cost;
       totalLabour += count;
     });
@@ -1814,7 +1838,7 @@ export default function AdminLabour() {
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-            {allLabourAttendance.filter(r => r.attendanceDate === new Date().toISOString().split("T")[0]).length}
+            {todayLabourSummary.activeWorkers}
           </div>
           <span style={{ fontSize: "10.5px", color: "#ea580c", marginTop: "6px", display: "block", fontWeight: "600" }}>On-site active workers</span>
         </div>
@@ -1846,7 +1870,7 @@ export default function AdminLabour() {
             </div>
           </div>
           <div style={{ fontSize: "22px", fontWeight: "800", color: "#0f172a", lineHeight: "1" }}>
-            {allLabourAttendance.filter(r => r.attendanceDate === new Date().toISOString().split("T")[0]).length}
+            {todayLabourSummary.checkInsLogged}
           </div>
           <span style={{ fontSize: "10.5px", color: "#ea580c", marginTop: "6px", display: "block", fontWeight: "600" }}>Check-ins logged</span>
         </div>

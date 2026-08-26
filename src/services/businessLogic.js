@@ -858,26 +858,64 @@ export function calculateCategoryLabourAmount({
 }
 
 /**
+ * Canonical helper for resolving labour attendance worker count, units, wage, and amount.
+ * Single Source of Truth for all labour metrics across Admin, Reports, Payroll, and Dashboards.
+ */
+export function resolveLabourRecordCalculations(r) {
+  if (!r) return { workerCount: 0, units: 1.0, wage: 0, amount: 0 };
+  
+  // Guard against lock records accidentally treated as labour
+  if (r.id?.startsWith("labour_lock_") || r.type === "labour_attendance_lock" || r.lockedMetadata || r.type === "lock") {
+    return { workerCount: 0, units: 0, wage: 0, amount: 0 };
+  }
+
+  const workerCount = Number(
+    r.workerCount !== undefined && r.workerCount !== null && r.workerCount !== ""
+      ? r.workerCount 
+      : (r.workerEntries && Array.isArray(r.workerEntries) && r.workerEntries.length > 0 
+          ? r.workerEntries.length 
+          : (r.total !== undefined ? r.total : 1))
+  ) || 0;
+
+  const units = Number(
+    r.customWorkUnits !== undefined && r.customWorkUnits !== null && r.customWorkUnits !== ""
+      ? r.customWorkUnits 
+      : (r.units !== undefined && r.units !== null && r.units !== ""
+          ? r.units 
+          : (r.attendanceType === "Half Day" ? 0.5 : 1.0))
+  ) || 1.0;
+
+  const wage = Number(
+    r.dailyWage !== undefined && r.dailyWage !== null && r.dailyWage !== ""
+      ? r.dailyWage 
+      : (r.wage !== undefined && r.wage !== null && r.wage !== ""
+          ? r.wage 
+          : (r.rate || 0))
+  ) || 0;
+
+  // Canonical Labour Amount = Worker Count × Duration × Rate
+  const amount = workerCount * units * wage;
+
+  return {
+    workerCount,
+    units,
+    wage,
+    amount
+  };
+}
+
+/**
  * Reconciles daily counts work duration costs with logged payments.
  */
 export function calculateLabourFinancials(siteId, labourHistory = [], labourMaster = {}, paymentsList = []) {
   let totalCost = 0;
   
   labourHistory.forEach(row => {
-    if (row.calculatedAmount !== undefined || row.totalAmount !== undefined) {
-      totalCost += Number(row.calculatedAmount !== undefined ? row.calculatedAmount : row.totalAmount) || 0;
-    } else if (row.memberId !== undefined || row.workerCount !== undefined) {
-      // Member-level attendance record
-      const count = Number(row.workerCount !== undefined ? row.workerCount : 1) || 1;
-      const customUnits = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units !== undefined ? row.units : (row.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wage = Number(row.dailyWage !== undefined ? row.dailyWage : (row.wage || 0)) || 0;
-      const calculated = calculateCategoryLabourAmount({
-        workerCount: count,
-        customWorkUnits: customUnits,
-        dailyWage: wage,
-        workerEntries: row.workerEntries || []
-      });
-      totalCost += calculated;
+    if (!row || row.id?.startsWith("labour_lock_") || row.type === "labour_attendance_lock" || row.lockedMetadata || row.type === "lock") return;
+
+    if (row.calculatedAmount !== undefined || row.totalAmount !== undefined || row.memberId !== undefined || row.workerCount !== undefined) {
+      const { amount } = resolveLabourRecordCalculations(row);
+      totalCost += amount;
     } else {
       // Legacy headcount logic
       Object.keys(row).forEach(key => {
@@ -908,7 +946,7 @@ export function calculateLabourFinancials(siteId, labourHistory = [], labourMast
     totalCost,
     paidAmount,
     pendingAmount,
-    paymentsHistory: sitePayments.sort((a, b) => b.date.localeCompare(a.date))
+    paymentsHistory: sitePayments.sort((a, b) => (b.date || "").localeCompare(a.date || ""))
   };
 }
 
@@ -1111,19 +1149,10 @@ export function getSiteExpenseLedger(site, materials = [], labourHistory = [], g
   });
 
   // Compile labour expenses from headcounts and member-level attendance records
-  const siteLabour = labourHistory.filter(l => l.siteId === site.id);
+  const siteLabour = labourHistory.filter(l => l.siteId === site.id && !l.id?.startsWith("labour_lock_") && l.type !== "labour_attendance_lock" && !l.lockedMetadata);
   siteLabour.forEach(l => {
     if (l.calculatedAmount !== undefined || l.totalAmount !== undefined || l.memberId !== undefined || l.categoryId !== undefined || l.units !== undefined || l.workerCount !== undefined) {
-      const count = Number(l.workerCount !== undefined ? l.workerCount : 1) || 1;
-      const customUnits = Number(l.customWorkUnits !== undefined ? l.customWorkUnits : (l.units !== undefined ? l.units : (l.attendanceType === "Half Day" ? 0.5 : 1.0))) || 1.0;
-      const wage = Number(l.dailyWage !== undefined ? l.dailyWage : (l.wage || 0)) || 0;
-      const cost = Number(
-        l.calculatedAmount !== undefined 
-          ? l.calculatedAmount 
-          : (l.totalAmount !== undefined 
-              ? l.totalAmount 
-              : (count * customUnits * wage))
-      ) || 0;
+      const { workerCount: count, units: customUnits, wage, amount: cost } = resolveLabourRecordCalculations(l);
       labourExpenseTotal += cost;
       if (cost > 0) {
         expenses.push({
@@ -1405,15 +1434,9 @@ export function computeSitePendingItemsSummary(siteId, materials = [], transfers
   // 4. Labour net payable balance
   let grossLabour = 0;
   (labourHistory || []).forEach(row => {
-    if (row.totalAmount) {
-      grossLabour += Number(row.totalAmount) || 0;
-    } else if (row.calculatedAmount) {
-      grossLabour += Number(row.calculatedAmount) || 0;
-    } else if (row.workerCount) {
-      const wage = Number(row.dailyWage || row.wage || 500);
-      const units = Number(row.customWorkUnits !== undefined ? row.customWorkUnits : (row.units || 1));
-      grossLabour += Number(row.workerCount) * units * wage;
-    }
+    if (!row || row.id?.startsWith("labour_lock_") || row.type === "labour_attendance_lock" || row.lockedMetadata || row.type === "lock") return;
+    const { amount } = resolveLabourRecordCalculations(row);
+    grossLabour += amount;
   });
   const advances = (labourPayments || []).reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   const netPayableLabour = Math.max(0, grossLabour - advances);
