@@ -71,19 +71,19 @@ export default function AppRoutes() {
       {/* Protected Super Admin Area */}
       <Route element={<ProtectedRoute allowedRoles={["super_admin", "superadmin"]} />}>
         <Route path="/superadmin" element={<ErrorBoundary><SuperAdminDashboard tab="dashboard" /></ErrorBoundary>} />
-        <Route path="/superadmin/sites" element={<ErrorBoundary><Sites /></ErrorBoundary>} />
-        <Route path="/superadmin/engineers" element={<ErrorBoundary><SiteEngineers /></ErrorBoundary>} />
+        <Route path="/superadmin/sites" element={<ErrorBoundary><SuperAdminDashboard tab="sites" /></ErrorBoundary>} />
+        <Route path="/superadmin/engineers" element={<ErrorBoundary><SuperAdminDashboard tab="engineers" /></ErrorBoundary>} />
         <Route path="/superadmin/admins" element={<ErrorBoundary><SuperAdminDashboard tab="admins" /></ErrorBoundary>} />
         <Route path="/superadmin/attendance" element={<ErrorBoundary><SuperAdminDashboard tab="attendance" /></ErrorBoundary>} />
-        <Route path="/superadmin/labour" element={<ErrorBoundary><AdminLabour /></ErrorBoundary>} />
-        <Route path="/superadmin/materials" element={<ErrorBoundary><AdminMaterials /></ErrorBoundary>} />
+        <Route path="/superadmin/labour" element={<ErrorBoundary><SuperAdminDashboard tab="labour" /></ErrorBoundary>} />
+        <Route path="/superadmin/materials" element={<ErrorBoundary><SuperAdminDashboard tab="materials" /></ErrorBoundary>} />
         <Route path="/superadmin/finance" element={<ErrorBoundary><SuperAdminDashboard tab="finance" /></ErrorBoundary>} />
         <Route path="/superadmin/expenses" element={<ErrorBoundary><SuperAdminDashboard tab="finance" /></ErrorBoundary>} />
+        <Route path="/superadmin/payments" element={<ErrorBoundary><SuperAdminDashboard tab="payments" /></ErrorBoundary>} />
+        <Route path="/superadmin/payroll" element={<ErrorBoundary><SuperAdminDashboard tab="payroll" /></ErrorBoundary>} />
         <Route path="/superadmin/progress" element={<ErrorBoundary><SuperAdminDashboard tab="progress" /></ErrorBoundary>} />
-        <Route path="/superadmin/reports" element={<ErrorBoundary><ReportsDashboard /></ErrorBoundary>} />
-        <Route path="/superadmin/payments" element={<ErrorBoundary><AdminPayments /></ErrorBoundary>} />
-        <Route path="/superadmin/payroll" element={<ErrorBoundary><PayrollSummary /></ErrorBoundary>} />
-        <Route path="/superadmin/approvals" element={<ErrorBoundary><ApprovalsDashboard /></ErrorBoundary>} />
+        <Route path="/superadmin/reports" element={<ErrorBoundary><SuperAdminDashboard tab="reports" /></ErrorBoundary>} />
+        <Route path="/superadmin/approvals" element={<ErrorBoundary><SuperAdminDashboard tab="approvals" /></ErrorBoundary>} />
         <Route path="/superadmin/activity" element={<ErrorBoundary><SuperAdminDashboard tab="activity" /></ErrorBoundary>} />
         <Route path="/superadmin/assignments" element={<ErrorBoundary><SiteAssignments /></ErrorBoundary>} />
         <Route path="/superadmin/site-completion" element={<ErrorBoundary><SiteCompletionDashboard /></ErrorBoundary>} />

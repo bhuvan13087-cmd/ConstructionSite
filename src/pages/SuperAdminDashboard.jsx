@@ -159,12 +159,34 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
   // ── Labour View State ──
   const [labourSearchQuery, setLabourSearchQuery] = useState("");
   const [labourSiteFilter, setLabourSiteFilter] = useState("");
+  const [labourDateFilter, setLabourDateFilter] = useState("");
 
-  // ── Material & Finance Filters ──
+  // ── Material Filters ──
   const [materialSearchQuery, setMaterialSearchQuery] = useState("");
   const [materialSiteFilter, setMaterialSiteFilter] = useState("");
+  const [materialCategoryFilter, setMaterialCategoryFilter] = useState("all");
+  const [materialStatusFilter, setMaterialStatusFilter] = useState("all");
+
+  // ── Finance & Expense Filters ──
   const [expenseSearchQuery, setExpenseSearchQuery] = useState("");
   const [expenseSiteFilter, setExpenseSiteFilter] = useState("");
+
+  // ── Payments & Payroll Filters ──
+  const [paymentSearchQuery, setPaymentSearchQuery] = useState("");
+  const [paymentSiteFilter, setPaymentSiteFilter] = useState("");
+  const [paymentCategoryFilter, setPaymentCategoryFilter] = useState("all");
+  const [paymentStatusFilter, setPaymentStatusFilter] = useState("all");
+  const [payrollSearchQuery, setPayrollSearchQuery] = useState("");
+  const [payrollSiteFilter, setPayrollSiteFilter] = useState("");
+
+  // ── Reports Filters ──
+  const [reportsSearchQuery, setReportsSearchQuery] = useState("");
+  const [reportsSiteFilter, setReportsSiteFilter] = useState("");
+  const [reportsDateFilter, setReportsDateFilter] = useState("");
+
+  // ── Approvals Filters ──
+  const [approvalsTypeFilter, setApprovalsTypeFilter] = useState("all");
+  const [approvalsStatusFilter, setApprovalsStatusFilter] = useState("pending");
 
   // ── Activity Log Filter ──
   const [activitySearchQuery, setActivitySearchQuery] = useState("");
@@ -4058,6 +4080,1143 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
 
 
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 6: DAILY LABOUR & CIVIL WORKFORCE COMMAND CENTER
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderLabourView = () => {
+    const activeDate = labourDateFilter || todayDateString;
+
+    // Filter raw labour attendance records
+    const filteredLabour = rawLabourAttendance.filter(r => {
+      if (!r || r.lockedMetadata) return false;
+      const recDate = r.attendanceDate || r.date;
+      if (labourDateFilter && recDate !== labourDateFilter) return false;
+      if (labourSiteFilter && r.siteId !== labourSiteFilter) return false;
+      if (labourSearchQuery.trim()) {
+        const q = labourSearchQuery.toLowerCase().trim();
+        const mSite = (r.siteName || sites.find(s => s.id === r.siteId)?.siteName || "").toLowerCase().includes(q);
+        const mCat = (r.categoryName || r.category || "").toLowerCase().includes(q);
+        const mTeam = (r.teamName || "").toLowerCase().includes(q);
+        const mEng = (r.engineerName || r.createdByName || "").toLowerCase().includes(q);
+        if (!mSite && !mCat && !mTeam && !mEng) return false;
+      }
+      return true;
+    });
+
+    // Compute Metrics for current filter
+    const totalWorkersFiltered = filteredLabour.reduce((sum, r) => sum + Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1), 0);
+    const totalWageLiability = filteredLabour.reduce((sum, r) => {
+      const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+      const rate = Number(r.dailyWage || r.rate || r.categoryRate) || 0;
+      return sum + Number(r.totalAmount || (count * rate));
+    }, 0);
+    const activeSitesWithLabour = new Set(filteredLabour.map(r => r.siteId)).size;
+    const distinctTeams = new Set(filteredLabour.map(r => r.teamId || r.teamName).filter(Boolean)).size;
+
+    // Civil Trade Specific Headcounts for current date
+    let masonCountFiltered = 0;
+    let barbenderCountFiltered = 0;
+    let carpenterCountFiltered = 0;
+    let helperCountFiltered = 0;
+
+    filteredLabour.forEach(r => {
+      const cat = (r.categoryName || r.category || "").toLowerCase();
+      const count = Number(r.workerCount || (r.workerEntries && r.workerEntries.length) || 1);
+      if (cat.includes("mason") || cat.includes("karigar") || cat.includes("brick") || cat.includes("plaster")) {
+        masonCountFiltered += count;
+      } else if (cat.includes("barbend") || cat.includes("steel") || cat.includes("rebar") || cat.includes("fitter")) {
+        barbenderCountFiltered += count;
+      } else if (cat.includes("carpenter") || cat.includes("shutter") || cat.includes("centering") || cat.includes("formwork")) {
+        carpenterCountFiltered += count;
+      } else {
+        helperCountFiltered += count;
+      }
+    });
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <Users size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{totalWorkersFiltered}</div>
+              <div className="admin-summary-label">Total On-Site Workers</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalWageLiability)}</div>
+              <div className="admin-summary-label">Daily Wage Liability</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
+              <Briefcase size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{distinctTeams || rawTeams.length}</div>
+              <div className="admin-summary-label">Active Labour Gangs</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-blue">
+              <Building2 size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{activeSitesWithLabour}/{sites.length}</div>
+              <div className="admin-summary-label">Sites with Labour</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Civil Trade Distribution Strip */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "10px" }}>
+          <div style={{ padding: "12px 14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", display: "block" }}>🧱 Masons / Karigar</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "4px" }}>
+              <strong style={{ fontSize: "20px", color: "var(--primary-950)" }}>{masonCountFiltered}</strong>
+              <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Blockwork &amp; Plaster</span>
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", display: "block" }}>🏗️ Barbenders / Steel</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "4px" }}>
+              <strong style={{ fontSize: "20px", color: "var(--primary-950)" }}>{barbenderCountFiltered}</strong>
+              <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Rebar Tying</span>
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", display: "block" }}>🪵 Formwork Carpenters</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "4px" }}>
+              <strong style={{ fontSize: "20px", color: "var(--primary-950)" }}>{carpenterCountFiltered}</strong>
+              <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Centering &amp; Staging</span>
+            </div>
+          </div>
+          <div style={{ padding: "12px 14px", backgroundColor: "#ffffff", borderRadius: "10px", border: "1px solid #e2e8f0", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" }}>
+            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontWeight: "700", display: "block" }}>🦺 Helpers / Mazdoors</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginTop: "4px" }}>
+              <strong style={{ fontSize: "20px", color: "var(--primary-950)" }}>{helperCountFiltered}</strong>
+              <span style={{ fontSize: "11px", color: "var(--primary-600)", fontWeight: "600" }}>Casting &amp; Curing</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Organization Labour &amp; Workforce Muster ({filteredLabour.length} entries)
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Daily trade headcount distribution, contractor gang musters, and wage liability ledger.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search team, site, trade..."
+                value={labourSearchQuery}
+                onChange={(e) => setLabourSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={labourSiteFilter}
+              onChange={(e) => setLabourSiteFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="">All Sites ({sites.length})</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+            </select>
+            <input
+              type="date"
+              value={labourDateFilter}
+              onChange={(e) => setLabourDateFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+            />
+            {labourDateFilter && (
+              <button
+                type="button"
+                onClick={() => setLabourDateFilter("")}
+                className="btn btn-outline"
+                style={{ height: "38px", padding: "0 10px", fontSize: "12px" }}
+              >
+                Today
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Labour Ledger Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Project Site</th>
+                  <th>Contractor / Team</th>
+                  <th>Trade Craft</th>
+                  <th style={{ textAlign: "right" }}>Worker Count</th>
+                  <th style={{ textAlign: "right" }}>Wage Rate</th>
+                  <th style={{ textAlign: "right" }}>Total Amount</th>
+                  <th>Muster Date</th>
+                  <th>Logged By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredLabour.length === 0 ? (
+                  <tr><td colSpan={8} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No labour muster records found for the selected criteria.</td></tr>
+                ) : (
+                  filteredLabour.map(rec => {
+                    const siteName = rec.siteName || sites.find(s => s.id === rec.siteId)?.siteName || "Civil Project";
+                    const count = Number(r => r.workerCount || (r.workerEntries && r.workerEntries.length) || 1) || Number(rec.workerCount) || 1;
+                    const rate = Number(rec.dailyWage || rec.rate || rec.categoryRate) || 0;
+                    const total = Number(rec.totalAmount || (count * rate));
+
+                    return (
+                      <tr key={rec.id}>
+                        <td style={{ fontWeight: "700" }}>{siteName}</td>
+                        <td>{rec.teamName || "Direct Site Gang"}</td>
+                        <td>
+                          <Badge status="info">
+                            {rec.categoryName || rec.category || "General Labour"}
+                          </Badge>
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: "800", fontVariantNumeric: "tabular-nums" }}>
+                          {count}
+                        </td>
+                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                          {rate > 0 ? formatINR(rate) : "—"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--primary-950)" }}>
+                          {formatINR(total)}
+                        </td>
+                        <td className="font-mono">{formatDateDMY(rec.attendanceDate || rec.date)}</td>
+                        <td>{rec.engineerName || rec.createdByName || "Site Engineer"}</td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 7: CIVIL MATERIAL STOCK & INWARD DELIVERIES REGISTER
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderMaterialsView = () => {
+    const filteredMaterials = materials.filter(m => {
+      if (materialSiteFilter && m.siteId !== materialSiteFilter) return false;
+      if (materialCategoryFilter !== "all" && (m.category || "").toLowerCase() !== materialCategoryFilter.toLowerCase()) return false;
+      if (materialStatusFilter !== "all" && (m.paymentStatus || "pending").toLowerCase() !== materialStatusFilter.toLowerCase()) return false;
+      if (materialSearchQuery.trim()) {
+        const q = materialSearchQuery.toLowerCase().trim();
+        const mName = (m.materialName || m.name || "").toLowerCase().includes(q);
+        const mCat = (m.category || "").toLowerCase().includes(q);
+        const mSupp = (m.supplier || m.vendor || "").toLowerCase().includes(q);
+        const mSite = (m.siteName || sites.find(s => s.id === m.siteId)?.siteName || "").toLowerCase().includes(q);
+        if (!mName && !mCat && !mSupp && !mSite) return false;
+      }
+      return true;
+    });
+
+    const totalMaterialsCost = filteredMaterials.reduce((sum, m) => sum + (Number(m.totalCost || m.amount || (Number(m.quantity || 0) * Number(m.unitPrice || 0))) || 0), 0);
+    const todayMaterials = filteredMaterials.filter(m => (m.date || m.deliveryDate || "").startsWith(todayDateString));
+    const todayMaterialCost = todayMaterials.reduce((sum, m) => sum + (Number(m.totalCost || m.amount || (Number(m.quantity || 0) * Number(m.unitPrice || 0))) || 0), 0);
+    const pendingPaymentMaterials = filteredMaterials.filter(m => (m.paymentStatus || "").toLowerCase() === "pending");
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
+              <Package size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{filteredMaterials.length}</div>
+              <div className="admin-summary-label">Total Material Logs</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(todayMaterialCost)}</div>
+              <div className="admin-summary-label">Today's Material Outlay</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalMaterialsCost)}</div>
+              <div className="admin-summary-label">Cumulative Inward Cost</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-red">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{pendingPaymentMaterials.length}</div>
+              <div className="admin-summary-label">Pending Invoices</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Category Filter Chips */}
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          {[
+            { id: "all", label: "All Materials" },
+            { id: "cement", label: "Cement" },
+            { id: "steel", label: "TMT Steel" },
+            { id: "sand", label: "Sand / M-Sand" },
+            { id: "aggregate", label: "Aggregates" },
+            { id: "bricks", label: "Bricks / Blocks" },
+            { id: "electrical", label: "Electrical" },
+            { id: "plumbing", label: "Plumbing" }
+          ].map(c => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setMaterialCategoryFilter(c.id)}
+              style={{
+                padding: "4px 10px",
+                borderRadius: "6px",
+                border: "1px solid",
+                borderColor: materialCategoryFilter === c.id ? "var(--brand-orange)" : "var(--border-color)",
+                backgroundColor: materialCategoryFilter === c.id ? "#fff7ed" : "#ffffff",
+                color: materialCategoryFilter === c.id ? "var(--brand-orange)" : "var(--primary-700)",
+                fontSize: "11.5px",
+                fontWeight: "700",
+                cursor: "pointer"
+              }}
+            >
+              {c.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Civil Materials Inventory &amp; Stock Inward Register ({filteredMaterials.length})
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Bulk construction material deliveries, delivery challan receipts, supplier rates, and payment tracking.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search material, vendor, site..."
+                value={materialSearchQuery}
+                onChange={(e) => setMaterialSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={materialSiteFilter}
+              onChange={(e) => setMaterialSiteFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="">All Sites</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+            </select>
+            <select
+              value={materialStatusFilter}
+              onChange={(e) => setMaterialStatusFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="all">All Payment Status</option>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
+              <option value="partial">Partial</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Materials Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Material &amp; Category</th>
+                  <th>Project Site</th>
+                  <th style={{ textAlign: "right" }}>Inward Quantity</th>
+                  <th style={{ textAlign: "right" }}>Unit Rate</th>
+                  <th style={{ textAlign: "right" }}>Total Cost</th>
+                  <th>Supplier / Vendor</th>
+                  <th>Delivery Date</th>
+                  <th>Payment Status</th>
+                  <th style={{ textAlign: "center" }}>Challan Proof</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMaterials.length === 0 ? (
+                  <tr><td colSpan={9} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No material delivery records found.</td></tr>
+                ) : (
+                  filteredMaterials.map(m => {
+                    const siteName = m.siteName || sites.find(s => s.id === m.siteId)?.siteName || "Civil Project";
+                    const cost = Number(m.totalCost || m.amount || (Number(m.quantity || 0) * Number(m.unitPrice || 0))) || 0;
+                    const unitPrice = Number(m.unitPrice || m.rate || 0);
+
+                    return (
+                      <tr key={m.id}>
+                        <td>
+                          <strong style={{ fontSize: "12.5px", color: "var(--primary-950)", display: "block" }}>
+                            {m.materialName || m.name || "Material Item"}
+                          </strong>
+                          <span style={{ fontSize: "11px", color: "var(--primary-600)" }}>{m.category || "General Supply"}</span>
+                        </td>
+                        <td style={{ fontWeight: "600" }}>{siteName}</td>
+                        <td style={{ textAlign: "right", fontWeight: "700", fontVariantNumeric: "tabular-nums" }}>
+                          {m.quantity} {m.unit || "Units"}
+                        </td>
+                        <td style={{ textAlign: "right", fontFamily: "monospace" }}>
+                          {unitPrice > 0 ? formatINR(unitPrice) : "—"}
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--primary-950)" }}>
+                          {formatINR(cost)}
+                        </td>
+                        <td>{m.supplier || m.vendor || "Direct Supply"}</td>
+                        <td className="font-mono">{formatDateDMY(m.date || m.deliveryDate)}</td>
+                        <td>
+                          <Badge status={(m.paymentStatus || "").toLowerCase() === "paid" ? "success" : "warning"}>
+                            {m.paymentStatus || "Pending"}
+                          </Badge>
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {m.billPhotoUrl || m.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPreviewImage({ url: m.billPhotoUrl || m.photoUrl, title: `Material Receipt: ${m.materialName || m.name}` })}
+                              style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <Eye size={13} /> View
+                            </button>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 10: PAYMENTS & OUTSTANDINGS CENTRAL MONITOR
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderPaymentsView = () => {
+    // Merge general expenses payments, material payments, and labour payments
+    const allPaymentEntries = [];
+
+    (labourPayments || []).forEach(p => {
+      allPaymentEntries.push({
+        id: `lab_${p.id}`,
+        payee: p.teamName || p.contractorName || "Labour Contractor",
+        siteId: p.siteId,
+        siteName: sites.find(s => s.id === p.siteId)?.siteName || "Civil Site",
+        category: "Labour Payout",
+        amount: Number(p.amount || 0),
+        paidAmount: Number(p.paidAmount || p.amount || 0),
+        pendingAmount: Math.max(0, Number(p.amount || 0) - Number(p.paidAmount || p.amount || 0)),
+        status: (p.status || "Paid"),
+        date: p.date || p.paymentDate,
+        mode: p.paymentMethod || "Bank Transfer",
+        refId: p.referenceId || p.transactionId || "—"
+      });
+    });
+
+    materials.forEach(m => {
+      const cost = Number(m.totalCost || m.amount || (Number(m.quantity || 0) * Number(m.unitPrice || 0))) || 0;
+      const isPaid = (m.paymentStatus || "").toLowerCase() === "paid";
+      allPaymentEntries.push({
+        id: `mat_${m.id}`,
+        payee: m.supplier || m.vendor || "Material Supplier",
+        siteId: m.siteId,
+        siteName: m.siteName || sites.find(s => s.id === m.siteId)?.siteName || "Civil Site",
+        category: `Material: ${m.materialName || m.category || "Supply"}`,
+        amount: cost,
+        paidAmount: isPaid ? cost : 0,
+        pendingAmount: isPaid ? 0 : cost,
+        status: m.paymentStatus || "Pending",
+        date: m.date || m.deliveryDate,
+        mode: m.paymentMode || "Vendor Invoice",
+        refId: m.challanNo || m.invoiceNo || "—"
+      });
+    });
+
+    generalExpenses.forEach(e => {
+      allPaymentEntries.push({
+        id: `gen_${e.id}`,
+        payee: e.paidTo || "Operational Expense",
+        siteId: e.siteId,
+        siteName: sites.find(s => s.id === e.siteId)?.siteName || "General / HQ",
+        category: `Field Expense: ${e.category || "General"}`,
+        amount: Number(e.amount || 0),
+        paidAmount: Number(e.amount || 0),
+        pendingAmount: 0,
+        status: e.status || "Approved",
+        date: e.date,
+        mode: e.paymentMethod || "Cash / Petty",
+        refId: e.receiptNo || "—"
+      });
+    });
+
+    const filteredPayments = allPaymentEntries.filter(p => {
+      if (paymentSiteFilter && p.siteId !== paymentSiteFilter) return false;
+      if (paymentStatusFilter !== "all" && p.status.toLowerCase() !== paymentStatusFilter.toLowerCase()) return false;
+      if (paymentCategoryFilter !== "all" && !p.category.toLowerCase().includes(paymentCategoryFilter.toLowerCase())) return false;
+      if (paymentSearchQuery.trim()) {
+        const q = paymentSearchQuery.toLowerCase().trim();
+        const mPayee = (p.payee || "").toLowerCase().includes(q);
+        const mSite = (p.siteName || "").toLowerCase().includes(q);
+        const mCat = (p.category || "").toLowerCase().includes(q);
+        const mRef = (p.refId || "").toLowerCase().includes(q);
+        if (!mPayee && !mSite && !mCat && !mRef) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+    const totalPaid = filteredPayments.reduce((s, p) => s + p.paidAmount, 0);
+    const totalPending = filteredPayments.reduce((s, p) => s + p.pendingAmount, 0);
+    const totalLabourPaid = filteredPayments.filter(p => p.category.includes("Labour")).reduce((s, p) => s + p.paidAmount, 0);
+    const totalMaterialPaid = filteredPayments.filter(p => p.category.includes("Material")).reduce((s, p) => s + p.paidAmount, 0);
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <CreditCard size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalPaid)}</div>
+              <div className="admin-summary-label">Total Paid Outlays</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-red">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalPending)}</div>
+              <div className="admin-summary-label">Pending Outstandings</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <Users size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalLabourPaid)}</div>
+              <div className="admin-summary-label">Labour Payouts</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <Package size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalMaterialPaid)}</div>
+              <div className="admin-summary-label">Vendor Material Bills</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Corporate Payments &amp; Outstandings Monitor ({filteredPayments.length})
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Consolidated payment ledger for contractor wages, supplier bills, and field operational expenses.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search payee, invoice, site..."
+                value={paymentSearchQuery}
+                onChange={(e) => setPaymentSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={paymentSiteFilter}
+              onChange={(e) => setPaymentSiteFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="">All Sites</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+            </select>
+            <select
+              value={paymentCategoryFilter}
+              onChange={(e) => setPaymentCategoryFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="all">All Heads</option>
+              <option value="labour">Labour Payouts</option>
+              <option value="material">Material Invoices</option>
+              <option value="field">Field Expenses</option>
+            </select>
+            <select
+              value={paymentStatusFilter}
+              onChange={(e) => setPaymentStatusFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="all">All Status</option>
+              <option value="paid">Paid / Approved</option>
+              <option value="pending">Pending</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Payments Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Payee / Party Name</th>
+                  <th>Project Site</th>
+                  <th>Payment Head</th>
+                  <th style={{ textAlign: "right" }}>Total Bill</th>
+                  <th style={{ textAlign: "right" }}>Paid Amount</th>
+                  <th style={{ textAlign: "right" }}>Balance Due</th>
+                  <th>Status</th>
+                  <th>Payment Mode</th>
+                  <th>Reference / Txn ID</th>
+                  <th>Date</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPayments.length === 0 ? (
+                  <tr><td colSpan={10} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No payment records found.</td></tr>
+                ) : (
+                  filteredPayments.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ fontWeight: "700" }}>{p.payee}</td>
+                      <td>{p.siteName}</td>
+                      <td><Badge status="info">{p.category}</Badge></td>
+                      <td style={{ textAlign: "right", fontFamily: "monospace" }}>{formatINR(p.amount)}</td>
+                      <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--success-700)" }}>{formatINR(p.paidAmount)}</td>
+                      <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: p.pendingAmount > 0 ? "var(--danger-700)" : "var(--primary-600)" }}>
+                        {formatINR(p.pendingAmount)}
+                      </td>
+                      <td>
+                        <Badge status={p.status.toLowerCase() === "paid" || p.status.toLowerCase() === "approved" ? "success" : "warning"}>
+                          {p.status}
+                        </Badge>
+                      </td>
+                      <td>{p.mode}</td>
+                      <td className="font-mono" style={{ fontSize: "11px" }}>{p.refId}</td>
+                      <td className="font-mono">{formatDateDMY(p.date)}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 12: WORKER PAYOUTS & WAGE SETTLEMENT MONITOR
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderPayrollView = () => {
+    const totalWageDisbursed = (labourPayments || []).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+
+    const filteredPayroll = (labourPayments || []).filter(p => {
+      if (payrollSiteFilter && p.siteId !== payrollSiteFilter) return false;
+      if (payrollSearchQuery.trim()) {
+        const q = payrollSearchQuery.toLowerCase().trim();
+        const mTeam = (p.teamName || p.contractorName || "").toLowerCase().includes(q);
+        const mSite = (p.siteName || sites.find(s => s.id === p.siteId)?.siteName || "").toLowerCase().includes(q);
+        if (!mTeam && !mSite) return false;
+      }
+      return true;
+    });
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <DollarSign size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value" style={{ fontSize: "15px" }}>{formatINR(totalWageDisbursed)}</div>
+              <div className="admin-summary-label">Total Wages Disbursed</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-purple">
+              <Users size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{rawTeams.length}</div>
+              <div className="admin-summary-label">Active Labour Gangs</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <FileText size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{labourPayments.length}</div>
+              <div className="admin-summary-label">Wage Settlements Filed</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-blue">
+              <Building2 size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{sites.length}</div>
+              <div className="admin-summary-label">Operational Sites</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Worker Payouts &amp; Gang Settlement Register ({filteredPayroll.length})
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Wage disbursement records, contractor gang advances, and balance settlements.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search contractor, gang, site..."
+                value={payrollSearchQuery}
+                onChange={(e) => setPayrollSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={payrollSiteFilter}
+              onChange={(e) => setPayrollSiteFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="">All Sites</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* Payroll Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Labour Team / Contractor</th>
+                  <th>Project Site</th>
+                  <th>Trade Head</th>
+                  <th style={{ textAlign: "right" }}>Disbursed Amount</th>
+                  <th>Payment Date</th>
+                  <th>Payment Method</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredPayroll.length === 0 ? (
+                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No worker payout records found.</td></tr>
+                ) : (
+                  filteredPayroll.map(p => {
+                    const siteName = p.siteName || sites.find(s => s.id === p.siteId)?.siteName || "Civil Project";
+
+                    return (
+                      <tr key={p.id}>
+                        <td style={{ fontWeight: "700" }}>{p.teamName || p.contractorName || "Site Labour Gang"}</td>
+                        <td>{siteName}</td>
+                        <td><Badge status="info">{p.category || "Wage Disbursement"}</Badge></td>
+                        <td style={{ textAlign: "right", fontWeight: "700", fontFamily: "monospace", color: "var(--success-700)" }}>
+                          {formatINR(p.amount)}
+                        </td>
+                        <td className="font-mono">{formatDateDMY(p.date || p.paymentDate)}</td>
+                        <td>{p.paymentMethod || "Direct Transfer"}</td>
+                        <td><Badge status="success">Settled</Badge></td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 13: CENTRAL DAILY PROGRESS REPORTS (DPR) & SITE LOGS
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderReportsView = () => {
+    const filteredReports = allDprs.filter(r => {
+      if (reportsSiteFilter && r.siteId !== reportsSiteFilter) return false;
+      if (reportsDateFilter && (r.date || r.reportDate) !== reportsDateFilter) return false;
+      if (reportsSearchQuery.trim()) {
+        const q = reportsSearchQuery.toLowerCase().trim();
+        const mSite = (r.siteName || sites.find(s => s.id === r.siteId)?.siteName || "").toLowerCase().includes(q);
+        const mEng = (r.engineerName || r.submittedByName || "").toLowerCase().includes(q);
+        const mWork = (r.workDone || r.description || r.activity || "").toLowerCase().includes(q);
+        if (!mSite && !mEng && !mWork) return false;
+      }
+      return true;
+    }).sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+
+    const todayReports = filteredReports.filter(r => (r.date || r.reportDate || "").startsWith(todayDateString));
+    const sitesReportedToday = new Set(todayReports.map(r => r.siteId)).size;
+    const totalPhotos = filteredReports.reduce((s, r) => s + ((r.photos && r.photos.length) || (r.photoUrl ? 1 : 0)), 0);
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid">
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-blue">
+              <FileText size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{filteredReports.length}</div>
+              <div className="admin-summary-label">Total DPR Logs</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <ClipboardCheck size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{todayReports.length}</div>
+              <div className="admin-summary-label">Reports Logged Today</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <Building2 size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{sitesReportedToday}/{sites.length}</div>
+              <div className="admin-summary-label">Active Sites Reported</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-teal">
+              <Camera size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{totalPhotos}</div>
+              <div className="admin-summary-label">Site Evidence Photos</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Central Daily Progress Reports (DPR) Monitor ({filteredReports.length})
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Field progress logs, concrete pour logs, weather conditions, and structural stage updates.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <div className="sites-search-wrapper" style={{ minWidth: "200px" }}>
+              <Search size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--text-muted)", pointerEvents: "none" }} />
+              <input
+                type="text"
+                placeholder="Search work, engineer, site..."
+                value={reportsSearchQuery}
+                onChange={(e) => setReportsSearchQuery(e.target.value)}
+                style={{ width: "100%", height: "38px", paddingLeft: "32px", paddingRight: "10px", borderRadius: "8px", border: "1px solid var(--border-color)", fontSize: "12.5px", boxSizing: "border-box" }}
+              />
+            </div>
+            <select
+              value={reportsSiteFilter}
+              onChange={(e) => setReportsSiteFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="">All Sites</option>
+              {sites.map(s => <option key={s.id} value={s.id}>{s.siteName}</option>)}
+            </select>
+            <input
+              type="date"
+              value={reportsDateFilter}
+              onChange={(e) => setReportsDateFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px" }}
+            />
+            {reportsDateFilter && (
+              <button
+                type="button"
+                onClick={() => setReportsDateFilter("")}
+                className="btn btn-outline"
+                style={{ height: "38px", padding: "0 10px", fontSize: "12px" }}
+              >
+                Clear Date
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Reports Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Project Site</th>
+                  <th>Submitting Engineer</th>
+                  <th>Report Date</th>
+                  <th>Weather</th>
+                  <th>Work Executed Description</th>
+                  <th style={{ textAlign: "right" }}>Labour on Site</th>
+                  <th style={{ textAlign: "center" }}>Photo Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredReports.length === 0 ? (
+                  <tr><td colSpan={7} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No daily progress reports found.</td></tr>
+                ) : (
+                  filteredReports.map(r => {
+                    const siteName = r.siteName || sites.find(s => s.id === r.siteId)?.siteName || "Civil Project";
+                    const photos = r.photos || (r.photoUrl ? [r.photoUrl] : []);
+
+                    return (
+                      <tr key={r.id}>
+                        <td style={{ fontWeight: "700" }}>{siteName}</td>
+                        <td>{r.engineerName || r.submittedByName || "Site Engineer"}</td>
+                        <td className="font-mono">{formatDateDMY(r.date || r.reportDate)}</td>
+                        <td>
+                          <Badge status="info">{r.weather || "Sunny / Clear"}</Badge>
+                        </td>
+                        <td style={{ maxWidth: "300px" }}>
+                          <span style={{ fontSize: "12px", color: "var(--primary-900)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {r.workDone || r.description || r.activity || "Construction work logged"}
+                          </span>
+                        </td>
+                        <td style={{ textAlign: "right", fontWeight: "700" }}>
+                          {r.labourCount || r.workersCount || "—"}
+                        </td>
+                        <td style={{ textAlign: "center" }}>
+                          {photos.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setSelectedPreviewImage({ url: photos[0], title: `DPR Photo: ${siteName}` })}
+                              style={{ border: "none", background: "none", color: "var(--brand-orange)", fontWeight: "750", fontSize: "12px", cursor: "pointer", display: "inline-flex", alignItems: "center", gap: "4px" }}
+                            >
+                              <Camera size={13} /> {photos.length} Photo{photos.length === 1 ? "" : "s"}
+                            </button>
+                          ) : "—"}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // VIEW 14: CENTRAL APPROVALS & GOVERNANCE GATEWAY
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderApprovalsView = () => {
+    const filteredApprovals = approvals.filter(a => {
+      if (approvalsStatusFilter !== "all" && (a.status || "pending").toLowerCase() !== approvalsStatusFilter.toLowerCase()) return false;
+      if (approvalsTypeFilter !== "all" && (a.type || "").toLowerCase() !== approvalsTypeFilter.toLowerCase()) return false;
+      return true;
+    }).sort((a, b) => (b.requestDate || b.createdAt || "").localeCompare(a.requestDate || a.createdAt || ""));
+
+    const pendingCount = approvals.filter(a => (a.status || "pending").toLowerCase() === "pending").length;
+    const approvedCount = approvals.filter(a => (a.status || "").toLowerCase() === "approved").length;
+    const rejectedCount = approvals.filter(a => (a.status || "").toLowerCase() === "rejected").length;
+
+    return (
+      <div className="admin-dashboard-container">
+        {/* KPI Summary Cards */}
+        <div className="admin-summary-grid" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-orange">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{pendingCount}</div>
+              <div className="admin-summary-label">Pending Review</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-green">
+              <CheckCircle2 size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{approvedCount}</div>
+              <div className="admin-summary-label">Approved Requests</div>
+            </div>
+          </div>
+          <div className="admin-summary-card">
+            <div className="admin-summary-icon erp-kpi-icon-red">
+              <XCircle size={20} />
+            </div>
+            <div className="admin-summary-info">
+              <div className="admin-summary-value">{rejectedCount}</div>
+              <div className="admin-summary-label">Rejected Requests</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="sites-toolbar-container">
+          <div>
+            <h2 style={{ margin: 0, fontSize: "16px", fontWeight: "800", color: "var(--primary-950)" }}>
+              Central Approvals &amp; Governance Gateway ({filteredApprovals.length})
+            </h2>
+            <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--primary-600)" }}>
+              Review and audit pending engineer leaves, site location updates, high-value material orders, and expenses.
+            </p>
+          </div>
+
+          <div className="sites-actions-group">
+            <select
+              value={approvalsStatusFilter}
+              onChange={(e) => setApprovalsStatusFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="pending">Pending Review ({pendingCount})</option>
+              <option value="approved">Approved ({approvedCount})</option>
+              <option value="rejected">Rejected ({rejectedCount})</option>
+              <option value="all">All Requests ({approvals.length})</option>
+            </select>
+            <select
+              value={approvalsTypeFilter}
+              onChange={(e) => setApprovalsTypeFilter(e.target.value)}
+              style={{ height: "38px", padding: "0 10px", borderRadius: "8px", border: "1px solid var(--border-color)", backgroundColor: "#fff", fontSize: "12.5px", fontWeight: "600" }}
+            >
+              <option value="all">All Types</option>
+              <option value="leave">Leave Requests</option>
+              <option value="location">Site Location</option>
+              <option value="material">Material Orders</option>
+              <option value="expense">Field Expense</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Approvals Table */}
+        <div className="admin-table-card">
+          <div className="admin-table-scroll">
+            <table className="admin-table">
+              <thead>
+                <tr>
+                  <th>Request Type</th>
+                  <th>Requested By</th>
+                  <th>Details / Scope</th>
+                  <th>Submission Date</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "right" }}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredApprovals.length === 0 ? (
+                  <tr><td colSpan={6} style={{ textAlign: "center", padding: "32px", color: "var(--text-muted)" }}>No approval requests matching filters.</td></tr>
+                ) : (
+                  filteredApprovals.map(req => {
+                    const isPending = (req.status || "pending").toLowerCase() === "pending";
+
+                    return (
+                      <tr key={req.id}>
+                        <td><Badge status="info">{req.type || "General"}</Badge></td>
+                        <td style={{ fontWeight: "700" }}>{req.requestedBy || req.employeeName || "Site Engineer"}</td>
+                        <td>{req.details || req.description || "Operational request"}</td>
+                        <td className="font-mono">{formatDateDMY(req.requestDate || req.createdAt)}</td>
+                        <td>
+                          <Badge status={(req.status || "pending").toLowerCase() === "approved" ? "success" : ((req.status || "pending").toLowerCase() === "rejected" ? "danger" : "warning")}>
+                            {req.status || "Pending"}
+                          </Badge>
+                        </td>
+                        <td style={{ textAlign: "right" }}>
+                          {isPending ? (
+                            <div style={{ display: "inline-flex", gap: "6px" }}>
+                              <button
+                                type="button"
+                                onClick={() => handleApproveRequest(req)}
+                                className="erp-btn-primary"
+                                style={{ fontSize: "11px", padding: "4px 8px", backgroundColor: "#16a34a" }}
+                              >
+                                Approve
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRejectRequest(req)}
+                                className="erp-btn-secondary"
+                                style={{ fontSize: "11px", padding: "4px 8px", color: "#dc2626" }}
+                              >
+                                Reject
+                              </button>
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>Resolved</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Layout
       title={
@@ -4069,7 +5228,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
         tab === "labour" ? "Daily Labour & Workforce" :
         tab === "materials" ? "Material Stock Inventory" :
         tab === "finance" ? "Financial Ledger & Expenses" :
+        tab === "payments" ? "Payments & Outstandings" :
+        tab === "payroll" ? "Worker Payouts & Settlement" :
         tab === "progress" ? "Schedule & Progress Standing" :
+        tab === "reports" ? "Central Daily Progress Reports (DPR)" :
         tab === "approvals" ? "Central Approvals Gateway" :
         tab === "activity" ? "System Activity & Audit Trail" :
         `Super Admin: ${tab.charAt(0).toUpperCase() + tab.slice(1)}`
@@ -4092,7 +5254,10 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
       {tab === "labour" && renderLabourView()}
       {tab === "materials" && renderMaterialsView()}
       {tab === "finance" && renderFinanceView()}
+      {tab === "payments" && renderPaymentsView()}
+      {tab === "payroll" && renderPayrollView()}
       {tab === "progress" && renderProgressView()}
+      {tab === "reports" && renderReportsView()}
       {tab === "approvals" && renderApprovalsView()}
       {tab === "activity" && renderActivityView()}
 
