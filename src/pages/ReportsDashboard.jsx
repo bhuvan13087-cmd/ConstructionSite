@@ -92,6 +92,34 @@ const formatDDMMYYYY = (dateVal) => {
   return cleanStr;
 };
 
+// Universal DD/MM/YYYY date formatter (strictly DD/MM/YYYY, e.g. 26/08/2026)
+const formatDDMMYYYYSlash = (dateVal) => {
+  if (dateVal === null || dateVal === undefined || dateVal === "") return "";
+  const cleanStr = normalizeDateStr(dateVal);
+  if (!cleanStr) return "";
+  const parts = cleanStr.split("-");
+  if (parts.length === 3) {
+    if (parts[0].length === 4) {
+      const [y, m, d] = parts;
+      return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+    }
+    if (parts[2].length === 4) {
+      return `${parts[0].padStart(2, '0')}/${parts[1].padStart(2, '0')}/${parts[2]}`;
+    }
+  }
+  const slashParts = cleanStr.split("/");
+  if (slashParts.length === 3) {
+    if (slashParts[0].length === 4) {
+      const [y, m, d] = slashParts;
+      return `${d.padStart(2, '0')}/${m.padStart(2, '0')}/${y}`;
+    }
+    if (slashParts[2].length === 4) {
+      return `${slashParts[0].padStart(2, '0')}/${slashParts[1].padStart(2, '0')}/${slashParts[2]}`;
+    }
+  }
+  return cleanStr;
+};
+
 // Safe JSX child renderer to prevent "Objects are not valid as a React child" errors
 const safeRender = (val, fallback = "--") => {
   if (val === null || val === undefined) return fallback;
@@ -1116,6 +1144,222 @@ export default function ReportsDashboard({ embedded = false }) {
     };
   }, [filteredSites, generalExpenses]);
 
+  // ==========================================================================
+  // CANONICAL DAILY ATTENDANCE REPORT DATA (SINGLE SOURCE OF TRUTH)
+  // Shared by:
+  // 1. PDF Printable Report (reportTemplate === "daily_attendance")
+  // 2. CSV Export (exportToExcel("daily_attendance", "csv"))
+  // 3. On-screen Site Engineer Attendance table (attendance_report tab)
+  // ==========================================================================
+  const dailyAttendanceReportData = useMemo(() => {
+    // 1. Determine effective date range
+    const todayStr = new Date().toISOString().split("T")[0];
+    const rawStart = filterStartDate || filterEndDate || todayStr;
+    const rawEnd = filterEndDate || filterStartDate || todayStr;
+
+    // Sort so startDate <= endDate
+    const [startDate, endDate] = rawStart <= rawEnd ? [rawStart, rawEnd] : [rawEnd, rawStart];
+    const isSingleDay = (startDate === endDate);
+
+    // 2. Generate all consecutive dates in range inclusive (no dates skipped)
+    const dates = [];
+    const sDate = new Date(startDate);
+    const eDate = new Date(endDate);
+    if (!isNaN(sDate.getTime()) && !isNaN(eDate.getTime())) {
+      const cur = new Date(sDate);
+      while (cur <= eDate) {
+        dates.push(cur.toISOString().split("T")[0]);
+        cur.setDate(cur.getDate() + 1);
+      }
+    } else {
+      dates.push(startDate);
+    }
+
+    // 3. Determine applicable site engineers based on selected site scope
+    let applicableEngineers = [];
+    if (filterEngineerId !== "all") {
+      applicableEngineers = engineers.filter(e => e.id === filterEngineerId || e.uid === filterEngineerId);
+    } else if (filterSiteId !== "all") {
+      const targetSite = sites.find(s => s.id === filterSiteId);
+      const siteEngSet = new Set(targetSite?.assignedEngineers || []);
+      applicableEngineers = engineers.filter(e => {
+        if (e.status === "inactive" || e.status === "disabled") return false;
+        if (e.assignedSites && e.assignedSites.includes(filterSiteId)) return true;
+        if (siteEngSet.has(e.id) || siteEngSet.has(e.uid)) return true;
+        const hasCheckInAtSite = engineerAttendance.some(a => {
+          const aEngId = a.engineerId || a.userId || a.uid;
+          if (aEngId !== e.id && aEngId !== e.uid) return false;
+          if (a.siteId !== filterSiteId) return false;
+          const aDate = normalizeDateStr(a.date || a.attendanceDate);
+          return dates.includes(aDate);
+        });
+        return hasCheckInAtSite;
+      });
+    } else {
+      applicableEngineers = engineers.filter(e => {
+        if (e.status === "inactive" || e.status === "disabled") return false;
+        if (userSites.length > 0 && !isSuperAdmin && userRole !== "admin") {
+          const assigned = e.assignedSites || [];
+          return assigned.some(sId => allowedSiteIds.has(sId));
+        }
+        return true;
+      });
+    }
+
+    // Deduplicate applicableEngineers by unique ID
+    const uniqueEngMap = new Map();
+    applicableEngineers.forEach(eng => {
+      const k = eng.id || eng.uid;
+      if (k && !uniqueEngMap.has(k)) {
+        uniqueEngMap.set(k, eng);
+      }
+    });
+    const canonicalApplicableEngineers = Array.from(uniqueEngMap.values()).sort((a, b) => 
+      (a.fullName || a.name || "").localeCompare(b.fullName || b.name || "")
+    );
+
+    // 4. For each date in range, evaluate attendance for every applicable engineer
+    const records = [];
+    let totalPresentCount = 0;
+    let totalAbsentCount = 0;
+    const dailySummaries = [];
+
+    dates.forEach(dateStr => {
+      const formattedDate = formatDDMMYYYYSlash(dateStr);
+      let dayPresent = 0;
+      let dayAbsent = 0;
+      const dayRecords = [];
+
+      canonicalApplicableEngineers.forEach(eng => {
+        const engId = eng.id || eng.uid;
+        const engName = eng.fullName || eng.name || "Site Engineer";
+
+        // Find all attendance records for this engineer on this date
+        const matchingAtts = engineerAttendance.filter(a => {
+          const aDate = normalizeDateStr(a.date || a.attendanceDate);
+          if (aDate !== dateStr) return false;
+          const aEngId = a.engineerId || a.userId || a.uid;
+          if (aEngId !== engId && aEngId !== eng.docId && aEngId !== eng.customId) {
+            if (!eng.email || (a.engineerEmail || "").toLowerCase() !== eng.email.toLowerCase()) {
+              return false;
+            }
+          }
+          if (filterSiteId !== "all" && a.siteId !== filterSiteId) return false;
+          return true;
+        });
+
+        if (matchingAtts.length > 0) {
+          // Sort by earliest check-in time to pick canonical first attendance
+          matchingAtts.sort((a, b) => {
+            const timeA = a.checkInTime?.seconds || a.timestamp?.seconds || 0;
+            const timeB = b.checkInTime?.seconds || b.timestamp?.seconds || 0;
+            if (timeA && timeB && timeA !== timeB) return timeA - timeB;
+            return (a.time || "").localeCompare(b.time || "");
+          });
+
+          const chosen = matchingAtts[0];
+          const checkInTime = chosen.checkInTimeFormatted || chosen.time || (chosen.checkInTime?.seconds 
+            ? new Date(chosen.checkInTime.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })
+            : (chosen.timestamp?.seconds 
+                ? new Date(chosen.timestamp.seconds * 1000).toLocaleTimeString("en-IN", { timeZone: "Asia/Kolkata", hour: "2-digit", minute: "2-digit", hour12: true })
+                : "--"));
+
+          const siteObj = sites.find(s => s.id === chosen.siteId);
+          const siteName = siteObj?.siteName || chosen.siteName || "Assigned Site";
+          const photoUrl = chosen.photoUrl || chosen.checkInPhotoUrl || null;
+
+          dayPresent++;
+          totalPresentCount++;
+
+          dayRecords.push({
+            id: `att_${engId}_${dateStr}`,
+            date: dateStr,
+            formattedDate,
+            engineerId: engId,
+            engineerName: engName,
+            firstAttendanceTime: checkInTime,
+            status: "Present",
+            photoUrl,
+            siteId: chosen.siteId || "",
+            siteName
+          });
+        } else {
+          // Engineer did not log attendance on this date -> Absent
+          dayAbsent++;
+          totalAbsentCount++;
+
+          dayRecords.push({
+            id: `abs_${engId}_${dateStr}`,
+            date: dateStr,
+            formattedDate,
+            engineerId: engId,
+            engineerName: engName,
+            firstAttendanceTime: "--",
+            status: "Absent",
+            photoUrl: null,
+            siteId: filterSiteId !== "all" ? filterSiteId : "",
+            siteName: filterSiteId !== "all" ? (sites.find(s => s.id === filterSiteId)?.siteName || "") : "—"
+          });
+        }
+      });
+
+      // Sort day records: Present first, then Absent (and alphabetical within each)
+      dayRecords.sort((a, b) => {
+        if (a.status === "Present" && b.status !== "Present") return -1;
+        if (a.status !== "Present" && b.status === "Present") return 1;
+        return a.engineerName.localeCompare(b.engineerName);
+      });
+
+      records.push(...dayRecords);
+
+      const dayTotal = canonicalApplicableEngineers.length;
+      const dayRate = dayTotal > 0 ? Math.round((dayPresent / dayTotal) * 100) : 0;
+      dailySummaries.push({
+        date: dateStr,
+        formattedDate,
+        totalEngineers: dayTotal,
+        presentCount: dayPresent,
+        absentCount: dayAbsent,
+        attendanceRate: dayRate
+      });
+    });
+
+    const totalEngineers = canonicalApplicableEngineers.length;
+    const summary = isSingleDay
+      ? {
+          totalEngineers,
+          presentCount: totalPresentCount,
+          absentCount: totalAbsentCount,
+          totalPresent: totalPresentCount,
+          attendanceRate: totalEngineers > 0 ? Math.round((totalPresentCount / totalEngineers) * 100) : 0
+        }
+      : {
+          totalEngineers,
+          totalDays: dates.length,
+          presentCount: totalPresentCount,
+          absentCount: totalAbsentCount,
+          totalPresent: totalPresentCount,
+          attendanceRate: (totalEngineers * dates.length) > 0 ? Math.round((totalPresentCount / (totalEngineers * dates.length)) * 100) : 0
+        };
+
+    const siteObj = sites.find(s => s.id === filterSiteId);
+    const siteNameDisplay = filterSiteId === "all" ? "All Sites Scope" : (siteObj?.siteName || "Selected Site");
+
+    return {
+      isSingleDay,
+      startDate,
+      endDate,
+      formattedStartDate: formatDDMMYYYYSlash(startDate),
+      formattedEndDate: formatDDMMYYYYSlash(endDate),
+      dates,
+      applicableEngineers: canonicalApplicableEngineers,
+      records,
+      dailySummaries,
+      summary,
+      siteNameDisplay
+    };
+  }, [filterStartDate, filterEndDate, filterSiteId, filterEngineerId, engineers, engineerAttendance, sites, allowedSiteIds, userSites, isSuperAdmin, userRole]);
+
   // Calculate Labour Date Range Report Data from canonical production records (labourAttendance state)
   const labourDateRangeReportData = useMemo(() => {
     // 1. Deduplicate by doc ID to prevent double counting and exclude lock documents
@@ -1821,7 +2065,34 @@ export default function ReportsDashboard({ embedded = false }) {
 
     const anchor = filterStartDate || new Date().toISOString().split("T")[0];
 
-    if (type === "attendance") {
+    if (type === "daily_attendance" || (type === "overview" && reportTemplate === "daily_attendance")) {
+      const fromStr = dailyAttendanceReportData.formattedStartDate || "Start";
+      const toStr = dailyAttendanceReportData.formattedEndDate || "End";
+      const siteClean = (filterSiteId === "all" ? "All_Sites" : (sites.find(s => s.id === filterSiteId)?.siteName || "Site")).replace(/[^a-zA-Z0-9_-]/g, "_");
+      filename = dailyAttendanceReportData.isSingleDay 
+        ? `Daily_Attendance_Report_${siteClean}_${fromStr.replace(/\//g, "-")}.${extension}`
+        : `Daily_Attendance_Report_${siteClean}_${fromStr.replace(/\//g, "-")}_to_${toStr.replace(/\//g, "-")}.${extension}`;
+
+      headers = ["Engineer Name", "Date", "First Attendance Time", "Status", "Photo Attachment"];
+
+      dailyAttendanceReportData.records.forEach(r => {
+        rows.push([
+          `"${(r.engineerName || "").replace(/"/g, '""')}"`,
+          `"${r.formattedDate}"`,
+          `"${r.firstAttendanceTime}"`,
+          `"${r.status}"`,
+          `"${r.photoUrl ? "Photo Captured" : (r.status === "Absent" ? "--" : "No Photo")}"`
+        ]);
+      });
+
+      rows.push([]);
+      rows.push(["SUMMARY", "", "", "", ""]);
+      rows.push(["Total Site Engineers", dailyAttendanceReportData.summary.totalEngineers, "", "", ""]);
+      rows.push(["Present Count", dailyAttendanceReportData.summary.presentCount, "", "", ""]);
+      rows.push(["Absent Count", dailyAttendanceReportData.summary.absentCount, "", "", ""]);
+      rows.push(["Total Present", dailyAttendanceReportData.summary.totalPresent, "", "", ""]);
+      rows.push(["Attendance Rate", `${dailyAttendanceReportData.summary.attendanceRate}%`, "", "", ""]);
+    } else if (type === "attendance") {
       filename = `Attendance_Report_${new Date().toISOString().split("T")[0]}.${extension}`;
       headers = ["Date", "Site Name", "Labour Team", "Labour Category", "Worker Count", "Attendance Type"];
       
@@ -2241,7 +2512,8 @@ export default function ReportsDashboard({ embedded = false }) {
             <button
               type="button"
               onClick={() => {
-                if (activeTab === "labour_report") setReportTemplate("labour");
+                if (activeTab === "attendance_report") setReportTemplate("daily_attendance");
+                else if (activeTab === "labour_report") setReportTemplate("labour");
                 else if (activeTab === "material_report") setReportTemplate("material");
                 else if (activeTab === "expense_report") setReportTemplate("expense");
                 else if (activeTab === "progress_report") setReportTemplate("progress");
@@ -2273,7 +2545,13 @@ export default function ReportsDashboard({ embedded = false }) {
             {/* 3. Export CSV Button */}
             <button
               type="button"
-              onClick={() => exportToExcel(activeTab.replace("_report", ""), "csv")}
+              onClick={() => {
+                if (reportTemplate === "daily_attendance" || activeTab === "attendance_report") {
+                  exportToExcel("daily_attendance", "csv");
+                } else {
+                  exportToExcel(activeTab.replace("_report", ""), "csv");
+                }
+              }}
               style={{
                 height: "36px",
                 padding: "0 14px",
@@ -2324,7 +2602,8 @@ export default function ReportsDashboard({ embedded = false }) {
               onChange={(e) => {
                 const tab = e.target.value;
                 setActiveTab(tab);
-                if (tab === "labour_report") setReportTemplate("labour");
+                if (tab === "attendance_report") setReportTemplate("daily_attendance");
+                else if (tab === "labour_report") setReportTemplate("labour");
                 else if (tab === "material_report") setReportTemplate("material");
                 else if (tab === "expense_report") setReportTemplate("expense");
                 else if (tab === "progress_report") setReportTemplate("progress");
@@ -2332,6 +2611,7 @@ export default function ReportsDashboard({ embedded = false }) {
               style={{ width: "100%", padding: "8px 10px", borderRadius: "6px", border: "1px solid #cbd5e1", backgroundColor: "#ffffff", fontSize: "12.5px", fontWeight: "600", outline: "none" }}
             >
               <option value="overview">Management Overview</option>
+              <option value="attendance_report">Attendance Reports</option>
               <option value="labour_report">Labour Reports</option>
               <option value="material_report">Material Reports</option>
               <option value="expense_report">Expense Reports</option>
@@ -2758,7 +3038,7 @@ export default function ReportsDashboard({ embedded = false }) {
             </div>
             <div style={{ display: "flex", gap: "10px" }}>
               <Button onClick={() => exportToExcel("attendance", "xls")} variant="outline" icon={Download}>Export Excel</Button>
-              <Button onClick={() => exportToExcel("attendance", "csv")} variant="outline" icon={Download}>Export CSV</Button>
+              <Button onClick={() => exportToExcel("daily_attendance", "csv")} variant="outline" icon={Download}>Export CSV</Button>
             </div>
           </div>
           
@@ -2833,48 +3113,12 @@ export default function ReportsDashboard({ embedded = false }) {
                 </thead>
                 <tbody>
                   {(() => {
-                    const records = [];
-                    engineers.forEach(eng => {
-                      if (filterEngineerId !== "all" && eng.id !== filterEngineerId) return;
-                      
-                      const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
-                      atts.forEach(a => {
-                        const normDate = normalizeDateStr(a.date);
-                        if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
-                        if (!allowedSiteIds.has(a.siteId)) return;
-                        if (!matchesDateFilters(normDate)) return;
-                        records.push({
-                          id: a.id || `att_${a.siteId || ""}_${eng.id}_${normDate}`,
-                          date: normDate,
-                          name: eng.fullName,
-                          time: a.checkInTime || "--",
-                          status: "Present",
-                          photoUrl: a.checkInPhotoUrl || a.photoUrl || null
-                        });
-                      });
-
-                      const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
-                      leavesList.forEach(l => {
-                        const normDate = normalizeDateStr(l.date);
-                        if (!matchesDateFilters(normDate)) return;
-                        records.push({
-                          id: `lv_${eng.id}_${normDate}`,
-                          date: normDate,
-                          name: eng.fullName,
-                          time: "--",
-                          status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
-                          photoUrl: null
-                        });
-                      });
-                    });
-
-                    records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-
+                    const records = dailyAttendanceReportData.records;
                     if (records.length === 0) {
                       return (
                         <tr>
                           <td colSpan={5} style={{ textAlign: "center", padding: "20px", color: "var(--text-muted)" }}>
-                            No supervisor attendance logs found matching filters.
+                            No site engineer attendance logs found matching filters.
                           </td>
                         </tr>
                       );
@@ -2882,9 +3126,9 @@ export default function ReportsDashboard({ embedded = false }) {
 
                     return records.map((rec) => (
                       <tr key={rec.id}>
-                        <td className="font-mono">{safeRender(rec.date)}</td>
-                        <td style={{ fontWeight: "700" }}>{safeRender(rec.name)}</td>
-                        <td className="font-mono">{safeRender(rec.time)}</td>
+                        <td className="font-mono">{rec.formattedDate}</td>
+                        <td style={{ fontWeight: "700" }}>{safeRender(rec.engineerName)}</td>
+                        <td className="font-mono">{safeRender(rec.firstAttendanceTime)}</td>
                         <td>
                           <Badge status={rec.status === "Present" ? "success" : "danger"}>
                             {rec.status}
@@ -2899,7 +3143,9 @@ export default function ReportsDashboard({ embedded = false }) {
                               onClick={() => window.open(rec.photoUrl, "_blank")}
                             />
                           ) : (
-                            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>No Photo</span>
+                            <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                              {rec.status === "Absent" ? "--" : "No Photo"}
+                            </span>
                           )}
                         </td>
                       </tr>
@@ -4009,7 +4255,7 @@ export default function ReportsDashboard({ embedded = false }) {
             </div>
           </div>
           <div style={{ textAlign: "right", fontSize: "10px", color: "#475569" }}>
-            <div><strong>Report Date:</strong> {formatDDMMYYYY(new Date())}</div>
+            <div><strong>Report Date:</strong> {formatDDMMYYYYSlash(new Date())}</div>
             {userProfile?.fullName && <div><strong>Generated By:</strong> {userProfile.fullName}</div>}
           </div>
         </div>
@@ -4026,9 +4272,13 @@ export default function ReportsDashboard({ embedded = false }) {
             </div>
             <div>
               <strong>Report Period:</strong> {
-                (filterStartDate && filterEndDate)
-                  ? `${formatDDMMYYYY(filterStartDate)} to ${formatDDMMYYYY(filterEndDate)}`
-                  : (filterStartDate ? `From ${formatDDMMYYYY(filterStartDate)}` : (filterEndDate ? `Up to ${formatDDMMYYYY(filterEndDate)}` : "All Dates"))
+                reportTemplate === "daily_attendance"
+                  ? (dailyAttendanceReportData.isSingleDay 
+                      ? dailyAttendanceReportData.formattedStartDate 
+                      : `${dailyAttendanceReportData.formattedStartDate} to ${dailyAttendanceReportData.formattedEndDate}`)
+                  : ((filterStartDate && filterEndDate)
+                      ? `${formatDDMMYYYY(filterStartDate)} to ${formatDDMMYYYY(filterEndDate)}`
+                      : (filterStartDate ? `From ${formatDDMMYYYY(filterStartDate)}` : (filterEndDate ? `Up to ${formatDDMMYYYY(filterEndDate)}` : "All Dates")))
               }
             </div>
             {/* Show Site Engineer once if applicable and available */}
@@ -4053,64 +4303,60 @@ export default function ReportsDashboard({ embedded = false }) {
         {/* PDF TEMPLATE: DAILY ATTENDANCE */}
         {reportTemplate === "daily_attendance" && (
           <div>
-            <h4 style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#0f172a", margin: "14px 0 6px 0" }}>Site Engineer Check-In Logs</h4>
+            {/* Executive Summary Block */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "8px", marginBottom: "12px" }}>
+              <div style={{ border: "1px solid #cbd5e1", borderRadius: "4px", padding: "6px 8px", backgroundColor: "#f8fafc", textAlign: "center" }}>
+                <div style={{ fontSize: "9px", fontWeight: "700", color: "#64748b", textTransform: "uppercase" }}>Total Site Engineers</div>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#0f172a", marginTop: "2px" }}>{dailyAttendanceReportData.summary.totalEngineers}</div>
+              </div>
+              <div style={{ border: "1px solid #bbf7d0", borderRadius: "4px", padding: "6px 8px", backgroundColor: "#f0fdf4", textAlign: "center" }}>
+                <div style={{ fontSize: "9px", fontWeight: "700", color: "#166534", textTransform: "uppercase" }}>Present Count</div>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#15803d", marginTop: "2px" }}>{dailyAttendanceReportData.summary.presentCount}</div>
+              </div>
+              <div style={{ border: "1px solid #fecaca", borderRadius: "4px", padding: "6px 8px", backgroundColor: "#fef2f2", textAlign: "center" }}>
+                <div style={{ fontSize: "9px", fontWeight: "700", color: "#991b1b", textTransform: "uppercase" }}>Absent Count</div>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#b91c1c", marginTop: "2px" }}>{dailyAttendanceReportData.summary.absentCount}</div>
+              </div>
+              <div style={{ border: "1px solid #bfdbfe", borderRadius: "4px", padding: "6px 8px", backgroundColor: "#eff6ff", textAlign: "center" }}>
+                <div style={{ fontSize: "9px", fontWeight: "700", color: "#1e40af", textTransform: "uppercase" }}>Attendance Rate</div>
+                <div style={{ fontSize: "15px", fontWeight: "800", color: "#2563eb", marginTop: "2px" }}>{dailyAttendanceReportData.summary.attendanceRate}%</div>
+              </div>
+            </div>
+
+            <h4 style={{ fontSize: "12px", fontWeight: "700", textTransform: "uppercase", color: "#0f172a", margin: "14px 0 6px 0" }}>
+              Site Engineer Check-In &amp; Absence Logs {dailyAttendanceReportData.isSingleDay ? `(${dailyAttendanceReportData.formattedStartDate})` : `(${dailyAttendanceReportData.formattedStartDate} to ${dailyAttendanceReportData.formattedEndDate})`}
+            </h4>
             <table className="printable-table">
               <thead>
                 <tr>
-                  <th>Date</th>
-                  <th>Engineer Name</th>
-                  <th>Check-In Time</th>
-                  <th>Status</th>
-                  <th>Photo Attachment</th>
+                  <th style={{ width: "15%" }}>Date</th>
+                  <th style={{ width: "30%" }}>Engineer Name</th>
+                  <th style={{ width: "20%" }}>First Attendance Time</th>
+                  <th style={{ width: "15%" }}>Status</th>
+                  <th style={{ width: "20%" }}>Photo Attachment</th>
                 </tr>
               </thead>
               <tbody>
-                {(() => {
-                  const records = [];
-                  engineers.forEach(eng => {
-                    if (filterEngineerId !== "all" && eng.id !== filterEngineerId) return;
-                    const atts = engineerAttendance.filter(a => a.engineerId === eng.id);
-                    atts.forEach(a => {
-                      const normDate = normalizeDateStr(a.date);
-                      if (filterSiteId !== "all" && a.siteId !== filterSiteId) return;
-                      if (!matchesDateFilters(normDate)) return;
-                      records.push({
-                        id: `att_${eng.id}_${normDate}`,
-                        date: normDate,
-                        name: eng.fullName,
-                        time: a.checkInTime || "--",
-                        status: "Present",
-                        photoUrl: a.checkInPhotoUrl || a.photoUrl || null
-                      });
-                    });
-                    const leavesList = engineerLeaves.filter(l => l.engineerId === eng.id && (l.status === "approved" || l.status === undefined));
-                    leavesList.forEach(l => {
-                      const normDate = normalizeDateStr(l.date);
-                      if (!matchesDateFilters(normDate)) return;
-                      records.push({
-                        id: `lv_${eng.id}_${normDate}`,
-                        date: normDate,
-                        name: eng.fullName,
-                        time: "--",
-                        status: l.type === "half_day" ? "Half Day Leave" : "Approved Leave",
-                        photoUrl: null
-                      });
-                    });
-                  });
-                  records.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
-                  if (records.length === 0) {
-                    return <tr><td colSpan={5} style={{ textAlign: "center" }}>No check-in logs registered.</td></tr>;
-                  }
-                  return records.map(r => (
+                {dailyAttendanceReportData.records.length === 0 ? (
+                  <tr><td colSpan={5} style={{ textAlign: "center", padding: "12px" }}>No site engineers found for the selected scope.</td></tr>
+                ) : (
+                  dailyAttendanceReportData.records.map(r => (
                     <tr key={r.id}>
-                      <td>{safeRender(r.date)}</td>
-                      <td>{safeRender(r.name)}</td>
-                      <td>{safeRender(r.time)}</td>
-                      <td>{safeRender(r.status)}</td>
-                      <td>{r.photoUrl ? "Photo Captured" : "No Photo"}</td>
+                      <td style={{ fontFamily: "monospace" }}>{r.formattedDate}</td>
+                      <td style={{ fontWeight: "700" }}>{r.engineerName}</td>
+                      <td style={{ fontFamily: "monospace" }}>{r.firstAttendanceTime}</td>
+                      <td>
+                        <span style={{
+                          color: r.status === "Present" ? "#15803d" : "#b91c1c",
+                          fontWeight: "700"
+                        }}>
+                          {r.status}
+                        </span>
+                      </td>
+                      <td>{r.photoUrl ? "Photo Captured" : (r.status === "Absent" ? "--" : "No Photo")}</td>
                     </tr>
-                  ));
-                })()}
+                  ))
+                )}
               </tbody>
             </table>
 
