@@ -15,7 +15,33 @@ export default class ErrorBoundary extends React.Component {
     this.setState({ errorInfo });
   }
 
-  handleReload = () => {
+  handleReload = async () => {
+    try {
+      const errStr = String(this.state.error || "");
+      if (errStr.includes("INTERNAL ASSERTION FAILED") || errStr.includes("FIRESTORE")) {
+        // Clear firestore-related keys in localStorage
+        try {
+          Object.keys(localStorage).forEach(key => {
+            if (key.includes("firestore") || key.includes("firebase")) {
+              localStorage.removeItem(key);
+            }
+          });
+        } catch {}
+        // Clear indexedDB databases if supported
+        if (typeof window !== "undefined" && window.indexedDB && window.indexedDB.databases) {
+          try {
+            const dbs = await window.indexedDB.databases();
+            for (const db of dbs) {
+              if (db.name && db.name.includes("firestore")) {
+                window.indexedDB.deleteDatabase(db.name);
+              }
+            }
+          } catch {}
+        }
+      }
+    } catch (e) {
+      console.warn("Error clearing persistence on reload:", e);
+    }
     window.location.reload();
   };
 
@@ -101,7 +127,7 @@ export default class ErrorBoundary extends React.Component {
                   boxShadow: "0 4px 6px -1px rgba(103, 80, 164, 0.2)"
                 }}
               >
-                Reload Page
+                {String(this.state.error || "").includes("INTERNAL ASSERTION FAILED") ? "Reset Cache & Reload" : "Reload Page"}
               </button>
               
               <button

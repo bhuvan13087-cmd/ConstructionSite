@@ -489,6 +489,7 @@ export default function SiteDetails({
   };
 
   const loadData = async () => {
+    if (!siteId) return;
     try {
       // 1. If site is not yet loaded from initialSite prop, fetch site & engineers first
       if (!site) {
@@ -554,7 +555,30 @@ export default function SiteDetails({
   };
 
   useEffect(() => {
-    loadData();
+    if (initialSite) {
+      setSite(initialSite);
+      if (Array.isArray(allEngineers) && allEngineers.length > 0) {
+        const assigned = allEngineers.filter(eng => {
+          const isDirect = initialSite.assignedEngineers && (
+            initialSite.assignedEngineers.includes(eng.id) ||
+            initialSite.assignedEngineers.includes(eng.uid) ||
+            initialSite.assignedEngineers.includes(eng.customId) ||
+            initialSite.assignedEngineers.includes(eng.engineerId) ||
+            (eng.email && initialSite.assignedEngineers.includes(eng.email))
+          );
+          const isReverse = Array.isArray(eng.assignedSites) && eng.assignedSites.includes(initialSite.id);
+          return isDirect || isReverse;
+        });
+        setEngineers(assigned);
+      }
+      setLoading(false);
+    }
+  }, [initialSite, allEngineers]);
+
+  useEffect(() => {
+    if (siteId) {
+      loadData();
+    }
   }, [siteId]);
 
   useEffect(() => {
@@ -642,13 +666,63 @@ export default function SiteDetails({
 
   const latestSiteAttendanceRecord = canonicalSiteEngineerAttendance.length > 0 ? canonicalSiteEngineerAttendance[0] : null;
 
-  const modalFilteredSiteAttendance = canonicalSiteEngineerAttendance.filter(rec => {
-    const normDate = normalizeDateToISO(rec.date || rec.attendanceDate || "");
-    if (!normDate) return false;
-    if (siteAppliedModalRange.from && normDate < siteAppliedModalRange.from) return false;
-    if (siteAppliedModalRange.to && normDate > siteAppliedModalRange.to) return false;
-    return true;
-  });
+  const modalFilteredSiteAttendance = useMemo(() => {
+    return canonicalSiteEngineerAttendance.filter(rec => {
+      const normDate = normalizeDateToISO(rec.date || rec.attendanceDate || "");
+      if (!normDate) return false;
+      if (siteAppliedModalRange.from && normDate < siteAppliedModalRange.from) return false;
+      if (siteAppliedModalRange.to && normDate > siteAppliedModalRange.to) return false;
+      return true;
+    });
+  }, [canonicalSiteEngineerAttendance, siteAppliedModalRange]);
+
+  const applyLast30Days = () => {
+    const r = getInitial30DayRange();
+    setSiteModalFromDate(r.from);
+    setSiteModalToDate(r.to);
+    setSiteAppliedModalRange(r);
+  };
+
+  const applyLast7Days = () => {
+    const to = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 7);
+    const r = { from: formatDateForInput(from), to: formatDateForInput(to) };
+    setSiteModalFromDate(r.from);
+    setSiteModalToDate(r.to);
+    setSiteAppliedModalRange(r);
+  };
+
+  const applyThisMonth = () => {
+    const now = new Date();
+    const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const to = formatDateForInput(now);
+    setSiteModalFromDate(from);
+    setSiteModalToDate(to);
+    setSiteAppliedModalRange({ from, to });
+  };
+
+  const applyAllTime = () => {
+    setSiteModalFromDate("");
+    setSiteModalToDate("");
+    setSiteAppliedModalRange({ from: "", to: "" });
+  };
+
+  const attendanceMetrics = useMemo(() => {
+    const records = modalFilteredSiteAttendance;
+    const totalRecords = records.length;
+    const presentCount = records.filter(r => !r.isCheckedOut && r.status !== "checked_out" && !r.checkOutTimeFormatted).length;
+    const checkedOutCount = records.filter(r => r.isCheckedOut || r.status === "checked_out" || Boolean(r.checkOutTimeFormatted)).length;
+    const verifiedCount = records.filter(r => r.verificationStatus === "verified" || r.isVerified).length;
+    const uniqueEngineers = new Set(records.map(r => r.engineerId || r.userId || r.engineerName).filter(Boolean)).size;
+    return {
+      totalRecords,
+      presentCount,
+      checkedOutCount,
+      verifiedCount,
+      uniqueEngineers
+    };
+  }, [modalFilteredSiteAttendance]);
 
   const renderSiteAttendanceTable = (records = []) => {
     if (!records || records.length === 0) {
@@ -3008,210 +3082,319 @@ export default function SiteDetails({
         )}
 
         {/* ===================================================================
-            TAB: ATTENDANCE / ENTRY EXIT
+            TAB: ATTENDANCE / ENTRY EXIT (CANONICAL 30-DAY REPORT)
             =================================================================== */}
         {activeTab === "attendance" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: "24px" }} className="no-print">
+          <div style={{ display: "flex", flexDirection: "column", gap: "20px" }} className="no-print">
+            
+            {/* Top KPI Cards Strip for Selected Period */}
+            <div style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+              gap: "14px"
+            }}>
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 18px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.03)"
+              }}>
+                <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#64748b", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Total Attendance Logs
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "6px" }}>
+                  <strong style={{ fontSize: "24px", fontWeight: "800", color: "#0f172a" }}>
+                    {attendanceMetrics.totalRecords}
+                  </strong>
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>entries</span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 18px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.03)"
+              }}>
+                <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#166534", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Present / Active
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "6px" }}>
+                  <strong style={{ fontSize: "24px", fontWeight: "800", color: "#16a34a" }}>
+                    {attendanceMetrics.presentCount}
+                  </strong>
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>logged in</span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 18px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.03)"
+              }}>
+                <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#4338ca", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Completed Shifts
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "6px" }}>
+                  <strong style={{ fontSize: "24px", fontWeight: "800", color: "#4f46e5" }}>
+                    {attendanceMetrics.checkedOutCount}
+                  </strong>
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>checked out</span>
+                </div>
+              </div>
+
+              <div style={{
+                backgroundColor: "#ffffff",
+                padding: "16px 18px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                boxShadow: "0 1px 3px rgba(0,0,0,0.03)"
+              }}>
+                <span style={{ fontSize: "11.5px", fontWeight: "750", color: "#0284c7", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                  Verified Selfies
+                </span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginTop: "6px" }}>
+                  <strong style={{ fontSize: "24px", fontWeight: "800", color: "#0284c7" }}>
+                    {attendanceMetrics.verifiedCount}
+                  </strong>
+                  <span style={{ fontSize: "12px", color: "#64748b" }}>
+                    {attendanceMetrics.totalRecords > 0 ? `(${Math.round((attendanceMetrics.verifiedCount / attendanceMetrics.totalRecords) * 100)}%)` : "0%"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Main Attendance Card with Date Range Filter Toolbar & Interactive Report Table */}
             <Card 
-              title="Site Attendance Overview"
-              subtitle="Compact verified supervisor attendance summary for this project."
+              title="Site Supervisor & Engineer Attendance Report"
+              subtitle="Canonical attendance log single source of truth with GPS geofence verification and check-in selfies."
             >
-              {latestSiteAttendanceRecord ? (
+              {/* Date Range Selection & Quick Presets Toolbar */}
+              <div style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "12px",
+                backgroundColor: "#f8fafc",
+                padding: "14px 18px",
+                borderRadius: "12px",
+                border: "1px solid var(--border-color)",
+                marginBottom: "18px"
+              }}>
                 <div style={{
-                  padding: "18px",
-                  backgroundColor: "#ffffff",
-                  border: "1.5px solid var(--border-color)",
-                  borderRadius: "12px",
-                  boxShadow: "0 2px 8px rgba(0,0,0,0.04)",
                   display: "flex",
-                  flexDirection: "column",
-                  gap: "14px"
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "12px",
+                  flexWrap: "wrap"
                 }}>
-                  {/* Header: Latest Badge, Engineer Name, Date, Status */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                      {latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl ? (
-                        <img 
-                          src={latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl} 
-                          alt="Selfie"
-                          onClick={() => setSelectedAttendancePhotoModal({ 
-                            url: latestSiteAttendanceRecord.photoUrl || latestSiteAttendanceRecord.checkInPhotoUrl, 
-                            title: `Verification Selfie - ${(() => {
-                              const eng = engineers.find(e => e.id === latestSiteAttendanceRecord.engineerId || e.id === latestSiteAttendanceRecord.userId);
-                              return eng ? eng.fullName : (latestSiteAttendanceRecord.engineerName || "Site Engineer");
-                            })()} (${latestSiteAttendanceRecord.date || latestSiteAttendanceRecord.attendanceDate})` 
-                          })}
-                          style={{
-                            width: "48px",
-                            height: "48px",
-                            borderRadius: "10px",
-                            objectFit: "cover",
-                            flexShrink: 0,
-                            border: "1.5px solid var(--border-color)",
-                            cursor: "pointer"
-                          }}
-                          title="Click to view full selfie"
-                        />
-                      ) : (
-                        <div style={{
-                          width: "48px",
-                          height: "48px",
-                          borderRadius: "10px",
-                          backgroundColor: "#eff6ff",
-                          color: "#2563eb",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          flexShrink: 0,
-                          border: "1px solid #bfdbfe"
-                        }}>
-                          <ClipboardCheck size={24} />
-                        </div>
-                      )}
-                      <div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                          <span style={{ 
-                            fontSize: "11px", 
-                            fontWeight: "800", 
-                            textTransform: "uppercase", 
-                            color: "#2563eb", 
-                            backgroundColor: "#dbeafe", 
-                            padding: "2px 8px", 
-                            borderRadius: "4px",
-                            letterSpacing: "0.5px" 
-                          }}>
-                            Latest Attendance
-                          </span>
-                          <strong style={{ fontSize: "15px", color: "var(--primary-950)" }}>
-                            {(() => {
-                              const eng = engineers.find(e => e.id === latestSiteAttendanceRecord.engineerId || e.id === latestSiteAttendanceRecord.userId);
-                              return eng ? eng.fullName : (latestSiteAttendanceRecord.engineerName || "Site Engineer");
-                            })()}
-                          </strong>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "3px", color: "var(--text-muted)", fontSize: "12px" }}>
-                          <Calendar size={13} style={{ color: "var(--primary-600)" }} />
-                          <span className="font-mono" style={{ fontWeight: "750", color: "#1e293b" }}>
-                            {formatDisplayDate(latestSiteAttendanceRecord.date || latestSiteAttendanceRecord.attendanceDate)}
-                          </span>
-                          <span>•</span>
-                          <span>{site.siteName}</span>
-                        </div>
-                      </div>
+                  {/* Inputs: From & To Date */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <label htmlFor="tab-att-from-date" style={{ fontSize: "12.5px", fontWeight: "750", color: "#475569" }}>From:</label>
+                      <input
+                        type="date"
+                        id="tab-att-from-date"
+                        value={siteModalFromDate}
+                        onChange={(e) => setSiteModalFromDate(e.target.value)}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-color)",
+                          fontSize: "13px",
+                          outline: "none",
+                          backgroundColor: "#ffffff",
+                          color: "#0f172a"
+                        }}
+                      />
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      {(latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.status === "checked_out" || latestSiteAttendanceRecord.checkOutTimeFormatted) ? (
-                        <Badge status="info">Checked Out</Badge>
-                      ) : (
-                        <Badge status="success">Present / On Site</Badge>
-                      )}
-                      {(latestSiteAttendanceRecord.verificationStatus === "verified" || latestSiteAttendanceRecord.isVerified) && (
-                        <span style={{ 
-                          display: "inline-flex", 
-                          alignItems: "center", 
-                          gap: "3px", 
-                          fontSize: "10.5px", 
-                          fontWeight: "700", 
-                          color: "#059669", 
-                          backgroundColor: "#ecfdf5", 
-                          padding: "2px 8px", 
-                          borderRadius: "12px", 
-                          border: "1px solid #a7f3d0" 
-                        }}>
-                          <ShieldCheck size={12} />
-                          Verified
-                        </span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Quick Check-In / Check-Out strip */}
-                  <div style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-                    gap: "10px",
-                    backgroundColor: "var(--primary-50)",
-                    padding: "10px 14px",
-                    borderRadius: "8px",
-                    border: "1px solid var(--border-color)",
-                    fontSize: "12px"
-                  }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: "#dcfce7", color: "#15803d", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <LogIn size={13} />
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-In</span>
-                        <strong className="font-mono" style={{ color: "var(--primary-900)", fontSize: "12.5px" }}>
-                          {latestSiteAttendanceRecord.checkInTimeFormatted || latestSiteAttendanceRecord.time || "--"}
-                        </strong>
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <div style={{ width: "24px", height: "24px", borderRadius: "50%", backgroundColor: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#e0e7ff" : "#f1f5f9", color: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#4338ca" : "var(--text-muted)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                        <LogOut size={13} />
-                      </div>
-                      <div>
-                        <span style={{ fontSize: "10px", color: "var(--text-muted)", display: "block", textTransform: "uppercase", fontWeight: "700" }}>Check-Out</span>
-                        <strong className="font-mono" style={{ color: (latestSiteAttendanceRecord.isCheckedOut || latestSiteAttendanceRecord.checkOutTimeFormatted) ? "#1e1b4b" : "var(--text-muted)", fontSize: "12.5px" }}>
-                          {latestSiteAttendanceRecord.checkOutTimeFormatted || (latestSiteAttendanceRecord.isCheckedOut ? "Logged" : "On Site")}
-                        </strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Bottom Footer: GPS Location + Small View Attendance action */}
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", borderTop: "1px solid var(--border-color)", paddingTop: "12px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "11.5px", color: "var(--text-muted)" }}>
-                      <MapPin size={13} style={{ color: "var(--primary-600)", flexShrink: 0 }} />
-                      <span>{latestSiteAttendanceRecord.address || (latestSiteAttendanceRecord.latitude && latestSiteAttendanceRecord.longitude ? `Lat: ${Number(latestSiteAttendanceRecord.latitude).toFixed(5)}, Lng: ${Number(latestSiteAttendanceRecord.longitude).toFixed(5)}` : "GPS Captured")}</span>
-                      {latestSiteAttendanceRecord.distance !== undefined && latestSiteAttendanceRecord.distance !== null && (
-                        <span style={{ fontWeight: "750", color: Number(latestSiteAttendanceRecord.distance) <= 500 ? "#15803d" : "#b45309" }}>
-                          • 🎯 {Math.round(latestSiteAttendanceRecord.distance)}m from site
-                        </span>
-                      )}
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                      <label htmlFor="tab-att-to-date" style={{ fontSize: "12.5px", fontWeight: "750", color: "#475569" }}>To:</label>
+                      <input
+                        type="date"
+                        id="tab-att-to-date"
+                        value={siteModalToDate}
+                        onChange={(e) => setSiteModalToDate(e.target.value)}
+                        style={{
+                          padding: "7px 10px",
+                          borderRadius: "8px",
+                          border: "1px solid var(--border-color)",
+                          fontSize: "13px",
+                          outline: "none",
+                          backgroundColor: "#ffffff",
+                          color: "#0f172a"
+                        }}
+                      />
                     </div>
 
                     <Button
                       variant="primary"
                       size="sm"
-                      icon={Calendar}
-                      onClick={() => setShowSiteAttendanceModal(true)}
-                      style={{
-                        padding: "6px 14px",
-                        fontSize: "12px",
-                        fontWeight: "750"
-                      }}
+                      onClick={() => setSiteAppliedModalRange({ from: siteModalFromDate, to: siteModalToDate })}
+                      style={{ padding: "7px 16px", fontWeight: "750" }}
                     >
-                      View Attendance
+                      Apply Range
                     </Button>
                   </div>
+
+                  {/* Preset Quick Range Chips */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      onClick={applyLast30Days}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "750",
+                        cursor: "pointer",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: (siteAppliedModalRange.from === getInitial30DayRange().from && siteAppliedModalRange.to === getInitial30DayRange().to) ? "var(--primary-600)" : "#ffffff",
+                        color: (siteAppliedModalRange.from === getInitial30DayRange().from && siteAppliedModalRange.to === getInitial30DayRange().to) ? "#ffffff" : "#475569",
+                        transition: "all 0.15s ease"
+                      }}
+                    >
+                      Last 30 Days
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={applyLast7Days}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: "#ffffff",
+                        color: "#475569"
+                      }}
+                    >
+                      Last 7 Days
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={applyThisMonth}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: "#ffffff",
+                        color: "#475569"
+                      }}
+                    >
+                      This Month
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={applyAllTime}
+                      style={{
+                        padding: "5px 12px",
+                        borderRadius: "20px",
+                        fontSize: "12px",
+                        fontWeight: "700",
+                        cursor: "pointer",
+                        border: "1px solid #cbd5e1",
+                        backgroundColor: (!siteAppliedModalRange.from && !siteAppliedModalRange.to) ? "var(--primary-600)" : "#ffffff",
+                        color: (!siteAppliedModalRange.from && !siteAppliedModalRange.to) ? "#ffffff" : "#475569"
+                      }}
+                    >
+                      All Time
+                    </button>
+                  </div>
                 </div>
-              ) : (
+
+                {/* Range summary indicator status */}
                 <div style={{
-                  padding: "32px 16px",
-                  textAlign: "center",
-                  backgroundColor: "var(--primary-50)",
-                  borderRadius: "10px",
-                  border: "1px dashed var(--border-color)"
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  fontSize: "12px",
+                  color: "#64748b",
+                  borderTop: "1px solid #e2e8f0",
+                  paddingTop: "8px",
+                  flexWrap: "wrap",
+                  gap: "8px"
                 }}>
-                  <ClipboardCheck size={36} style={{ color: "var(--text-muted)", opacity: 0.4, marginBottom: "8px" }} />
-                  <p style={{ color: "var(--text-muted)", fontSize: "13px", fontStyle: "italic", margin: "0 0 14px 0" }}>
-                    No attendance records found for this site.
-                  </p>
+                  <div>
+                    Active Period: <strong style={{ color: "#0f172a" }}>
+                      {siteAppliedModalRange.from ? formatDisplayDate(siteAppliedModalRange.from) : "All Prior Records"}
+                    </strong> to <strong style={{ color: "#0f172a" }}>
+                      {siteAppliedModalRange.to ? formatDisplayDate(siteAppliedModalRange.to) : "Today"}
+                    </strong>
+                  </div>
+                  <div>
+                    Showing <strong style={{ color: "var(--primary-700)" }}>{modalFilteredSiteAttendance.length}</strong> canonical record{modalFilteredSiteAttendance.length !== 1 ? "s" : ""}
+                  </div>
+                </div>
+              </div>
+
+              {/* Render Full Attendance Table directly on the tab */}
+              {renderSiteAttendanceTable(modalFilteredSiteAttendance)}
+            </Card>
+
+            {/* Optional Latest Attendance Highlight Card if available */}
+            {latestSiteAttendanceRecord && (
+              <div style={{
+                padding: "16px 20px",
+                backgroundColor: "#ffffff",
+                border: "1px solid var(--border-color)",
+                borderRadius: "12px",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "12px"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <div style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "50%",
+                    backgroundColor: "#f0fdf4",
+                    color: "#16a34a",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center"
+                  }}>
+                    <LogIn size={18} />
+                  </div>
+                  <div>
+                    <span style={{ fontSize: "11px", fontWeight: "750", color: "#64748b", textTransform: "uppercase" }}>
+                      Most Recent Check-In
+                    </span>
+                    <div style={{ fontSize: "13.5px", fontWeight: "750", color: "#0f172a" }}>
+                      {(() => {
+                        const eng = engineers.find(e => e.id === latestSiteAttendanceRecord.engineerId || e.id === latestSiteAttendanceRecord.userId);
+                        return eng ? eng.fullName : (latestSiteAttendanceRecord.engineerName || "Site Engineer");
+                      })()} — <span className="font-mono">{formatDisplayDate(latestSiteAttendanceRecord.date || latestSiteAttendanceRecord.attendanceDate)}</span> at <span className="font-mono">{latestSiteAttendanceRecord.checkInTimeFormatted || latestSiteAttendanceRecord.time || "--"}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <Button
                     variant="outline"
                     size="sm"
                     icon={Calendar}
                     onClick={() => setShowSiteAttendanceModal(true)}
                   >
-                    View Attendance
+                    Open in Fullscreen Modal
                   </Button>
                 </div>
-              )}
-            </Card>
+              </div>
+            )}
+
           </div>
         )}
 

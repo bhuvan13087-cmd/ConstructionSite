@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from "firebase/firestore";
+import { getFirestore, initializeFirestore, persistentLocalCache, persistentSingleTabManager } from "firebase/firestore";
 
 let firebaseApp = null;
 let secondaryApp = null;
@@ -84,12 +84,16 @@ export function getFirebaseDb() {
     try {
       dbInstance = initializeFirestore(firebaseApp, {
         localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager()
+          tabManager: persistentSingleTabManager()
         })
       });
     } catch (e) {
-      console.warn("Firestore already initialized or error enabling offline cache:", e);
-      dbInstance = getFirestore(firebaseApp);
+      console.warn("Firestore offline cache initialization notice:", e);
+      try {
+        dbInstance = getFirestore(firebaseApp);
+      } catch (err) {
+        console.error("Firestore fallback initialization failed:", err);
+      }
     }
   }
   return dbInstance;
