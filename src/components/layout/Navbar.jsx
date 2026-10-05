@@ -5,7 +5,7 @@ import { getNotifications, markNotificationAsRead, markAllNotificationsAsRead } 
 
 export default function Navbar({ title = "Dashboard", description = "Control Panel", onToggleSidebar }) {
   const [time, setTime] = useState("");
-  const { user } = useAuth();
+  const { user, activeTenantKey } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [showDropdown, setShowDropdown] = useState(false);
 
@@ -64,7 +64,23 @@ export default function Navbar({ title = "Dashboard", description = "Control Pan
           <Menu size={20} />
         </button>
         <div className="page-title-area">
-          <h2 className="page-title" id="page-title">{title}</h2>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <h2 className="page-title" id="page-title">{title}</h2>
+            <span style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "4px",
+              padding: "2px 8px",
+              borderRadius: "12px",
+              fontSize: "11px",
+              fontWeight: "700",
+              backgroundColor: activeTenantKey === "customer2" ? "rgba(16, 185, 129, 0.15)" : "rgba(59, 130, 246, 0.15)",
+              color: activeTenantKey === "customer2" ? "#10b981" : "#3b82f6",
+              border: activeTenantKey === "customer2" ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(59, 130, 246, 0.3)"
+            }}>
+              {activeTenantKey === "customer2" ? "🏗️ Project 2" : "🏢 Project 1"}
+            </span>
+          </div>
           <p className="page-description" id="page-description">{description}</p>
         </div>
       </div>

@@ -237,6 +237,7 @@ export default function Login() {
   const [resetUserId, setResetUserId] = useState("");
   const [resetUserPhone, setResetUserPhone] = useState("");
   const [resetSuccess, setResetSuccess] = useState("");
+  const [selectedTenant, setSelectedTenant] = useState("auto");
   
   const { user, userProfile, loading: authLoading } = useAuth();
   const navigate = useNavigate();
@@ -291,7 +292,13 @@ export default function Login() {
     setError("");
 
     try {
-      await signIn(email.trim(), password);
+      const result = await signIn(email.trim(), password, selectedTenant);
+      if (result && result.switched) {
+        window.location.href = "/";
+        return;
+      }
+      navigate("/");
+      return;
     } catch (err) {
       // If sign-in fails, check if we need to auto-create the default superadmin or admin account
       if (email.trim() === "superadmin@visvas.com" && password === "123456") {
@@ -823,6 +830,66 @@ export default function Login() {
 
           {loginView === "login" && (
             <form onSubmit={handleSubmit} className="login-form-content">
+              <div style={{ marginBottom: "16px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                  <label className="login-field-label" style={{ margin: 0 }}>Target Workspace / Project</label>
+                  <span style={{ fontSize: "11px", color: "var(--slate-400)" }}>Auto or Select</span>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTenant("auto")}
+                    style={{
+                      padding: "8px 4px",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      border: selectedTenant === "auto" ? "2px solid #f59e0b" : "1px solid rgba(255,255,255,0.12)",
+                      backgroundColor: selectedTenant === "auto" ? "rgba(245, 158, 11, 0.18)" : "rgba(255,255,255,0.04)",
+                      color: selectedTenant === "auto" ? "#fbbf24" : "var(--slate-300)",
+                      transition: "all 0.15s"
+                    }}
+                  >
+                    ⚡ Auto-Detect
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTenant("customer1")}
+                    style={{
+                      padding: "8px 4px",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      border: selectedTenant === "customer1" ? "2px solid #3b82f6" : "1px solid rgba(255,255,255,0.12)",
+                      backgroundColor: selectedTenant === "customer1" ? "rgba(59, 130, 246, 0.18)" : "rgba(255,255,255,0.04)",
+                      color: selectedTenant === "customer1" ? "#60a5fa" : "var(--slate-300)",
+                      transition: "all 0.15s"
+                    }}
+                  >
+                    🏢 Project 1
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTenant("customer2")}
+                    style={{
+                      padding: "8px 4px",
+                      borderRadius: "8px",
+                      fontSize: "11px",
+                      fontWeight: "700",
+                      cursor: "pointer",
+                      border: selectedTenant === "customer2" ? "2px solid #10b981" : "1px solid rgba(255,255,255,0.12)",
+                      backgroundColor: selectedTenant === "customer2" ? "rgba(16, 185, 129, 0.18)" : "rgba(255,255,255,0.04)",
+                      color: selectedTenant === "customer2" ? "#34d399" : "var(--slate-300)",
+                      transition: "all 0.15s"
+                    }}
+                  >
+                    🏗️ Project 2
+                  </button>
+                </div>
+              </div>
+
               <div className="login-form-group">
                 <label htmlFor="modal-email" className="login-field-label">Corporate Email Address</label>
                 <div className="login-input-wrapper">
@@ -831,7 +898,7 @@ export default function Login() {
                     type="email"
                     id="modal-email"
                     className="login-input-field"
-                    placeholder={defaultAdminEmail}
+                    placeholder={selectedTenant === "customer2" ? "admin2@gmail.com" : "admin@gmail.com"}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required

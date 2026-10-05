@@ -12,13 +12,59 @@ import {
   setPersistence,
   browserLocalPersistence
 } from "firebase/auth";
-import { getFirebaseAuth, getSecondaryAuth } from "./config";
+import { 
+  getFirebaseAuth, 
+  getSecondaryAuth,
+  getActiveProjectKey,
+  setActiveProject,
+  PROJECT_CONFIGS 
+} from "./config.js";
 
-// Sign in with email and password (main App)
-export async function signIn(email, password) {
-  const auth = getFirebaseAuth();
-  await setPersistence(auth, browserLocalPersistence);
-  return signInWithEmailAndPassword(auth, email, password);
+// Multi-tenant Sign in with automatic project detection
+export async function signIn(email, password, preferredProjectKey = null) {
+  const cleanEmail = email.trim();
+
+  // If user or UI explicitly requested a specific project, authenticate against it directly
+  if (preferredProjectKey && preferredProjectKey !== "auto" && PROJECT_CONFIGS[preferredProjectKey]) {
+    setActiveProject(preferredProjectKey);
+    const auth = getFirebaseAuth(preferredProjectKey);
+    try { await setPersistence(auth, browserLocalPersistence); } catch (e) {}
+    const userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+    return { ...userCredential, projectKey: preferredProjectKey, switched: false };
+  }
+
+  // Automatic multi-project detection:
+  // 1. Try currently active project first
+  const currentKey = getActiveProjectKey();
+  const currentAuth = getFirebaseAuth(currentKey);
+  try {
+    try { await setPersistence(currentAuth, browserLocalPersistence); } catch (e) {}
+    const userCredential = await signInWithEmailAndPassword(currentAuth, cleanEmail, password);
+    return { ...userCredential, projectKey: currentKey, switched: false };
+  } catch (currentErr) {
+    // If not found in current project, try alternate registered project(s)
+    if (
+      currentErr.code === "auth/invalid-credential" || 
+      currentErr.code === "auth/user-not-found" || 
+      currentErr.code === "auth/wrong-password"
+    ) {
+      const otherKeys = Object.keys(PROJECT_CONFIGS).filter(k => k !== currentKey);
+      for (const altKey of otherKeys) {
+        try {
+          const altAuth = getFirebaseAuth(altKey);
+          try { await setPersistence(altAuth, browserLocalPersistence); } catch (e) {}
+          const userCredential = await signInWithEmailAndPassword(altAuth, cleanEmail, password);
+          // Successfully authenticated on alternate project! Switch active tenant
+          setActiveProject(altKey);
+          return { ...userCredential, projectKey: altKey, switched: true };
+        } catch (altErr) {
+          // Continue search
+        }
+      }
+    }
+    // If not found in any project, throw initial error
+    throw currentErr;
+  }
 }
 
 // Create user with email and password (main App, e.g. Admin creation)

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { onAuthChange, signOutUser } from "../firebase/auth";
 import { getUserProfile, createUserProfile, logSystemActivity, subscribeToUserProfile } from "../services/firebaseService";
-import { isFirebaseConfigured, defaultAdminEmail } from "../firebase/config";
+import { isFirebaseConfigured, defaultAdminEmail, getActiveProjectKey, getActiveProjectConfig, setActiveProject } from "../firebase/config";
 
 const AuthContext = createContext(null);
 
@@ -106,11 +106,22 @@ export function AuthProvider({ children }) {
     setConfigured(isFirebaseConfigured());
   };
 
+  const activeTenantKey = getActiveProjectKey();
+  const activeProjectConfig = getActiveProjectConfig();
+
+  const switchProject = (key) => {
+    setActiveProject(key);
+    window.location.href = "/";
+  };
+
   const value = {
     user,
     userProfile,
     loading,
     configured,
+    activeTenantKey,
+    activeProjectConfig,
+    switchProject,
     recheckConfig,
     logout,
     setUserProfile
