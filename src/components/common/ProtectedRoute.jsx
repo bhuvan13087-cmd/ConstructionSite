@@ -26,7 +26,7 @@ export default function ProtectedRoute({ allowedRoles = ["admin"] }) {
   if (user && !userProfile) {
     // Let the default admin / super admin accounts through so the context/dashboard can auto-provision the profile document if needed
     if (
-      ((user.email === "admin@gmail.com" || user.email === "admin2@gmail.com") && allowedRoles.includes("admin")) ||
+      (user.email === "admin@gmail.com" && allowedRoles.includes("admin")) ||
       (user.email === "superadmin@visvas.com" && (allowedRoles.includes("super_admin") || allowedRoles.includes("superadmin")))
     ) {
       return <Outlet />;
