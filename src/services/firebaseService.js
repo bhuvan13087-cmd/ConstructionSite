@@ -18,7 +18,7 @@ import {
   addDoc,
   orderBy
 } from "firebase/firestore";
-import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth } from "../firebase/config.js";
+import { getFirebaseDb, getSecondaryAuth, getFirebaseAuth, firebaseConfig } from "../firebase/config.js";
 import { signInWithEmailAndPassword, deleteUser, signOut } from "firebase/auth";
 import { getFunctions, httpsCallable } from "firebase/functions";
 import { evaluateLabourDateSequence } from "./businessLogic.js";
@@ -986,7 +986,8 @@ export async function getUserByPhone(phone) {
 
 // Reset password in Firebase Auth Emulator securely via PATCH
 export async function resetUserPasswordInAuthEmulator(uid, newPassword) {
-  const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/studio-7044154747-fb0fa/users/${uid}`, {
+  const projectId = firebaseConfig?.projectId || "";
+  const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/${projectId}/users/${uid}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ password: newPassword })
@@ -3524,7 +3525,8 @@ export async function deleteSiteEngineer(engineerId, email = null, password = nu
 
     // Try calling local Firebase Auth Emulator admin REST API if active
     try {
-      const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/studio-7044154747-fb0fa/users/${engineerId}`, {
+      const projectId = firebaseConfig?.projectId || "";
+      const response = await fetch(`http://127.0.0.1:9099/admin/v2/projects/${projectId}/users/${engineerId}`, {
         method: "DELETE"
       });
       if (response.ok) {

@@ -320,7 +320,7 @@ export default function Login() {
         }
       }
 
-      if (email.trim() === "admin@gmail.com" && password === "123456") {
+      if ((email.trim() === "admin@gmail.com" || email.trim() === "admin2@gmail.com") && password === "123456") {
         try {
           const userCredential = await signUp(email.trim(), password);
           const user = userCredential.user;
@@ -328,7 +328,7 @@ export default function Login() {
           // Write admin profile document
           await createUserProfile(user.uid, {
             fullName: "Admin User",
-            username: "admin",
+            username: email.trim().split("@")[0],
             role: "admin",
             status: "active",
             email: email.trim(),

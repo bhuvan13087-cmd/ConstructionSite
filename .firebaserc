@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "studio-7044154747-fb0fa"
+    "default": "studio-7044154747-fb0fa",
+    "customer1": "studio-7044154747-fb0fa",
+    "customer2": "civilconstructionsite2"
   }
 }

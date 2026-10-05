@@ -8,16 +8,26 @@ let dbInstance = null;
 
 import { firebaseConfig as importedConfig } from "../../env.js";
 
-const metaEnv = (typeof import.meta !== "undefined" && import.meta && import.meta.env) ? import.meta.env : {};
+const metaEnv = (typeof import.meta !== "undefined" && import.meta && import.meta.env) 
+  ? import.meta.env 
+  : (typeof process !== "undefined" && process && process.env) 
+    ? process.env 
+    : {};
+
+// Detect if an external environment project is configured that differs from the default file-based importedConfig
+const hasCustomProject = Boolean(
+  metaEnv.VITE_FIREBASE_PROJECT_ID && 
+  metaEnv.VITE_FIREBASE_PROJECT_ID !== importedConfig?.projectId
+);
 
 export const firebaseConfig = {
-  apiKey: metaEnv.VITE_FIREBASE_API_KEY || importedConfig?.apiKey,
-  googleMapsApiKey: metaEnv.VITE_GOOGLE_MAPS_API_KEY || importedConfig?.googleMapsApiKey || importedConfig?.apiKey,
-  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || importedConfig?.authDomain,
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || (hasCustomProject ? "" : importedConfig?.apiKey),
+  googleMapsApiKey: metaEnv.VITE_GOOGLE_MAPS_API_KEY || metaEnv.VITE_FIREBASE_API_KEY || (hasCustomProject ? "" : importedConfig?.googleMapsApiKey || importedConfig?.apiKey),
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || (hasCustomProject ? `${metaEnv.VITE_FIREBASE_PROJECT_ID}.firebaseapp.com` : importedConfig?.authDomain),
   projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || importedConfig?.projectId,
-  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || importedConfig?.storageBucket,
-  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || importedConfig?.messagingSenderId,
-  appId: metaEnv.VITE_FIREBASE_APP_ID || importedConfig?.appId,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || (hasCustomProject ? `${metaEnv.VITE_FIREBASE_PROJECT_ID}.firebasestorage.app` : importedConfig?.storageBucket),
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || (hasCustomProject ? "" : importedConfig?.messagingSenderId),
+  appId: metaEnv.VITE_FIREBASE_APP_ID || (hasCustomProject ? "" : importedConfig?.appId),
 };
 
 // Check if config exists
@@ -38,6 +48,10 @@ export function isFirebaseConfigured() {
 // Initialize Firebase App and secondary instances
 export function initFirebase(config) {
   try {
+    if (!config || !config.apiKey || config.apiKey === "YOUR_API_KEY_HERE" || config.apiKey === "") {
+      return false;
+    }
+
     if (getApps().length === 0) {
       firebaseApp = initializeApp(config);
     } else {
@@ -62,7 +76,9 @@ export function initFirebase(config) {
 
 // Auto-initialize if config is present
 try {
-  initFirebase(firebaseConfig);
+  if (isFirebaseConfigured()) {
+    initFirebase(firebaseConfig);
+  }
 } catch (err) {
   console.error("Auto-initialization of Firebase failed:", err);
 }

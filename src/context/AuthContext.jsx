@@ -42,7 +42,7 @@ export function AuthProvider({ children }) {
               return;
             }
 
-            if (!profile && (firebaseUser.email === "admin@gmail.com" || firebaseUser.email === "admin@visvas.com")) {
+            if (!profile && (firebaseUser.email === "admin@gmail.com" || firebaseUser.email === "admin2@gmail.com" || firebaseUser.email === "admin@visvas.com")) {
               // Auto-provision admin user profile in Firestore if it doesn't exist
               const adminProfile = {
                 fullName: "Admin",
