@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 import { onAuthChange, signOutUser } from "../firebase/auth";
 import { getUserProfile, createUserProfile, logSystemActivity, subscribeToUserProfile } from "../services/firebaseService";
-import { isFirebaseConfigured } from "../firebase/config";
+import { isFirebaseConfigured, defaultAdminEmail } from "../firebase/config";
 
 const AuthContext = createContext(null);
 
@@ -42,11 +42,11 @@ export function AuthProvider({ children }) {
               return;
             }
 
-            if (!profile && (firebaseUser.email === "admin@gmail.com" || firebaseUser.email === "admin@visvas.com")) {
+            if (!profile && (firebaseUser.email === defaultAdminEmail || firebaseUser.email === "admin@visvas.com")) {
               // Auto-provision admin user profile in Firestore if it doesn't exist
               const adminProfile = {
-                fullName: "Admin",
-                username: "admin",
+                fullName: defaultAdminEmail === "admin2@gmail.com" ? "Admin 2" : "Admin",
+                username: defaultAdminEmail === "admin2@gmail.com" ? "admin2" : "admin",
                 role: "admin",
                 status: "active",
                 email: firebaseUser.email,

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { signIn, signUp } from "../firebase/auth";
 import { createUserProfile, getUserByEmail, getUserByPhone, resetUserPasswordInAuthEmulator, updateEngineerPasswordInDb } from "../services/firebaseService";
+import { defaultAdminEmail } from "../firebase/config";
 import { useAuth } from "../context/AuthContext";
 import { 
   ShieldCheck, 
@@ -320,15 +321,15 @@ export default function Login() {
         }
       }
 
-      if (email.trim() === "admin@gmail.com" && password === "123456") {
+      if (email.trim() === defaultAdminEmail && password === "123456") {
         try {
           const userCredential = await signUp(email.trim(), password);
           const user = userCredential.user;
 
           // Write admin profile document
           await createUserProfile(user.uid, {
-            fullName: "Admin User",
-            username: "admin",
+            fullName: defaultAdminEmail === "admin2@gmail.com" ? "Admin 2 User" : "Admin User",
+            username: defaultAdminEmail === "admin2@gmail.com" ? "admin2" : "admin",
             role: "admin",
             status: "active",
             email: email.trim(),
@@ -830,7 +831,7 @@ export default function Login() {
                     type="email"
                     id="modal-email"
                     className="login-input-field"
-                    placeholder="admin@gmail.com"
+                    placeholder={defaultAdminEmail}
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required

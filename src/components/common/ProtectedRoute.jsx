@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Navigate, Outlet } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
+import { defaultAdminEmail } from "../../firebase/config";
 import Loading from "./Loading";
 
 export default function ProtectedRoute({ allowedRoles = ["admin"] }) {
@@ -26,7 +27,7 @@ export default function ProtectedRoute({ allowedRoles = ["admin"] }) {
   if (user && !userProfile) {
     // Let the default admin / super admin accounts through so the context/dashboard can auto-provision the profile document if needed
     if (
-      (user.email === "admin@gmail.com" && allowedRoles.includes("admin")) ||
+      (user.email === defaultAdminEmail && allowedRoles.includes("admin")) ||
       (user.email === "superadmin@visvas.com" && (allowedRoles.includes("super_admin") || allowedRoles.includes("superadmin")))
     ) {
       return <Outlet />;

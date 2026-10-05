@@ -20,6 +20,9 @@ export const firebaseConfig = {
   appId: metaEnv.VITE_FIREBASE_APP_ID || importedConfig?.appId,
 };
 
+export const isProject2 = firebaseConfig?.projectId === "civilconstructionsite2";
+export const defaultAdminEmail = isProject2 ? "admin2@gmail.com" : "admin@gmail.com";
+
 // Check if config exists
 export function getStoredConfig() {
   return firebaseConfig;
