@@ -88,7 +88,7 @@ import Sites from "./Sites";
 import SiteDetails from "./SiteDetails";
 
 export default function SuperAdminDashboard({ tab = "dashboard" }) {
-  const { userProfile } = useAuth();
+  const { userProfile, brandTitle } = useAuth();
   const [loading, setLoading] = useState(true);
   const [dataLoading, setDataLoading] = useState(false);
   const [toast, setToast] = useState({ show: false, message: "", type: "info" });
@@ -918,7 +918,7 @@ export default function SuperAdminDashboard({ tab = "dashboard" }) {
               </span>
             </div>
             <p style={{ margin: "2px 0 0 0", fontSize: "12px", color: "var(--text-muted)", fontWeight: "500" }}>
-              Central monitoring and operations oversight for Visvas Builders construction portfolio.
+              Central monitoring and operations oversight for {brandTitle || "Visvas Builders"} construction portfolio.
             </p>
           </div>
 

@@ -193,8 +193,21 @@ export function getDefaultAdminEmail(projectKey = getActiveProjectKey()) {
   return PROJECT_CONFIGS[key]?.defaultAdminEmail || "admin@gmail.com";
 }
 
+// Company / Organization display name based on active project
+export function getCompanyName(projectKey = getActiveProjectKey()) {
+  const key = (projectKey === "customer2" || projectKey === "civilconstructionsite2") ? "customer2" : "customer1";
+  return key === "customer2" ? "Construction Site" : "VISVAS BUILDERS";
+}
+
+export function getBrandTitle(projectKey = getActiveProjectKey()) {
+  const key = (projectKey === "customer2" || projectKey === "civilconstructionsite2") ? "customer2" : "customer1";
+  return key === "customer2" ? "Construction Site" : "Visvas Builders";
+}
+
 export const defaultAdminEmail = getDefaultAdminEmail();
 export const isProject2 = getActiveProjectKey() === "customer2";
+export const companyName = getCompanyName();
+export const brandTitle = getBrandTitle();
 
 // Stored config check
 export function getStoredConfig() {

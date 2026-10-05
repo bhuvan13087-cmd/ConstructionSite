@@ -78,7 +78,7 @@ export default function Navbar({ title = "Dashboard", description = "Control Pan
               color: activeTenantKey === "customer2" ? "#10b981" : "#3b82f6",
               border: activeTenantKey === "customer2" ? "1px solid rgba(16, 185, 129, 0.3)" : "1px solid rgba(59, 130, 246, 0.3)"
             }}>
-              {activeTenantKey === "customer2" ? "🏗️ Project 2" : "🏢 Project 1"}
+              {activeTenantKey === "customer2" ? "🏗️ Construction Site" : "🏢 Visvas Builders"}
             </span>
           </div>
           <p className="page-description" id="page-description">{description}</p>

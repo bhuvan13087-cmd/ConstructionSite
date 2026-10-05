@@ -354,7 +354,7 @@ function LineChartComponent({ data }) {
 // CENTRAL REPORTS DASHBOARD PAGE
 // ==========================================================================
 export default function ReportsDashboard({ embedded = false }) {
-  const { userProfile } = useAuth();
+  const { userProfile, brandTitle } = useAuth();
   const userRole = userProfile?.role || "admin";
   const isSuperAdmin = userRole === "super_admin" || userRole === "superadmin";
 
@@ -4246,9 +4246,9 @@ export default function ReportsDashboard({ embedded = false }) {
         {/* Company header details */}
         <div className="report-header-block" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-            <img src="/app-icon.png" alt="Visvas Builders" width="36" height="36" style={{ borderRadius: "6px", objectFit: "contain", display: "inline-block" }} />
+            <img src="/app-icon.png" alt={brandTitle || "Visvas Builders"} width="36" height="36" style={{ borderRadius: "6px", objectFit: "contain", display: "inline-block" }} />
             <div>
-              <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit, sans-serif" }}>Visvas Builders</h2>
+              <h2 style={{ margin: 0, fontSize: "18px", fontWeight: "800", color: "#0f172a", fontFamily: "Outfit, sans-serif" }}>{brandTitle || "Visvas Builders"}</h2>
               <div style={{ fontSize: "12px", fontWeight: "800", color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                 {getSelectedReportTemplateLabel()}
               </div>

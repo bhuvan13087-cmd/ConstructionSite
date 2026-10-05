@@ -212,7 +212,7 @@ const readPhotoMetadata = (file) => {
 // Geocode and Address System utilities moved to firebaseService.js
 
 export default function EngineerDashboard({ tab = "dashboard" }) {
-  const { userProfile, logout, loading: authLoading } = useAuth();
+  const { userProfile, logout, loading: authLoading, brandTitle } = useAuth();
   const navigate = useNavigate();
   const currentEngineerId = userProfile?.uid || userProfile?.id || "";
   
@@ -3380,7 +3380,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <header className="mobile-app-header">
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
               <CivilEngineerLogo size={24} />
-              <h3>Visvas Builders</h3>
+              <h3>{brandTitle || "Visvas Builders"}</h3>
             </div>
           </header>
           <div className="mobile-app-content" style={{ display: "flex", flexDirection: "column", gap: "16px", justifyContent: "center" }}>
@@ -3462,7 +3462,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
           <header className="mobile-app-header" style={{ justifyContent: "space-between", height: "64px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <CivilEngineerLogo size={24} />
-              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>Visvas Builders</h3>
+              <h3 style={{ fontSize: "16px", fontWeight: "800", color: "var(--primary-900)", margin: 0 }}>{brandTitle || "Visvas Builders"}</h3>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
               <div style={{
@@ -10580,7 +10580,7 @@ export default function EngineerDashboard({ tab = "dashboard" }) {
                tab === "material" ? "Materials" : 
                tab === "labour" ? "Workforce" : 
                tab === "expenses" ? "Financials & Expenses" : 
-               ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : "Visvas Builders"}
+               ["more", "photos", "progress", "profile"].includes(tab) ? "More Tools" : (brandTitle || "Visvas Builders")}
             </h3>
           </div>
 
